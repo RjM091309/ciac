@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   Briefcase,
   ChevronRight,
@@ -51,43 +51,56 @@ const SidebarItem = ({
   onClick: () => void;
   hasSubmenu?: boolean;
   collapsed?: boolean;
-}) => (
-  <button
-    onClick={onClick}
-    className={cn(
-      'flex items-center rounded-lg transition-all duration-200 w-full group',
-      collapsed ? 'justify-center px-1.5 py-2.5' : 'justify-start gap-3 px-3 py-2',
-      active
-        ? 'shadow-sm text-[var(--nav-active-text)]'
-        : 'text-secondary hover:text-[var(--text)] hover:bg-[var(--selected-bg)]',
-    )}
-    style={active ? { backgroundColor: 'var(--nav-active-bg)' } : undefined}
-  >
-    <Icon
-      size={18}
+}) => {
+  const [shimmer, setShimmer] = useState(false);
+
+  const handleClick = () => {
+    setShimmer(true);
+    setTimeout(() => {
+      setShimmer(false);
+    }, 900);
+    onClick();
+  };
+
+  return (
+    <button
+      onClick={handleClick}
       className={cn(
-        'transition-colors',
-        active ? 'text-[var(--nav-active-text)]' : 'text-secondary group-hover:text-[var(--text)]',
+        'flex items-center rounded-lg transition-all duration-200 w-full group',
+        collapsed ? 'justify-center px-1.5 py-2.5' : 'justify-start gap-3 px-3 py-2',
+        active
+          ? 'shadow-sm text-[var(--nav-active-text)]'
+          : 'text-secondary hover:text-[var(--text)] hover:bg-[var(--selected-bg)]',
+        shimmer && 'shimmer-badge',
       )}
-    />
-    {!collapsed && (
-      <>
-        <span className="flex-1 text-left text-[13px] font-medium tracking-tight leading-snug whitespace-nowrap overflow-hidden text-ellipsis">
-          {label}
-        </span>
-        {hasSubmenu && (
-          <ChevronRight
-            size={14}
-            className={cn(
-              'transition-colors opacity-70',
-              active ? 'text-[var(--nav-active-text)]' : 'text-secondary group-hover:text-[var(--text)]',
-            )}
-          />
+      style={active ? { backgroundColor: 'var(--nav-active-bg)' } : undefined}
+    >
+      <Icon
+        size={18}
+        className={cn(
+          'transition-colors',
+          active ? 'text-[var(--nav-active-text)]' : 'text-secondary group-hover:text-[var(--text)]',
         )}
-      </>
-    )}
-  </button>
-);
+      />
+      {!collapsed && (
+        <>
+          <span className="flex-1 text-left text-[13px] font-medium tracking-tight leading-snug whitespace-nowrap overflow-hidden text-ellipsis">
+            {label}
+          </span>
+          {hasSubmenu && (
+            <ChevronRight
+              size={14}
+              className={cn(
+                'transition-colors opacity-70',
+                active ? 'text-[var(--nav-active-text)]' : 'text-secondary group-hover:text-[var(--text)]',
+              )}
+            />
+          )}
+        </>
+      )}
+    </button>
+  );
+};
 
 export function AppSidebar({
   view,

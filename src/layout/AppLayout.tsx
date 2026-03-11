@@ -80,10 +80,9 @@ export function AppLayout({
   return (
     <div
       className={cn(
-        'h-screen overflow-hidden flex flex-col text-zinc-100 font-sans selection:bg-white/10 relative',
-        theme === 'dark' && 'dark'
+        'h-screen overflow-hidden flex flex-col font-sans selection:bg-white/10 relative',
       )}
-      style={{ backgroundColor: 'var(--background)', color: 'var(--foreground)' }}
+      style={{ backgroundColor: 'var(--background)', color: 'var(--foreground)', transition: 'background-color 220ms ease-out, color 220ms ease-out' }}
     >
       <AppHeader onToggleSidebar={toggleSidebar} theme={theme} onToggleTheme={toggleTheme} />
 

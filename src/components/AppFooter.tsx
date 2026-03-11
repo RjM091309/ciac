@@ -21,10 +21,10 @@ export function AppFooter() {
           </div>
 
           <div
-            className="h-7 px-3 rounded-full text-[10px] font-bold inline-flex items-center"
+            className="h-7 px-3 rounded-full text-[10px] font-bold inline-flex items-center shimmer-badge"
             style={{
-              backgroundColor: 'color-mix(in oklab, var(--control-bg) 86%, transparent)',
-              color: 'var(--text)',
+              backgroundColor: 'var(--badge-bg)',
+              color: 'var(--nav-active-text)',
               boxShadow:
                 '0 2px 6px rgba(0,0,0,0.12), 0 0 0 1px color-mix(in oklab, var(--border-subtle) 70%, transparent)',
             }}

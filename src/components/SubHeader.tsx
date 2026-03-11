@@ -10,6 +10,7 @@ export function SubHeader() {
   ] as const;
 
   const [activeRole, setActiveRole] = useState<(typeof roles)[number]['id']>('admin');
+  const [shimmerRole, setShimmerRole] = useState<(typeof roles)[number]['id'] | null>(null);
 
   return (
     <>
@@ -34,12 +35,19 @@ export function SubHeader() {
               <button
                 key={role.id}
                 type="button"
-                onClick={() => setActiveRole(role.id)}
+                onClick={() => {
+                  setActiveRole(role.id);
+                  setShimmerRole(role.id);
+                  setTimeout(() => {
+                    setShimmerRole((current) => (current === role.id ? null : current));
+                  }, 900);
+                }}
                 className={cn(
                   'flex items-center gap-1.5 px-2.5 sm:px-3 py-2 sm:py-1.5 min-h-[44px] sm:min-h-0 rounded-full text-[11px] font-medium transition-colors',
                   isActive
                     ? 'shadow-sm text-[var(--nav-active-text)]'
                     : 'text-secondary hover:text-[var(--text)] hover:bg-[var(--selected-bg)]',
+                  shimmerRole === role.id && 'shimmer-badge',
                 )}
                 style={
                   isActive
