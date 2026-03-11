@@ -63,23 +63,42 @@ const MetricCard = ({
   trendValue?: string;
 }) => (
   <div
-    className="glass-card p-3 sm:p-3.5 flex flex-col justify-between min-h-[100px] sm:h-28 hover:bg-zinc-900 transition-colors group !border-transparent"
-    style={{ backgroundColor: 'var(--surface)' }}
+    className="glass-card p-3 sm:p-3.5 flex flex-col justify-between min-h-[100px] sm:h-28 transition-colors group !border-transparent"
+    style={{
+      backgroundColor: 'var(--surface)',
+    }}
   >
     <div className="flex justify-between items-center gap-2 min-w-0">
       <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
-        <div className="p-1.5 sm:p-2 bg-zinc-800 rounded-lg sm:rounded-xl border border-zinc-700 group-hover:border-zinc-500 transition-colors shrink-0">
-          <Icon className="text-zinc-200 group-hover:text-white transition-colors" size={18} />
+        <div
+          className="p-1.5 sm:p-2 rounded-lg sm:rounded-xl border transition-colors shrink-0"
+          style={{
+            backgroundColor: 'var(--control-bg)',
+            borderColor: 'var(--border-subtle)',
+          }}
+        >
+          <Icon
+            className="transition-colors"
+            size={18}
+            style={{ color: 'var(--text)' }}
+          />
         </div>
-        <span className="text-xs font-medium text-secondary group-hover:text-white transition-colors truncate">{title}</span>
+        <span className="text-xs font-medium text-secondary truncate">{title}</span>
       </div>
-      <button className="p-1 rounded-full text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800 transition-colors">
+      <button
+        className="p-1 rounded-full transition-colors"
+        style={{
+          color: 'var(--text-muted)',
+        }}
+      >
         <MoreHorizontal size={14} />
       </button>
     </div>
 
     <div className="flex items-end justify-between pt-2 sm:pt-2.5 gap-2">
-      <p className="text-lg sm:text-xl font-bold tracking-tight text-white leading-none truncate min-w-0">{value}</p>
+      <p className="text-lg sm:text-xl font-bold tracking-tight leading-none truncate min-w-0" style={{ color: 'var(--text)' }}>
+        {value}
+      </p>
       {trendValue && (
         <div
           className={cn(
@@ -120,8 +139,12 @@ export function Dashboard() {
         <div className="col-span-12 lg:col-span-8 flex flex-col gap-3 sm:gap-4">
           {/* Welcome + Weather Card (from provided design) */}
           <div
-            className="relative overflow-hidden rounded-2xl sm:rounded-3xl px-4 py-5 sm:px-6 sm:py-6 shadow-2xl !border-transparent"
-            style={{ backgroundColor: 'var(--surface)' }}
+            className="relative overflow-hidden rounded-2xl sm:rounded-3xl px-4 py-5 sm:px-6 sm:py-6 !border-transparent"
+            style={{
+              backgroundColor: 'var(--surface)',
+              boxShadow:
+                '0 6px 16px rgba(0,0,0,0.12), 0 0 0 1px color-mix(in oklab, var(--border-subtle) 70%, transparent)',
+            }}
           >
             {/* Subtle Glow Effect */}
             <div className="pointer-events-none absolute -top-32 -right-32 h-80 w-80 rounded-full bg-blue-600/30 blur-[100px]" />
@@ -130,29 +153,45 @@ export function Dashboard() {
               {/* Left Side: Greeting and Time */}
               <div className="flex flex-col justify-between space-y-5 sm:space-y-8">
                 <div>
-                  <h3 className="text-xl sm:text-2xl md:text-3xl font-bold text-white tracking-tight">
+                  <h3 className="text-xl sm:text-2xl md:text-3xl font-bold tracking-tight" style={{ color: 'var(--text)' }}>
                     Nice to see you, Demo
                   </h3>
                   <p className="mt-1.5 sm:mt-2 text-xs md:text-sm text-secondary flex items-center gap-2 flex-wrap">
                     Ready to make today productive!
-                    <Rocket className="w-4 h-4 text-pink-400 shrink-0" />
+                    <Rocket className="w-4 h-4 shrink-0" />
                   </p>
                 </div>
 
                 <div className="flex items-baseline gap-2">
-                  <span className="text-3xl sm:text-4xl md:text-5xl font-bold text-white tracking-tighter">
+                  <span
+                    className="text-3xl sm:text-4xl md:text-5xl font-bold tracking-tighter"
+                    style={{ color: 'var(--text)' }}
+                  >
                     {timeStr}
                   </span>
-                  <span className="text-base sm:text-lg md:text-xl font-bold text-white opacity-80 uppercase">{ampm}</span>
+                  <span
+                    className="text-base sm:text-lg md:text-xl font-bold opacity-80 uppercase"
+                    style={{ color: 'var(--text)' }}
+                  >
+                    {ampm}
+                  </span>
                 </div>
               </div>
 
               {/* Right Side: Weather and Date */}
               <div className="flex flex-row md:flex-col items-center md:items-end justify-between md:justify-between gap-4 md:gap-0 text-left md:text-right">
                 <div className="flex items-center gap-3">
-                  <Cloud className="w-10 h-10 md:w-12 md:h-12 text-white/90 shrink-0" />
+                  <Cloud
+                    className="w-10 h-10 md:w-12 md:h-12 shrink-0"
+                    style={{ color: 'var(--text)' }}
+                  />
                   <div className="flex flex-col">
-                    <span className="text-2xl sm:text-3xl md:text-4xl font-bold text-white">22°C</span>
+                    <span
+                      className="text-2xl sm:text-3xl md:text-4xl font-bold"
+                      style={{ color: 'var(--text)' }}
+                    >
+                      22°C
+                    </span>
                   </div>
                 </div>
 
@@ -186,14 +225,31 @@ export function Dashboard() {
           className="col-span-12 lg:col-span-4 glass-card p-4 sm:p-6 flex flex-col !border-transparent"
           style={{ backgroundColor: 'var(--surface)' }}
         >
-          <h4 className="text-base font-bold text-white mb-0.5">Insights</h4>
+          <h4
+            className="text-base font-bold mb-0.5"
+            style={{ color: 'var(--text)' }}
+          >
+            Insights
+          </h4>
           <p className="text-xs text-secondary mb-4 md:mb-6">Performance analytics</p>
 
-          <div className="flex gap-2 p-1 bg-zinc-950 rounded-xl mb-4 md:mb-6 border border-zinc-800">
-            <button className="flex-1 flex items-center justify-center gap-1.5 sm:gap-2 py-2.5 sm:py-2 min-h-[44px] bg-zinc-800 rounded-lg text-xs font-bold text-white shadow-sm">
+          <div
+            className="flex gap-2 p-1 rounded-xl mb-4 md:mb-6 border"
+            style={{
+              backgroundColor: 'var(--control-bg)',
+              borderColor: 'var(--border-subtle)',
+            }}
+          >
+            <button
+              className="flex-1 flex items-center justify-center gap-1.5 sm:gap-2 py-2.5 sm:py-2 min-h-[44px] rounded-lg text-xs font-bold shadow-sm"
+              style={{
+                backgroundColor: 'var(--nav-active-bg)',
+                color: 'var(--nav-active-text)',
+              }}
+            >
               <Target size={14} /> <span className="truncate">Performance</span>
             </button>
-            <button className="flex-1 flex items-center justify-center gap-1.5 sm:gap-2 py-2.5 sm:py-2 min-h-[44px] text-secondary text-xs font-bold hover:text-zinc-200 transition-colors">
+            <button className="flex-1 flex items-center justify-center gap-1.5 sm:gap-2 py-2.5 sm:py-2 min-h-[44px] text-secondary text-xs font-bold hover:text-[var(--text)] transition-colors">
               <TrendingUp size={14} /> <span className="truncate">Trends</span>
             </button>
           </div>
@@ -212,7 +268,8 @@ export function Dashboard() {
                     initial={{ opacity: 0, scale: 0.5 }}
                     animate={{ opacity: 1, scale: 1 }}
                     transition={{ duration: 0.5, delay: 0.8 }}
-                    className="text-lg md:text-xl font-extrabold text-white tracking-tight"
+                    className="text-lg md:text-xl font-extrabold tracking-tight"
+                    style={{ color: 'var(--text)' }}
                   >
                     85%
                   </motion.span>
@@ -252,7 +309,12 @@ export function Dashboard() {
                         <item.icon size={16} className={item.color} />
                       </div>
                       <div className="min-w-0">
-                        <p className="text-xs font-bold text-white leading-none mb-1 truncate sm:whitespace-normal">{item.label}</p>
+                        <p
+                          className="text-xs font-bold leading-none mb-1 truncate sm:whitespace-normal"
+                          style={{ color: 'var(--text)' }}
+                        >
+                          {item.label}
+                        </p>
                         <p className="text-[10px] text-secondary leading-none line-clamp-2">{item.subtext}</p>
                       </div>
                     </div>
@@ -266,14 +328,31 @@ export function Dashboard() {
 
         {/* Quick Tasks */}
         <div className="col-span-12 md:col-span-6 xl:col-span-5 glass-card p-4 sm:p-6 !border-transparent lg:-mt-18.5" style={{ backgroundColor: 'var(--surface)' }}>
-          <h4 className="text-sm font-bold mb-1 text-white">Quick Tasks</h4>
+          <h4
+            className="text-sm font-bold mb-1"
+            style={{ color: 'var(--text)' }}
+          >
+            Quick Tasks
+          </h4>
           <p className="text-[10px] text-secondary mb-4 sm:mb-6">Manage your daily tasks</p>
 
-          <div className="flex gap-2 p-1 bg-zinc-950 rounded-xl mb-4 sm:mb-6 border border-zinc-800">
-            <button className="flex-1 py-2.5 sm:py-1.5 min-h-[44px] sm:min-h-0 bg-zinc-800 rounded-lg text-[10px] font-bold text-white shadow-sm">
+          <div
+            className="flex gap-2 p-1 rounded-xl mb-4 sm:mb-6 border"
+            style={{
+              backgroundColor: 'var(--control-bg)',
+              borderColor: 'var(--border-subtle)',
+            }}
+          >
+            <button
+              className="flex-1 py-2.5 sm:py-1.5 min-h-[44px] sm:min-h-0 rounded-lg text-[10px] font-bold shadow-sm"
+              style={{
+                backgroundColor: 'var(--nav-active-bg)',
+                color: 'var(--nav-active-text)',
+              }}
+            >
               Active (3)
             </button>
-            <button className="flex-1 py-2.5 sm:py-1.5 min-h-[44px] sm:min-h-0 text-secondary text-[10px] font-bold hover:text-zinc-200 transition-colors">
+            <button className="flex-1 py-2.5 sm:py-1.5 min-h-[44px] sm:min-h-0 text-secondary text-[10px] font-bold hover:text-[var(--text)] transition-colors">
               Completed (12)
             </button>
           </div>
@@ -286,7 +365,11 @@ export function Dashboard() {
             ].map((task) => (
               <div
                 key={task.title}
-                className="flex items-center justify-between gap-2 p-3 bg-zinc-950/50 border border-zinc-800 rounded-xl hover:border-zinc-700 transition-all group cursor-pointer min-w-0"
+                className="flex items-center justify-between gap-2 p-3 rounded-xl transition-all group cursor-pointer min-w-0"
+                style={{
+                  backgroundColor: 'color-mix(in oklab, var(--surface-hover) 70%, transparent)',
+                  border: '1px solid var(--border-subtle)',
+                }}
               >
                 <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
                   <div
@@ -299,7 +382,10 @@ export function Dashboard() {
                           : 'bg-emerald-500',
                     )}
                   ></div>
-                  <p className="text-xs font-bold text-white group-hover:text-blue-400 transition-colors truncate min-w-0">
+                  <p
+                    className="text-xs font-bold transition-colors truncate min-w-0"
+                    style={{ color: 'var(--text)' }}
+                  >
                     {task.title}
                   </p>
                 </div>
@@ -312,29 +398,45 @@ export function Dashboard() {
             <input
               type="text"
               placeholder="Add a quick task..."
-              className="w-full bg-zinc-950 border border-zinc-800 rounded-xl py-2.5 px-4 text-xs text-white focus:outline-none focus:ring-1 focus:ring-zinc-700 transition-all"
+              className="w-full rounded-xl py-2.5 px-4 text-xs focus:outline-none focus:ring-1 transition-all"
+              style={{
+                backgroundColor: 'var(--input-bg)',
+                border: '1px solid var(--input-border)',
+                color: 'var(--text)',
+              }}
             />
-            <button className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 bg-zinc-800 rounded-lg hover:bg-zinc-700 transition-colors min-h-[36px]">
-              <Plus size={14} className="text-white" />
+            <button
+              className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-lg transition-colors min-h-[36px]"
+              style={{ backgroundColor: 'var(--control-bg)' }}
+            >
+              <Plus size={14} style={{ color: 'var(--text)' }} />
             </button>
           </div>
         </div>
 
         {/* Calendar */}
         <div className="col-span-12 md:col-span-6 xl:col-span-3 glass-card p-4 sm:p-6 !border-transparent lg:-mt-18.5" style={{ backgroundColor: 'var(--surface)' }}>
-          <h4 className="text-sm font-bold mb-1 text-white">Calendar</h4>
+          <h4
+            className="text-sm font-bold mb-1"
+            style={{ color: 'var(--text)' }}
+          >
+            Calendar
+          </h4>
           <p className="text-[10px] text-secondary mb-4 sm:mb-6">
             {currentTime.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
           </p>
 
           <div className="flex items-center justify-between mb-4 sm:mb-6">
-            <button className="p-2 sm:p-1.5 min-h-[44px] min-w-[44px] sm:min-h-0 sm:min-w-0 flex items-center justify-center hover:bg-zinc-800 rounded-lg text-secondary hover:text-white transition-colors -ml-1">
+            <button className="p-2 sm:p-1.5 min-h-[44px] min-w-[44px] sm:min-h-0 sm:min-w-0 flex items-center justify-center rounded-lg text-secondary hover:bg-[var(--surface-hover)] hover:text-[var(--text)] transition-colors -ml-1">
               <ChevronLeft size={14} />
             </button>
-            <span className="text-[11px] sm:text-xs font-bold text-white text-center px-1">
+            <span
+              className="text-[11px] sm:text-xs font-bold text-center px-1"
+              style={{ color: 'var(--text)' }}
+            >
               {currentTime.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
             </span>
-            <button className="p-2 sm:p-1.5 min-h-[44px] min-w-[44px] sm:min-h-0 sm:min-w-0 flex items-center justify-center hover:bg-zinc-800 rounded-lg text-secondary hover:text-white transition-colors -mr-1">
+            <button className="p-2 sm:p-1.5 min-h-[44px] min-w-[44px] sm:min-h-0 sm:min-w-0 flex items-center justify-center rounded-lg text-secondary hover:bg-[var(--surface-hover)] hover:text-[var(--text)] transition-colors -mr-1">
               <ChevronRight size={14} />
             </button>
           </div>
@@ -351,9 +453,14 @@ export function Dashboard() {
                   className={cn(
                     'text-[10px] font-bold w-7 h-7 sm:w-8 sm:h-8 flex items-center justify-center rounded-lg cursor-pointer transition-all',
                     i + 1 === currentTime.getDate()
-                      ? 'bg-white text-black shadow-lg shadow-white/10'
-                      : 'text-secondary hover:bg-zinc-800 hover:text-white',
+                      ? 'shadow-lg'
+                      : 'text-secondary hover:bg-[var(--surface-hover)] hover:text-[var(--text)]',
                   )}
+                  style={
+                    i + 1 === currentTime.getDate()
+                      ? { backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }
+                      : undefined
+                  }
                 >
                   {i + 1}
                 </span>

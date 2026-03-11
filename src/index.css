@@ -26,28 +26,30 @@
 
 @layer base {
   :root {
-    --neutralLight: #a1a1aa;
-    --text-secondary: #B3B4B5;
-    --surface: #18181b;
-    --surface-hover: #27272a;
-    --control-bg: #18181b;
-    --control-bg-hover: #27272a;
-    --text: #fafafa;
-    --text-muted: #a1a1aa;
-    --border: #27272a;
-    --border-subtle: #18181b;
-    --input-border: #27272a;
-    --input-bg: #09090b;
-    --selected-bg: #f0f0f02e;
-    --background: #09090b;
-    --foreground: #fafafa;
-    --primaryColor: #ffffff;
-    --primaryColorHover: #f4f4f5;
-    --errorColor: #ef4444;
-    --errorColorHover: #f87171;
-    --trend-growth: #22c55e;
-    --trend-drop: #f97316;
-    --greeting-gradient: linear-gradient(135deg, #33415580 0%, #47556966 50%, #64748b4d 100%);
+    --neutralLight: #71717a;
+    --text-secondary: #4b5563;
+    --surface: #ffffff;
+    --surface-hover: #f4f4f5;
+    --control-bg: #f4f4f5;
+    --control-bg-hover: #e4e4e7;
+    --text: #09090b;
+    --text-muted: #71717a;
+    --border: #e4e4e7;
+    --border-subtle: #f4f4f5;
+    --input-border: #d4d4d8;
+    --input-bg: #ffffff;
+    --selected-bg: #e5e5ff40;
+    --background: #f4f4f5;
+    --foreground: #09090b;
+    --primaryColor: #18181b;
+    --primaryColorHover: #27272a;
+    --errorColor: #b91c1c;
+    --errorColorHover: #ef4444;
+    --trend-growth: #16a34a;
+    --trend-drop: #ea580c;
+    --greeting-gradient: linear-gradient(135deg, #e5e7eb80 0%, #d4d4d866 50%, #e5e7eb4d 100%);
+    --nav-active-bg: #18181b;
+    --nav-active-text: #ffffff;
     
     /* Alerts */
     --alert-success-bg: #22c55e2e;
@@ -139,6 +141,8 @@
     --greeting-gradient: linear-gradient(135deg, #33415580 0%, #47556966 50%, #64748b4d 100%);
     --trend-growth: #4ade80;
     --trend-drop: #fb923c;
+    --nav-active-bg: var(--surface-hover);
+    --nav-active-text: var(--text);
   }
 
   body {

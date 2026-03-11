@@ -27,10 +27,10 @@ const SidebarGroup = ({
     <div className="px-3 mb-2 h-5 flex items-center">
       {collapsed ? (
         <div className="w-full flex justify-center">
-          <div className="h-px w-7 rounded-full bg-zinc-800" />
+          <div className="h-px w-7 rounded-full" style={{ backgroundColor: 'var(--border-subtle)' }} />
         </div>
       ) : (
-        <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">{title}</p>
+        <p className="text-[10px] font-bold text-secondary uppercase tracking-widest">{title}</p>
       )}
     </div>
     <div className="space-y-1.5 flex flex-col items-stretch">{children}</div>
@@ -58,13 +58,17 @@ const SidebarItem = ({
       'flex items-center rounded-lg transition-all duration-200 w-full group',
       collapsed ? 'justify-center px-1.5 py-2.5' : 'justify-start gap-3 px-3 py-2',
       active
-        ? 'text-white shadow-sm bg-[var(--selected-bg)]'
-        : 'text-secondary hover:text-zinc-100 hover:bg-[var(--selected-bg)]',
+        ? 'shadow-sm text-[var(--nav-active-text)]'
+        : 'text-secondary hover:text-[var(--text)] hover:bg-[var(--selected-bg)]',
     )}
+    style={active ? { backgroundColor: 'var(--nav-active-bg)' } : undefined}
   >
     <Icon
       size={18}
-      className={cn('transition-colors', active ? 'text-zinc-100' : 'text-secondary group-hover:text-zinc-200')}
+      className={cn(
+        'transition-colors',
+        active ? 'text-[var(--nav-active-text)]' : 'text-secondary group-hover:text-[var(--text)]',
+      )}
     />
     {!collapsed && (
       <>
@@ -75,8 +79,8 @@ const SidebarItem = ({
           <ChevronRight
             size={14}
             className={cn(
-              'transition-colors',
-              active ? 'text-zinc-300/70' : 'text-zinc-500 group-hover:text-zinc-300',
+              'transition-colors opacity-70',
+              active ? 'text-[var(--nav-active-text)]' : 'text-secondary group-hover:text-[var(--text)]',
             )}
           />
         )}
@@ -112,7 +116,8 @@ export function AppSidebar({
         className={cn('rounded-2xl overflow-hidden flex flex-col', isDrawer ? 'h-full min-h-0' : 'h-full')}
         style={{
           backgroundColor: 'var(--surface)',
-          boxShadow: '0 18px 60px rgba(0,0,0,0.55)',
+          boxShadow:
+            '0 8px 20px rgba(0,0,0,0.18), 0 0 0 1px color-mix(in oklab, var(--border-subtle) 70%, transparent)',
         }}
       >
         <nav className={cn('flex-1 px-3 py-5 flex flex-col items-stretch', isDrawer && 'min-h-0 overflow-y-auto')}>
@@ -147,14 +152,18 @@ export function AppSidebar({
         </nav>
 
         <div
-          className="px-3 py-3 border-t border-zinc-800/60"
+          className="px-3 py-3 border-t"
           style={{
             backgroundColor: 'color-mix(in oklab, var(--control-bg) 60%, transparent)',
+            borderColor: 'var(--border-subtle)',
           }}
         >
           <button
             onClick={onLogout}
-            className="flex items-center justify-center gap-3 px-3 py-2 rounded-lg transition-all duration-200 w-full text-zinc-300 hover:text-white hover:bg-white/5 group"
+            className="flex items-center justify-center gap-3 px-3 py-2 rounded-lg transition-all duration-200 w-full text-[var(--text-muted)] hover:text-[var(--text)] group"
+            style={{
+              backgroundColor: 'color-mix(in oklab, var(--control-bg) 88%, transparent)',
+            }}
           >
             <LogOut size={16} className="group-hover:rotate-12 transition-transform" />
             {!collapsed && <span className="text-[13px] font-medium">Logout</span>}

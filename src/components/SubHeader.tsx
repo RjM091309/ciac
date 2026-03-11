@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { ChevronRight, Home, ShieldCheck, UserCog, User } from 'lucide-react';
+import { cn } from '../lib/utils';
 
 export function SubHeader() {
   const roles = [
@@ -17,10 +18,15 @@ export function SubHeader() {
         <div className="flex items-center gap-2 text-xs font-medium text-secondary min-w-0">
           <Home size={14} className="text-secondary shrink-0" />
           <ChevronRight size={12} className="text-secondary/70 shrink-0" />
-          <span className="text-zinc-100 truncate">Dashboard</span>
+          <span className="truncate text-[var(--text)]">Dashboard</span>
         </div>
 
-        <div className="flex flex-wrap items-center gap-1.5 rounded-full bg-zinc-900/70 px-1 py-1 w-fit">
+        <div
+          className="flex flex-wrap items-center gap-1.5 rounded-full px-1 py-1 w-fit"
+          style={{
+            backgroundColor: 'color-mix(in oklab, var(--control-bg) 82%, transparent)',
+          }}
+        >
           {roles.map((role) => {
             const Icon = role.icon;
             const isActive = activeRole === role.id;
@@ -29,13 +35,27 @@ export function SubHeader() {
                 key={role.id}
                 type="button"
                 onClick={() => setActiveRole(role.id)}
-                className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-2 sm:py-1.5 min-h-[44px] sm:min-h-0 rounded-full text-[11px] font-medium transition-colors ${
+                className={cn(
+                  'flex items-center gap-1.5 px-2.5 sm:px-3 py-2 sm:py-1.5 min-h-[44px] sm:min-h-0 rounded-full text-[11px] font-medium transition-colors',
                   isActive
-                    ? 'bg-zinc-100 text-black shadow-sm'
-                    : 'text-secondary hover:text-zinc-100 hover:bg-zinc-800/70'
-                }`}
+                    ? 'shadow-sm text-[var(--nav-active-text)]'
+                    : 'text-secondary hover:text-[var(--text)] hover:bg-[var(--selected-bg)]',
+                )}
+                style={
+                  isActive
+                    ? {
+                        backgroundColor: 'var(--nav-active-bg)',
+                      }
+                    : undefined
+                }
               >
-                <Icon size={13} className="shrink-0" />
+                <Icon
+                  size={13}
+                  className={cn(
+                    'shrink-0',
+                    isActive ? 'text-[var(--nav-active-text)]' : 'text-secondary',
+                  )}
+                />
                 <span className="whitespace-nowrap">{role.label}</span>
               </button>
             );
@@ -46,7 +66,7 @@ export function SubHeader() {
       {/* Page title */}
       <div className="flex justify-between items-center mb-4 sm:mb-5">
         <div className="space-y-0.5 min-w-0">
-          <h2 className="text-xl sm:text-2xl font-semibold tracking-tight text-white">Overview</h2>
+          <h2 className="text-xl sm:text-2xl font-semibold tracking-tight text-[var(--text)]">Overview</h2>
           <p className="text-xs text-secondary">Monitor key metrics and manage your platform</p>
         </div>
       </div>

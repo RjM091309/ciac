@@ -6,6 +6,8 @@ import { cn } from '../lib/utils';
 
 export type AppView = 'dashboard' | 'applications' | 'profile' | 'businesses';
 
+type Theme = 'light' | 'dark';
+
 const MOBILE_BREAKPOINT = 768;
 const DESKTOP_BREAKPOINT = 1024; // tablet = 768..1023, desktop = 1024+
 
@@ -34,6 +36,15 @@ export function AppLayout({
     typeof window !== 'undefined' ? getSidebarDefaultCollapsed(window.innerWidth) : true
   );
 
+  const [theme, setTheme] = useState<Theme>(() => {
+    if (typeof window === 'undefined') return 'dark';
+    const stored = window.localStorage.getItem('theme');
+    if (stored === 'light' || stored === 'dark') return stored;
+    return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
+      ? 'dark'
+      : 'light';
+  });
+
   useEffect(() => {
     const mobileQuery = window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT - 1}px)`);
     const desktopQuery = window.matchMedia(`(min-width: ${DESKTOP_BREAKPOINT}px)`);
@@ -51,15 +62,30 @@ export function AppLayout({
     };
   }, []);
 
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    const root = document.documentElement;
+    if (theme === 'dark') {
+      root.classList.add('dark');
+    } else {
+      root.classList.remove('dark');
+    }
+    window.localStorage.setItem('theme', theme);
+  }, [theme]);
+
   const closeSidebar = () => setSidebarCollapsed(true);
   const toggleSidebar = () => setSidebarCollapsed((prev) => !prev);
+  const toggleTheme = () => setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'));
 
   return (
     <div
-      className="h-screen overflow-hidden flex flex-col text-zinc-100 font-sans selection:bg-white/10 relative"
+      className={cn(
+        'h-screen overflow-hidden flex flex-col text-zinc-100 font-sans selection:bg-white/10 relative',
+        theme === 'dark' && 'dark'
+      )}
       style={{ backgroundColor: 'var(--background)', color: 'var(--foreground)' }}
     >
-      <AppHeader onToggleSidebar={toggleSidebar} />
+      <AppHeader onToggleSidebar={toggleSidebar} theme={theme} onToggleTheme={toggleTheme} />
 
       <div className="flex-1 flex overflow-hidden relative">
         {/* Mobile: sidebar as overlay drawer, hidden by default */}
