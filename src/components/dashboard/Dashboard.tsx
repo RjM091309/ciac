@@ -130,6 +130,11 @@ export function Dashboard() {
     })
     .split(' ');
 
+  const year = currentTime.getFullYear();
+  const month = currentTime.getMonth();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const startWeekday = new Date(year, month, 1).getDay();
+
   return (
     <>
       <SubHeader />
@@ -254,7 +259,13 @@ export function Dashboard() {
             </button>
           </div>
 
-          <div className="flex-1 bg-zinc-950/50 rounded-2xl p-4 md:p-6 border border-zinc-800 flex flex-col">
+          <div
+            className="flex-1 rounded-2xl p-4 md:p-6 border flex flex-col"
+            style={{
+              backgroundColor: 'var(--control-bg)',
+              borderColor: 'var(--border-subtle)',
+            }}
+          >
             {/* Mobile: stack vertically; Desktop: side-by-side */}
             <div className="flex flex-col md:flex-row items-center md:items-center gap-5 md:gap-5">
               <div className="relative w-32 h-32 sm:w-36 sm:h-36 md:w-40 md:h-40 shrink-0 flex items-center justify-center">
@@ -398,7 +409,7 @@ export function Dashboard() {
             <input
               type="text"
               placeholder="Add a quick task..."
-              className="w-full rounded-xl py-2.5 px-4 text-xs focus:outline-none focus:ring-1 transition-all"
+              className="w-full rounded-2xl pr-12 pl-4 py-2.5 text-xs focus:outline-none focus:ring-1 transition-all"
               style={{
                 backgroundColor: 'var(--input-bg)',
                 border: '1px solid var(--input-border)',
@@ -406,7 +417,7 @@ export function Dashboard() {
               }}
             />
             <button
-              className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-lg transition-colors min-h-[36px]"
+              className="absolute inset-y-1 right-1 px-3 rounded-2xl transition-colors flex items-center justify-center"
               style={{ backgroundColor: 'var(--control-bg)' }}
             >
               <Plus size={14} style={{ color: 'var(--text)' }} />
@@ -447,33 +458,55 @@ export function Dashboard() {
                 {day}
               </span>
             ))}
-            {Array.from({ length: 14 }).map((_, i) => (
-              <div key={i} className="flex items-center justify-center">
-                <span
-                  className={cn(
-                    'text-[10px] font-bold w-7 h-7 sm:w-8 sm:h-8 flex items-center justify-center rounded-lg cursor-pointer transition-all',
-                    i + 1 === currentTime.getDate()
-                      ? 'shadow-lg'
-                      : 'text-secondary hover:bg-[var(--surface-hover)] hover:text-[var(--text)]',
-                  )}
-                  style={
-                    i + 1 === currentTime.getDate()
-                      ? { backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }
-                      : undefined
-                  }
-                >
-                  {i + 1}
-                </span>
-              </div>
-            ))}
+            {Array.from({ length: startWeekday + daysInMonth }).map((_, i) => {
+              const dayNum = i - startWeekday + 1;
+
+              if (i < startWeekday) {
+                return (
+                  <div key={`empty-${i}`} className="flex items-center justify-center">
+                    <span className="text-[10px]">&nbsp;</span>
+                  </div>
+                );
+              }
+
+              const isToday = dayNum === currentTime.getDate();
+
+              return (
+                <div key={dayNum} className="flex items-center justify-center">
+                  <span
+                    className={cn(
+                      'text-[10px] font-bold w-7 h-7 sm:w-8 sm:h-8 flex items-center justify-center rounded-lg cursor-pointer transition-all',
+                      isToday
+                        ? 'shadow-lg'
+                        : 'text-secondary hover:bg-[var(--surface-hover)] hover:text-[var(--text)]',
+                    )}
+                    style={
+                      isToday
+                        ? { backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }
+                        : undefined
+                    }
+                  >
+                    {dayNum}
+                  </span>
+                </div>
+              );
+            })}
           </div>
         </div>
 
         {/* Revenue Analytics */}
-        <div className="col-span-12 xl:col-span-4 glass-card p-4 sm:p-6 !border-transparent" style={{ backgroundColor: 'var(--surface)' }}>
+        <div
+          className="col-span-12 xl:col-span-4 glass-card p-4 sm:p-6 !border-transparent"
+          style={{ backgroundColor: 'var(--surface)' }}
+        >
           <div className="flex justify-between items-start gap-2 mb-1 min-w-0">
-            <h4 className="text-sm font-bold text-white truncate min-w-0">Revenue Analytics</h4>
-            <div className="flex items-center gap-1 text-[10px] font-bold text-secondary cursor-pointer hover:text-zinc-300 transition-colors shrink-0">
+            <h4
+              className="text-sm font-bold truncate min-w-0"
+              style={{ color: 'var(--text)' }}
+            >
+              Revenue Analytics
+            </h4>
+            <div className="flex items-center gap-1 text-[10px] font-bold text-secondary cursor-pointer hover:text-[var(--text)] transition-colors shrink-0">
               This Quarter <ChevronRight size={10} className="rotate-90" />
             </div>
           </div>
@@ -491,23 +524,35 @@ export function Dashboard() {
               >
                 <defs>
                   <linearGradient id="colorValue" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#ffffff" stopOpacity={0.1} />
-                    <stop offset="95%" stopColor="#ffffff" stopOpacity={0} />
+                    <stop offset="5%" stopColor="var(--primaryColor)" stopOpacity={0.12} />
+                    <stop offset="95%" stopColor="var(--primaryColor)" stopOpacity={0} />
                   </linearGradient>
                 </defs>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#27272a" strokeOpacity={0.5} />
+                <CartesianGrid
+                  strokeDasharray="3 3"
+                  vertical={false}
+                  stroke="var(--border-subtle)"
+                  strokeOpacity={0.6}
+                />
                 <Tooltip
                   contentStyle={{
-                    backgroundColor: '#09090b',
-                    border: '1px solid #27272a',
+                    backgroundColor: 'var(--surface)',
+                    border: `1px solid var(--border-subtle)`,
                     borderRadius: '12px',
                     fontSize: '10px',
-                    color: '#fff',
+                    color: 'var(--text)',
                     boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)',
                   }}
-                  itemStyle={{ color: '#fff' }}
+                  itemStyle={{ color: 'var(--text)' }}
                 />
-                <Area type="monotone" dataKey="value" stroke="#ffffff" strokeWidth={2} fillOpacity={1} fill="url(#colorValue)" />
+                <Area
+                  type="monotone"
+                  dataKey="value"
+                  stroke="var(--primaryColor)"
+                  strokeWidth={2}
+                  fillOpacity={1}
+                  fill="url(#colorValue)"
+                />
               </AreaChart>
             </ResponsiveContainer>
           </div>
@@ -515,11 +560,21 @@ export function Dashboard() {
           <div className="flex justify-between mt-3 sm:mt-4">
             <div className="flex flex-col">
               <span className="text-[10px] font-bold text-secondary uppercase tracking-widest">Min</span>
-              <span className="text-xs font-bold text-white">$30k</span>
+              <span
+                className="text-xs font-bold"
+                style={{ color: 'var(--text)' }}
+              >
+                $30k
+              </span>
             </div>
             <div className="flex flex-col items-end">
               <span className="text-[10px] font-bold text-secondary uppercase tracking-widest">Max</span>
-              <span className="text-xs font-bold text-white">$60k</span>
+              <span
+                className="text-xs font-bold"
+                style={{ color: 'var(--text)' }}
+              >
+                $60k
+              </span>
             </div>
           </div>
         </div>

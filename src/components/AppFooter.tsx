@@ -8,22 +8,25 @@ export function AppFooter() {
       <div
         className="w-full rounded-2xl px-5 py-3 backdrop-blur-xl"
         style={{
-          backgroundColor: 'color-mix(in oklab, var(--surface) 65%, transparent)',
-          boxShadow: '0 14px 50px rgba(0,0,0,0.45)',
+          backgroundColor: 'color-mix(in oklab, var(--surface) 85%, transparent)',
+          boxShadow:
+            '0 3px 10px rgba(0,0,0,0.10), 0 0 0 1px color-mix(in oklab, var(--border-subtle) 70%, transparent)',
         }}
       >
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <span>© {year}</span>
-            <span className="text-zinc-700">•</span>
+            <span className="text-secondary">•</span>
             <span>v1.0.0</span>
           </div>
 
           <div
-            className="h-7 px-3 rounded-full text-[10px] font-bold text-zinc-200 inline-flex items-center"
+            className="h-7 px-3 rounded-full text-[10px] font-bold inline-flex items-center"
             style={{
-              backgroundColor: 'color-mix(in oklab, var(--control-bg) 70%, transparent)',
-              boxShadow: '0 10px 30px rgba(0,0,0,0.35)',
+              backgroundColor: 'color-mix(in oklab, var(--control-bg) 86%, transparent)',
+              color: 'var(--text)',
+              boxShadow:
+                '0 2px 6px rgba(0,0,0,0.12), 0 0 0 1px color-mix(in oklab, var(--border-subtle) 70%, transparent)',
             }}
           >
             3CORE
