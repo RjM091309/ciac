@@ -90,27 +90,32 @@ export function AppSidebar({
   onViewChange,
   onLogout,
   collapsed,
+  variant = 'default',
 }: {
   view: View;
   onViewChange: (view: View) => void;
   onLogout: () => void;
   collapsed?: boolean;
+  variant?: 'default' | 'drawer';
 }) {
+  const isDrawer = variant === 'drawer';
   return (
     <aside
       className={cn(
-        'shrink-0 pt-3 pb-6 transition-[width] duration-300 ease-in-out',
+        'shrink-0 pb-6 transition-[width] duration-300 ease-in-out',
+        isDrawer ? 'pt-1' : 'pt-3',
         collapsed ? 'w-[88px] px-3' : 'w-64 pl-4 pr-2',
+        isDrawer && 'h-full',
       )}
     >
       <div
-        className="h-full rounded-2xl overflow-hidden flex flex-col"
+        className={cn('rounded-2xl overflow-hidden flex flex-col', isDrawer ? 'h-full min-h-0' : 'h-full')}
         style={{
           backgroundColor: 'var(--surface)',
           boxShadow: '0 18px 60px rgba(0,0,0,0.55)',
         }}
       >
-        <nav className="flex-1 px-3 py-5 flex flex-col items-stretch">
+        <nav className={cn('flex-1 px-3 py-5 flex flex-col items-stretch', isDrawer && 'min-h-0 overflow-y-auto')}>
           <SidebarGroup title="Main" collapsed={collapsed}>
             <div className="flex flex-col gap-1.5">
               <SidebarItem
