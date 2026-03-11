@@ -1,0 +1,422 @@
+import React, { useEffect, useState } from 'react';
+import { ChevronLeft, ChevronRight, CircleDot, Clock, Cloud, FileText, MoreHorizontal, Plus, Rocket, Target, TrendingUp, User, Users, Zap } from 'lucide-react';
+import { motion } from 'motion/react';
+import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip } from 'recharts';
+import { cn } from '../../lib/utils';
+import { SubHeader } from '../SubHeader';
+
+const RadialProgress = ({
+  value,
+  radius,
+  strokeWidth,
+  color,
+  delay = 0,
+}: {
+  value: number;
+  radius: number;
+  strokeWidth: number;
+  color: string;
+  delay?: number;
+}) => {
+  const circumference = 2 * Math.PI * radius;
+  const offset = circumference - (value / 100) * circumference;
+
+  return (
+    <g className="transform -rotate-90 origin-center">
+      <circle
+        cx="120"
+        cy="120"
+        r={radius}
+        fill="transparent"
+        stroke="#1e293b"
+        strokeWidth={strokeWidth}
+        className="opacity-30"
+      />
+      <motion.circle
+        cx="120"
+        cy="120"
+        r={radius}
+        fill="transparent"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeDasharray={circumference}
+        initial={{ strokeDashoffset: circumference }}
+        animate={{ strokeDashoffset: offset }}
+        transition={{ duration: 1.5, delay, ease: 'easeOut' }}
+        strokeLinecap="round"
+      />
+    </g>
+  );
+};
+
+const MetricCard = ({
+  title,
+  value,
+  icon: Icon,
+  trend,
+  trendValue,
+}: {
+  title: string;
+  value: string | number;
+  icon: any;
+  trend?: 'up' | 'down';
+  trendValue?: string;
+}) => (
+  <div
+    className="glass-card p-3.5 flex flex-col justify-between h-28 hover:bg-zinc-900 transition-colors group !border-transparent"
+    style={{ backgroundColor: 'var(--surface)' }}
+  >
+    <div className="flex justify-between items-center">
+      <div className="flex items-center gap-3">
+        <div className="p-2 bg-zinc-800 rounded-xl border border-zinc-700 group-hover:border-zinc-500 transition-colors">
+          <Icon className="text-zinc-200 group-hover:text-white transition-colors" size={18} />
+        </div>
+        <span className="text-xs font-medium text-secondary group-hover:text-white transition-colors">{title}</span>
+      </div>
+      <button className="p-1 rounded-full text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800 transition-colors">
+        <MoreHorizontal size={14} />
+      </button>
+    </div>
+
+    <div className="flex items-end justify-between pt-2.5">
+      <p className="text-xl font-bold tracking-tight text-white leading-none">{value}</p>
+      {trendValue && (
+        <div
+          className={cn(
+            'flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-full',
+            trend === 'up' ? 'text-emerald-400 bg-emerald-400/10' : 'text-orange-400 bg-orange-400/10',
+          )}
+        >
+          <TrendingUp size={10} className={trend === 'down' ? 'rotate-180' : ''} />
+          {trendValue}
+        </div>
+      )}
+    </div>
+  </div>
+);
+
+export function Dashboard() {
+  const [currentTime, setCurrentTime] = useState(new Date());
+
+  useEffect(() => {
+    const timer = setInterval(() => setCurrentTime(new Date()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const [timeStr, ampm] = currentTime
+    .toLocaleTimeString('en-US', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true,
+    })
+    .split(' ');
+
+  return (
+    <>
+      <SubHeader />
+
+      <div className="grid grid-cols-12 gap-5">
+        {/* Left side: hero + 4 cards (single block) */}
+        <div className="col-span-12 lg:col-span-8 flex flex-col gap-4">
+          {/* Welcome + Weather Card (from provided design) */}
+          <div
+            className="relative overflow-hidden rounded-3xl px-6 py-6 shadow-2xl !border-transparent"
+            style={{ backgroundColor: 'var(--surface)' }}
+          >
+            {/* Subtle Glow Effect */}
+            <div className="pointer-events-none absolute -top-32 -right-32 h-80 w-80 rounded-full bg-blue-600/30 blur-[100px]" />
+
+            <div className="relative flex flex-col md:flex-row justify-between gap-6">
+              {/* Left Side: Greeting and Time */}
+              <div className="flex flex-col justify-between space-y-8">
+                <div>
+                  <h3 className="text-2xl md:text-3xl font-bold text-white tracking-tight">
+                    Nice to see you, Demo
+                  </h3>
+                  <p className="mt-2 text-xs md:text-sm text-secondary flex items-center gap-2">
+                    Ready to make today productive!
+                    <Rocket className="w-4 h-4 text-pink-400" />
+                  </p>
+                </div>
+
+                <div className="flex items-baseline gap-2">
+                  <span className="text-4xl md:text-5xl font-bold text-white tracking-tighter">
+                    {timeStr}
+                  </span>
+                  <span className="text-lg md:text-xl font-bold text-white opacity-80 uppercase">{ampm}</span>
+                </div>
+              </div>
+
+              {/* Right Side: Weather and Date */}
+              <div className="flex flex-col items-end justify-between text-right">
+                <div className="flex items-center gap-3">
+                  <Cloud className="w-10 h-10 md:w-12 md:h-12 text-white/90" />
+                  <div className="flex flex-col">
+                    <span className="text-3xl md:text-4xl font-bold text-white">22°C</span>
+                  </div>
+                </div>
+
+                <div className="mt-4 space-y-1">
+                  <p className="text-sm font-medium text-secondary">Overcast</p>
+                  <p className="text-xs font-semibold text-secondary">Freeport</p>
+                  <p className="text-xs text-secondary">
+                    {currentTime.toLocaleDateString('en-US', {
+                      weekday: 'long',
+                      month: 'long',
+                      day: 'numeric',
+                      year: 'numeric',
+                    })}
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Metrics row directly under hero */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <MetricCard title="Total Projects" value="24" icon={FileText} trend="up" trendValue="+3" />
+            <MetricCard title="Active Users" value="1,847" icon={Users} trend="up" trendValue="+12%" />
+            <MetricCard title="Task Completion" value="78%" icon={TrendingUp} trend="up" trendValue="+5%" />
+            <MetricCard title="Avg. Response Time" value="32 min" icon={Clock} trend="down" trendValue="0%" />
+          </div>
+        </div>
+
+        {/* Insights Card on the right, same row height */}
+        <div
+          className="col-span-12 lg:col-span-4 glass-card p-6 flex flex-col !border-transparent"
+          style={{ backgroundColor: 'var(--surface)' }}
+        >
+          <h4 className="text-base font-bold text-white mb-0.5">Insights</h4>
+          <p className="text-xs text-secondary mb-6">Performance analytics</p>
+
+          <div className="flex gap-2 p-1 bg-zinc-950 rounded-xl mb-6 border border-zinc-800">
+            <button className="flex-1 flex items-center justify-center gap-2 py-2 bg-zinc-800 rounded-lg text-xs font-bold text-white shadow-sm">
+              <Target size={14} /> Performance
+            </button>
+            <button className="flex-1 flex items-center justify-center gap-2 py-2 text-secondary text-xs font-bold hover:text-zinc-200 transition-colors">
+              <TrendingUp size={14} /> Trends
+            </button>
+          </div>
+
+          <div className="flex-1 bg-zinc-950/50 rounded-2xl p-6 border border-zinc-800 flex flex-col">
+            <div className="flex items-center gap-5">
+              <div className="relative w-40 h-40 shrink-0 flex items-center justify-center">
+                <svg width="240" height="240" viewBox="0 0 240 240">
+                  <RadialProgress value={85} radius={90} strokeWidth={12} color="#3b82f6" delay={0} />
+                  <RadialProgress value={84} radius={70} strokeWidth={12} color="#22c55e" delay={0.2} />
+                  <RadialProgress value={78} radius={50} strokeWidth={12} color="#64748b" delay={0.4} />
+                </svg>
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <motion.span
+                    initial={{ opacity: 0, scale: 0.5 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    transition={{ duration: 0.5, delay: 0.8 }}
+                    className="text-xl font-extrabold text-white tracking-tight"
+                  >
+                    85%
+                  </motion.span>
+                </div>
+              </div>
+
+              <div className="flex-1 space-y-5">
+                {[
+                  {
+                    label: 'Task Completion',
+                    value: '85%',
+                    subtext: 'Overall completion rate',
+                    icon: CircleDot,
+                    color: 'text-blue-400',
+                    bgColor: 'bg-blue-400/10',
+                  },
+                  {
+                    label: 'User Engagement',
+                    value: '84%',
+                    subtext: 'Active user participation',
+                    icon: User,
+                    color: 'text-emerald-400',
+                    bgColor: 'bg-emerald-400/10',
+                  },
+                  {
+                    label: 'Response Time',
+                    value: '78%',
+                    subtext: 'Average response efficiency',
+                    icon: Clock,
+                    color: 'text-secondary',
+                    bgColor: 'bg-zinc-500/10',
+                  },
+                ].map((item) => (
+                  <div key={item.label} className="flex items-center justify-between group">
+                    <div className="flex items-center gap-3">
+                      <div className={cn('p-2 rounded-full transition-colors', item.bgColor)}>
+                        <item.icon size={16} className={item.color} />
+                      </div>
+                      <div>
+                        <p className="text-xs font-bold text-white leading-none mb-1">{item.label}</p>
+                        <p className="text-[10px] text-secondary leading-none">{item.subtext}</p>
+                      </div>
+                    </div>
+                    <span className={cn('text-xs font-bold', item.color)}>{item.value}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Quick Tasks */}
+        <div className="col-span-12 md:col-span-6 xl:col-span-5 glass-card p-6 !border-transparent -mt-18.5" style={{ backgroundColor: 'var(--surface)' }}>
+          <h4 className="text-sm font-bold mb-1 text-white">Quick Tasks</h4>
+          <p className="text-[10px] text-secondary mb-6">Manage your daily tasks</p>
+
+          <div className="flex gap-2 p-1 bg-zinc-950 rounded-xl mb-6 border border-zinc-800">
+            <button className="flex-1 py-1.5 bg-zinc-800 rounded-lg text-[10px] font-bold text-white shadow-sm">
+              Active (3)
+            </button>
+            <button className="flex-1 py-1.5 text-secondary text-[10px] font-bold hover:text-zinc-200 transition-colors">
+              Completed (12)
+            </button>
+          </div>
+
+          <div className="space-y-3 mb-6">
+            {[
+              { title: 'Review business permit #8291', priority: 'High', time: '2h ago' },
+              { title: 'Update system documentation', priority: 'Medium', time: '5h ago' },
+              { title: 'Meeting with development team', priority: 'Low', time: 'Tomorrow' },
+            ].map((task) => (
+              <div
+                key={task.title}
+                className="flex items-center justify-between p-3 bg-zinc-950/50 border border-zinc-800 rounded-xl hover:border-zinc-700 transition-all group cursor-pointer"
+              >
+                <div className="flex items-center gap-3">
+                  <div
+                    className={cn(
+                      'w-2 h-2 rounded-full',
+                      task.priority === 'High'
+                        ? 'bg-rose-500'
+                        : task.priority === 'Medium'
+                          ? 'bg-amber-500'
+                          : 'bg-emerald-500',
+                    )}
+                  ></div>
+                  <p className="text-xs font-bold text-white group-hover:text-blue-400 transition-colors">
+                    {task.title}
+                  </p>
+                </div>
+                <span className="text-[10px] text-secondary">{task.time}</span>
+              </div>
+            ))}
+          </div>
+
+          <div className="relative">
+            <input
+              type="text"
+              placeholder="Add a quick task..."
+              className="w-full bg-zinc-950 border border-zinc-800 rounded-xl py-2.5 px-4 text-xs text-white focus:outline-none focus:ring-1 focus:ring-zinc-700 transition-all"
+            />
+            <button className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 bg-zinc-800 rounded-lg hover:bg-zinc-700 transition-colors">
+              <Plus size={14} className="text-white" />
+            </button>
+          </div>
+        </div>
+
+        {/* Calendar */}
+        <div className="col-span-12 md:col-span-6 xl:col-span-3 glass-card p-6 !border-transparent -mt-18.5" style={{ backgroundColor: 'var(--surface)' }}>
+          <h4 className="text-sm font-bold mb-1 text-white">Calendar</h4>
+          <p className="text-[10px] text-secondary mb-6">
+            {currentTime.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
+          </p>
+
+          <div className="flex items-center justify-between mb-6">
+            <button className="p-1.5 hover:bg-zinc-800 rounded-lg text-secondary hover:text-white transition-colors">
+              <ChevronLeft size={14} />
+            </button>
+            <span className="text-xs font-bold text-white">
+              {currentTime.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
+            </span>
+            <button className="p-1.5 hover:bg-zinc-800 rounded-lg text-secondary hover:text-white transition-colors">
+              <ChevronRight size={14} />
+            </button>
+          </div>
+
+          <div className="grid grid-cols-7 gap-y-4 text-center">
+            {['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'].map((day) => (
+              <span key={day} className="text-[10px] font-bold text-secondary uppercase">
+                {day}
+              </span>
+            ))}
+            {Array.from({ length: 14 }).map((_, i) => (
+              <div key={i} className="flex items-center justify-center">
+                <span
+                  className={cn(
+                    'text-[10px] font-bold w-8 h-8 flex items-center justify-center rounded-lg cursor-pointer transition-all',
+                    i + 1 === currentTime.getDate()
+                      ? 'bg-white text-black shadow-lg shadow-white/10'
+                      : 'text-secondary hover:bg-zinc-800 hover:text-white',
+                  )}
+                >
+                  {i + 1}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Revenue Analytics */}
+        <div className="col-span-12 xl:col-span-4 glass-card p-6 !border-transparent" style={{ backgroundColor: 'var(--surface)' }}>
+          <div className="flex justify-between items-start mb-1">
+            <h4 className="text-sm font-bold text-white">Revenue Analytics</h4>
+            <div className="flex items-center gap-1 text-[10px] font-bold text-secondary cursor-pointer hover:text-zinc-300 transition-colors">
+              This Quarter <ChevronRight size={10} className="rotate-90" />
+            </div>
+          </div>
+          <p className="text-[10px] text-secondary mb-6">Revenue breakdown by category</p>
+
+          <div className="h-48 w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart
+                data={[
+                  { name: 'Jan', value: 30 },
+                  { name: 'Feb', value: 45 },
+                  { name: 'Mar', value: 38 },
+                  { name: 'Apr', value: 55 },
+                ]}
+              >
+                <defs>
+                  <linearGradient id="colorValue" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#ffffff" stopOpacity={0.1} />
+                    <stop offset="95%" stopColor="#ffffff" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#27272a" strokeOpacity={0.5} />
+                <Tooltip
+                  contentStyle={{
+                    backgroundColor: '#09090b',
+                    border: '1px solid #27272a',
+                    borderRadius: '12px',
+                    fontSize: '10px',
+                    color: '#fff',
+                    boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)',
+                  }}
+                  itemStyle={{ color: '#fff' }}
+                />
+                <Area type="monotone" dataKey="value" stroke="#ffffff" strokeWidth={2} fillOpacity={1} fill="url(#colorValue)" />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+
+          <div className="flex justify-between mt-4">
+            <div className="flex flex-col">
+              <span className="text-[10px] font-bold text-secondary uppercase tracking-widest">Min</span>
+              <span className="text-xs font-bold text-white">$30k</span>
+            </div>
+            <div className="flex flex-col items-end">
+              <span className="text-[10px] font-bold text-secondary uppercase tracking-widest">Max</span>
+              <span className="text-xs font-bold text-white">$60k</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
