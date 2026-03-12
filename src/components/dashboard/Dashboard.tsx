@@ -162,7 +162,7 @@ export function Dashboard() {
               <div className="flex flex-col justify-between space-y-5 sm:space-y-8">
                 <div>
                   <h3 className="text-xl sm:text-2xl md:text-3xl font-bold tracking-tight" style={{ color: 'var(--text)' }}>
-                    Nice to see you, Demo
+                    Nice to see you, 3CORE
                   </h3>
                   <p className="mt-1.5 sm:mt-2 text-xs md:text-sm text-secondary flex items-center gap-2 flex-wrap">
                     Ready to make today productive!

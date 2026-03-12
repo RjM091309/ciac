@@ -131,10 +131,10 @@ export function AppHeader({
                 backgroundColor: 'color-mix(in oklab, var(--control-bg) 55%, transparent)',
               }}
             >
-              DT
+            
             </div>
             <span className="text-xs font-bold hidden sm:inline truncate max-w-[4rem] md:max-w-none">
-              Demo
+              3CORE
             </span>
             <ChevronRight size={12} className="rotate-90 opacity-70 shrink-0 hidden sm:block" />
           </div>
