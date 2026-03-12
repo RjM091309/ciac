@@ -1,9 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { ChevronLeft, ChevronRight, CircleDot, Clock, Cloud, FileText, MoreHorizontal, Plus, Rocket, Target, TrendingUp, User, Users, Zap } from 'lucide-react';
+import { ChevronLeft, ChevronRight, CircleDot, Clock, FileText, MoreHorizontal, Plus, Rocket, Target, TrendingUp, User, Users, Zap } from 'lucide-react';
 import { motion } from 'motion/react';
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip } from 'recharts';
 import { cn } from '../../lib/utils';
-import { SubHeader } from '../SubHeader';
 
 const RadialProgress = ({
   value,
@@ -140,8 +139,6 @@ export function Dashboard() {
 
   return (
     <>
-      <SubHeader />
-
       <div className="grid grid-cols-12 gap-4 sm:gap-4 lg:gap-5">
         {/* Left side: hero + 4 cards (single block) */}
         <div className="col-span-12 lg:col-span-8 flex flex-col gap-4 sm:gap-4">
@@ -162,10 +159,10 @@ export function Dashboard() {
               <div className="flex flex-col justify-between space-y-5 sm:space-y-8">
                 <div>
                   <h3 className="text-xl sm:text-2xl md:text-3xl font-bold tracking-tight" style={{ color: 'var(--text)' }}>
-                    Nice to see you, 3CORE
+                    Lease Application Center
                   </h3>
                   <p className="mt-1.5 sm:mt-2 text-xs md:text-sm text-secondary flex items-center gap-2 flex-wrap">
-                    Ready to make today productive!
+                    Monitor requirement completion and permit status for every proponent.
                     <Rocket className="w-4 h-4 shrink-0" />
                   </p>
                 </div>
@@ -186,26 +183,29 @@ export function Dashboard() {
                 </div>
               </div>
 
-              {/* Right Side: Weather and Date */}
+              {/* Right Side: Application count and date */}
               <div className="flex flex-row md:flex-col items-center md:items-end justify-between md:justify-between gap-4 md:gap-0 text-left md:text-right">
                 <div className="flex items-center gap-3">
-                  <Cloud
-                    className="w-10 h-10 md:w-12 md:h-12 shrink-0"
-                    style={{ color: 'var(--text)' }}
-                  />
-                  <div className="flex flex-col">
+                  <div className="flex flex-col items-start md:items-end">
                     <span
                       className="text-2xl sm:text-3xl md:text-4xl font-bold"
                       style={{ color: 'var(--text)' }}
                     >
-                      22°C
+                      18
+                    </span>
+                    <span className="text-[11px] text-secondary font-medium tracking-tight">
+                      active applications today
                     </span>
                   </div>
+                  <FileText
+                    className="w-10 h-10 md:w-12 md:h-12 shrink-0"
+                    style={{ color: 'var(--text)' }}
+                  />
                 </div>
 
                 <div className="md:mt-4 space-y-0.5 md:space-y-1">
-                  <p className="text-xs sm:text-sm font-medium text-secondary">Overcast</p>
-                  <p className="text-xs font-semibold text-secondary">Freeport</p>
+                  <p className="text-xs sm:text-sm font-medium text-secondary">CIAC Lease Desk</p>
+                  <p className="text-xs font-semibold text-secondary">Application Monitoring</p>
                   <p className="text-[10px] sm:text-xs text-secondary">
                     {currentTime.toLocaleDateString('en-US', {
                       weekday: 'long',
@@ -219,12 +219,12 @@ export function Dashboard() {
             </div>
           </div>
 
-          {/* Metrics row directly under hero */}
+        {/* Metrics row directly under hero */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-4">
-            <MetricCard title="Total Projects" value="24" icon={FileText} trend="up" trendValue="+3" />
-            <MetricCard title="Active Users" value="1,847" icon={Users} trend="up" trendValue="+12%" />
-            <MetricCard title="Task Completion" value="78%" icon={TrendingUp} trend="up" trendValue="+5%" />
-            <MetricCard title="Avg. Response Time" value="32 min" icon={Clock} trend="down" trendValue="0%" />
+          <MetricCard title="Total Applications" value="126" icon={FileText} trend="up" trendValue="+8 this week" />
+          <MetricCard title="Complete Requirements" value="89" icon={Users} trend="up" trendValue="71% cleared" />
+          <MetricCard title="Pending Verification" value="27" icon={TrendingUp} trend="down" trendValue="-4 vs. last week" />
+          <MetricCard title="Permits Near Expiry" value="9" icon={Clock} trend="up" trendValue="next 60 days" />
           </div>
         </div>
 
@@ -237,9 +237,9 @@ export function Dashboard() {
             className="text-base font-bold mb-0.5"
             style={{ color: 'var(--text)' }}
           >
-            Insights
+            Requirements Overview
           </h4>
-          <p className="text-xs text-secondary mb-4 md:mb-6">Performance analytics</p>
+          <p className="text-xs text-secondary mb-4 md:mb-6">Completion rate by document group</p>
 
           <div
             className="flex gap-2 p-1 rounded-xl mb-4 md:mb-6 border"
@@ -293,25 +293,25 @@ export function Dashboard() {
               <div className="w-full min-w-0 md:flex-1 space-y-4 md:space-y-5">
                 {[
                   {
-                    label: 'Task Completion',
-                    value: '85%',
-                    subtext: 'Overall completion rate',
+                    label: 'Proponent & Company',
+                    value: '92%',
+                    subtext: 'LOI, company profile, board resolution, registrations, IDs',
                     icon: CircleDot,
                     color: 'text-blue-400',
                     bgColor: 'bg-blue-400/10',
                   },
                   {
-                    label: 'User Engagement',
+                    label: 'BIR Documents',
                     value: '84%',
-                    subtext: 'Active user participation',
+                    subtext: 'Tax clearance, registration, receipts, POS/CRM permits',
                     icon: User,
                     color: 'text-emerald-400',
                     bgColor: 'bg-emerald-400/10',
                   },
                   {
-                    label: 'Response Time',
+                    label: 'CDC Permits & Licenses',
                     value: '78%',
-                    subtext: 'Average response efficiency',
+                    subtext: 'Environmental, fire safety, occupancy, sanitary, others',
                     icon: Clock,
                     color: 'text-secondary',
                     bgColor: 'bg-zinc-500/10',
@@ -348,7 +348,7 @@ export function Dashboard() {
           >
             Quick Tasks
           </h4>
-          <p className="text-[10px] text-secondary mb-4 sm:mb-6">Manage your daily tasks</p>
+          <p className="text-[10px] text-secondary mb-4 sm:mb-6">Follow-ups for lease requirements</p>
 
           <div
             className="flex gap-2 p-1 rounded-xl mb-4 sm:mb-6 border"
@@ -373,9 +373,9 @@ export function Dashboard() {
 
           <div className="space-y-2 sm:space-y-3 mb-4 sm:mb-6">
             {[
-              { title: 'Review business permit #8291', priority: 'High', time: '2h ago' },
-              { title: 'Update system documentation', priority: 'Medium', time: '5h ago' },
-              { title: 'Meeting with development team', priority: 'Low', time: 'Tomorrow' },
+              { title: 'Call Proponent A for missing LOI', priority: 'High', time: '2h ago' },
+              { title: 'Verify BIR Tax Clearance for Proponent B', priority: 'Medium', time: '5h ago' },
+              { title: 'Confirm Fire Safety Inspection schedule for Warehouse C', priority: 'Low', time: 'Tomorrow' },
             ].map((task) => (
               <div
                 key={task.title}
@@ -497,7 +497,7 @@ export function Dashboard() {
           </div>
         </div>
 
-        {/* Revenue Analytics */}
+        {/* Application Pipeline Analytics */}
         <div
           className="col-span-12 xl:col-span-4 glass-card p-4 sm:p-6 !border-transparent"
           style={{ backgroundColor: 'var(--surface)' }}
@@ -507,22 +507,23 @@ export function Dashboard() {
               className="text-sm font-bold truncate min-w-0"
               style={{ color: 'var(--text)' }}
             >
-              Revenue Analytics
+              Application Pipeline
             </h4>
             <div className="flex items-center gap-1 text-[10px] font-bold text-secondary cursor-pointer hover:text-[var(--text)] transition-colors shrink-0">
               This Quarter <ChevronRight size={10} className="rotate-90" />
             </div>
           </div>
-          <p className="text-[10px] text-secondary mb-4 sm:mb-6">Revenue breakdown by category</p>
+          <p className="text-[10px] text-secondary mb-4 sm:mb-6">Applications by processing stage</p>
 
           <div className="h-40 sm:h-48 w-full min-h-[160px]">
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart
                 data={[
-                  { name: 'Jan', value: 30 },
-                  { name: 'Feb', value: 45 },
-                  { name: 'Mar', value: 38 },
-                  { name: 'Apr', value: 55 },
+                  { name: 'Draft', value: 18 },
+                  { name: 'Submitted', value: 42 },
+                  { name: 'For Evaluation', value: 31 },
+                  { name: 'For Board Approval', value: 21 },
+                  { name: 'Approved', value: 14 },
                 ]}
               >
                 <defs>

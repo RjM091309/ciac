@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { AnimatePresence, motion } from 'motion/react';
 import { AppLayout, AppView } from './layout/AppLayout';
 import { Dashboard } from './components/dashboard/Dashboard';
 import { SubHeader } from './components/SubHeader';
@@ -30,7 +31,28 @@ export default function App() {
   return (
     <>
       <AppLayout view={view} onViewChange={setView} onLogout={() => setUser(defaultUser)}>
-        {view === 'dashboard' ? <Dashboard /> : <SectionLanding view={view} />}
+        {view === 'dashboard' ? (
+          <SubHeader />
+        ) : (
+          <SubHeader
+            title={LANDING_CONFIG[view].title}
+            description={LANDING_CONFIG[view].description}
+            badge={LANDING_CONFIG[view].badge}
+          />
+        )}
+
+        <AnimatePresence mode="wait" initial={false}>
+          <motion.div
+            key={view}
+            initial={{ opacity: 0, x: 24 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: -24 }}
+            transition={{ duration: 0.25, ease: [0.22, 0.8, 0.35, 1] }}
+            className="h-full"
+          >
+            {view === 'dashboard' ? <Dashboard /> : <SectionLanding view={view} />}
+          </motion.div>
+        </AnimatePresence>
       </AppLayout>
     </>
   );
@@ -372,48 +394,8 @@ function SectionLanding({ view }: { view: AppView }) {
 
   return (
     <>
-      <SubHeader />
-
       <div className="space-y-4 sm:space-y-5">
-        <div
-          className="glass-card p-4 sm:p-5 flex flex-col gap-3 sm:gap-4 !border-transparent"
-          style={{ backgroundColor: 'var(--surface)' }}
-        >
-          <div className="flex items-start justify-between gap-3">
-            <div className="flex items-center gap-3">
-              <div
-                className="p-2 rounded-xl border"
-                style={{
-                  backgroundColor: 'var(--control-bg)',
-                  borderColor: 'var(--border-subtle)',
-                }}
-              >
-                <Icon size={18} style={{ color: 'var(--text)' }} />
-              </div>
-              <div>
-                <div className="flex items-center gap-2">
-                  <span
-                    className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-widest"
-                    style={{
-                      backgroundColor: 'var(--control-bg)',
-                      color: 'var(--text-muted)',
-                    }}
-                  >
-                    {config.badge}
-                  </span>
-                </div>
-                <h2
-                  className="mt-1 text-lg sm:text-xl font-bold tracking-tight"
-                  style={{ color: 'var(--text)' }}
-                >
-                  {config.title}
-                </h2>
-                <p className="mt-1 text-xs text-secondary max-w-2xl">{config.description}</p>
-              </div>
-            </div>
-          </div>
-
-          {config.stats.length > 0 && (
+        {config.stats.length > 0 && (
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4 mt-3">
               {config.stats.map((stat) => (
                 <div
@@ -438,7 +420,6 @@ function SectionLanding({ view }: { view: AppView }) {
               ))}
             </div>
           )}
-        </div>
 
         <div
           className="glass-card p-4 sm:p-5 !border-transparent"

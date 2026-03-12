@@ -2,7 +2,13 @@ import React, { useState } from 'react';
 import { ChevronRight, Home, ShieldCheck, UserCog, User } from 'lucide-react';
 import { cn } from '../lib/utils';
 
-export function SubHeader() {
+type SubHeaderProps = {
+  title?: string;
+  description?: string;
+  badge?: string;
+};
+
+export function SubHeader({ title, description, badge }: SubHeaderProps) {
   const roles = [
     { id: 'admin', label: 'Administrator', icon: ShieldCheck },
     { id: 'account-officer', label: 'Account Officer', icon: UserCog },
@@ -19,7 +25,9 @@ export function SubHeader() {
         <div className="flex items-center gap-2 text-xs font-medium text-secondary min-w-0">
           <Home size={14} className="text-secondary shrink-0" />
           <ChevronRight size={12} className="text-secondary/70 shrink-0" />
-          <span className="truncate text-[var(--text)]">Dashboard</span>
+          <span className="truncate text-[var(--text)]">
+            {badge ?? 'Dashboard'}
+          </span>
         </div>
 
         <div className="w-full sm:w-auto min-w-0 max-w-full flex justify-center sm:justify-start overflow-hidden">
@@ -78,8 +86,12 @@ export function SubHeader() {
       {/* Page title */}
       <div className="flex justify-between items-center mb-4 sm:mb-5">
         <div className="space-y-0.5 min-w-0">
-          <h2 className="text-xl sm:text-2xl font-semibold tracking-tight text-[var(--text)]">Overview</h2>
-          <p className="text-xs text-secondary">Monitor key metrics and manage your platform</p>
+          <h2 className="text-xl sm:text-2xl font-semibold tracking-tight text-[var(--text)]">
+            {title ?? 'Overview'}
+          </h2>
+          <p className="text-xs text-secondary">
+            {description ?? 'Monitor key metrics and manage your platform'}
+          </p>
         </div>
       </div>
     </>

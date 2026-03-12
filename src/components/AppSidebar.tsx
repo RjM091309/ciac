@@ -118,10 +118,15 @@ const SidebarSubItem = ({
       onClick={onClick}
       className={cn(
         'group w-full flex items-center gap-2 pl-9 pr-3 py-1.5 rounded-lg text-[12px] hover:text-[var(--text)] transition-colors',
-        active ? 'text-[var(--text)] bg-[var(--selected-bg)]' : 'text-[var(--text-muted)]',
+        active ? 'text-[var(--text)]' : 'text-[var(--text-muted)]',
       )}
     >
-      <span className="w-1.5 h-1.5 rounded-full bg-[var(--text-muted)] group-hover:bg-[var(--text)] transition-colors" />
+      <span
+        className={cn(
+          'w-1.5 h-1.5 rounded-full transition-colors',
+          active ? 'bg-[var(--text)]' : 'bg-[var(--text-muted)] group-hover:bg-[var(--text)]',
+        )}
+      />
       <span className="flex-1 text-left leading-snug whitespace-nowrap overflow-hidden text-ellipsis">
         {label}
       </span>
@@ -213,7 +218,7 @@ export function AppSidebar({
             <div className="flex flex-col gap-1.5">
               <SidebarDropdown
                 icon={Briefcase}
-                label="Applications Management"
+                label="Management"
                 collapsed={collapsed}
                 isOpen={openDropdownId === 'applications'}
                 onToggle={() => toggleDropdown('applications')}
@@ -241,7 +246,7 @@ export function AppSidebar({
             <div className="flex flex-col gap-1.5">
               <SidebarDropdown
                 icon={FileCheck}
-                label="Document Verification"
+                label="Doc Verification"
                 collapsed={collapsed}
                 isOpen={openDropdownId === 'verification'}
                 onToggle={() => toggleDropdown('verification')}
