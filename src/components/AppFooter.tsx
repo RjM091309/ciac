@@ -4,7 +4,7 @@ export function AppFooter() {
   const year = new Date().getFullYear();
 
   return (
-    <footer className="shrink-0 pb-6 mt-6 text-[11px] text-secondary">
+    <footer className="shrink-0 mt-6 text-[11px] text-secondary">
       <div
         className="w-full rounded-2xl px-5 py-3 backdrop-blur-xl"
         style={{
