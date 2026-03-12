@@ -4,7 +4,24 @@ import { AppHeader } from '../components/AppHeader';
 import { AppSidebar } from '../components/AppSidebar';
 import { cn } from '../lib/utils';
 
-export type AppView = 'dashboard' | 'applications' | 'profile' | 'businesses';
+export type AppView =
+  | 'dashboard'
+  | 'applications:new'
+  | 'applications:renewals'
+  | 'applications:projects'
+  | 'verification:pending'
+  | 'verification:audit'
+  | 'directory:companies'
+  | 'directory:officers'
+  | 'directory:site-plans'
+  | 'compliance:permits'
+  | 'compliance:bir'
+  | 'compliance:expiry'
+  | 'operations:flowcharts'
+  | 'operations:brochures'
+  | 'operations:gad'
+  | 'settings:users'
+  | 'settings:checklist';
 
 type Theme = 'light' | 'dark';
 

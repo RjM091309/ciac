@@ -1,18 +1,19 @@
 import React, { useState } from 'react';
 import {
   Briefcase,
+  CalendarClock,
   ChevronRight,
   FileCheck,
   Globe,
   LayoutDashboard,
   LogOut,
   Settings,
+  ShieldCheck,
   Sparkles,
   Users,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
-
-type View = 'dashboard' | 'applications' | 'profile' | 'businesses';
+import type { AppView } from '../layout/AppLayout';
 
 const SidebarGroup = ({
   title,
@@ -106,14 +107,19 @@ const SidebarItem = ({
 const SidebarSubItem = ({
   label,
   onClick,
+  active,
 }: {
   label: string;
   onClick?: () => void;
+  active?: boolean;
 }) => {
   return (
     <button
       onClick={onClick}
-      className="group w-full flex items-center gap-2 pl-9 pr-3 py-1.5 rounded-lg text-[12px] text-[var(--text-muted)] hover:text-[var(--text)] transition-colors"
+      className={cn(
+        'group w-full flex items-center gap-2 pl-9 pr-3 py-1.5 rounded-lg text-[12px] hover:text-[var(--text)] transition-colors',
+        active ? 'text-[var(--text)] bg-[var(--selected-bg)]' : 'text-[var(--text-muted)]',
+      )}
     >
       <span className="w-1.5 h-1.5 rounded-full bg-[var(--text-muted)] group-hover:bg-[var(--text)] transition-colors" />
       <span className="flex-1 text-left leading-snug whitespace-nowrap overflow-hidden text-ellipsis">
@@ -160,8 +166,8 @@ export function AppSidebar({
   collapsed,
   variant = 'default',
 }: {
-  view: View;
-  onViewChange: (view: View) => void;
+  view: AppView;
+  onViewChange: (view: AppView) => void;
   onLogout: () => void;
   collapsed?: boolean;
   variant?: 'default' | 'drawer';
@@ -191,117 +197,208 @@ export function AppSidebar({
         }}
       >
         <nav className={cn('flex-1 px-3 py-5 flex flex-col items-stretch', isDrawer && 'min-h-0 overflow-y-auto')}>
-          <SidebarGroup title="Application" collapsed={collapsed}>
+          <SidebarGroup title="Overview" collapsed={collapsed}>
             <div className="flex flex-col gap-1.5">
               <SidebarItem
                 icon={LayoutDashboard}
-                label="Application Overview"
+                label="Dashboard"
                 active={view === 'dashboard'}
                 onClick={() => onViewChange('dashboard')}
                 collapsed={collapsed}
               />
-              <SidebarDropdown
-                icon={Users}
-                label="Proponent"
-                collapsed={collapsed}
-                isOpen={openDropdownId === 'proponent'}
-                onToggle={() => toggleDropdown('proponent')}
-              >
-                <SidebarSubItem label="Letter of Intent (LOI)" />
-                <SidebarSubItem label="Company Profile" />
-                <SidebarSubItem label="Board Resolution" />
-                <SidebarSubItem label="Business Registration" />
-                <SidebarSubItem label="Resume & IDs" />
-              </SidebarDropdown>
-              <SidebarDropdown
-                icon={FileCheck}
-                label="Financial Documents"
-                collapsed={collapsed}
-                isOpen={openDropdownId === 'financial'}
-                onToggle={() => toggleDropdown('financial')}
-              >
-                <SidebarSubItem label="AFS" />
-                <SidebarSubItem label="Financial Capability" />
-                <SidebarSubItem label="Bank Certification" />
-              </SidebarDropdown>
+            </div>
+          </SidebarGroup>
+
+          <SidebarGroup title="Applications" collapsed={collapsed}>
+            <div className="flex flex-col gap-1.5">
               <SidebarDropdown
                 icon={Briefcase}
-                label="Property"
+                label="Applications Management"
                 collapsed={collapsed}
-                isOpen={openDropdownId === 'property'}
-                onToggle={() => toggleDropdown('property')}
+                isOpen={openDropdownId === 'applications'}
+                onToggle={() => toggleDropdown('applications')}
               >
-                <SidebarSubItem label="Project Evaluation" />
-                <SidebarSubItem label="Site Dev" />
-                <SidebarSubItem label="Production Process" />
+                <SidebarSubItem
+                  label="New Applications"
+                  active={view === 'applications:new'}
+                  onClick={() => onViewChange('applications:new')}
+                />
+                <SidebarSubItem
+                  label="Renewal Tracking"
+                  active={view === 'applications:renewals'}
+                  onClick={() => onViewChange('applications:renewals')}
+                />
+                <SidebarSubItem
+                  label="Project Evaluations"
+                  active={view === 'applications:projects'}
+                  onClick={() => onViewChange('applications:projects')}
+                />
               </SidebarDropdown>
             </div>
           </SidebarGroup>
 
-          <SidebarGroup title="Compliance" collapsed={collapsed}>
+          <SidebarGroup title="Verification" collapsed={collapsed}>
             <div className="flex flex-col gap-1.5">
               <SidebarDropdown
                 icon={FileCheck}
-                label="BIR Documents"
+                label="Document Verification"
                 collapsed={collapsed}
-                isOpen={openDropdownId === 'bir'}
-                onToggle={() => toggleDropdown('bir')}
+                isOpen={openDropdownId === 'verification'}
+                onToggle={() => toggleDropdown('verification')}
               >
-                <SidebarSubItem label="BIR Tax Clearance" />
-                <SidebarSubItem label="Certificate" />
-                <SidebarSubItem label="Receipts / Invoices / ATP" />
-                <SidebarSubItem label="POS / CRM Permit" />
-              </SidebarDropdown>
-              <SidebarDropdown
-                icon={Settings}
-                label="CDC Permits"
-                collapsed={collapsed}
-                isOpen={openDropdownId === 'cdc'}
-                onToggle={() => toggleDropdown('cdc')}
-              >
-                <SidebarSubItem label="Environmental Compliance" />
-                <SidebarSubItem label="Fire Safety Inspection" />
-                <SidebarSubItem label="Annual Inspection" />
-                <SidebarSubItem label="Sanitary Permit" />
-                <SidebarSubItem label="Authority to Operate" />
-                <SidebarSubItem label="Other Licenses" />
-              </SidebarDropdown>
-              <SidebarDropdown
-                icon={Globe}
-                label="Supporting Docs"
-                collapsed={collapsed}
-                isOpen={openDropdownId === 'supporting'}
-                onToggle={() => toggleDropdown('supporting')}
-              >
-                <SidebarSubItem label="Brochures" />
-                <SidebarSubItem label="Gender & Development" />
+                <SidebarSubItem
+                  label="Pending Review"
+                  active={view === 'verification:pending'}
+                  onClick={() => onViewChange('verification:pending')}
+                />
+                <SidebarSubItem
+                  label="Audit Trail"
+                  active={view === 'verification:audit'}
+                  onClick={() => onViewChange('verification:audit')}
+                />
               </SidebarDropdown>
             </div>
           </SidebarGroup>
 
-          <SidebarGroup title="Access Control" collapsed={collapsed}>
+          <SidebarGroup title="Directory" collapsed={collapsed}>
             <div className="flex flex-col gap-1.5">
               <SidebarDropdown
                 icon={Users}
-                label="User Management"
+                label="Proponent Directory"
                 collapsed={collapsed}
-                isOpen={openDropdownId === 'user-management'}
-                onToggle={() => toggleDropdown('user-management')}
+                isOpen={openDropdownId === 'directory'}
+                onToggle={() => toggleDropdown('directory')}
               >
-                <SidebarSubItem label="All Users" />
-                <SidebarSubItem label="Pending Approvals" />
-                <SidebarSubItem label="Deactivated Users" />
+                <SidebarSubItem
+                  label="Company Profiles"
+                  active={view === 'directory:companies'}
+                  onClick={() => onViewChange('directory:companies')}
+                />
+                <SidebarSubItem
+                  label="Key Officers & Stakeholders"
+                  active={view === 'directory:officers'}
+                  onClick={() => onViewChange('directory:officers')}
+                />
+                <SidebarSubItem
+                  label="Site Development Plans"
+                  active={view === 'directory:site-plans'}
+                  onClick={() => onViewChange('directory:site-plans')}
+                />
+              </SidebarDropdown>
+            </div>
+          </SidebarGroup>
+
+          <SidebarGroup title="Compliance & Permits" collapsed={collapsed}>
+            <div className="flex flex-col gap-1.5">
+              <SidebarDropdown
+                icon={ShieldCheck}
+                label="CDC/CIAC Permits"
+                collapsed={collapsed}
+                isOpen={openDropdownId === 'permits'}
+                onToggle={() => toggleDropdown('permits')}
+              >
+                <SidebarSubItem
+                  label="Environmental, Fire, Occupancy, Sanitary"
+                  active={view === 'compliance:permits'}
+                  onClick={() => onViewChange('compliance:permits')}
+                />
+                <SidebarSubItem
+                  label="Authority to Operate"
+                  active={view === 'compliance:permits'}
+                  onClick={() => onViewChange('compliance:permits')}
+                />
               </SidebarDropdown>
               <SidebarDropdown
-                icon={Sparkles}
-                label="Roles & Access"
+                icon={FileCheck}
+                label="BIR & Tax Records"
                 collapsed={collapsed}
-                isOpen={openDropdownId === 'roles-access'}
-                onToggle={() => toggleDropdown('roles-access')}
+                isOpen={openDropdownId === 'bir-tax'}
+                onToggle={() => toggleDropdown('bir-tax')}
               >
-                <SidebarSubItem label="Role Definitions" />
-                <SidebarSubItem label="Permissions Matrix" />
-                <SidebarSubItem label="Audit Logs" />
+                <SidebarSubItem
+                  label="BIR Tax Clearance"
+                  active={view === 'compliance:bir'}
+                  onClick={() => onViewChange('compliance:bir')}
+                />
+                <SidebarSubItem
+                  label="Certificate of Registration"
+                  active={view === 'compliance:bir'}
+                  onClick={() => onViewChange('compliance:bir')}
+                />
+                <SidebarSubItem
+                  label="Receipts / Invoices / ATP"
+                  active={view === 'compliance:bir'}
+                  onClick={() => onViewChange('compliance:bir')}
+                />
+                <SidebarSubItem
+                  label="POS / CRM Permit"
+                  active={view === 'compliance:bir'}
+                  onClick={() => onViewChange('compliance:bir')}
+                />
+              </SidebarDropdown>
+              <SidebarDropdown
+                icon={CalendarClock}
+                label="Expiry Calendar"
+                collapsed={collapsed}
+                isOpen={openDropdownId === 'expiry-calendar'}
+                onToggle={() => toggleDropdown('expiry-calendar')}
+              >
+                <SidebarSubItem
+                  label="Expiring Permits"
+                  active={view === 'compliance:expiry'}
+                  onClick={() => onViewChange('compliance:expiry')}
+                />
+              </SidebarDropdown>
+            </div>
+          </SidebarGroup>
+
+          <SidebarGroup title="Operations" collapsed={collapsed}>
+            <div className="flex flex-col gap-1.5">
+              <SidebarDropdown
+                icon={Globe}
+                label="Operations & Assets"
+                collapsed={collapsed}
+                isOpen={openDropdownId === 'operations'}
+                onToggle={() => toggleDropdown('operations')}
+              >
+                <SidebarSubItem
+                  label="Production Flowcharts"
+                  active={view === 'operations:flowcharts'}
+                  onClick={() => onViewChange('operations:flowcharts')}
+                />
+                <SidebarSubItem
+                  label="Brochures & Marketing"
+                  active={view === 'operations:brochures'}
+                  onClick={() => onViewChange('operations:brochures')}
+                />
+                <SidebarSubItem
+                  label="GAD Programs"
+                  active={view === 'operations:gad'}
+                  onClick={() => onViewChange('operations:gad')}
+                />
+              </SidebarDropdown>
+            </div>
+          </SidebarGroup>
+
+          <SidebarGroup title="System" collapsed={collapsed}>
+            <div className="flex flex-col gap-1.5">
+              <SidebarDropdown
+                icon={Settings}
+                label="System Settings"
+                collapsed={collapsed}
+                isOpen={openDropdownId === 'system-settings'}
+                onToggle={() => toggleDropdown('system-settings')}
+              >
+                <SidebarSubItem
+                  label="User Management"
+                  active={view === 'settings:users'}
+                  onClick={() => onViewChange('settings:users')}
+                />
+                <SidebarSubItem
+                  label="Master Checklist"
+                  active={view === 'settings:checklist'}
+                  onClick={() => onViewChange('settings:checklist')}
+                />
               </SidebarDropdown>
             </div>
           </SidebarGroup>
