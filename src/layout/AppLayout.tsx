@@ -91,8 +91,10 @@ export function AppLayout({
         {isMobile ? (
           <>
             <div
-              className="fixed left-0 top-14 bottom-0 z-50 w-64 max-w-[85vw] pt-1 pb-6 flex flex-col"
+              className="fixed left-0 bottom-0 z-50 w-64 max-w-[85vw] pt-1 pb-6 flex flex-col"
               style={{
+                top: 'calc(3.5rem + env(safe-area-inset-top, 0px))',
+                paddingBottom: 'max(1.5rem, env(safe-area-inset-bottom, 0px))',
                 transform: sidebarCollapsed ? 'translateX(-100%)' : 'translateX(0)',
                 transition: 'transform 0.35s cubic-bezier(0.32, 0.72, 0, 1)',
                 willChange: 'transform',
@@ -120,7 +122,7 @@ export function AppLayout({
         )}
 
         <div className="flex-1 flex flex-col overflow-hidden min-w-0">
-          <main className="flex-1 overflow-y-auto pl-2 pr-3 sm:pl-3 sm:pr-4 pt-6 sm:pt-8 custom-scrollbar">
+          <main className="flex-1 overflow-y-auto overflow-x-hidden px-3 sm:px-4 pt-6 sm:pt-8 pb-safe custom-scrollbar">
             <div className="min-h-full flex flex-col">
               <div className="flex-1">{children}</div>
               <AppFooter />

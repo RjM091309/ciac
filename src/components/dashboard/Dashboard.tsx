@@ -63,12 +63,13 @@ const MetricCard = ({
   trendValue?: string;
 }) => (
   <div
-    className="glass-card p-3 sm:p-3.5 flex flex-col justify-between min-h-[100px] sm:h-28 transition-colors group !border-transparent"
+    className="glass-card p-3 sm:p-3.5 flex flex-col min-h-[100px] sm:h-31 transition-colors group !border-transparent"
     style={{
       backgroundColor: 'var(--surface)',
     }}
   >
-    <div className="flex justify-between items-center gap-2 min-w-0">
+    {/* Fixed height for label row so value row aligns across all cards */}
+    <div className="flex justify-between items-center gap-2 min-w-0 h-9 shrink-0">
       <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
         <div
           className="p-1.5 sm:p-2 rounded-lg sm:rounded-xl border transition-colors shrink-0"
@@ -86,7 +87,9 @@ const MetricCard = ({
         <span className="text-xs font-medium text-secondary truncate">{title}</span>
       </div>
       <button
-        className="p-1 rounded-full transition-colors"
+        type="button"
+        aria-label="More options"
+        className="p-2 -m-1 rounded-full transition-colors shrink-0 touch-target min-h-[44px] min-w-[44px] sm:min-h-0 sm:min-w-0 sm:p-1 flex items-center justify-center"
         style={{
           color: 'var(--text-muted)',
         }}
@@ -95,7 +98,7 @@ const MetricCard = ({
       </button>
     </div>
 
-    <div className="flex items-end justify-between pt-2 sm:pt-2.5 gap-2">
+    <div className="flex items-end justify-between pt-1 sm:pt-1.5 gap-2 flex-1 min-h-0">
       <p className="text-lg sm:text-xl font-bold tracking-tight leading-none truncate min-w-0" style={{ color: 'var(--text)' }}>
         {value}
       </p>
@@ -139,12 +142,12 @@ export function Dashboard() {
     <>
       <SubHeader />
 
-      <div className="grid grid-cols-12 gap-3 sm:gap-4 lg:gap-5">
+      <div className="grid grid-cols-12 gap-4 sm:gap-4 lg:gap-5">
         {/* Left side: hero + 4 cards (single block) */}
-        <div className="col-span-12 lg:col-span-8 flex flex-col gap-3 sm:gap-4">
+        <div className="col-span-12 lg:col-span-8 flex flex-col gap-4 sm:gap-4">
           {/* Welcome + Weather Card (from provided design) */}
           <div
-            className="relative overflow-hidden rounded-2xl sm:rounded-3xl px-4 py-5 sm:px-6 sm:py-6 !border-transparent"
+            className="relative overflow-hidden rounded-2xl px-4 py-5 sm:px-6 sm:py-6 !border-transparent"
             style={{
               backgroundColor: 'var(--surface)',
               boxShadow:
@@ -217,7 +220,7 @@ export function Dashboard() {
           </div>
 
           {/* Metrics row directly under hero */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-4">
             <MetricCard title="Total Projects" value="24" icon={FileText} trend="up" trendValue="+3" />
             <MetricCard title="Active Users" value="1,847" icon={Users} trend="up" trendValue="+12%" />
             <MetricCard title="Task Completion" value="78%" icon={TrendingUp} trend="up" trendValue="+5%" />

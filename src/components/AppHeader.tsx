@@ -11,9 +11,9 @@ export function AppHeader({
   onToggleTheme: () => void;
 }) {
   return (
-    <header className="shrink-0 px-2 sm:px-4 pt-2 sm:pt-3 mb-2">
+    <header className="shrink-0 px-2 sm:px-4 pt-2 sm:pt-3 mb-2 safe-top">
       <div
-        className="min-h-12 sm:min-h-14 rounded-xl sm:rounded-2xl backdrop-blur-xl px-3 sm:px-4 md:px-5 flex items-center justify-between gap-2 sm:gap-3 flex-nowrap"
+        className="min-h-12 sm:min-h-14 rounded-2xl backdrop-blur-xl px-3 sm:px-4 md:px-5 flex items-center justify-between gap-2 sm:gap-3 flex-nowrap"
         style={{
           backgroundColor: 'color-mix(in oklab, var(--surface) 65%, transparent)',
           boxShadow:

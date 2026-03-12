@@ -197,6 +197,33 @@
   @apply rounded-xl focus:outline-none focus:ring-1 focus:ring-zinc-700 transition-all;
 }
 
+/* --- Premium mobile/tablet --- */
+@supports (padding: env(safe-area-inset-top)) {
+  .safe-top { padding-top: env(safe-area-inset-top); }
+  .safe-bottom { padding-bottom: env(safe-area-inset-bottom); }
+  .safe-left { padding-left: env(safe-area-inset-left); }
+  .safe-right { padding-right: env(safe-area-inset-right); }
+  .pb-safe { padding-bottom: max(1.5rem, env(safe-area-inset-bottom)); }
+}
+@supports not (padding: env(safe-area-inset-top)) {
+  .pb-safe { padding-bottom: 1.5rem; }
+}
+
+/* Minimum touch target (44px) for mobile/tablet */
+@media (pointer: coarse) {
+  .touch-target { min-height: 44px; min-width: 44px; }
+}
+
+/* Smooth, contained scroll for main content */
+.overflow-y-auto {
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: contain;
+}
+
+.custom-scrollbar {
+  scrollbar-gutter: stable;
+}
+
 .custom-scrollbar::-webkit-scrollbar {
   width: 6px;
 }
@@ -212,6 +239,15 @@
 
 .custom-scrollbar::-webkit-scrollbar-thumb:hover {
   background: #3f3f46;
+}
+
+/* Hide scrollbar for role pills / horizontal scroll on mobile */
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
 }
 
 .shimmer-badge {
