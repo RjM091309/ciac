@@ -57,9 +57,8 @@ export function AppLayout({
     if (typeof window === 'undefined') return 'dark';
     const stored = window.localStorage.getItem('theme');
     if (stored === 'light' || stored === 'dark') return stored;
-    return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
-      ? 'dark'
-      : 'light';
+    // Default to dark mode on first visit regardless of system preference
+    return 'dark';
   });
 
   useEffect(() => {
