@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useState } from 'react';
 import { AppFooter } from '../components/AppFooter';
 import { AppHeader } from '../components/AppHeader';
 import { AppSidebar } from '../components/AppSidebar';
@@ -62,7 +62,7 @@ export function AppLayout({
     };
   }, []);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (typeof document === 'undefined') return;
     const root = document.documentElement;
     if (theme === 'dark') {
