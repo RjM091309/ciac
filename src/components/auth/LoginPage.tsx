@@ -7,6 +7,7 @@ type LoginResult =
   | { ok: false; message: string };
 
 type LoginTab = 'password' | 'otp';
+type ThemeMode = 'light' | 'dark';
 
 function normalizeBaseUrl(url: string) {
   return String(url || '').replace(/\/+$/, '');
@@ -46,7 +47,12 @@ export function LoginPage(props: { backendUrl: string; onLoggedIn: (user: { id: 
   const [otpTarget, setOtpTarget] = useState('');
   const [otp, setOtp] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [isDarkMode, setIsDarkMode] = useState(true);
+  const [theme, setTheme] = useState<ThemeMode>(() => {
+    if (typeof window === 'undefined') return 'dark';
+    const stored = window.localStorage.getItem('theme');
+    if (stored === 'light' || stored === 'dark') return stored;
+    return 'dark';
+  });
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState<{ type: 'muted' | 'error' | 'success'; text: string }>({
     type: 'muted',
@@ -54,9 +60,10 @@ export function LoginPage(props: { backendUrl: string; onLoggedIn: (user: { id: 
   });
 
   useEffect(() => {
-    if (isDarkMode) document.documentElement.classList.add('dark');
+    if (theme === 'dark') document.documentElement.classList.add('dark');
     else document.documentElement.classList.remove('dark');
-  }, [isDarkMode]);
+    window.localStorage.setItem('theme', theme);
+  }, [theme]);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -93,17 +100,32 @@ export function LoginPage(props: { backendUrl: string; onLoggedIn: (user: { id: 
         : 'var(--text-secondary)';
 
   return (
-    <div className="min-h-screen flex flex-col lg:flex-row bg-background text-foreground overflow-hidden">
+    <div
+      className="min-h-screen flex flex-col lg:flex-row overflow-hidden"
+      style={{ backgroundColor: 'var(--background)', color: 'var(--foreground)' }}
+    >
       <button
-        onClick={() => setIsDarkMode((p) => !p)}
-        className="fixed top-6 right-6 p-3 rounded-full control-btn touch-target z-50 backdrop-blur-md bg-surface/50"
-        aria-label="Toggle theme"
+        onClick={() => setTheme((p) => (p === 'dark' ? 'light' : 'dark'))}
+        className="fixed top-6 right-6 p-3 rounded-full control-btn touch-target z-50 backdrop-blur-md"
+        style={{
+          backgroundColor: 'color-mix(in oklab, var(--surface) 78%, transparent)',
+          color: 'var(--text)',
+          border: 'none',
+          boxShadow: 'none',
+        }}
+        aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
         type="button"
       >
-        {isDarkMode ? <Sun size={20} /> : <Moon size={20} />}
+        {theme === 'dark' ? <Sun size={20} /> : <Moon size={20} />}
       </button>
 
-      <div className="hidden lg:flex lg:w-1/2 relative bg-surface items-center justify-center p-12 overflow-hidden border-r border-border">
+      <div
+        className="hidden lg:flex lg:w-1/2 relative items-center justify-center p-12 overflow-hidden border-r"
+        style={{
+          backgroundColor: 'var(--surface)',
+          borderColor: 'var(--border)',
+        }}
+      >
         <div className="absolute top-0 left-0 w-full h-full opacity-30 pointer-events-none">
           <div className="absolute top-[-10%] left-[-10%] w-[60%] h-[60%] rounded-full bg-primary/10 blur-[120px] animate-pulse" />
           <div className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] rounded-full bg-primary/5 blur-[100px]" />
@@ -112,8 +134,14 @@ export function LoginPage(props: { backendUrl: string; onLoggedIn: (user: { id: 
         <div className="relative z-10 max-w-xl">
           <motion.div initial={{ opacity: 0, x: -30 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.8, ease: 'easeOut' }}>
             <div className="flex items-center gap-3 mb-12">
-              <div className="w-10 h-10 rounded-xl bg-primary flex items-center justify-center">
-                <ShieldCheck className="text-background" size={24} />
+              <div
+                className="w-10 h-10 rounded-xl flex items-center justify-center"
+                style={{
+                  backgroundColor: 'var(--nav-active-bg)',
+                  color: 'var(--nav-active-text)',
+                }}
+              >
+                <ShieldCheck size={24} />
               </div>
               <span className="text-xl font-bold tracking-tighter uppercase">CIAC Portal</span>
             </div>
@@ -335,10 +363,21 @@ export function LoginPage(props: { backendUrl: string; onLoggedIn: (user: { id: 
             <button
               type="submit"
               disabled={submitting}
-              className="w-full bg-primary text-background font-bold py-4 rounded-xl hover:scale-[1.02] active:scale-[0.98] transition-all flex items-center justify-center gap-3 disabled:opacity-70 disabled:cursor-not-allowed shadow-xl shadow-primary/10"
+              className="w-full font-bold py-4 rounded-xl hover:scale-[1.02] active:scale-[0.98] transition-all flex items-center justify-center gap-3 disabled:opacity-70 disabled:cursor-not-allowed shadow-xl"
+              style={{
+                backgroundColor: 'var(--nav-active-bg)',
+                color: 'var(--nav-active-text)',
+                boxShadow: '0 10px 30px color-mix(in oklab, var(--nav-active-bg) 30%, transparent)',
+              }}
             >
               {submitting ? (
-                <div className="w-5 h-5 border-2 border-background/30 border-t-background rounded-full animate-spin" />
+                <div
+                  className="w-5 h-5 border-2 rounded-full animate-spin"
+                  style={{
+                    borderColor: 'color-mix(in oklab, var(--nav-active-text) 35%, transparent)',
+                    borderTopColor: 'var(--nav-active-text)',
+                  }}
+                />
               ) : (
                 <>
                   Continue

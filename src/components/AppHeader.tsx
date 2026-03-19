@@ -90,9 +90,9 @@ export function AppHeader({
           </div>
 
           <button
-            aria-label="Theme"
+            aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
             onClick={onToggleTheme}
-            className="h-10 w-10 sm:h-9 sm:w-9 inline-flex items-center justify-center rounded-full text-[var(--text-muted)] hover:text-[var(--text)] transition-colors shrink-0"
+            className="h-10 w-10 sm:h-9 sm:w-9 inline-flex items-center justify-center rounded-full text-[var(--text-muted)] hover:text-[var(--text)] transition-colors shrink-0 cursor-pointer"
             style={{
               backgroundColor: 'color-mix(in oklab, var(--control-bg) 88%, transparent)',
             }}
