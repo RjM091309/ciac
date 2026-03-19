@@ -22,6 +22,7 @@ export type AppView =
   | 'operations:gad'
   | 'settings:users'
   | 'settings:proponents'
+  | 'settings:requirement-categories'
   | 'settings:checklist';
 
 type Theme = 'light' | 'dark';

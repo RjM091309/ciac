@@ -5,7 +5,8 @@ import { Dashboard } from './components/dashboard/Dashboard';
 import { SubHeader } from './components/SubHeader';
 import { FileCheck, FolderTree, ShieldCheck, Users, CalendarClock } from 'lucide-react';
 import { UsersManagement } from './components/settings/UsersManagement';
-import { ProponentsManagement } from './components/settings/ProponentsManagement';
+import { ProponentsManagement } from './components/proponent/ProponentsManagement';
+import { RequirementCategoriesManagement } from './components/FileMaintenance/RequirementCategories';
 import { LoginPage } from './components/auth/LoginPage';
 import { Toaster } from 'sonner';
 
@@ -36,6 +37,7 @@ const VIEW_TO_PATH: Record<AppView, string> = {
   'operations:gad': '/operations/gad',
   'settings:users': '/settings/users',
   'settings:proponents': '/settings/proponents',
+  'settings:requirement-categories': '/settings/requirement-categories',
   'settings:checklist': '/settings/checklist',
 };
 
@@ -193,6 +195,8 @@ export default function App() {
               <UsersManagement />
             ) : view === 'settings:proponents' ? (
               <ProponentsManagement />
+            ) : view === 'settings:requirement-categories' ? (
+              <RequirementCategoriesManagement />
             ) : (
               <SectionLanding view={view} />
             )}
@@ -525,6 +529,25 @@ const LANDING_CONFIG: Record<AppView, LandingConfig> = {
         ['SkyPort Logistics Inc.', '—', 'SEC-2026-0310', 'Active', 'Mar 10, 2026'],
         ['GreenFuel Terminals Corp.', '—', 'SEC-2024-0182', 'Active', 'Mar 09, 2026'],
         ['Metro Agro Trading', '—', 'DTI-24-8931', 'Inactive', 'Feb 12, 2026'],
+      ],
+    },
+  },
+  'settings:requirement-categories': {
+    title: 'Requirement Categories',
+    description: 'Manage requirement categories used in checklists and document grouping.',
+    badge: 'Proponent',
+    icon: FileCheck,
+    stats: [
+      { label: 'Total Categories', value: '—' },
+      { label: 'Active', value: '—' },
+      { label: 'Deactivated', value: '—' },
+    ],
+    table: {
+      columns: ['Category Name', 'Description', 'Status', 'Last Updated'],
+      rows: [
+        ['Legal', 'Incorporation and legal identity docs', 'Active', 'Mar 19, 2026'],
+        ['Financial', 'Tax filings and financial statements', 'Active', 'Mar 18, 2026'],
+        ['Technical', 'Engineering plans and permits', 'Inactive', 'Mar 15, 2026'],
       ],
     },
   },

@@ -238,19 +238,12 @@ export function AppSidebar({
                   active={view === 'applications:projects'}
                   onClick={() => onViewChange('applications:projects')}
                 />
+                <SidebarSubItem
+                  label="Proponent"
+                  active={view === 'settings:proponents'}
+                  onClick={() => onViewChange('settings:proponents')}
+                />
               </SidebarDropdown>
-            </div>
-          </SidebarGroup>
-
-          <SidebarGroup title="Proponent" collapsed={collapsed}>
-            <div className="flex flex-col gap-1.5">
-              <SidebarItem
-                icon={Users}
-                label="Proponent Management"
-                active={view === 'settings:proponents'}
-                onClick={() => onViewChange('settings:proponents')}
-                collapsed={collapsed}
-              />
             </div>
           </SidebarGroup>
 
@@ -272,34 +265,6 @@ export function AppSidebar({
                   label="Audit Trail"
                   active={view === 'verification:audit'}
                   onClick={() => onViewChange('verification:audit')}
-                />
-              </SidebarDropdown>
-            </div>
-          </SidebarGroup>
-
-          <SidebarGroup title="Directory" collapsed={collapsed}>
-            <div className="flex flex-col gap-1.5">
-              <SidebarDropdown
-                icon={Users}
-                label="Proponent Directory"
-                collapsed={collapsed}
-                isOpen={openDropdownId === 'directory'}
-                onToggle={() => toggleDropdown('directory')}
-              >
-                <SidebarSubItem
-                  label="Company Profiles"
-                  active={view === 'directory:companies'}
-                  onClick={() => onViewChange('directory:companies')}
-                />
-                <SidebarSubItem
-                  label="Key Officers & Stakeholders"
-                  active={view === 'directory:officers'}
-                  onClick={() => onViewChange('directory:officers')}
-                />
-                <SidebarSubItem
-                  label="Site Development Plans"
-                  active={view === 'directory:site-plans'}
-                  onClick={() => onViewChange('directory:site-plans')}
                 />
               </SidebarDropdown>
             </div>
@@ -412,14 +377,22 @@ export function AppSidebar({
                   onClick={() => onViewChange('settings:users')}
                 />
                 <SidebarSubItem
-                  label="Proponent"
-                  active={view === 'settings:proponents'}
-                  onClick={() => onViewChange('settings:proponents')}
-                />
-                <SidebarSubItem
                   label="Master Checklist"
                   active={view === 'settings:checklist'}
                   onClick={() => onViewChange('settings:checklist')}
+                />
+              </SidebarDropdown>
+              <SidebarDropdown
+                icon={FileCheck}
+                label="File Maintenance"
+                collapsed={collapsed}
+                isOpen={openDropdownId === 'file-maintenance'}
+                onToggle={() => toggleDropdown('file-maintenance')}
+              >
+                <SidebarSubItem
+                  label="Requirement Categories"
+                  active={view === 'settings:requirement-categories'}
+                  onClick={() => onViewChange('settings:requirement-categories')}
                 />
               </SidebarDropdown>
             </div>
