@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { motion } from 'motion/react';
+import { AnimatePresence, motion } from 'motion/react';
 import { ArrowRight, Eye, EyeOff, Moon, ShieldCheck, Sun } from 'lucide-react';
 
 type LoginResult =
@@ -163,19 +163,26 @@ export function LoginPage(props: { backendUrl: string; onLoggedIn: (user: { id: 
           </div>
 
           <div className="mb-6">
-            <div className="control-btn p-1 rounded-xl flex">
+            <div className="grid grid-cols-2 gap-1">
               <button
                 type="button"
                 onClick={() => {
                   setTab('password');
                   setMessage({ type: 'muted', text: '' });
                 }}
-                className={[
-                  'flex-1 rounded-lg py-2 text-[11px] font-bold uppercase tracking-widest transition-all',
-                  tab === 'password' ? 'bg-primary text-background' : 'text-secondary hover:text-primary',
-                ].join(' ')}
+                className="relative rounded-lg px-3 py-2 text-[14px] font-semibold tracking-tight transition-colors cursor-pointer"
+                style={{
+                  color: tab === 'password' ? 'var(--text)' : 'var(--text-secondary)',
+                }}
               >
-                Password
+                Password Login
+                <span
+                  className="pointer-events-none absolute left-2 right-2 -bottom-[1px] h-[2px] rounded-full transition-opacity"
+                  style={{
+                    opacity: tab === 'password' ? 1 : 0,
+                    backgroundColor: 'var(--text)',
+                  }}
+                />
               </button>
               <button
                 type="button"
@@ -186,117 +193,144 @@ export function LoginPage(props: { backendUrl: string; onLoggedIn: (user: { id: 
                   setUsername('');
                   setMessage({ type: 'muted', text: '' });
                 }}
-                className={[
-                  'flex-1 rounded-lg py-2 text-[11px] font-bold uppercase tracking-widest transition-all',
-                  tab === 'otp' ? 'bg-primary text-background' : 'text-secondary hover:text-primary',
-                ].join(' ')}
+                className="relative rounded-lg px-3 py-2 text-[14px] font-semibold tracking-tight transition-colors cursor-pointer"
+                style={{
+                  color: tab === 'otp' ? 'var(--text)' : 'var(--text-secondary)',
+                }}
               >
-                OTP
+                Verification Code Login
+                <span
+                  className="pointer-events-none absolute left-2 right-2 -bottom-[1px] h-[2px] rounded-full transition-opacity"
+                  style={{
+                    opacity: tab === 'otp' ? 1 : 0,
+                    backgroundColor: 'var(--text)',
+                  }}
+                />
               </button>
             </div>
           </div>
 
           <form onSubmit={onSubmit} className="space-y-6" autoComplete="off">
-            {tab === 'password' ? (
-              <div className="space-y-2">
-                <label className="text-xs font-bold uppercase tracking-widest text-secondary ml-1" htmlFor="username">
-                  Username
-                </label>
-                <input
-                  id="username"
-                  type="text"
-                  placeholder="your.username"
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                  className="input-field w-full px-5 py-4 text-sm focus:border-primary transition-all duration-300"
-                  required
-                />
-              </div>
-            ) : (
-              <div className="space-y-2">
-                <label className="text-xs font-bold uppercase tracking-widest text-secondary ml-1" htmlFor="otp-target">
-                  Email or Mobile
-                </label>
-                <input
-                  id="otp-target"
-                  type="text"
-                  placeholder="name@ciac.gov.ph or +63..."
-                  value={otpTarget}
-                  onChange={(e) => setOtpTarget(e.target.value)}
-                  className="input-field w-full px-5 py-4 text-sm focus:border-primary transition-all duration-300"
-                  required
-                />
-              </div>
-            )}
+            <AnimatePresence mode="wait">
+              {tab === 'password' ? (
+                <motion.div
+                  key="tab-password"
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                  transition={{ duration: 0.18, ease: 'easeOut' }}
+                  className="space-y-2"
+                >
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between ml-1">
+                      <label className="text-xs font-bold uppercase tracking-widest text-secondary" htmlFor="username">
+                        Username
+                      </label>
+                    </div>
+                    <input
+                      id="username"
+                      type="text"
+                      placeholder="your.username"
+                      value={username}
+                      onChange={(e) => setUsername(e.target.value)}
+                      className="input-field w-full px-5 py-4 text-sm focus:border-primary transition-all duration-300"
+                      required
+                    />
+                  </div>
 
-            {tab === 'password' && (
-              <div className="space-y-2">
-                <div className="flex items-center justify-between ml-1">
-                  <label className="text-xs font-bold uppercase tracking-widest text-secondary" htmlFor="password">
-                    Password
-                  </label>
-                  <button
-                    type="button"
-                    className="text-xs font-medium text-secondary hover:text-primary transition-colors"
-                    onClick={() => setMessage({ type: 'muted', text: 'Please contact the administrator.' })}
-                  >
-                    Forgot?
-                  </button>
-                </div>
-                <div className="relative">
-                  <input
-                    id="password"
-                    type={showPassword ? 'text' : 'password'}
-                    placeholder="••••••••"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    className="input-field w-full px-5 py-4 pr-14 text-sm focus:border-primary transition-all duration-300"
-                    required
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword((p) => !p)}
-                    className="absolute right-4 top-1/2 -translate-y-1/2 text-secondary hover:text-primary transition-colors p-2"
-                    aria-label={showPassword ? 'Hide password' : 'Show password'}
-                  >
-                    {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
-                  </button>
-                </div>
-              </div>
-            )}
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between ml-1">
+                      <label className="text-xs font-bold uppercase tracking-widest text-secondary" htmlFor="password">
+                        Password
+                      </label>
+                      <button
+                        type="button"
+                        className="text-xs font-medium text-secondary hover:text-primary transition-colors cursor-pointer"
+                        onClick={() => setMessage({ type: 'muted', text: 'Please contact the administrator.' })}
+                      >
+                        Forgot?
+                      </button>
+                    </div>
+                    <div className="relative">
+                      <input
+                        id="password"
+                        type={showPassword ? 'text' : 'password'}
+                        placeholder="••••••••"
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        className="input-field w-full px-5 py-4 pr-14 text-sm focus:border-primary transition-all duration-300"
+                        required
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword((p) => !p)}
+                        className="absolute right-4 top-1/2 -translate-y-1/2 text-secondary hover:text-primary transition-colors p-2 cursor-pointer"
+                        aria-label={showPassword ? 'Hide password' : 'Show password'}
+                      >
+                        {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                      </button>
+                    </div>
+                  </div>
+                </motion.div>
+              ) : (
+                <motion.div
+                  key="tab-otp"
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                  transition={{ duration: 0.18, ease: 'easeOut' }}
+                  className="space-y-2"
+                >
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between ml-1">
+                      <label className="text-xs font-bold uppercase tracking-widest text-secondary" htmlFor="otp-target">
+                        Email or Mobile
+                      </label>
+                    </div>
+                    <input
+                      id="otp-target"
+                      type="text"
+                      placeholder="name@ciac.gov.ph or +63..."
+                      value={otpTarget}
+                      onChange={(e) => setOtpTarget(e.target.value)}
+                      className="input-field w-full px-5 py-4 text-sm focus:border-primary transition-all duration-300"
+                      required
+                    />
+                  </div>
 
-            {tab === 'otp' ? (
-              <div className="space-y-2">
-                <div className="flex items-center justify-between ml-1">
-                  <label className="text-xs font-bold uppercase tracking-widest text-secondary" htmlFor="otp">
-                    One-time password
-                  </label>
-                  <button
-                    type="button"
-                    className="text-xs font-medium text-secondary hover:text-primary transition-colors"
-                    onClick={() => {
-                      if (!otpTarget.trim()) {
-                        setMessage({ type: 'error', text: 'Enter email or mobile first.' });
-                        return;
-                      }
-                      setMessage({ type: 'muted', text: 'OTP request endpoint not implemented yet.' });
-                    }}
-                  >
-                    Send code
-                  </button>
-                </div>
-                <input
-                  id="otp"
-                  inputMode="numeric"
-                  autoComplete="one-time-code"
-                  placeholder="123456"
-                  value={otp}
-                  onChange={(e) => setOtp(e.target.value)}
-                  className="input-field w-full px-5 py-4 text-sm focus:border-primary transition-all duration-300"
-                  required
-                />
-              </div>
-            ) : null}
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between ml-1">
+                      <label className="text-xs font-bold uppercase tracking-widest text-secondary" htmlFor="otp">
+                        One-time password
+                      </label>
+                      <button
+                        type="button"
+                        className="text-xs font-medium text-secondary hover:text-primary transition-colors cursor-pointer"
+                        onClick={() => {
+                          if (!otpTarget.trim()) {
+                            setMessage({ type: 'error', text: 'Enter email or mobile first.' });
+                            return;
+                          }
+                          setMessage({ type: 'muted', text: 'OTP request endpoint not implemented yet.' });
+                        }}
+                      >
+                        Send code
+                      </button>
+                    </div>
+                    <input
+                      id="otp"
+                      inputMode="numeric"
+                      autoComplete="one-time-code"
+                      placeholder="123456"
+                      value={otp}
+                      onChange={(e) => setOtp(e.target.value)}
+                      className="input-field w-full px-5 py-4 text-sm focus:border-primary transition-all duration-300"
+                      required
+                    />
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
 
             <button
               type="submit"
