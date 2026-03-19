@@ -238,10 +238,22 @@ export function AppSidebar({
                   active={view === 'applications:projects'}
                   onClick={() => onViewChange('applications:projects')}
                 />
-                <SidebarSubItem
+
+                 <SidebarSubItem
                   label="Proponent"
                   active={view === 'settings:proponents'}
                   onClick={() => onViewChange('settings:proponents')}
+                />
+            
+                <SidebarSubItem
+                  label="Requirements"
+                  active={view === 'applications:requirements'}
+                  onClick={() => onViewChange('applications:requirements')}
+                />
+                <SidebarSubItem
+                  label="Requirement Categories"
+                  active={view === 'settings:requirement-categories'}
+                  onClick={() => onViewChange('settings:requirement-categories')}
                 />
               </SidebarDropdown>
             </div>
@@ -389,11 +401,7 @@ export function AppSidebar({
                 isOpen={openDropdownId === 'file-maintenance'}
                 onToggle={() => toggleDropdown('file-maintenance')}
               >
-                <SidebarSubItem
-                  label="Requirement Categories"
-                  active={view === 'settings:requirement-categories'}
-                  onClick={() => onViewChange('settings:requirement-categories')}
-                />
+                
                 <SidebarSubItem
                   label="Inspection Types"
                   active={view === 'settings:inspection-types'}

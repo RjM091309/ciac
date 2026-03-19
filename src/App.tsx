@@ -6,7 +6,8 @@ import { SubHeader } from './components/SubHeader';
 import { FileCheck, FolderTree, ShieldCheck, Users, CalendarClock } from 'lucide-react';
 import { UsersManagement } from './components/settings/UsersManagement';
 import { ProponentsManagement } from './components/proponent/ProponentsManagement';
-import { RequirementCategoriesManagement } from './components/FileMaintenance/RequirementCategories';
+import { RequirementsManagement } from './components/applications/Requirements';
+import { RequirementCategoriesManagement } from './components/applications/RequirementCategories';
 import { InspectionTypesManagement } from './components/FileMaintenance/InspectionTypes';
 import { ComplianceTypesManagement } from './components/FileMaintenance/ComplianceTypes';
 import { LoginPage } from './components/auth/LoginPage';
@@ -26,6 +27,7 @@ const VIEW_TO_PATH: Record<AppView, string> = {
   'applications:new': '/applications/new',
   'applications:renewals': '/applications/renewals',
   'applications:projects': '/applications/projects',
+  'applications:requirements': '/applications/requirements',
   'verification:pending': '/verification/pending',
   'verification:audit': '/verification/audit',
   'directory:companies': '/directory/companies',
@@ -197,6 +199,8 @@ export default function App() {
               <Dashboard />
             ) : view === 'settings:users' ? (
               <UsersManagement />
+            ) : view === 'applications:requirements' ? (
+              <RequirementsManagement />
             ) : view === 'settings:proponents' ? (
               <ProponentsManagement />
             ) : view === 'settings:requirement-categories' ? (
@@ -290,6 +294,25 @@ const LANDING_CONFIG: Record<AppView, LandingConfig> = {
         ['Cold Chain Facility', 'HarborFresh Cold Storage', 'Engr. Santos', 'Technical Review', 'Requested load profile'],
         ['Fuel Depot Expansion', 'GreenFuel Terminals Corp.', 'Engr. Cruz', 'For Board', 'Endorsed to CIAC Board'],
         ['Maintenance Hangar', 'Atlas Aero Parts', 'Engr. Dela Cruz', 'Initial Review', 'Site visit scheduled'],
+      ],
+    },
+  },
+  'applications:requirements': {
+    title: 'Requirements',
+    description: 'Manage requirement definitions for new and renewal applications.',
+    badge: 'Applications',
+    icon: FileCheck,
+    stats: [
+      { label: 'Total Requirements', value: '—' },
+      { label: 'For New', value: '—' },
+      { label: 'For Renewal', value: '—' },
+    ],
+    table: {
+      columns: ['Code', 'Name', 'Category', 'Flags', 'Status'],
+      rows: [
+        ['SEC-AOI', 'Articles of Incorporation', 'Legal', 'New, Mandatory', 'Active'],
+        ['BIR-CLR', 'BIR Tax Clearance', 'Financial', 'New, Renewal, Mandatory', 'Active'],
+        ['FSIC', 'Fire Safety Certificate', 'Technical', 'Renewal', 'Inactive'],
       ],
     },
   },
