@@ -1,9 +1,9 @@
 const express = require("express");
 const router = express.Router();
 const rolesController = require("../controller/c_roles");
-const { authenticateToken } = require("../middleware/m_auth");
+const { requireRole } = require("../middleware/m_auth");
 
-router.get("/", authenticateToken, rolesController.list);
+router.get("/", requireRole("admin"), rolesController.list);
 
 module.exports = router;
 

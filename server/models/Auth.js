@@ -1,4 +1,5 @@
 const jwt = require("jsonwebtoken");
+const bcrypt = require("bcryptjs");
 const { selectData } = require("../config/database");
 
 function getJwtSecret() {
@@ -11,6 +12,7 @@ function getDemoAdminCreds() {
   return {
     username: process.env.CIAC_ADMIN_USERNAME || "admin",
     password: process.env.CIAC_ADMIN_PASSWORD || "admin123",
+    passwordHash: process.env.CIAC_ADMIN_PASSWORD_HASH || "",
   };
 }
 
@@ -28,10 +30,9 @@ function pickPasswordField(row) {
   return actualKey || null;
 }
 
-async function loginViaDatabase(username, password, req) {
+async function loginViaDatabase(username, password) {
   const userKey = normalizeString(username);
   const pass = String(password ?? "");
-  const isAdminMode = req?.body?.adminlogin === "1" || req?.body?.adminlogin === 1 || req?.body?.adminlogin === true;
 
   // Prefer active accounts first
   const activeRows = await selectData(
@@ -67,18 +68,19 @@ async function loginViaDatabase(username, password, req) {
     return { success: false, message: "User not found" };
   }
 
-  if (!isAdminMode) {
-    const passField = pickPasswordField(row);
-    if (!passField) {
-      return { success: false, message: "Password field not found in users. Configure your schema or update Auth model." };
-    }
-    const stored = String(row[passField] ?? "");
-    // If bcrypt hash, require bcrypt implementation
-    if (stored.startsWith("$2")) {
-      return { success: false, message: "Password appears hashed (bcrypt). Install bcrypt and update password check." };
-    }
-    if (stored !== pass) return { success: false, message: "Username and Password incorrect!" };
+  const passField = pickPasswordField(row);
+  if (!passField) {
+    return { success: false, message: "Password field not found in users. Configure your schema or update Auth model." };
   }
+  const stored = String(row[passField] ?? "");
+  if (!stored.startsWith("$2")) {
+    return {
+      success: false,
+      message: "Account password is using an unsupported format. Ask admin to reset your password.",
+    };
+  }
+  const matches = await bcrypt.compare(pass, stored);
+  if (!matches) return { success: false, message: "Username and Password incorrect!" };
 
   const id = row.id ?? row.user_id ?? 0;
   const role = row.role_name || row.role || "user";
@@ -87,10 +89,10 @@ async function loginViaDatabase(username, password, req) {
   return { success: true, message: "Login successful", user, token };
 }
 
-async function login(username, password, req) {
+async function login(username, password) {
   // Prefer DB if configured; fallback to demo creds
   try {
-    return await loginViaDatabase(username, password, req);
+    return await loginViaDatabase(username, password);
   } catch (err) {
     // Only fallback if DB isn't configured; otherwise surface the real issue.
     const msg = err && typeof err === "object" && "message" in err ? String(err.message) : "";
@@ -98,19 +100,14 @@ async function login(username, password, req) {
       return { success: false, message: msg || "Login failed" };
     }
 
-    const { username: adminUser, password: adminPass } = getDemoAdminCreds();
-    const isAdminMode =
-      req?.body?.adminlogin === "1" || req?.body?.adminlogin === 1 || req?.body?.adminlogin === true;
-
-    if (isAdminMode) {
-      if (normalizeString(username) !== normalizeString(adminUser)) {
-        return { success: false, message: "Invalid admin username" };
-      }
-    } else {
-      if (normalizeString(username) !== normalizeString(adminUser) || String(password) !== String(adminPass)) {
-        return { success: false, message: "Username and Password incorrect!" };
-      }
+    const { username: adminUser, password: adminPass, passwordHash: adminPassHash } = getDemoAdminCreds();
+    if (normalizeString(username) !== normalizeString(adminUser)) {
+      return { success: false, message: "Username and Password incorrect!" };
     }
+    const stored = String(adminPassHash || "");
+    const hashForCompare = stored.startsWith("$2") ? stored : await bcrypt.hash(String(adminPass), 10);
+    const matches = await bcrypt.compare(String(password), hashForCompare);
+    if (!matches) return { success: false, message: "Username and Password incorrect!" };
 
     const user = { id: 1, username: adminUser, role: "admin" };
     const token = jwt.sign(user, getJwtSecret(), { expiresIn: "24h" });

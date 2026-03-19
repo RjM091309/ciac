@@ -1,8 +1,16 @@
 const { selectData, insertData, updateData, updateSchema } = require("../config/database");
+const bcrypt = require("bcryptjs");
 
 function toInt(v) {
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
+}
+
+async function hashPasswordIfNeeded(password) {
+  const value = String(password ?? "");
+  if (!value) return value;
+  if (value.startsWith("$2")) return value;
+  return bcrypt.hash(value, 10);
 }
 
 async function ensureSchema() {
@@ -146,13 +154,14 @@ async function getUserById(id) {
 async function createUser({ username, email, full_name, password, is_active = 1, role_id }) {
   const active = is_active ? 1 : 0;
   const roleId = toInt(role_id);
+  const hashedPassword = await hashPasswordIfNeeded(password);
   const result = await insertData(
     `
     INSERT INTO users (username,email,password_hash,full_name,is_active,created_at,updated_at)
     OUTPUT INSERTED.id
     VALUES (@param0,@param1,@param2,@param3,@param4,GETDATE(),NULL)
     `,
-    [username, email, password, full_name, active]
+    [username, email, hashedPassword, full_name, active]
   );
 
   const newId = result?.recordset?.[0]?.id;
@@ -202,7 +211,9 @@ async function updateUser(id, { username, email, full_name, password, is_active,
   if (username !== undefined) pushSet("username = ?", username);
   if (email !== undefined) pushSet("email = ?", email);
   if (full_name !== undefined) pushSet("full_name = ?", full_name);
-  if (password !== undefined && password !== "") pushSet("password_hash = ?", password);
+  if (password !== undefined && password !== "") {
+    pushSet("password_hash = ?", await hashPasswordIfNeeded(password));
+  }
   if (is_active !== undefined) pushSet("is_active = ?", is_active ? 1 : 0);
 
   if (sets.length) {

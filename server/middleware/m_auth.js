@@ -42,9 +42,24 @@ function authenticateToken(req, res, next) {
   return next();
 }
 
+function requireRole(...allowedRoles) {
+  const normalizedAllowed = allowedRoles.map((r) => String(r).toLowerCase());
+  return function roleGuard(req, res, next) {
+    if (!req.user) {
+      return res.status(401).json({ success: false, message: "Access token required" });
+    }
+    const userRole = String(req.user.role || "").toLowerCase();
+    if (!userRole || !normalizedAllowed.includes(userRole)) {
+      return res.status(403).json({ success: false, message: "Forbidden" });
+    }
+    return next();
+  };
+}
+
 module.exports = {
   attachUserFromJwt,
   isAuthenticated,
   authenticateToken,
+  requireRole,
 };
 

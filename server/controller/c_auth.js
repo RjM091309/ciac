@@ -2,17 +2,17 @@ const Auth = require("../models/Auth");
 
 exports.login = async (req, res) => {
   try {
-    const { username, password, adminlogin } = req.body || {};
+    const { username, password } = req.body || {};
 
     if (!username) {
       return res.status(400).json({ success: false, message: "Username is required" });
     }
 
-    if (!adminlogin && !password) {
+    if (!password) {
       return res.status(400).json({ success: false, message: "Password is required" });
     }
 
-    const result = await Auth.login(username, password, req);
+    const result = await Auth.login(username, password);
 
     if (!result.success) {
       return res.status(401).json({ success: false, message: result.message });
