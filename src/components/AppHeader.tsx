@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { Bell, CalendarDays, ChevronRight, Moon, Search, SunMedium, Zap } from 'lucide-react';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
-import { Box, Button, Popover, TextField, Typography } from '@mui/material';
+import { Box, Button, Popover, Typography } from '@mui/material';
 import { alpha, styled } from '@mui/material/styles';
 import { DateCalendar } from '@mui/x-date-pickers/DateCalendar';
 import { PickersDay } from '@mui/x-date-pickers/PickersDay';
@@ -169,37 +169,26 @@ function HeaderRangePicker({
           <CalendarDays size={16} />
         </button>
       ) : (
-        <TextField
-          label="Date range"
-          value={rangeText}
-          size="small"
-          onClick={(e) => setAnchorEl(e.currentTarget)}
-          inputProps={{ readOnly: true }}
-          sx={{
-            minWidth: { xs: 0, md: 170, lg: 190 },
-            width: { xs: 0, md: 170, lg: 190 },
-            cursor: 'pointer',
-            '& .MuiInputBase-root': {
-              height: 36, // match header search bar (h-9)
-              borderRadius: 9999,
-              backgroundColor: (t) =>
-                t.palette.mode === 'dark'
-                  ? 'color-mix(in oklab, var(--control-bg) 70%, transparent)'
-                  : t.palette.background.paper,
-            },
-            '& .MuiInputBase-input': {
-              whiteSpace: 'nowrap',
-              paddingTop: 0,
-              paddingBottom: 0,
-              fontSize: 12, // match search bar's text-xs
+        <div className="relative group w-full sm:w-36 md:w-44 lg:w-64 xl:w-72 max-w-[170px] lg:max-w-none">
+          <CalendarDays
+            className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)] group-focus-within:text-[var(--text)] transition-colors pointer-events-none"
+            size={14}
+          />
+          <input
+            type="text"
+            readOnly
+            value={isEmpty ? '' : rangeText}
+            placeholder="Enter Date Range"
+            aria-label="Date range"
+            onClick={(e) => setAnchorEl(e.currentTarget)}
+            className="h-9 rounded-full pl-9 pr-3 text-xs w-full focus:outline-none focus:ring-1 focus:ring-[var(--border)] text-[var(--text)] placeholder:text-[var(--text-muted)] transition-all cursor-pointer"
+            style={{
+              backgroundColor: 'color-mix(in oklab, var(--control-bg) 70%, transparent)',
               opacity: isEmpty ? 0.72 : 1,
-            },
-            '& .MuiOutlinedInput-notchedOutline': {
-              borderColor: (t) =>
-                t.palette.mode === 'dark' ? 'rgba(255,255,255,0.22)' : 'rgba(0,0,0,0.22)',
-            },
-          }}
-        />
+              whiteSpace: 'nowrap',
+            }}
+          />
+        </div>
       )}
 
       <Popover
