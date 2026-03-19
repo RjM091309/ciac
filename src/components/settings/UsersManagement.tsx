@@ -6,6 +6,7 @@ import { SidePanel } from '../ui/SidePanel';
 import { ConfirmModal } from '../ui/ConfirmModal';
 import { AppSelect } from '../ui/AppSelect';
 import { DataTableControls } from '../ui/DataTableControls';
+import { useSessionStorageCachedResource } from '../../hooks/useSessionStorageCachedResource';
 
 type Role = {
   id: number;
@@ -25,16 +26,18 @@ type UserRow = {
   roles: { id: number; name: string; description?: string | null }[];
 };
 
+type UsersRolesData = {
+  users: UserRow[];
+  roles: Role[];
+};
+
 function api(path: string) {
   return path;
 }
 
 export function UsersManagement() {
-  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [users, setUsers] = useState<UserRow[]>([]);
-  const [roles, setRoles] = useState<Role[]>([]);
   const [editing, setEditing] = useState<UserRow | null>(null);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [confirmDeactivateId, setConfirmDeactivateId] = useState<number | null>(null);
@@ -42,6 +45,40 @@ export function UsersManagement() {
   const [searchQuery, setSearchQuery] = useState('');
   const [pageSize, setPageSize] = useState(20);
   const [page, setPage] = useState(1);
+
+  const { data: usersRoles, isLoading, isRevalidating, refresh } = useSessionStorageCachedResource<UsersRolesData>({
+    cacheKey: 'ciac.users_roles.v1',
+    ttlMs: 5 * 60 * 1000, // 5 minutes
+    fetcher: async () => {
+      setError(null);
+      const [uRes, rRes] = await Promise.all([
+        fetch(api('/api/users'), { credentials: 'include' }),
+        fetch(api('/api/roles'), { credentials: 'include' }),
+      ]);
+
+      const uJson = await uRes.json();
+      const rJson = await rRes.json();
+
+      if (!uRes.ok) throw new Error(uJson?.message || 'Failed to load users');
+      if (!rRes.ok) throw new Error(rJson?.message || 'Failed to load roles');
+
+      return {
+        users: (uJson.data || []).map((u: any) => ({
+          ...u,
+          is_active: Number(u?.is_active) ? 1 : 0,
+        })),
+        roles: rJson.data || [],
+      };
+    },
+    onError: (e) => {
+      const message = e instanceof Error ? e.message : 'Failed to load data';
+      setError(message);
+      toast.error(message);
+    },
+  });
+
+  const users = usersRoles?.users ?? [];
+  const roles = usersRoles?.roles ?? [];
 
   const [form, setForm] = useState({
     username: '',
@@ -134,41 +171,6 @@ export function UsersManagement() {
     return hasChanged;
   }, [editing, form.email, form.full_name, form.password, form.role_id, form.username, roles]);
 
-  async function loadAll() {
-    setLoading(true);
-    setError(null);
-    try {
-      const [uRes, rRes] = await Promise.all([
-        fetch(api('/api/users'), { credentials: 'include' }),
-        fetch(api('/api/roles'), { credentials: 'include' }),
-      ]);
-
-      const uJson = await uRes.json();
-      const rJson = await rRes.json();
-
-      if (!uRes.ok) throw new Error(uJson?.message || 'Failed to load users');
-      if (!rRes.ok) throw new Error(rJson?.message || 'Failed to load roles');
-
-      setUsers(
-        (uJson.data || []).map((u: any) => ({
-          ...u,
-          is_active: Number(u?.is_active) ? 1 : 0,
-        }))
-      );
-      setRoles(rJson.data || []);
-    } catch (e: any) {
-      const message = e?.message || 'Failed to load data';
-      setError(message);
-      toast.error(message);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  useEffect(() => {
-    loadAll();
-  }, []);
-
   useEffect(() => {
     setPage(1);
   }, [searchQuery, pageSize]);
@@ -226,7 +228,7 @@ export function UsersManagement() {
       if (!res.ok) throw new Error(json?.message || 'Save failed');
 
       setIsCreateOpen(false);
-      await loadAll();
+      await refresh({ showLoading: false });
       toast.success(editing ? 'User updated successfully' : 'User created successfully');
     } catch (e: any) {
       const message = e?.message || 'Save failed';
@@ -247,7 +249,7 @@ export function UsersManagement() {
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json?.message || 'Deactivate failed');
-      await loadAll();
+      await refresh({ showLoading: false });
       toast.success('User deactivated successfully');
       setConfirmDeactivateId(null);
     } catch (e: any) {
@@ -269,7 +271,7 @@ export function UsersManagement() {
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json?.message || 'Reactivate failed');
-      await loadAll();
+      await refresh({ showLoading: false });
       toast.success('User reactivated successfully');
       setConfirmReactivateId(null);
     } catch (e: any) {
@@ -312,7 +314,7 @@ export function UsersManagement() {
           </div>
         )}
 
-        {loading ? (
+        {isLoading ? (
           <div className="text-xs text-secondary">Loading…</div>
         ) : (
           <div className="overflow-x-auto">
@@ -440,7 +442,7 @@ export function UsersManagement() {
               pageSizeOptions={[20, 50, 100, 200]}
               onPageSizeChange={(value) => setPageSize(value)}
               onPageChange={(p) => setPage(p)}
-              loading={loading}
+              loading={isLoading || isRevalidating}
             />
           </div>
         )}

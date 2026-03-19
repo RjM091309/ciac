@@ -6,6 +6,7 @@ import { SidePanel } from '../ui/SidePanel';
 import { ConfirmModal } from '../ui/ConfirmModal';
 import { AppSelect } from '../ui/AppSelect';
 import { DataTableControls } from '../ui/DataTableControls';
+import { useSessionStorageCachedResource } from '../../hooks/useSessionStorageCachedResource';
 
 type ProponentRow = {
   id: number;
@@ -29,16 +30,18 @@ type UserOption = {
   is_active: number;
 };
 
+type ProponentsUsersData = {
+  proponents: ProponentRow[];
+  users: UserOption[];
+};
+
 function api(path: string) {
   return path;
 }
 
 export function ProponentsManagement() {
-  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [proponents, setProponents] = useState<ProponentRow[]>([]);
-  const [users, setUsers] = useState<UserOption[]>([]);
   const [editing, setEditing] = useState<ProponentRow | null>(null);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [confirmDeactivateId, setConfirmDeactivateId] = useState<number | null>(null);
@@ -46,6 +49,43 @@ export function ProponentsManagement() {
   const [searchQuery, setSearchQuery] = useState('');
   const [pageSize, setPageSize] = useState(20);
   const [page, setPage] = useState(1);
+
+  const { data: proponentsUsersData, isLoading, isRevalidating, refresh } = useSessionStorageCachedResource<ProponentsUsersData>({
+    cacheKey: 'ciac.proponents_users.v1',
+    ttlMs: 5 * 60 * 1000,
+    fetcher: async () => {
+      const [pRes, uRes] = await Promise.all([
+        fetch(api('/api/proponents'), { credentials: 'include' }),
+        fetch(api('/api/users'), { credentials: 'include' }),
+      ]);
+
+      const pJson = await pRes.json();
+      const uJson = await uRes.json();
+
+      if (!pRes.ok) throw new Error(pJson?.message || 'Failed to load proponents');
+      if (!uRes.ok) throw new Error(uJson?.message || 'Failed to load users');
+
+      const nextProponents: ProponentRow[] = (pJson.data || []).map((p: any) => ({
+        ...p,
+        is_active: Number(p?.is_active) ? 1 : 0,
+      }));
+
+      const nextUsers: UserOption[] = (uJson.data || []).map((u: any) => ({
+        ...u,
+        is_active: Number(u?.is_active) ? 1 : 0,
+      }));
+
+      return { proponents: nextProponents, users: nextUsers };
+    },
+    onError: (e) => {
+      const message = e instanceof Error ? e.message : 'Failed to load data';
+      setError(message);
+      toast.error(message);
+    },
+  });
+
+  const proponents = proponentsUsersData?.proponents ?? [];
+  const users = proponentsUsersData?.users ?? [];
 
   const [form, setForm] = useState({
     user_id: '',
@@ -145,36 +185,6 @@ export function ProponentsManagement() {
     return Array.from({ length: end - adjustedStart + 1 }, (_, i) => adjustedStart + i);
   }, [page, totalPages]);
 
-  async function loadAll() {
-    setLoading(true);
-    setError(null);
-    try {
-      const [pRes, uRes] = await Promise.all([
-        fetch(api('/api/proponents'), { credentials: 'include' }),
-        fetch(api('/api/users'), { credentials: 'include' }),
-      ]);
-
-      const pJson = await pRes.json();
-      const uJson = await uRes.json();
-
-      if (!pRes.ok) throw new Error(pJson?.message || 'Failed to load proponents');
-      if (!uRes.ok) throw new Error(uJson?.message || 'Failed to load users');
-
-      setProponents(pJson.data || []);
-      setUsers(uJson.data || []);
-    } catch (e: any) {
-      const message = e?.message || 'Failed to load data';
-      setError(message);
-      toast.error(message);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  useEffect(() => {
-    loadAll();
-  }, []);
-
   useEffect(() => {
     setPage(1);
   }, [searchQuery, pageSize]);
@@ -234,7 +244,8 @@ export function ProponentsManagement() {
       if (!res.ok) throw new Error(json?.message || 'Save failed');
 
       setIsCreateOpen(false);
-      await loadAll();
+      setError(null);
+      await refresh({ showLoading: false });
       toast.success(editing ? 'Proponent updated successfully' : 'Proponent created successfully');
     } catch (e: any) {
       const message = e?.message || 'Save failed';
@@ -255,7 +266,8 @@ export function ProponentsManagement() {
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json?.message || 'Deactivate failed');
-      await loadAll();
+      setError(null);
+      await refresh({ showLoading: false });
       toast.success('Proponent deactivated successfully');
       setConfirmDeactivateId(null);
     } catch (e: any) {
@@ -277,7 +289,8 @@ export function ProponentsManagement() {
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json?.message || 'Reactivate failed');
-      await loadAll();
+      setError(null);
+      await refresh({ showLoading: false });
       toast.success('Proponent reactivated successfully');
     } catch (e: any) {
       const message = e?.message || 'Reactivate failed';
@@ -319,7 +332,7 @@ export function ProponentsManagement() {
           </div>
         )}
 
-        {loading ? (
+        {isLoading ? (
           <div className="text-xs text-secondary">Loading…</div>
         ) : (
           <div className="overflow-x-auto">
@@ -433,7 +446,7 @@ export function ProponentsManagement() {
               pageSizeOptions={[20, 50, 100, 200]}
               onPageSizeChange={(value) => setPageSize(value)}
               onPageChange={(p) => setPage(p)}
-              loading={loading}
+              loading={isLoading || isRevalidating}
             />
           </div>
         )}

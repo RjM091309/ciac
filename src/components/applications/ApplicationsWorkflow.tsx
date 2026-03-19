@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 import { cn } from '../../lib/utils';
 import { SidePanel } from '../ui/SidePanel';
 import { DataTableControls } from '../ui/DataTableControls';
+import { useSessionStorageCachedResource } from '../../hooks/useSessionStorageCachedResource';
 
 type ApplicationRow = {
   id: number;
@@ -21,6 +22,11 @@ type ProponentRow = {
   id: number;
   business_name: string;
   is_active: number;
+};
+
+type ApplicationsBaseData = {
+  applications: ApplicationRow[];
+  proponents: ProponentRow[];
 };
 
 type AppRequirementRow = {
@@ -139,10 +145,43 @@ function toDateInputValue(v: string | null | undefined) {
 }
 
 export function ApplicationsWorkflow({ renewalMode }: { renewalMode: boolean }) {
-  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [applications, setApplications] = useState<ApplicationRow[]>([]);
   const [proponents, setProponents] = useState<ProponentRow[]>([]);
+
+  const { data: baseData, isLoading: baseLoading, isRevalidating: baseRevalidating, refresh: refreshBase } =
+    useSessionStorageCachedResource<ApplicationsBaseData>({
+      cacheKey: 'ciac.applications_base.v1',
+      ttlMs: 5 * 60 * 1000, // 5 minutes
+      fetcher: async () => {
+        const [appsRes, propsRes] = await Promise.all([
+          fetch(api('/api/applications'), { credentials: 'include' }),
+          fetch(api('/api/proponents'), { credentials: 'include' }),
+        ]);
+
+        const [appsJson, propsJson] = await Promise.all([appsRes.json(), propsRes.json()]);
+
+        if (!appsRes.ok) throw new Error(appsJson?.message || 'Failed to load applications');
+        if (!propsRes.ok) throw new Error(propsJson?.message || 'Failed to load proponents');
+
+        const applicationsRows: ApplicationRow[] = Array.isArray(appsJson?.data) ? appsJson.data : [];
+        const proponentsRows: ProponentRow[] = Array.isArray(propsJson?.data)
+          ? propsJson.data.filter((p: any) => Number(p?.is_active) === 1)
+          : [];
+
+        return { applications: applicationsRows, proponents: proponentsRows };
+      },
+      onError: (e) => {
+        const message = e instanceof Error ? e.message : 'Failed to load applications';
+        toast.error(message);
+      },
+    });
+
+  useEffect(() => {
+    if (!baseData) return;
+    setApplications(baseData.applications);
+    setProponents(baseData.proponents);
+  }, [baseData]);
 
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [requirements, setRequirements] = useState<AppRequirementRow[]>([]);
@@ -197,9 +236,12 @@ export function ApplicationsWorkflow({ renewalMode }: { renewalMode: boolean }) 
     file_size_bytes: '245760',
   });
 
+  const applicationsEffective = baseData?.applications ?? applications;
+  const proponentsEffective = baseData?.proponents ?? proponents;
+
   const appsByType = useMemo(
-    () => applications.filter((a) => Number(a.is_renewal) === (renewalMode ? 1 : 0)),
-    [applications, renewalMode]
+    () => applicationsEffective.filter((a) => Number(a.is_renewal) === (renewalMode ? 1 : 0)),
+    [applicationsEffective, renewalMode]
   );
   const filteredApps = useMemo(() => {
     const q = appsSearchQuery.trim().toLowerCase();
@@ -324,24 +366,6 @@ export function ApplicationsWorkflow({ renewalMode }: { renewalMode: boolean }) 
     }
   }
 
-  async function loadBase() {
-    setLoading(true);
-    try {
-      const [appsRes, propsRes] = await Promise.all([
-        fetch(api('/api/applications'), { credentials: 'include' }),
-        fetch(api('/api/proponents'), { credentials: 'include' }),
-      ]);
-      const [appsJson, propsJson] = await Promise.all([appsRes.json(), propsRes.json()]);
-      setApplications(Array.isArray(appsJson?.data) ? appsJson.data : []);
-      const proponentRows = Array.isArray(propsJson?.data) ? propsJson.data : [];
-      setProponents(proponentRows.filter((p: any) => Number(p?.is_active) === 1));
-    } catch (error: any) {
-      toast.error(error?.message || 'Failed to load applications');
-    } finally {
-      setLoading(false);
-    }
-  }
-
   async function loadDetails(applicationId: number) {
     setDetailsLoading(true);
     try {
@@ -367,10 +391,6 @@ export function ApplicationsWorkflow({ renewalMode }: { renewalMode: boolean }) 
       setDetailsLoading(false);
     }
   }
-
-  useEffect(() => {
-    loadBase();
-  }, []);
 
   useEffect(() => {
     if (!filteredApps.length) {
@@ -576,7 +596,7 @@ export function ApplicationsWorkflow({ renewalMode }: { renewalMode: boolean }) 
       toast.success('Application created. Requirements auto-generated.');
       setIsCreateOpen(false);
       setCreateForm((p) => ({ ...p, application_no: '' }));
-      await loadBase();
+      await refreshBase({ showLoading: false });
       const createdId = Number(json?.data?.id || 0);
       if (createdId) setSelectedId(createdId);
     } catch (error: any) {
@@ -646,7 +666,7 @@ export function ApplicationsWorkflow({ renewalMode }: { renewalMode: boolean }) 
       const json = await res.json().catch(() => ({}));
       if (!res.ok || !json?.success) throw new Error(json?.message || 'Failed to update status');
       toast.success('Application status updated');
-      await loadBase();
+      await refreshBase({ showLoading: false });
       await loadDetails(selectedId);
     } catch (error: any) {
       toast.error(error?.message || 'Failed to update status');
@@ -668,7 +688,7 @@ export function ApplicationsWorkflow({ renewalMode }: { renewalMode: boolean }) 
       if (!res.ok || !json?.success) throw new Error(json?.message || 'Failed to update requirement');
       toast.success(`Requirement marked as ${nextStatus}`);
       if (selectedId) await loadDetails(selectedId);
-      await loadBase();
+      await refreshBase({ showLoading: false });
     } catch (error: any) {
       toast.error(error?.message || 'Failed to update requirement');
     } finally {
@@ -718,7 +738,7 @@ export function ApplicationsWorkflow({ renewalMode }: { renewalMode: boolean }) 
             />
           </div>
         </div>
-        {loading ? (
+        {baseLoading ? (
           <div className="text-xs text-secondary py-8 text-center">Loading...</div>
         ) : filteredApps.length === 0 ? (
           <div className="text-xs text-secondary py-8 text-center">No records yet. Click "New Application".</div>
@@ -824,7 +844,7 @@ export function ApplicationsWorkflow({ renewalMode }: { renewalMode: boolean }) 
           pageSizeOptions={[5, 20, 50, 100, 200]}
           onPageSizeChange={setAppsPageSize}
           onPageChange={setAppsPage}
-          loading={loading}
+              loading={baseLoading || baseRevalidating}
         />
       </div>
 
@@ -1324,7 +1344,7 @@ export function ApplicationsWorkflow({ renewalMode }: { renewalMode: boolean }) 
             onChange={(e) => setCreateForm((p) => ({ ...p, proponent_id: e.target.value }))}
           >
             <option value="">Select proponent...</option>
-            {proponents.map((p) => (
+            {proponentsEffective.map((p) => (
               <option key={p.id} value={String(p.id)}>
                 {p.business_name}
               </option>

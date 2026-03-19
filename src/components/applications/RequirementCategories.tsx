@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import { SidePanel } from '../ui/SidePanel';
 import { ConfirmModal } from '../ui/ConfirmModal';
 import { DataTableControls } from '../ui/DataTableControls';
+import { useSessionStorageCachedResource } from '../../hooks/useSessionStorageCachedResource';
 
 type RequirementCategoryRow = {
   id: number;
@@ -22,10 +23,8 @@ function api(path: string) {
 }
 
 export function RequirementCategoriesManagement() {
-  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [items, setItems] = useState<RequirementCategoryRow[]>([]);
   const [editing, setEditing] = useState<RequirementCategoryRow | null>(null);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [confirmDeactivateId, setConfirmDeactivateId] = useState<number | null>(null);
@@ -33,6 +32,27 @@ export function RequirementCategoriesManagement() {
   const [searchQuery, setSearchQuery] = useState('');
   const [pageSize, setPageSize] = useState(20);
   const [page, setPage] = useState(1);
+
+  const { data: itemsData, isLoading, isRevalidating, refresh } =
+    useSessionStorageCachedResource<RequirementCategoryRow[]>({
+      cacheKey: 'ciac.requirement_categories.v1',
+      ttlMs: 5 * 60 * 1000,
+      fetcher: async () => {
+        const res = await fetch(api('/api/requirement-categories'), { credentials: 'include' });
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(json?.message || 'Failed to load requirement categories');
+        return (json.data || []).map((item: any) => ({
+          ...item,
+          is_active: Number(item?.is_active) ? 1 : 0,
+        })) as RequirementCategoryRow[];
+      },
+      onError: (e) => {
+        const message = e instanceof Error ? e.message : 'Failed to load data';
+        setError(message);
+        toast.error(message);
+      },
+    });
+  const items = itemsData ?? [];
 
   const [form, setForm] = useState({
     name: '',
@@ -100,32 +120,6 @@ export function RequirementCategoriesManagement() {
     return Array.from({ length: end - adjustedStart + 1 }, (_, i) => adjustedStart + i);
   }, [page, totalPages]);
 
-  async function loadAll() {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await fetch(api('/api/requirement-categories'), { credentials: 'include' });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(json?.message || 'Failed to load requirement categories');
-      setItems(
-        (json.data || []).map((item: any) => ({
-          ...item,
-          is_active: Number(item?.is_active) ? 1 : 0,
-        })),
-      );
-    } catch (e: any) {
-      const message = e?.message || 'Failed to load data';
-      setError(message);
-      toast.error(message);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  useEffect(() => {
-    loadAll();
-  }, []);
-
   useEffect(() => {
     setPage(1);
   }, [searchQuery, pageSize]);
@@ -172,7 +166,8 @@ export function RequirementCategoriesManagement() {
       if (!res.ok) throw new Error(json?.message || 'Save failed');
 
       setIsCreateOpen(false);
-      await loadAll();
+      setError(null);
+      await refresh({ showLoading: false });
       toast.success(editing ? 'Category updated successfully' : 'Category created successfully');
     } catch (e: any) {
       const message = e?.message || 'Save failed';
@@ -193,7 +188,8 @@ export function RequirementCategoriesManagement() {
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json?.message || 'Deactivate failed');
-      await loadAll();
+      setError(null);
+      await refresh({ showLoading: false });
       toast.success('Category deactivated successfully');
       setConfirmDeactivateId(null);
     } catch (e: any) {
@@ -215,7 +211,8 @@ export function RequirementCategoriesManagement() {
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json?.message || 'Reactivate failed');
-      await loadAll();
+      setError(null);
+      await refresh({ showLoading: false });
       toast.success('Category reactivated successfully');
     } catch (e: any) {
       const message = e?.message || 'Reactivate failed';
@@ -254,7 +251,7 @@ export function RequirementCategoriesManagement() {
           </div>
         )}
 
-        {loading ? (
+        {isLoading ? (
           <div className="text-xs text-secondary">Loading…</div>
         ) : (
           <div className="overflow-x-auto">
@@ -375,7 +372,7 @@ export function RequirementCategoriesManagement() {
               pageSizeOptions={[20, 50, 100, 200]}
               onPageSizeChange={(value) => setPageSize(value)}
               onPageChange={(p) => setPage(p)}
-              loading={loading}
+              loading={isLoading || isRevalidating}
             />
           </div>
         )}

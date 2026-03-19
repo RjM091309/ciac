@@ -6,6 +6,7 @@ import { SidePanel } from '../ui/SidePanel';
 import { ConfirmModal } from '../ui/ConfirmModal';
 import { AppSelect } from '../ui/AppSelect';
 import { DataTableControls } from '../ui/DataTableControls';
+import { useSessionStorageCachedResource } from '../../hooks/useSessionStorageCachedResource';
 
 type RequirementRow = {
   id: number;
@@ -30,16 +31,18 @@ type CategoryRow = {
   is_active: number;
 };
 
+type RequirementsData = {
+  items: RequirementRow[];
+  categories: CategoryRow[];
+};
+
 function api(path: string) {
   return path;
 }
 
 export function RequirementsManagement() {
-  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [items, setItems] = useState<RequirementRow[]>([]);
-  const [categories, setCategories] = useState<CategoryRow[]>([]);
   const [editing, setEditing] = useState<RequirementRow | null>(null);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [confirmDeactivateId, setConfirmDeactivateId] = useState<number | null>(null);
@@ -47,6 +50,46 @@ export function RequirementsManagement() {
   const [searchQuery, setSearchQuery] = useState('');
   const [pageSize, setPageSize] = useState(20);
   const [page, setPage] = useState(1);
+
+  const { data: requirementsData, isLoading, isRevalidating, refresh } =
+    useSessionStorageCachedResource<RequirementsData>({
+      cacheKey: 'ciac.requirements.categories_and_items.v1',
+      ttlMs: 5 * 60 * 1000, // 5 minutes
+      fetcher: async () => {
+        const [rRes, cRes] = await Promise.all([
+          fetch(api('/api/requirements'), { credentials: 'include' }),
+          fetch(api('/api/requirement-categories'), { credentials: 'include' }),
+        ]);
+
+        const rJson = await rRes.json().catch(() => ({}));
+        const cJson = await cRes.json().catch(() => ({}));
+
+        if (!rRes.ok) throw new Error(rJson?.message || 'Failed to load requirements');
+        if (!cRes.ok) throw new Error(cJson?.message || 'Failed to load requirement categories');
+
+        return {
+          items: (rJson.data || []).map((item: any) => ({
+            ...item,
+            for_new: Number(item?.for_new) ? 1 : 0,
+            for_renewal: Number(item?.for_renewal) ? 1 : 0,
+            is_mandatory: Number(item?.is_mandatory) ? 1 : 0,
+            is_active: Number(item?.is_active) ? 1 : 0,
+          })),
+          categories: (cJson.data || []).map((c: any) => ({
+            ...c,
+            is_active: Number(c?.is_active) ? 1 : 0,
+          })),
+        };
+      },
+      onError: (e) => {
+        const message = e instanceof Error ? e.message : 'Failed to load data';
+        setError(message);
+        toast.error(message);
+      },
+    });
+
+  const items = requirementsData?.items ?? [];
+  const categories = requirementsData?.categories ?? [];
 
   const [form, setForm] = useState({
     code: '',
@@ -145,47 +188,6 @@ export function RequirementsManagement() {
     return Array.from({ length: end - adjustedStart + 1 }, (_, i) => adjustedStart + i);
   }, [page, totalPages]);
 
-  async function loadAll() {
-    setLoading(true);
-    setError(null);
-    try {
-      const [rRes, cRes] = await Promise.all([
-        fetch(api('/api/requirements'), { credentials: 'include' }),
-        fetch(api('/api/requirement-categories'), { credentials: 'include' }),
-      ]);
-      const rJson = await rRes.json().catch(() => ({}));
-      const cJson = await cRes.json().catch(() => ({}));
-      if (!rRes.ok) throw new Error(rJson?.message || 'Failed to load requirements');
-      if (!cRes.ok) throw new Error(cJson?.message || 'Failed to load requirement categories');
-
-      setItems(
-        (rJson.data || []).map((item: any) => ({
-          ...item,
-          for_new: Number(item?.for_new) ? 1 : 0,
-          for_renewal: Number(item?.for_renewal) ? 1 : 0,
-          is_mandatory: Number(item?.is_mandatory) ? 1 : 0,
-          is_active: Number(item?.is_active) ? 1 : 0,
-        }))
-      );
-      setCategories(
-        (cJson.data || []).map((c: any) => ({
-          ...c,
-          is_active: Number(c?.is_active) ? 1 : 0,
-        }))
-      );
-    } catch (e: any) {
-      const message = e?.message || 'Failed to load data';
-      setError(message);
-      toast.error(message);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  useEffect(() => {
-    loadAll();
-  }, []);
-
   useEffect(() => {
     setPage(1);
   }, [searchQuery, pageSize]);
@@ -247,7 +249,8 @@ export function RequirementsManagement() {
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json?.message || 'Save failed');
       setIsCreateOpen(false);
-      await loadAll();
+      setError(null);
+      await refresh({ showLoading: false });
       toast.success(editing ? 'Requirement updated successfully' : 'Requirement created successfully');
     } catch (e: any) {
       const message = e?.message || 'Save failed';
@@ -265,7 +268,8 @@ export function RequirementsManagement() {
       const res = await fetch(api(`/api/requirements/${id}/deactivate`), { method: 'PATCH', credentials: 'include' });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json?.message || 'Deactivate failed');
-      await loadAll();
+      setError(null);
+      await refresh({ showLoading: false });
       toast.success('Requirement deactivated successfully');
       setConfirmDeactivateId(null);
     } catch (e: any) {
@@ -284,7 +288,8 @@ export function RequirementsManagement() {
       const res = await fetch(api(`/api/requirements/${id}/reactivate`), { method: 'PATCH', credentials: 'include' });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json?.message || 'Reactivate failed');
-      await loadAll();
+      setError(null);
+      await refresh({ showLoading: false });
       toast.success('Requirement reactivated successfully');
       setConfirmReactivateId(null);
     } catch (e: any) {
@@ -324,7 +329,7 @@ export function RequirementsManagement() {
           </div>
         )}
 
-        {loading ? (
+        {isLoading ? (
           <div className="text-xs text-secondary">Loading…</div>
         ) : (
           <div className="overflow-x-auto">
@@ -449,7 +454,7 @@ export function RequirementsManagement() {
               pageSizeOptions={[20, 50, 100, 200]}
               onPageSizeChange={(value) => setPageSize(value)}
               onPageChange={(p) => setPage(p)}
-              loading={loading}
+              loading={isLoading || isRevalidating}
             />
           </div>
         )}
