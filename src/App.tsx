@@ -4,6 +4,7 @@ import { AppLayout, AppView } from './layout/AppLayout';
 import { Dashboard } from './components/dashboard/Dashboard';
 import { SubHeader } from './components/SubHeader';
 import { FileCheck, FolderTree, ShieldCheck, Users, CalendarClock } from 'lucide-react';
+import { UsersManagement } from './components/settings/UsersManagement';
 
 // --- Types ---
 type Role = 'admin' | 'officer' | 'proponent';
@@ -27,10 +28,18 @@ export default function App() {
 
   const [user, setUser] = useState<UserData>(defaultUser);
   const [view, setView] = useState<AppView>('dashboard');
+  const backendUrl = (import.meta as any).env?.VITE_BACKEND_URL || 'http://localhost:3100';
 
   return (
     <>
-      <AppLayout view={view} onViewChange={setView} onLogout={() => setUser(defaultUser)}>
+      <AppLayout
+        view={view}
+        onViewChange={setView}
+        onLogout={() => {
+          setUser(defaultUser);
+          window.location.href = `${String(backendUrl).replace(/\/+$/, '')}/api/auth/logout`;
+        }}
+      >
         {view === 'dashboard' ? (
           <SubHeader />
         ) : (
@@ -50,7 +59,13 @@ export default function App() {
             transition={{ duration: 0.25, ease: [0.22, 0.8, 0.35, 1] }}
             className="h-full"
           >
-            {view === 'dashboard' ? <Dashboard /> : <SectionLanding view={view} />}
+            {view === 'dashboard' ? (
+              <Dashboard />
+            ) : view === 'settings:users' ? (
+              <UsersManagement />
+            ) : (
+              <SectionLanding view={view} />
+            )}
           </motion.div>
         </AnimatePresence>
       </AppLayout>

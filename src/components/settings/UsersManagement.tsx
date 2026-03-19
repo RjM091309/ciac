@@ -1,0 +1,369 @@
+import React, { useEffect, useMemo, useState } from 'react';
+import { cn } from '../../lib/utils';
+
+type Role = {
+  id: number;
+  name: string;
+  description?: string | null;
+  is_active?: number;
+};
+
+type UserRow = {
+  id: number;
+  username: string;
+  email: string | null;
+  full_name: string | null;
+  is_active: number;
+  created_at?: string | null;
+  updated_at?: string | null;
+  roles: { id: number; name: string; description?: string | null }[];
+};
+
+function api(path: string) {
+  return path;
+}
+
+export function UsersManagement() {
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [users, setUsers] = useState<UserRow[]>([]);
+  const [roles, setRoles] = useState<Role[]>([]);
+  const [editing, setEditing] = useState<UserRow | null>(null);
+  const [isCreateOpen, setIsCreateOpen] = useState(false);
+
+  const [form, setForm] = useState({
+    username: '',
+    email: '',
+    full_name: '',
+    password: '',
+    role_id: '',
+  });
+
+  const stats = useMemo(() => {
+    const active = users.filter((u) => u.is_active === 1).length;
+    const inactive = users.filter((u) => u.is_active === 0).length;
+    return { active, inactive, total: users.length };
+  }, [users]);
+
+  async function loadAll() {
+    setLoading(true);
+    setError(null);
+    try {
+      const [uRes, rRes] = await Promise.all([
+        fetch(api('/api/users'), { credentials: 'include' }),
+        fetch(api('/api/roles'), { credentials: 'include' }),
+      ]);
+
+      const uJson = await uRes.json();
+      const rJson = await rRes.json();
+
+      if (!uRes.ok) throw new Error(uJson?.message || 'Failed to load users');
+      if (!rRes.ok) throw new Error(rJson?.message || 'Failed to load roles');
+
+      setUsers(uJson.data || []);
+      setRoles(rJson.data || []);
+    } catch (e: any) {
+      setError(e?.message || 'Failed to load data');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    loadAll();
+  }, []);
+
+  function openCreate() {
+    setEditing(null);
+    setForm({
+      username: '',
+      email: '',
+      full_name: '',
+      password: '',
+      role_id: roles[0]?.id ? String(roles[0].id) : '',
+    });
+    setIsCreateOpen(true);
+  }
+
+  function openEdit(u: UserRow) {
+    setIsCreateOpen(true);
+    setEditing(u);
+    setForm({
+      username: u.username || '',
+      email: u.email || '',
+      full_name: u.full_name || '',
+      password: '',
+      role_id: u.roles?.[0]?.id ? String(u.roles[0].id) : roles[0]?.id ? String(roles[0].id) : '',
+    });
+  }
+
+  async function save() {
+    setSaving(true);
+    setError(null);
+    try {
+      const payload: any = {
+        username: form.username.trim(),
+        email: form.email.trim() || null,
+        full_name: form.full_name.trim() || null,
+        role_id: form.role_id ? Number(form.role_id) : null,
+      };
+      if (form.password.trim()) payload.password = form.password;
+
+      if (!payload.username) throw new Error('Username is required');
+      if (!editing && !payload.password) throw new Error('Password is required');
+
+      const res = await fetch(api(editing ? `/api/users/${editing.id}` : '/api/users'), {
+        method: editing ? 'PUT' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(payload),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.message || 'Save failed');
+
+      setIsCreateOpen(false);
+      await loadAll();
+    } catch (e: any) {
+      setError(e?.message || 'Save failed');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function deactivate(id: number) {
+    if (!confirm('Deactivate this user?')) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await fetch(api(`/api/users/${id}/deactivate`), {
+        method: 'PATCH',
+        credentials: 'include',
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.message || 'Deactivate failed');
+      await loadAll();
+    } catch (e: any) {
+      setError(e?.message || 'Deactivate failed');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="space-y-4 sm:space-y-5">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4 mt-3">
+        <StatCard label="Active Users" value={String(stats.active)} />
+        <StatCard label="Total Users" value={String(stats.total)} />
+        <StatCard label="Deactivated" value={String(stats.inactive)} />
+      </div>
+
+      <div
+        className="glass-card p-4 sm:p-5 !border-transparent"
+        style={{ backgroundColor: 'var(--surface)' }}
+      >
+        <div className="flex items-center justify-between mb-3 gap-2">
+          <h3 className="text-sm font-bold tracking-tight" style={{ color: 'var(--text)' }}>
+            User Management List
+          </h3>
+          <button
+            className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-semibold shadow-sm"
+            style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
+            onClick={openCreate}
+          >
+            + New Record
+          </button>
+        </div>
+
+        {error && (
+          <div className="mb-3 rounded-lg border px-3 py-2 text-xs" style={{ borderColor: 'var(--border-subtle)', color: '#fca5a5' }}>
+            {error}
+          </div>
+        )}
+
+        {loading ? (
+          <div className="text-xs text-secondary">Loading…</div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-left text-xs">
+              <thead>
+                <tr>
+                  {['Username', 'Full Name', 'Email', 'Role', 'Status', 'Actions'].map((col) => (
+                    <th
+                      key={col}
+                      className="px-3 py-2 font-semibold text-[10px] uppercase tracking-widest text-secondary border-b"
+                      style={{ borderColor: 'var(--border-subtle)' }}
+                    >
+                      {col}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {users.map((u) => (
+                  <tr key={u.id} className="border-b last:border-b-0" style={{ borderColor: 'var(--border-subtle)' }}>
+                    <td className="px-3 py-2 text-[11px]" style={{ color: 'var(--text)' }}>
+                      {u.username}
+                    </td>
+                    <td className="px-3 py-2 text-[11px] text-secondary">{u.full_name || '-'}</td>
+                    <td className="px-3 py-2 text-[11px] text-secondary">{u.email || '-'}</td>
+                    <td className="px-3 py-2 text-[11px] text-secondary">
+                      {u.roles && u.roles.length ? u.roles.map((r) => r.name).join(', ') : '-'}
+                    </td>
+                    <td className="px-3 py-2 text-[11px] text-secondary">{u.is_active ? 'Active' : 'Inactive'}</td>
+                    <td className="px-3 py-2">
+                      <div className="flex items-center gap-2">
+                        <button
+                          className={cn(
+                            'rounded-md px-2 py-1 text-[11px] font-semibold border',
+                          )}
+                          style={{ borderColor: 'var(--border-subtle)', color: 'var(--text)' }}
+                          onClick={() => openEdit(u)}
+                          disabled={saving}
+                        >
+                          Edit
+                        </button>
+                        <button
+                          className="rounded-md px-2 py-1 text-[11px] font-semibold border"
+                          style={{ borderColor: 'rgba(252,165,165,.35)', color: '#fca5a5' }}
+                          onClick={() => deactivate(u.id)}
+                          disabled={saving || u.is_active === 0}
+                        >
+                          Deactivate
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+                {users.length === 0 && (
+                  <tr>
+                    <td className="px-3 py-6 text-center text-xs text-secondary" colSpan={6}>
+                      No users found.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {isCreateOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center px-3" style={{ backgroundColor: 'rgba(0,0,0,.45)' }}>
+          <div className="w-full max-w-lg rounded-2xl border p-4 sm:p-5" style={{ backgroundColor: 'var(--surface)', borderColor: 'var(--border-subtle)' }}>
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="text-sm font-bold" style={{ color: 'var(--text)' }}>
+                  {editing ? 'Edit User' : 'New User'}
+                </div>
+                <div className="text-xs text-secondary">Users table + role mapping</div>
+              </div>
+              <button
+                className="rounded-lg px-2 py-1 text-xs border"
+                style={{ borderColor: 'var(--border-subtle)', color: 'var(--text-muted)' }}
+                onClick={() => setIsCreateOpen(false)}
+                disabled={saving}
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <Field label="Username">
+                <input
+                  className="w-full rounded-lg px-3 py-2 text-sm border bg-transparent"
+                  style={{ borderColor: 'var(--border-subtle)', color: 'var(--text)' }}
+                  value={form.username}
+                  onChange={(e) => setForm((p) => ({ ...p, username: e.target.value }))}
+                />
+              </Field>
+              <Field label="Role">
+                <select
+                  className="w-full rounded-lg px-3 py-2 text-sm border bg-transparent"
+                  style={{ borderColor: 'var(--border-subtle)', color: 'var(--text)' }}
+                  value={form.role_id}
+                  onChange={(e) => setForm((p) => ({ ...p, role_id: e.target.value }))}
+                >
+                  <option value="">(none)</option>
+                  {roles.map((r) => (
+                    <option key={r.id} value={String(r.id)}>
+                      {r.name}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="Full name">
+                <input
+                  className="w-full rounded-lg px-3 py-2 text-sm border bg-transparent"
+                  style={{ borderColor: 'var(--border-subtle)', color: 'var(--text)' }}
+                  value={form.full_name}
+                  onChange={(e) => setForm((p) => ({ ...p, full_name: e.target.value }))}
+                />
+              </Field>
+              <Field label="Email">
+                <input
+                  className="w-full rounded-lg px-3 py-2 text-sm border bg-transparent"
+                  style={{ borderColor: 'var(--border-subtle)', color: 'var(--text)' }}
+                  value={form.email}
+                  onChange={(e) => setForm((p) => ({ ...p, email: e.target.value }))}
+                />
+              </Field>
+              <Field label={editing ? 'Password (leave blank to keep)' : 'Password'}>
+                <input
+                  className="w-full rounded-lg px-3 py-2 text-sm border bg-transparent"
+                  style={{ borderColor: 'var(--border-subtle)', color: 'var(--text)' }}
+                  type="password"
+                  value={form.password}
+                  onChange={(e) => setForm((p) => ({ ...p, password: e.target.value }))}
+                />
+              </Field>
+            </div>
+
+            <div className="mt-4 flex items-center justify-end gap-2">
+              <button
+                className="rounded-lg px-3 py-2 text-sm font-semibold border"
+                style={{ borderColor: 'var(--border-subtle)', color: 'var(--text)' }}
+                onClick={() => setIsCreateOpen(false)}
+                disabled={saving}
+              >
+                Cancel
+              </button>
+              <button
+                className="rounded-lg px-3 py-2 text-sm font-semibold"
+                style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
+                onClick={save}
+                disabled={saving}
+              >
+                {saving ? 'Saving…' : 'Save'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StatCard({ label, value }: { label: string; value: string }) {
+  return (
+    <div
+      className="rounded-xl px-3 py-3 border flex flex-col gap-1"
+      style={{ backgroundColor: 'var(--control-bg)', borderColor: 'var(--border-subtle)' }}
+    >
+      <span className="text-[10px] font-semibold text-secondary uppercase tracking-widest">{label}</span>
+      <span className="text-base sm:text-lg font-bold leading-tight" style={{ color: 'var(--text)' }}>
+        {value}
+      </span>
+    </div>
+  );
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="space-y-1">
+      <div className="text-[11px] font-semibold text-secondary uppercase tracking-widest">{label}</div>
+      {children}
+    </div>
+  );
+}
+

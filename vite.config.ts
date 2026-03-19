@@ -19,6 +19,13 @@ export default defineConfig(({mode}) => {
       host: '0.0.0.0',
       port: 2500,
       strictPort: true,
+      proxy: {
+        '/api': {
+          target: 'http://localhost:3100',
+          changeOrigin: true,
+          secure: false,
+        },
+      },
       // HMR is disabled in AI Studio via DISABLE_HMR env var.
       // Do not modify—file watching is disabled to prevent flickering during agent edits.
       hmr: process.env.DISABLE_HMR !== 'true',

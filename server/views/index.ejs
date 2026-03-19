@@ -1,0 +1,26 @@
+<div class="page">
+  <header class="topbar">
+    <div class="topbar-left">
+      <div class="brand-mark small">CIAC</div>
+      <div class="topbar-meta">
+        <div class="title"><%= title %></div>
+        <div class="subtitle"><%= subTitle %></div>
+      </div>
+    </div>
+    <div class="topbar-right">
+      <div class="user">
+        <span class="muted">Signed in as</span>
+        <strong><%= (user && user.username) ? user.username : "user" %></strong>
+      </div>
+      <a class="btn-secondary" href="/api/auth/logout">Logout</a>
+    </div>
+  </header>
+
+  <main class="content">
+    <div class="panel">
+      <h2>Dashboard</h2>
+      <p class="muted">This is a placeholder dashboard. Next step is wiring your real CIAC modules.</p>
+    </div>
+  </main>
+</div>
+
