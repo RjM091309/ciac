@@ -46,7 +46,7 @@ export function SidePanel({
               exit={{ x: 64, opacity: 0.98 }}
               transition={{ duration: 0.24, ease: [0.22, 0.8, 0.35, 1] }}
             >
-              <div className="flex items-start justify-between gap-3 border-b pb-3" style={{ borderColor: 'var(--border-subtle)' }}>
+              <div className="flex items-start justify-between gap-3 border-b pb-3" style={{ borderColor: 'var(--input-border)' }}>
                 <div>
                   <div className="text-sm font-bold" style={{ color: 'var(--text)' }}>
                     {title}
@@ -65,7 +65,7 @@ export function SidePanel({
 
               <div className="flex-1 overflow-y-auto py-4">{children}</div>
 
-              <div className="border-t pt-3 flex items-center justify-end gap-2" style={{ borderColor: 'var(--border-subtle)' }}>
+              <div className="border-t pt-3 flex items-center justify-end gap-2" style={{ borderColor: 'var(--input-border)' }}>
                 <button
                   className="rounded-lg px-3 py-2 text-sm font-semibold border"
                   style={{ borderColor: 'var(--border-subtle)', color: 'var(--text)' }}
