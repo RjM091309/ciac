@@ -27,6 +27,7 @@ module.exports = function pageRouter(app) {
   app.use("/api/auth", require("./r_auth"));
   app.use("/api/users", require("./r_users"));
   app.use("/api/roles", require("./r_roles"));
+  app.use("/api/proponents", require("./r_proponents"));
   app.use("/", router);
 };
 

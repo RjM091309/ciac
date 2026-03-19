@@ -5,6 +5,7 @@ import { Dashboard } from './components/dashboard/Dashboard';
 import { SubHeader } from './components/SubHeader';
 import { FileCheck, FolderTree, ShieldCheck, Users, CalendarClock } from 'lucide-react';
 import { UsersManagement } from './components/settings/UsersManagement';
+import { ProponentsManagement } from './components/settings/ProponentsManagement';
 import { LoginPage } from './components/auth/LoginPage';
 import { Toaster } from 'sonner';
 
@@ -34,6 +35,7 @@ const VIEW_TO_PATH: Record<AppView, string> = {
   'operations:brochures': '/operations/brochures',
   'operations:gad': '/operations/gad',
   'settings:users': '/settings/users',
+  'settings:proponents': '/settings/proponents',
   'settings:checklist': '/settings/checklist',
 };
 
@@ -189,6 +191,8 @@ export default function App() {
               <Dashboard />
             ) : view === 'settings:users' ? (
               <UsersManagement />
+            ) : view === 'settings:proponents' ? (
+              <ProponentsManagement />
             ) : (
               <SectionLanding view={view} />
             )}
@@ -502,6 +506,25 @@ const LANDING_CONFIG: Record<AppView, LandingConfig> = {
         ['Admin Demo', 'admin@bizreg.com', 'System Admin', 'Mar 11, 2026 09:18', 'Active'],
         ['Joan Cruz', 'j.cruz@ciac.gov', 'Verifier', 'Mar 10, 2026 16:02', 'Active'],
         ['Leo Dizon', 'l.dizon@ciac.gov', 'Account Officer', 'Mar 05, 2026 11:22', 'Active'],
+      ],
+    },
+  },
+  'settings:proponents': {
+    title: 'Proponent Management',
+    description: 'Manage registered proponent business profiles and their status.',
+    badge: 'Directory',
+    icon: Users,
+    stats: [
+      { label: 'Total Proponents', value: '—' },
+      { label: 'Active', value: '—' },
+      { label: 'Deactivated', value: '—' },
+    ],
+    table: {
+      columns: ['Business Name', 'TIN', 'Registration No.', 'Status', 'Last Updated'],
+      rows: [
+        ['SkyPort Logistics Inc.', '—', 'SEC-2026-0310', 'Active', 'Mar 10, 2026'],
+        ['GreenFuel Terminals Corp.', '—', 'SEC-2024-0182', 'Active', 'Mar 09, 2026'],
+        ['Metro Agro Trading', '—', 'DTI-24-8931', 'Inactive', 'Feb 12, 2026'],
       ],
     },
   },

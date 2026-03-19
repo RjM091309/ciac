@@ -400,6 +400,11 @@ export function AppSidebar({
                   onClick={() => onViewChange('settings:users')}
                 />
                 <SidebarSubItem
+                  label="Proponent Management"
+                  active={view === 'settings:proponents'}
+                  onClick={() => onViewChange('settings:proponents')}
+                />
+                <SidebarSubItem
                   label="Master Checklist"
                   active={view === 'settings:checklist'}
                   onClick={() => onViewChange('settings:checklist')}
