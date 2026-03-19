@@ -70,6 +70,38 @@ export function ProponentsManagement() {
       })),
     [users],
   );
+  const canSubmit = useMemo(() => {
+    const userId = form.user_id.trim();
+    const businessName = form.business_name.trim();
+    const registrationNo = form.registration_no.trim();
+    const tin = form.tin.trim();
+    const address = form.address.trim();
+    const contactNo = form.contact_no.trim();
+
+    if (!businessName) return false;
+
+    if (!editing) {
+      const hasAnyInput = Boolean(userId || businessName || registrationNo || tin || address || contactNo);
+      return hasAnyInput;
+    }
+
+    const originalUserId = editing.user_id != null ? String(editing.user_id).trim() : '';
+    const originalBusinessName = (editing.business_name || '').trim();
+    const originalRegistrationNo = (editing.registration_no || '').trim();
+    const originalTin = (editing.tin || '').trim();
+    const originalAddress = (editing.address || '').trim();
+    const originalContactNo = (editing.contact_no || '').trim();
+
+    const hasChanged =
+      userId !== originalUserId ||
+      businessName !== originalBusinessName ||
+      registrationNo !== originalRegistrationNo ||
+      tin !== originalTin ||
+      address !== originalAddress ||
+      contactNo !== originalContactNo;
+
+    return hasChanged;
+  }, [editing, form.address, form.business_name, form.contact_no, form.registration_no, form.tin, form.user_id]);
 
   const filteredProponents = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -414,6 +446,7 @@ export function ProponentsManagement() {
         onClose={() => setIsCreateOpen(false)}
         onSave={save}
         saving={saving}
+        saveDisabled={!canSubmit}
       >
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Field label="Business name">

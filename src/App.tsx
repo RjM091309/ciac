@@ -7,6 +7,7 @@ import { FileCheck, FolderTree, ShieldCheck, Users, CalendarClock } from 'lucide
 import { UsersManagement } from './components/settings/UsersManagement';
 import { ProponentsManagement } from './components/proponent/ProponentsManagement';
 import { RequirementCategoriesManagement } from './components/FileMaintenance/RequirementCategories';
+import { InspectionTypesManagement } from './components/FileMaintenance/InspectionTypes';
 import { LoginPage } from './components/auth/LoginPage';
 import { Toaster } from 'sonner';
 
@@ -38,6 +39,7 @@ const VIEW_TO_PATH: Record<AppView, string> = {
   'settings:users': '/settings/users',
   'settings:proponents': '/settings/proponents',
   'settings:requirement-categories': '/settings/requirement-categories',
+  'settings:inspection-types': '/settings/inspection-types',
   'settings:checklist': '/settings/checklist',
 };
 
@@ -197,6 +199,8 @@ export default function App() {
               <ProponentsManagement />
             ) : view === 'settings:requirement-categories' ? (
               <RequirementCategoriesManagement />
+            ) : view === 'settings:inspection-types' ? (
+              <InspectionTypesManagement />
             ) : (
               <SectionLanding view={view} />
             )}
@@ -548,6 +552,25 @@ const LANDING_CONFIG: Record<AppView, LandingConfig> = {
         ['Legal', 'Incorporation and legal identity docs', 'Active', 'Mar 19, 2026'],
         ['Financial', 'Tax filings and financial statements', 'Active', 'Mar 18, 2026'],
         ['Technical', 'Engineering plans and permits', 'Inactive', 'Mar 15, 2026'],
+      ],
+    },
+  },
+  'settings:inspection-types': {
+    title: 'Inspection Types',
+    description: 'Manage inspection types for file maintenance.',
+    badge: 'File Maintenance',
+    icon: FileCheck,
+    stats: [
+      { label: 'Total Types', value: '—' },
+      { label: 'Active', value: '—' },
+      { label: 'Deactivated', value: '—' },
+    ],
+    table: {
+      columns: ['Code', 'Name', 'Description', 'Status'],
+      rows: [
+        ['PRE', 'Pre-operation', 'Pre-operation inspection', 'Active'],
+        ['POST', 'Post-operation', 'Post-operation inspection', 'Active'],
+        ['RND', 'Random', 'Random spot check', 'Inactive'],
       ],
     },
   },

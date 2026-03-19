@@ -6,8 +6,9 @@ import { SidePanel } from '../ui/SidePanel';
 import { ConfirmModal } from '../ui/ConfirmModal';
 import { DataTableControls } from '../ui/DataTableControls';
 
-type RequirementCategoryRow = {
+type InspectionTypeRow = {
   id: number;
+  code: string;
   name: string;
   description: string | null;
   created_by: number | null;
@@ -21,12 +22,12 @@ function api(path: string) {
   return path;
 }
 
-export function RequirementCategoriesManagement() {
+export function InspectionTypesManagement() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [items, setItems] = useState<RequirementCategoryRow[]>([]);
-  const [editing, setEditing] = useState<RequirementCategoryRow | null>(null);
+  const [items, setItems] = useState<InspectionTypeRow[]>([]);
+  const [editing, setEditing] = useState<InspectionTypeRow | null>(null);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [confirmDeactivateId, setConfirmDeactivateId] = useState<number | null>(null);
   const [confirmReactivateId, setConfirmReactivateId] = useState<number | null>(null);
@@ -35,6 +36,7 @@ export function RequirementCategoriesManagement() {
   const [page, setPage] = useState(1);
 
   const [form, setForm] = useState({
+    code: '',
     name: '',
     description: '',
   });
@@ -51,6 +53,7 @@ export function RequirementCategoriesManagement() {
     return items.filter((i) => {
       const statusStr = i.is_active === 1 ? 'active' : 'inactive';
       return (
+        (i.code || '').toLowerCase().includes(q) ||
         (i.name || '').toLowerCase().includes(q) ||
         (i.description || '').toLowerCase().includes(q) ||
         statusStr.includes(q)
@@ -58,21 +61,23 @@ export function RequirementCategoriesManagement() {
     });
   }, [items, searchQuery]);
   const canSubmit = useMemo(() => {
+    const code = form.code.trim();
     const name = form.name.trim();
     const description = form.description.trim();
 
-    if (!name) return false;
+    if (!code || !name) return false;
 
     if (!editing) {
-      const hasAnyInput = Boolean(name || description);
+      const hasAnyInput = Boolean(code || name || description);
       return hasAnyInput;
     }
 
+    const originalCode = (editing.code || '').trim();
     const originalName = (editing.name || '').trim();
     const originalDescription = (editing.description || '').trim();
 
-    return name !== originalName || description !== originalDescription;
-  }, [editing, form.description, form.name]);
+    return code !== originalCode || name !== originalName || description !== originalDescription;
+  }, [editing, form.code, form.description, form.name]);
 
   const totalPages = useMemo(() => {
     return Math.max(1, Math.ceil(filteredItems.length / Math.max(1, pageSize)));
@@ -104,9 +109,9 @@ export function RequirementCategoriesManagement() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(api('/api/requirement-categories'), { credentials: 'include' });
+      const res = await fetch(api('/api/inspection-types'), { credentials: 'include' });
       const json = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(json?.message || 'Failed to load requirement categories');
+      if (!res.ok) throw new Error(json?.message || 'Failed to load inspection types');
       setItems(
         (json.data || []).map((item: any) => ({
           ...item,
@@ -136,17 +141,15 @@ export function RequirementCategoriesManagement() {
 
   function openCreate() {
     setEditing(null);
-    setForm({
-      name: '',
-      description: '',
-    });
+    setForm({ code: '', name: '', description: '' });
     setIsCreateOpen(true);
   }
 
-  function openEdit(item: RequirementCategoryRow) {
+  function openEdit(item: InspectionTypeRow) {
     setIsCreateOpen(true);
     setEditing(item);
     setForm({
+      code: item.code || '',
       name: item.name || '',
       description: item.description || '',
     });
@@ -157,12 +160,14 @@ export function RequirementCategoriesManagement() {
     setError(null);
     try {
       const payload: any = {
+        code: form.code.trim(),
         name: form.name.trim(),
         description: form.description.trim() || null,
       };
-      if (!payload.name) throw new Error('Category name is required');
+      if (!payload.code) throw new Error('Code is required');
+      if (!payload.name) throw new Error('Name is required');
 
-      const res = await fetch(api(editing ? `/api/requirement-categories/${editing.id}` : '/api/requirement-categories'), {
+      const res = await fetch(api(editing ? `/api/inspection-types/${editing.id}` : '/api/inspection-types'), {
         method: editing ? 'PUT' : 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -173,7 +178,7 @@ export function RequirementCategoriesManagement() {
 
       setIsCreateOpen(false);
       await loadAll();
-      toast.success(editing ? 'Category updated successfully' : 'Category created successfully');
+      toast.success(editing ? 'Inspection type updated successfully' : 'Inspection type created successfully');
     } catch (e: any) {
       const message = e?.message || 'Save failed';
       setError(message);
@@ -187,19 +192,18 @@ export function RequirementCategoriesManagement() {
     setSaving(true);
     setError(null);
     try {
-      const res = await fetch(api(`/api/requirement-categories/${id}/deactivate`), {
+      const res = await fetch(api(`/api/inspection-types/${id}/deactivate`), {
         method: 'PATCH',
         credentials: 'include',
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json?.message || 'Deactivate failed');
       await loadAll();
-      toast.success('Category deactivated successfully');
+      toast.success('Inspection type deactivated successfully');
       setConfirmDeactivateId(null);
     } catch (e: any) {
-      const message = e?.message || 'Deactivate failed';
-      setError(message);
-      toast.error(message);
+      setError(e?.message || 'Deactivate failed');
+      toast.error(e?.message || 'Deactivate failed');
     } finally {
       setSaving(false);
     }
@@ -209,18 +213,17 @@ export function RequirementCategoriesManagement() {
     setSaving(true);
     setError(null);
     try {
-      const res = await fetch(api(`/api/requirement-categories/${id}/reactivate`), {
+      const res = await fetch(api(`/api/inspection-types/${id}/reactivate`), {
         method: 'PATCH',
         credentials: 'include',
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json?.message || 'Reactivate failed');
       await loadAll();
-      toast.success('Category reactivated successfully');
+      toast.success('Inspection type reactivated successfully');
     } catch (e: any) {
-      const message = e?.message || 'Reactivate failed';
-      setError(message);
-      toast.error(message);
+      setError(e?.message || 'Reactivate failed');
+      toast.error(e?.message || 'Reactivate failed');
     } finally {
       setSaving(false);
     }
@@ -229,15 +232,15 @@ export function RequirementCategoriesManagement() {
   return (
     <div className="space-y-4 sm:space-y-5">
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4 mt-3">
-        <StatCard label="Active Categories" value={String(stats.active)} />
-        <StatCard label="Total Categories" value={String(stats.total)} />
+        <StatCard label="Active Types" value={String(stats.active)} />
+        <StatCard label="Total Types" value={String(stats.total)} />
         <StatCard label="Deactivated" value={String(stats.inactive)} />
       </div>
 
       <div className="glass-card p-4 sm:p-5 !border-transparent" style={{ backgroundColor: 'var(--surface)' }}>
         <div className="flex items-center justify-between mb-3 gap-2">
           <h3 className="text-sm font-bold tracking-tight" style={{ color: 'var(--text)' }}>
-            Requirement Categories List
+            Inspection Types List
           </h3>
           <button
             className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-semibold shadow-sm"
@@ -266,7 +269,7 @@ export function RequirementCategoriesManagement() {
                 />
                 <input
                   type="text"
-                  placeholder="Search categories..."
+                  placeholder="Search inspection types..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   className="h-9 rounded-full pl-9 pr-3 text-xs w-full focus:outline-none focus:ring-1 focus:ring-[var(--border)] text-[var(--text)] placeholder:text-[var(--text-muted)] transition-all"
@@ -277,7 +280,7 @@ export function RequirementCategoriesManagement() {
             <table className="min-w-full text-left text-xs">
               <thead>
                 <tr>
-                  {['Category Name', 'Description', 'Status', 'Actions'].map((col) => (
+                  {['Code', 'Name', 'Description', 'Status', 'Actions'].map((col) => (
                     <th
                       key={col}
                       className={cn(
@@ -294,6 +297,9 @@ export function RequirementCategoriesManagement() {
               <tbody>
                 {pagedItems.map((item) => (
                   <tr key={item.id} className="border-b last:border-b-0" style={{ borderColor: 'var(--border-subtle)' }}>
+                    <td className="px-3 py-2 text-[11px]" style={{ color: 'var(--text)' }}>
+                      {item.code}
+                    </td>
                     <td className="px-3 py-2 text-[11px]" style={{ color: 'var(--text)' }}>
                       {item.name}
                     </td>
@@ -324,7 +330,7 @@ export function RequirementCategoriesManagement() {
                         >
                           <Pencil size={14} />
                         </button>
-                        {item.is_active ? (
+                        {item.is_active === 1 ? (
                           <button
                             className={cn(
                               'inline-flex items-center justify-center rounded-md p-1.5 text-secondary',
@@ -357,8 +363,8 @@ export function RequirementCategoriesManagement() {
                 ))}
                 {filteredItems.length === 0 && (
                   <tr>
-                    <td className="px-3 py-6 text-center text-xs text-secondary" colSpan={4}>
-                      No requirement categories found.
+                    <td className="px-3 py-6 text-center text-xs text-secondary" colSpan={5}>
+                      No inspection types found.
                     </td>
                   </tr>
                 )}
@@ -383,15 +389,23 @@ export function RequirementCategoriesManagement() {
 
       <SidePanel
         open={isCreateOpen}
-        title={editing ? 'Edit Requirement Category' : 'New Requirement Category'}
-        subtitle="Requirements category master table"
+        title={editing ? 'Edit Inspection Type' : 'New Inspection Type'}
+        subtitle="Inspection types master table"
         onClose={() => setIsCreateOpen(false)}
         onSave={save}
         saving={saving}
         saveDisabled={!canSubmit}
       >
         <div className="grid grid-cols-1 gap-3">
-          <Field label="Category name">
+          <Field label="Code">
+            <input
+              className="w-full rounded-md px-3 py-2 text-sm border focus:outline-none focus:border-[var(--nav-active-bg)]"
+              style={{ borderColor: 'var(--input-border)', color: 'var(--text)', backgroundColor: 'var(--input-bg)' }}
+              value={form.code}
+              onChange={(e) => setForm((p) => ({ ...p, code: e.target.value }))}
+            />
+          </Field>
+          <Field label="Name">
             <input
               className="w-full rounded-md px-3 py-2 text-sm border focus:outline-none focus:border-[var(--nav-active-bg)]"
               style={{ borderColor: 'var(--input-border)', color: 'var(--text)', backgroundColor: 'var(--input-bg)' }}
@@ -412,23 +426,21 @@ export function RequirementCategoriesManagement() {
 
       <ConfirmModal
         open={confirmDeactivateId !== null}
-        title="Deactivate requirement category?"
-        description="This category will be marked inactive. You can re-activate later."
+        title="Deactivate inspection type?"
+        description="This type will be marked inactive. You can re-activate later."
         confirmText="Deactivate"
         danger
         loading={saving}
         onCancel={() => setConfirmDeactivateId(null)}
         onConfirm={() => {
-          if (confirmDeactivateId !== null) {
-            void deactivate(confirmDeactivateId);
-          }
+          if (confirmDeactivateId !== null) void deactivate(confirmDeactivateId);
         }}
       />
 
       <ConfirmModal
         open={confirmReactivateId !== null}
-        title="Reactivate requirement category?"
-        description="This category will be marked active again."
+        title="Reactivate inspection type?"
+        description="This type will be marked active again."
         confirmText="Reactivate"
         loading={saving}
         onCancel={() => setConfirmReactivateId(null)}

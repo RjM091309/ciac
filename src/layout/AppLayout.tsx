@@ -23,6 +23,7 @@ export type AppView =
   | 'settings:users'
   | 'settings:proponents'
   | 'settings:requirement-categories'
+  | 'settings:inspection-types'
   | 'settings:checklist';
 
 type Theme = 'light' | 'dark';

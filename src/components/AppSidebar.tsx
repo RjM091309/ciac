@@ -394,6 +394,11 @@ export function AppSidebar({
                   active={view === 'settings:requirement-categories'}
                   onClick={() => onViewChange('settings:requirement-categories')}
                 />
+                <SidebarSubItem
+                  label="Inspection Types"
+                  active={view === 'settings:inspection-types'}
+                  onClick={() => onViewChange('settings:inspection-types')}
+                />
               </SidebarDropdown>
             </div>
           </SidebarGroup>
