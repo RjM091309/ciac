@@ -1,5 +1,335 @@
-import React from 'react';
+import React, { useMemo, useState } from 'react';
 import { Bell, ChevronRight, Moon, Search, SunMedium, Zap } from 'lucide-react';
+import { ThemeProvider, createTheme } from '@mui/material/styles';
+import { Box, Button, Popover, TextField, Typography } from '@mui/material';
+import { alpha, styled } from '@mui/material/styles';
+import { DateCalendar } from '@mui/x-date-pickers/DateCalendar';
+import { PickersDay } from '@mui/x-date-pickers/PickersDay';
+import { useGlobalDate } from '../state/GlobalDateContext';
+
+function formatRange(value: [Date | null, Date | null]) {
+  const [start, end] = value;
+  if (!start && !end) return 'Enter Date';
+  const fmt = (d: Date) =>
+    d.toLocaleDateString(undefined, {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    });
+  if (start && end) return `${fmt(start)} – ${fmt(end)}`;
+  if (start && !end) return `${fmt(start)} –`;
+  return '–– – ––';
+}
+
+type RangeDayProps = {
+  isRangeMiddle?: boolean;
+  isRangeStart?: boolean;
+  isRangeEnd?: boolean;
+};
+
+/** Material-style range: tinted strip between dates; solid primary circles on start/end. */
+const RangePickersDay = styled(PickersDay, {
+  shouldForwardProp: (prop) =>
+    prop !== 'isRangeMiddle' && prop !== 'isRangeStart' && prop !== 'isRangeEnd',
+})<RangeDayProps>(({ theme, isRangeMiddle, isRangeStart, isRangeEnd }) => {
+  const stripBg =
+    theme.palette.mode === 'dark'
+      ? alpha(theme.palette.primary.main, 0.28)
+      : alpha(theme.palette.primary.main, 0.14);
+  const stripText = theme.palette.text.primary;
+
+  return {
+    ...(isRangeMiddle && {
+      borderRadius: 0,
+      backgroundColor: stripBg,
+      color: stripText,
+      fontWeight: 600,
+      '&:hover, &:focus': {
+        backgroundColor: alpha(
+          theme.palette.primary.main,
+          theme.palette.mode === 'dark' ? 0.38 : 0.22
+        ),
+      },
+    }),
+    ...((isRangeStart || isRangeEnd) && {
+      zIndex: 1,
+      backgroundColor: theme.palette.primary.main,
+      color: theme.palette.primary.contrastText,
+      fontWeight: 700,
+      borderRadius: '50%',
+      '&:hover, &:focus': {
+        backgroundColor: theme.palette.primary.dark,
+      },
+    }),
+  };
+});
+
+function stripTime(d: Date) {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+}
+
+function isSameDay(a: Date, b: Date) {
+  return (
+    a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate()
+  );
+}
+
+function isBetweenInclusive(day: Date, start: Date, end: Date) {
+  const t = day.getTime();
+  return t >= start.getTime() && t <= end.getTime();
+}
+
+function getRelativeRange(days: number): [Date, Date] {
+  const end = stripTime(new Date());
+  const start = new Date(end);
+  start.setDate(end.getDate() - (days - 1));
+  return [start, end];
+}
+
+function getTodayRange(): [Date, Date] {
+  const today = stripTime(new Date());
+  return [today, today];
+}
+
+function getYesterdayRange(): [Date, Date] {
+  const day = stripTime(new Date());
+  day.setDate(day.getDate() - 1);
+  return [day, day];
+}
+
+function getMonthRange(offsetMonths: number): [Date, Date] {
+  const now = stripTime(new Date());
+  const start = new Date(now.getFullYear(), now.getMonth() + offsetMonths, 1);
+  const end = new Date(now.getFullYear(), now.getMonth() + offsetMonths + 1, 0);
+  return [start, end];
+}
+
+type PresetKey =
+  | 'today'
+  | 'yesterday'
+  | 'last7'
+  | 'last30'
+  | 'thisMonth'
+  | 'lastMonth'
+  | 'custom';
+
+function sameRange(a: [Date | null, Date | null], b: [Date, Date]) {
+  const [as, ae] = a;
+  return Boolean(as && ae && isSameDay(as, b[0]) && isSameDay(ae, b[1]));
+}
+
+function detectPreset(range: [Date | null, Date | null]): PresetKey {
+  if (sameRange(range, getTodayRange())) return 'today';
+  if (sameRange(range, getYesterdayRange())) return 'yesterday';
+  if (sameRange(range, getRelativeRange(7))) return 'last7';
+  if (sameRange(range, getRelativeRange(30))) return 'last30';
+  if (sameRange(range, getMonthRange(0))) return 'thisMonth';
+  if (sameRange(range, getMonthRange(-1))) return 'lastMonth';
+  return 'custom';
+}
+
+function HeaderRangePicker({
+  value,
+  onChange,
+}: {
+  value: [Date | null, Date | null];
+  onChange: (next: [Date | null, Date | null]) => void;
+}) {
+  const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
+  const open = Boolean(anchorEl);
+
+  const rangeText = formatRange(value);
+  const [start, end] = value;
+  const isEmpty = !start && !end;
+  const selectedPreset = detectPreset(value);
+  const presets: { key: PresetKey; label: string; range?: [Date, Date] }[] = [
+    { key: 'today', label: 'Today', range: getTodayRange() },
+    { key: 'yesterday', label: 'Yesterday', range: getYesterdayRange() },
+    { key: 'last7', label: 'Last 7 Days', range: getRelativeRange(7) },
+    { key: 'last30', label: 'Last 30 Days', range: getRelativeRange(30) },
+    { key: 'thisMonth', label: 'This Month', range: getMonthRange(0) },
+    { key: 'lastMonth', label: 'Last Month', range: getMonthRange(-1) },
+    { key: 'custom', label: 'Custom range' },
+  ];
+
+  return (
+    <>
+      <TextField
+        label="Date range"
+        value={rangeText}
+        size="small"
+        onClick={(e) => setAnchorEl(e.currentTarget)}
+        inputProps={{ readOnly: true }}
+        sx={{
+          minWidth: 190,
+          cursor: 'pointer',
+          '& .MuiInputBase-root': {
+            height: 36, // match header search bar (h-9)
+            borderRadius: 9999,
+            backgroundColor: (t) =>
+              t.palette.mode === 'dark'
+                ? 'color-mix(in oklab, var(--control-bg) 70%, transparent)'
+                : t.palette.background.paper,
+          },
+          '& .MuiInputBase-input': {
+            whiteSpace: 'nowrap',
+            paddingTop: 0,
+            paddingBottom: 0,
+            fontSize: 12, // match search bar's text-xs
+            opacity: isEmpty ? 0.72 : 1,
+          },
+          '& .MuiOutlinedInput-notchedOutline': {
+            borderColor: (t) =>
+              t.palette.mode === 'dark' ? 'rgba(255,255,255,0.22)' : 'rgba(0,0,0,0.22)',
+          },
+        }}
+      />
+
+      <Popover
+        open={open}
+        anchorEl={anchorEl}
+        onClose={() => setAnchorEl(null)}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+        transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+        slotProps={{
+          paper: {
+            sx: { overflow: 'hidden', borderRadius: 2, width: 520, maxWidth: 'calc(100vw - 16px)' },
+          },
+        }}
+      >
+        <Box
+          sx={(t) => ({
+            px: 2.25,
+            pt: 1.75,
+            pb: 1.5,
+            bgcolor: t.palette.mode === 'dark' ? '#000000' : t.palette.background.paper,
+            color: t.palette.mode === 'dark' ? '#ffffff' : t.palette.text.primary,
+          })}
+        >
+          <Typography
+            variant="overline"
+            sx={{ opacity: 0.9, letterSpacing: '0.12em', fontWeight: 700, lineHeight: 1.2 }}
+          >
+            SELECTED RANGE
+          </Typography>
+          <Typography variant="h4" sx={{ fontWeight: 400, mt: 0.5, lineHeight: 1.1 }}>
+            {rangeText}
+          </Typography>
+        </Box>
+
+        <Box sx={{ display: 'grid', gridTemplateColumns: '132px 1fr', minHeight: 312 }}>
+          <Box
+            sx={{
+              p: 1,
+              borderRight: (t) =>
+                `1px solid ${t.palette.mode === 'dark' ? 'rgba(255,255,255,0.14)' : 'rgba(0,0,0,0.14)'}`,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 0.5,
+            }}
+          >
+            {presets.map((preset) => {
+              const active = selectedPreset === preset.key;
+              return (
+                <Button
+                  key={preset.key}
+                  size="small"
+                  variant={active ? 'contained' : 'text'}
+                  onClick={() => {
+                    if (preset.range) onChange(preset.range);
+                  }}
+                  sx={{
+                    justifyContent: 'flex-start',
+                    textTransform: 'none',
+                    px: 1.2,
+                    py: 0.7,
+                    borderRadius: 0.5,
+                    minHeight: 34,
+                    fontSize: 13,
+                  }}
+                >
+                  {preset.label}
+                </Button>
+              );
+            })}
+          </Box>
+
+          <DateCalendar
+            value={start}
+            onChange={(picked) => {
+              if (!picked) return;
+              const day = stripTime(picked);
+
+              if (!start || (start && end)) {
+                onChange([day, null]);
+                return;
+              }
+
+              const s = stripTime(start);
+              if (day.getTime() < s.getTime()) {
+                onChange([day, null]);
+                return;
+              }
+              onChange([s, day]);
+            }}
+            slots={{
+              day: (dayProps) => {
+                const day = stripTime(dayProps.day as Date);
+                const s = start ? stripTime(start) : null;
+                const e = end ? stripTime(end) : null;
+
+                const inSpan = Boolean(s && e && isBetweenInclusive(day, s, e));
+                const isStart = Boolean(s && isSameDay(day, s));
+                const isEnd = Boolean(e && isSameDay(day, e));
+                const isRangeMiddle = Boolean(inSpan && !isStart && !isEnd);
+
+                const selected = Boolean(isStart || isEnd);
+
+                return (
+                  <RangePickersDay
+                    {...dayProps}
+                    day={dayProps.day}
+                    selected={selected}
+                    isRangeMiddle={isRangeMiddle}
+                    isRangeStart={isStart}
+                    isRangeEnd={isEnd}
+                  />
+                );
+              },
+            }}
+          />
+        </Box>
+
+        <Box
+          sx={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            gap: 1,
+            px: 1.5,
+            pb: 1.25,
+          }}
+        >
+          <Box />
+
+          <Box sx={{ display: 'flex', gap: 1 }}>
+            <Button
+              size="small"
+              onClick={() => {
+                onChange([null, null]);
+              }}
+            >
+              Clear
+            </Button>
+            <Button size="small" variant="contained" onClick={() => setAnchorEl(null)}>
+              Save
+            </Button>
+          </Box>
+        </Box>
+      </Popover>
+    </>
+  );
+}
 
 export function AppHeader({
   onToggleSidebar,
@@ -10,6 +340,50 @@ export function AppHeader({
   theme: 'light' | 'dark';
   onToggleTheme: () => void;
 }) {
+  const { range, setRange } = useGlobalDate();
+  const muiTheme = useMemo(
+    () =>
+      createTheme({
+        palette: {
+          mode: theme,
+          primary:
+            theme === 'dark'
+              ? { main: '#ffffff', contrastText: '#000000' }
+              : { main: '#000000', contrastText: '#ffffff' },
+          background:
+            theme === 'dark'
+              ? { default: '#000000', paper: '#0b0b0b' }
+              : { default: '#ffffff', paper: '#ffffff' },
+          text:
+            theme === 'dark'
+              ? { primary: '#ffffff', secondary: 'rgba(255,255,255,0.72)' }
+              : { primary: '#000000', secondary: 'rgba(0,0,0,0.72)' },
+          divider: theme === 'dark' ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.18)',
+        },
+        shape: { borderRadius: 12 },
+        components: {
+          MuiOutlinedInput: {
+            styleOverrides: {
+              root: {
+                backgroundColor: theme === 'dark' ? '#0b0b0b' : '#ffffff',
+              },
+              notchedOutline: {
+                borderColor: theme === 'dark' ? 'rgba(255,255,255,0.28)' : 'rgba(0,0,0,0.28)',
+              },
+            },
+          },
+          MuiPaper: {
+            styleOverrides: {
+              root: {
+                backgroundImage: 'none',
+              },
+            },
+          },
+        },
+      }),
+    [theme]
+  );
+
   return (
     <header className="shrink-0 px-2 sm:px-4 pt-2 sm:pt-3 mb-2 safe-top">
       <div
@@ -76,6 +450,12 @@ export function AppHeader({
               </span>
               <span className="text-[9px] text-[var(--text-muted)] font-bold">K</span>
             </div>
+          </div>
+
+          <div className="hidden md:block shrink-0">
+            <ThemeProvider theme={muiTheme}>
+              <HeaderRangePicker value={range} onChange={setRange} />
+            </ThemeProvider>
           </div>
 
           <div

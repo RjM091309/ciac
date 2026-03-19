@@ -24,6 +24,7 @@ export type AppView =
   | 'settings:checklist';
 
 type Theme = 'light' | 'dark';
+type ThemeMode = 'system' | 'manual';
 
 const MOBILE_BREAKPOINT = 768;
 const DESKTOP_BREAKPOINT = 1024; // tablet = 768..1023, desktop = 1024+
@@ -53,12 +54,22 @@ export function AppLayout({
     typeof window !== 'undefined' ? getSidebarDefaultCollapsed(window.innerWidth) : true
   );
 
+  const getSystemTheme = (): Theme => {
+    if (typeof window === 'undefined') return 'dark';
+    return window.matchMedia?.('(prefers-color-scheme: dark)')?.matches ? 'dark' : 'light';
+  };
+
+  const [themeMode, setThemeMode] = useState<ThemeMode>(() => {
+    if (typeof window === 'undefined') return 'system';
+    const storedMode = window.localStorage.getItem('themeMode');
+    return storedMode === 'manual' ? 'manual' : 'system';
+  });
+
   const [theme, setTheme] = useState<Theme>(() => {
     if (typeof window === 'undefined') return 'dark';
     const stored = window.localStorage.getItem('theme');
     if (stored === 'light' || stored === 'dark') return stored;
-    // Default to dark mode on first visit regardless of system preference
-    return 'dark';
+    return getSystemTheme();
   });
 
   useEffect(() => {
@@ -78,6 +89,17 @@ export function AppLayout({
     };
   }, []);
 
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const mq = window.matchMedia?.('(prefers-color-scheme: dark)');
+    if (!mq) return;
+    const onChange = () => {
+      if (themeMode === 'system') setTheme(getSystemTheme());
+    };
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, [themeMode]);
+
   useLayoutEffect(() => {
     if (typeof document === 'undefined') return;
     const root = document.documentElement;
@@ -87,11 +109,15 @@ export function AppLayout({
       root.classList.remove('dark');
     }
     window.localStorage.setItem('theme', theme);
-  }, [theme]);
+    window.localStorage.setItem('themeMode', themeMode);
+  }, [theme, themeMode]);
 
   const closeSidebar = () => setSidebarCollapsed(true);
   const toggleSidebar = () => setSidebarCollapsed((prev) => !prev);
-  const toggleTheme = () => setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'));
+  const toggleTheme = () => {
+    setThemeMode('manual');
+    setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'));
+  };
 
   return (
     <div
