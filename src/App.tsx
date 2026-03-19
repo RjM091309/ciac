@@ -8,6 +8,7 @@ import { UsersManagement } from './components/settings/UsersManagement';
 import { ProponentsManagement } from './components/proponent/ProponentsManagement';
 import { RequirementsManagement } from './components/applications/Requirements';
 import { RequirementCategoriesManagement } from './components/applications/RequirementCategories';
+import { ApplicationsWorkflow } from './components/applications/ApplicationsWorkflow';
 import { InspectionTypesManagement } from './components/FileMaintenance/InspectionTypes';
 import { ComplianceTypesManagement } from './components/FileMaintenance/ComplianceTypes';
 import { LoginPage } from './components/auth/LoginPage';
@@ -199,6 +200,10 @@ export default function App() {
               <Dashboard />
             ) : view === 'settings:users' ? (
               <UsersManagement />
+            ) : view === 'applications:new' ? (
+              <ApplicationsWorkflow renewalMode={false} />
+            ) : view === 'applications:renewals' ? (
+              <ApplicationsWorkflow renewalMode={true} />
             ) : view === 'applications:requirements' ? (
               <RequirementsManagement />
             ) : view === 'settings:proponents' ? (
