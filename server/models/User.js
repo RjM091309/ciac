@@ -244,6 +244,18 @@ async function deactivateUser(id) {
   return await getUserById(id);
 }
 
+async function reactivateUser(id) {
+  await updateData(
+    `
+    UPDATE users
+    SET is_active = 1, updated_at = GETDATE()
+    WHERE id = @param0
+    `,
+    [id]
+  );
+  return await getUserById(id);
+}
+
 module.exports = {
   ensureSchema,
   listUsers,
@@ -251,5 +263,6 @@ module.exports = {
   createUser,
   updateUser,
   deactivateUser,
+  reactivateUser,
 };
 

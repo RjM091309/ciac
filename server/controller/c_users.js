@@ -70,3 +70,18 @@ exports.deactivate = async (req, res) => {
   }
 };
 
+exports.reactivate = async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ success: false, message: "Invalid id" });
+
+    const row = await User.reactivateUser(id);
+    if (!row) return res.status(404).json({ success: false, message: "User not found" });
+
+    return res.json({ success: true, data: row });
+  } catch (error) {
+    console.error("Reactivate user error:", error);
+    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+  }
+};
+

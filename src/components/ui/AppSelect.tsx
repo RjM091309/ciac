@@ -12,13 +12,14 @@ type AppSelectProps = {
   placeholder?: string;
   isDisabled?: boolean;
   isClearable?: boolean;
+  compact?: boolean;
   onChange: (value: string) => void;
 };
 
-const styles: StylesConfig<AppSelectOption, false> = {
+const createStyles = (compact: boolean): StylesConfig<AppSelectOption, false> => ({
   control: (base, state) => ({
     ...base,
-    minHeight: 40,
+    minHeight: compact ? 32 : 40,
     backgroundColor: 'transparent',
     borderColor: state.isFocused ? 'var(--nav-active-bg)' : 'var(--input-border)',
     boxShadow: 'none',
@@ -28,7 +29,7 @@ const styles: StylesConfig<AppSelectOption, false> = {
   }),
   valueContainer: (base) => ({
     ...base,
-    padding: '0 10px',
+    padding: compact ? '0 8px' : '0 10px',
   }),
   input: (base) => ({
     ...base,
@@ -37,12 +38,12 @@ const styles: StylesConfig<AppSelectOption, false> = {
   placeholder: (base) => ({
     ...base,
     color: 'var(--text-muted)',
-    fontSize: 14,
+    fontSize: compact ? 12 : 14,
   }),
   singleValue: (base) => ({
     ...base,
     color: 'var(--text)',
-    fontSize: 14,
+    fontSize: compact ? 12 : 14,
   }),
   menuPortal: (base) => ({
     ...base,
@@ -57,7 +58,7 @@ const styles: StylesConfig<AppSelectOption, false> = {
   }),
   option: (base, state) => ({
     ...base,
-    fontSize: 13,
+    fontSize: compact ? 12 : 13,
     backgroundColor: state.isSelected ? 'var(--nav-active-bg)' : state.isFocused ? 'var(--selected-bg)' : 'transparent',
     color: state.isSelected ? 'var(--nav-active-text)' : 'var(--text)',
     cursor: 'pointer',
@@ -67,15 +68,17 @@ const styles: StylesConfig<AppSelectOption, false> = {
   }),
   dropdownIndicator: (base) => ({
     ...base,
+    padding: compact ? 6 : 8,
     color: 'var(--text-muted)',
     '&:hover': { color: 'var(--text)' },
   }),
   clearIndicator: (base) => ({
     ...base,
+    padding: compact ? 6 : 8,
     color: 'var(--text-muted)',
     '&:hover': { color: 'var(--text)' },
   }),
-};
+});
 
 export function AppSelect({
   options,
@@ -83,6 +86,7 @@ export function AppSelect({
   placeholder = 'Select...',
   isDisabled = false,
   isClearable = true,
+  compact = false,
   onChange,
 }: AppSelectProps) {
   const selected = options.find((option) => option.value === value) ?? null;
@@ -91,7 +95,7 @@ export function AppSelect({
     <Select<AppSelectOption, false>
       options={options}
       value={selected}
-      styles={styles}
+      styles={createStyles(compact)}
       menuPortalTarget={typeof document !== 'undefined' ? document.body : null}
       placeholder={placeholder}
       isDisabled={isDisabled}

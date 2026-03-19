@@ -8,6 +8,7 @@ router.get("/:id", requireRole("admin"), usersController.getById);
 router.post("/", requireRole("admin"), usersController.create);
 router.put("/:id", requireRole("admin"), usersController.update);
 router.patch("/:id/deactivate", requireRole("admin"), usersController.deactivate);
+router.patch("/:id/reactivate", requireRole("admin"), usersController.reactivate);
 
 module.exports = router;
 

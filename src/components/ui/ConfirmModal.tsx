@@ -36,7 +36,9 @@ export function ConfirmModal({
         </div>
         <div className="mt-4 flex items-center justify-end gap-2">
           <button
-            className="rounded-lg px-3 py-2 text-sm font-semibold border"
+            className={`rounded-lg px-3 py-2 text-sm font-semibold border ${
+              loading ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
+            }`}
             style={{ borderColor: 'var(--border-subtle)', color: 'var(--text)' }}
             onClick={onCancel}
             disabled={loading}
@@ -44,7 +46,9 @@ export function ConfirmModal({
             {cancelText}
           </button>
           <button
-            className="rounded-lg px-3 py-2 text-sm font-semibold"
+            className={`rounded-lg px-3 py-2 text-sm font-semibold ${
+              loading ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
+            }`}
             style={{
               backgroundColor: danger ? '#dc2626' : 'var(--nav-active-bg)',
               color: '#ffffff',

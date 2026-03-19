@@ -6,6 +6,7 @@ type SidePanelProps = {
   title: string;
   subtitle?: string;
   saving?: boolean;
+  saveDisabled?: boolean;
   saveLabel?: string;
   widthClassName?: string;
   onClose: () => void;
@@ -18,6 +19,7 @@ export function SidePanel({
   title,
   subtitle,
   saving = false,
+  saveDisabled = false,
   saveLabel = 'Save',
   widthClassName = 'max-w-[44rem]',
   onClose,
@@ -54,7 +56,9 @@ export function SidePanel({
                   {subtitle ? <div className="text-xs text-secondary mt-0.5">{subtitle}</div> : null}
                 </div>
                 <button
-                  className="rounded-lg px-2 py-1 text-xs border"
+                  className={`rounded-lg px-2 py-1 text-xs border ${
+                    saving ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
+                  }`}
                   style={{ borderColor: 'var(--border-subtle)', color: 'var(--text-muted)' }}
                   onClick={onClose}
                   disabled={saving}
@@ -67,7 +71,9 @@ export function SidePanel({
 
               <div className="border-t pt-3 flex items-center justify-end gap-2" style={{ borderColor: 'var(--input-border)' }}>
                 <button
-                  className="rounded-lg px-3 py-2 text-sm font-semibold border"
+                  className={`rounded-lg px-3 py-2 text-sm font-semibold border ${
+                    saving ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
+                  }`}
                   style={{ borderColor: 'var(--border-subtle)', color: 'var(--text)' }}
                   onClick={onClose}
                   disabled={saving}
@@ -75,10 +81,12 @@ export function SidePanel({
                   Cancel
                 </button>
                 <button
-                  className="rounded-lg px-3 py-2 text-sm font-semibold"
+                  className={`rounded-lg px-3 py-2 text-sm font-semibold ${
+                    saving || saveDisabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
+                  }`}
                   style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
                   onClick={onSave}
-                  disabled={saving}
+                  disabled={saving || saveDisabled}
                 >
                   {saving ? 'Saving…' : saveLabel}
                 </button>
