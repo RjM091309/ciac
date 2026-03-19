@@ -8,6 +8,7 @@ import { UsersManagement } from './components/settings/UsersManagement';
 import { ProponentsManagement } from './components/proponent/ProponentsManagement';
 import { RequirementCategoriesManagement } from './components/FileMaintenance/RequirementCategories';
 import { InspectionTypesManagement } from './components/FileMaintenance/InspectionTypes';
+import { ComplianceTypesManagement } from './components/FileMaintenance/ComplianceTypes';
 import { LoginPage } from './components/auth/LoginPage';
 import { Toaster } from 'sonner';
 
@@ -40,6 +41,7 @@ const VIEW_TO_PATH: Record<AppView, string> = {
   'settings:proponents': '/settings/proponents',
   'settings:requirement-categories': '/settings/requirement-categories',
   'settings:inspection-types': '/settings/inspection-types',
+  'settings:compliance-types': '/settings/compliance-types',
   'settings:checklist': '/settings/checklist',
 };
 
@@ -201,6 +203,8 @@ export default function App() {
               <RequirementCategoriesManagement />
             ) : view === 'settings:inspection-types' ? (
               <InspectionTypesManagement />
+            ) : view === 'settings:compliance-types' ? (
+              <ComplianceTypesManagement />
             ) : (
               <SectionLanding view={view} />
             )}
@@ -571,6 +575,25 @@ const LANDING_CONFIG: Record<AppView, LandingConfig> = {
         ['PRE', 'Pre-operation', 'Pre-operation inspection', 'Active'],
         ['POST', 'Post-operation', 'Post-operation inspection', 'Active'],
         ['RND', 'Random', 'Random spot check', 'Inactive'],
+      ],
+    },
+  },
+  'settings:compliance-types': {
+    title: 'Compliance Types',
+    description: 'Manage compliance types for file maintenance.',
+    badge: 'File Maintenance',
+    icon: FileCheck,
+    stats: [
+      { label: 'Total Types', value: '—' },
+      { label: 'Active', value: '—' },
+      { label: 'Deactivated', value: '—' },
+    ],
+    table: {
+      columns: ['Code', 'Name', 'Description', 'Status'],
+      rows: [
+        ['ENV', 'Environmental', 'Environmental compliance requirement', 'Active'],
+        ['FIRE', 'Fire Safety', 'Fire safety compliance requirement', 'Active'],
+        ['SAN', 'Sanitary', 'Sanitary compliance requirement', 'Inactive'],
       ],
     },
   },

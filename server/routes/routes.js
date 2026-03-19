@@ -30,6 +30,7 @@ module.exports = function pageRouter(app) {
   app.use("/api/proponents", require("./r_proponents"));
   app.use("/api/requirement-categories", require("./r_requirement_categories"));
   app.use("/api/inspection-types", require("./r_inspection_types"));
+  app.use("/api/compliance-types", require("./r_compliance_types"));
   app.use("/", router);
 };
 

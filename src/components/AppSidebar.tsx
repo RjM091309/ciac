@@ -399,6 +399,11 @@ export function AppSidebar({
                   active={view === 'settings:inspection-types'}
                   onClick={() => onViewChange('settings:inspection-types')}
                 />
+                <SidebarSubItem
+                  label="Compliance Types"
+                  active={view === 'settings:compliance-types'}
+                  onClick={() => onViewChange('settings:compliance-types')}
+                />
               </SidebarDropdown>
             </div>
           </SidebarGroup>
