@@ -5,6 +5,7 @@ import {defineConfig, loadEnv} from 'vite';
 
 export default defineConfig(({mode}) => {
   const env = loadEnv(mode, '.', '');
+  const backendTarget = env.VITE_BACKEND_URL || 'http://127.0.0.1:2501';
   return {
     plugins: [react(), tailwindcss()],
     define: {
@@ -21,7 +22,7 @@ export default defineConfig(({mode}) => {
       strictPort: true,
       proxy: {
         '/api': {
-          target: 'http://localhost:3100',
+          target: backendTarget,
           changeOrigin: true,
           secure: false,
         },

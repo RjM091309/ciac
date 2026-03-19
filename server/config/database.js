@@ -5,6 +5,11 @@ function isTrustedConnection() {
   return String(process.env.DB_TRUSTED_CONNECTION || "").toLowerCase() === "true";
 }
 
+function getOdbcDriver() {
+  // Ubuntu hosts commonly have msodbcsql18 installed.
+  return process.env.DB_ODBC_DRIVER || "ODBC Driver 18 for SQL Server";
+}
+
 const sql = isTrustedConnection() ? require("mssql/msnodesqlv8") : require("mssql");
 
 function getDbConfig() {
@@ -12,7 +17,7 @@ function getDbConfig() {
     // Windows Authentication (Trusted Connection)
     // Requires msnodesqlv8 driver.
     return {
-      connectionString: `Driver={ODBC Driver 17 for SQL Server};Server=${process.env.DB_SERVER};Database=${process.env.DB_NAME};Trusted_Connection=Yes;TrustServerCertificate=Yes;`,
+      connectionString: `Driver={${getOdbcDriver()}};Server=${process.env.DB_SERVER};Database=${process.env.DB_NAME};Trusted_Connection=Yes;TrustServerCertificate=Yes;`,
     };
   }
 
