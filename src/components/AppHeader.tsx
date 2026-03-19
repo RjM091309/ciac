@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Bell, ChevronRight, Moon, Search, SunMedium, Zap } from 'lucide-react';
+import { Bell, CalendarDays, ChevronRight, Moon, Search, SunMedium, Zap } from 'lucide-react';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import { Box, Button, Popover, TextField, Typography } from '@mui/material';
 import { alpha, styled } from '@mui/material/styles';
@@ -131,9 +131,11 @@ function detectPreset(range: [Date | null, Date | null]): PresetKey {
 function HeaderRangePicker({
   value,
   onChange,
+  compact = false,
 }: {
   value: [Date | null, Date | null];
   onChange: (next: [Date | null, Date | null]) => void;
+  compact?: boolean;
 }) {
   const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
   const open = Boolean(anchorEl);
@@ -154,36 +156,51 @@ function HeaderRangePicker({
 
   return (
     <>
-      <TextField
-        label="Date range"
-        value={rangeText}
-        size="small"
-        onClick={(e) => setAnchorEl(e.currentTarget)}
-        inputProps={{ readOnly: true }}
-        sx={{
-          minWidth: 190,
-          cursor: 'pointer',
-          '& .MuiInputBase-root': {
-            height: 36, // match header search bar (h-9)
-            borderRadius: 9999,
-            backgroundColor: (t) =>
-              t.palette.mode === 'dark'
-                ? 'color-mix(in oklab, var(--control-bg) 70%, transparent)'
-                : t.palette.background.paper,
-          },
-          '& .MuiInputBase-input': {
-            whiteSpace: 'nowrap',
-            paddingTop: 0,
-            paddingBottom: 0,
-            fontSize: 12, // match search bar's text-xs
-            opacity: isEmpty ? 0.72 : 1,
-          },
-          '& .MuiOutlinedInput-notchedOutline': {
-            borderColor: (t) =>
-              t.palette.mode === 'dark' ? 'rgba(255,255,255,0.22)' : 'rgba(0,0,0,0.22)',
-          },
-        }}
-      />
+      {compact ? (
+        <button
+          type="button"
+          onClick={(e) => setAnchorEl(e.currentTarget)}
+          aria-label="Open date range picker"
+          className="h-9 w-9 inline-flex items-center justify-center rounded-full text-[var(--text-muted)] hover:text-[var(--text)] transition-colors shrink-0"
+          style={{
+            backgroundColor: 'color-mix(in oklab, var(--control-bg) 88%, transparent)',
+          }}
+        >
+          <CalendarDays size={16} />
+        </button>
+      ) : (
+        <TextField
+          label="Date range"
+          value={rangeText}
+          size="small"
+          onClick={(e) => setAnchorEl(e.currentTarget)}
+          inputProps={{ readOnly: true }}
+          sx={{
+            minWidth: { xs: 0, md: 170, lg: 190 },
+            width: { xs: 0, md: 170, lg: 190 },
+            cursor: 'pointer',
+            '& .MuiInputBase-root': {
+              height: 36, // match header search bar (h-9)
+              borderRadius: 9999,
+              backgroundColor: (t) =>
+                t.palette.mode === 'dark'
+                  ? 'color-mix(in oklab, var(--control-bg) 70%, transparent)'
+                  : t.palette.background.paper,
+            },
+            '& .MuiInputBase-input': {
+              whiteSpace: 'nowrap',
+              paddingTop: 0,
+              paddingBottom: 0,
+              fontSize: 12, // match search bar's text-xs
+              opacity: isEmpty ? 0.72 : 1,
+            },
+            '& .MuiOutlinedInput-notchedOutline': {
+              borderColor: (t) =>
+                t.palette.mode === 'dark' ? 'rgba(255,255,255,0.22)' : 'rgba(0,0,0,0.22)',
+            },
+          }}
+        />
+      )}
 
       <Popover
         open={open}
@@ -193,38 +210,61 @@ function HeaderRangePicker({
         transformOrigin={{ vertical: 'top', horizontal: 'right' }}
         slotProps={{
           paper: {
-            sx: { overflow: 'hidden', borderRadius: 2, width: 520, maxWidth: 'calc(100vw - 16px)' },
+            sx: {
+              overflow: 'hidden',
+              borderRadius: 2,
+              width: { xs: 'calc(100vw - 12px)', sm: 500, md: 520 },
+              maxWidth: 'calc(100vw - 16px)',
+              maxHeight: { xs: 'min(88vh, 640px)', sm: 'none' },
+            },
           },
         }}
       >
         <Box
           sx={(t) => ({
-            px: 2.25,
-            pt: 1.75,
-            pb: 1.5,
+            px: { xs: 1.5, sm: 2.25 },
+            pt: { xs: 1.25, sm: 1.75 },
+            pb: { xs: 1, sm: 1.5 },
             bgcolor: t.palette.mode === 'dark' ? '#000000' : t.palette.background.paper,
             color: t.palette.mode === 'dark' ? '#ffffff' : t.palette.text.primary,
           })}
         >
           <Typography
             variant="overline"
-            sx={{ opacity: 0.9, letterSpacing: '0.12em', fontWeight: 700, lineHeight: 1.2 }}
+            sx={{ opacity: 0.9, letterSpacing: '0.12em', fontWeight: 700, lineHeight: 1.2, fontSize: { xs: 10, sm: 11 } }}
           >
             SELECTED RANGE
           </Typography>
-          <Typography variant="h4" sx={{ fontWeight: 400, mt: 0.5, lineHeight: 1.1 }}>
+          <Typography variant="h4" sx={{ fontWeight: 400, mt: 0.5, lineHeight: 1.1, fontSize: { xs: '1.1rem', sm: '2rem' } }}>
             {rangeText}
           </Typography>
         </Box>
 
-        <Box sx={{ display: 'grid', gridTemplateColumns: '132px 1fr', minHeight: 312 }}>
+        <Box
+          sx={{
+            display: 'grid',
+            gridTemplateColumns: { xs: '1fr', sm: '132px 1fr' },
+            minHeight: { xs: 'auto', sm: 312 },
+            maxHeight: { xs: 'calc(88vh - 160px)', sm: 'none' },
+            overflowY: { xs: 'auto', sm: 'visible' },
+          }}
+        >
           <Box
             sx={{
               p: 1,
-              borderRight: (t) =>
-                `1px solid ${t.palette.mode === 'dark' ? 'rgba(255,255,255,0.14)' : 'rgba(0,0,0,0.14)'}`,
+              borderRight: {
+                xs: 'none',
+                sm: (t) =>
+                  `1px solid ${t.palette.mode === 'dark' ? 'rgba(255,255,255,0.14)' : 'rgba(0,0,0,0.14)'}`,
+              },
+              borderBottom: {
+                xs: (t) =>
+                  `1px solid ${t.palette.mode === 'dark' ? 'rgba(255,255,255,0.14)' : 'rgba(0,0,0,0.14)'}`,
+                sm: 'none',
+              },
               display: 'flex',
-              flexDirection: 'column',
+              flexDirection: { xs: 'row', sm: 'column' },
+              flexWrap: { xs: 'wrap', sm: 'nowrap' },
               gap: 0.5,
             }}
           >
@@ -246,6 +286,8 @@ function HeaderRangePicker({
                     borderRadius: 0.5,
                     minHeight: 34,
                     fontSize: 13,
+                    flex: { xs: '1 1 calc(50% - 4px)', sm: 'initial' },
+                    minWidth: 0,
                   }}
                 >
                   {preset.label}
@@ -271,6 +313,24 @@ function HeaderRangePicker({
                 return;
               }
               onChange([s, day]);
+            }}
+            sx={{
+              width: { xs: '100%', sm: 'auto' },
+              maxWidth: '100%',
+              mx: { xs: 'auto', sm: 0 },
+              '& .MuiPickersCalendarHeader-root': { pl: { xs: 1, sm: 1.5 }, pr: { xs: 1, sm: 1.5 } },
+              '& .MuiPickersCalendarHeader-label': { fontSize: { xs: '1.1rem', sm: '1.25rem' }, fontWeight: 600 },
+              '& .MuiDayCalendar-header': { px: { xs: 0.5, sm: 1 } },
+              '& .MuiDayCalendar-weekContainer': { mx: { xs: 0, sm: 'auto' } },
+              '& .MuiDayCalendar-weekDayLabel': {
+                width: { xs: 32, sm: 36 },
+                fontSize: { xs: 11, sm: 12 },
+              },
+              '& .MuiPickersDay-root': {
+                width: { xs: 32, sm: 36 },
+                height: { xs: 32, sm: 36 },
+                fontSize: { xs: 13, sm: 14 },
+              },
             }}
             slots={{
               day: (dayProps) => {
@@ -303,25 +363,25 @@ function HeaderRangePicker({
         <Box
           sx={{
             display: 'flex',
-            justifyContent: 'space-between',
+            justifyContent: 'flex-end',
             alignItems: 'center',
             gap: 1,
-            px: 1.5,
-            pb: 1.25,
+            px: { xs: 1, sm: 1.5 },
+            pb: { xs: 1, sm: 1.25 },
+            pt: { xs: 0.5, sm: 0 },
           }}
         >
-          <Box />
-
-          <Box sx={{ display: 'flex', gap: 1 }}>
+          <Box sx={{ display: 'flex', gap: 1, width: { xs: '100%', sm: 'auto' } }}>
             <Button
               size="small"
+              fullWidth
               onClick={() => {
                 onChange([null, null]);
               }}
             >
               Clear
             </Button>
-            <Button size="small" variant="contained" onClick={() => setAnchorEl(null)}>
+            <Button size="small" variant="contained" onClick={() => setAnchorEl(null)} fullWidth>
               Save
             </Button>
           </Box>
@@ -360,6 +420,9 @@ export function AppHeader({
               : { primary: '#000000', secondary: 'rgba(0,0,0,0.72)' },
           divider: theme === 'dark' ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.18)',
         },
+        typography: {
+          fontFamily: '"Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif',
+        },
         shape: { borderRadius: 12 },
         components: {
           MuiOutlinedInput: {
@@ -385,9 +448,9 @@ export function AppHeader({
   );
 
   return (
-    <header className="shrink-0 px-2 sm:px-4 pt-2 sm:pt-3 mb-2 safe-top">
+    <header className="shrink-0 px-2 sm:px-3 md:px-4 pt-2 sm:pt-2.5 md:pt-3 mb-2 safe-top">
       <div
-        className="min-h-12 sm:min-h-14 rounded-2xl backdrop-blur-xl px-3 sm:px-4 md:px-5 flex items-center justify-between gap-2 sm:gap-3 flex-nowrap"
+        className="min-h-11 sm:min-h-12 md:min-h-14 rounded-2xl backdrop-blur-xl px-2.5 sm:px-3 md:px-5 flex items-center justify-between gap-1.5 sm:gap-2 md:gap-3 flex-nowrap"
         style={{
           backgroundColor: 'color-mix(in oklab, var(--surface) 65%, transparent)',
           boxShadow:
@@ -395,12 +458,12 @@ export function AppHeader({
         }}
       >
         {/* Left: hamburger + logo */}
-        <div className="flex items-center gap-2 sm:gap-3 min-w-0 shrink-0">
+        <div className="flex items-center gap-1.5 sm:gap-2 md:gap-3 min-w-0 shrink">
           <button
             type="button"
             onClick={onToggleSidebar}
             aria-label="Toggle sidebar"
-            className="h-10 w-10 sm:h-9 sm:w-9 rounded-full flex flex-col items-center justify-center gap-[3px] text-[var(--text-muted)] hover:text-[var(--text)] transition-colors shrink-0"
+            className="h-9 w-9 sm:h-9 sm:w-9 rounded-full flex flex-col items-center justify-center gap-[3px] text-[var(--text-muted)] hover:text-[var(--text)] transition-colors shrink-0"
             style={{
               backgroundColor: 'color-mix(in oklab, var(--control-bg) 88%, transparent)',
             }}
@@ -419,14 +482,14 @@ export function AppHeader({
           >
             <Zap className="text-[var(--foreground)]" size={14} fill="currentColor" />
           </div>
-          <span className="text-xs sm:text-sm font-bold tracking-tight text-[var(--text)] truncate">
+          <span className="text-[11px] sm:text-sm font-bold tracking-tight text-[var(--text)] truncate max-w-[4.25rem] sm:max-w-none">
             3Core
           </span>
         </div>
 
         {/* Right: search (desktop) + actions + profile */}
-        <div className="flex items-center gap-1 sm:gap-2 md:gap-3 flex-shrink-0 min-w-0">
-          <div className="relative group hidden sm:block w-full sm:w-44 md:w-56 lg:w-72 max-w-[200px] md:max-w-none">
+        <div className="flex items-center gap-1 sm:gap-2 md:gap-2.5 flex-shrink min-w-0">
+          <div className="relative group hidden sm:block w-full sm:w-36 md:w-44 lg:w-64 xl:w-72 max-w-[170px] lg:max-w-none">
             <Search
               className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)] group-focus-within:text-[var(--text)] transition-colors pointer-events-none"
               size={14}
@@ -434,13 +497,13 @@ export function AppHeader({
             <input
               type="text"
               placeholder="Search..."
-              className="h-9 rounded-full pl-9 pr-14 md:pr-16 text-xs w-full focus:outline-none focus:ring-1 focus:ring-[var(--border)] text-[var(--text)] placeholder:text-[var(--text-muted)] transition-all"
+              className="h-9 rounded-full pl-9 pr-10 lg:pr-16 text-xs w-full focus:outline-none focus:ring-1 focus:ring-[var(--border)] text-[var(--text)] placeholder:text-[var(--text-muted)] transition-all"
               style={{
                 backgroundColor: 'color-mix(in oklab, var(--control-bg) 70%, transparent)',
               }}
             />
             <div
-              className="absolute right-2 top-1/2 -translate-y-1/2 hidden md:flex items-center gap-1 px-2 py-1 rounded-full"
+              className="absolute right-2 top-1/2 -translate-y-1/2 hidden lg:flex items-center gap-1 px-2 py-1 rounded-full"
               style={{
                 backgroundColor: 'color-mix(in oklab, var(--surface-hover) 80%, transparent)',
               }}
@@ -452,7 +515,13 @@ export function AppHeader({
             </div>
           </div>
 
-          <div className="hidden md:block shrink-0">
+          <div className="block xl:hidden shrink-0">
+            <ThemeProvider theme={muiTheme}>
+              <HeaderRangePicker value={range} onChange={setRange} compact />
+            </ThemeProvider>
+          </div>
+
+          <div className="hidden xl:block shrink-0 max-w-[190px] lg:max-w-none">
             <ThemeProvider theme={muiTheme}>
               <HeaderRangePicker value={range} onChange={setRange} />
             </ThemeProvider>
@@ -472,7 +541,7 @@ export function AppHeader({
           <button
             aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
             onClick={onToggleTheme}
-            className="h-10 w-10 sm:h-9 sm:w-9 inline-flex items-center justify-center rounded-full text-[var(--text-muted)] hover:text-[var(--text)] transition-colors shrink-0 cursor-pointer"
+            className="h-9 w-9 sm:h-9 sm:w-9 inline-flex items-center justify-center rounded-full text-[var(--text-muted)] hover:text-[var(--text)] transition-colors shrink-0 cursor-pointer"
             style={{
               backgroundColor: 'color-mix(in oklab, var(--control-bg) 88%, transparent)',
             }}
@@ -482,13 +551,13 @@ export function AppHeader({
 
           <button
             aria-label="Notifications"
-            className="h-10 w-10 sm:h-9 sm:w-9 inline-flex items-center justify-center rounded-full text-[var(--text-muted)] hover:text-[var(--text)] transition-colors relative shrink-0"
+            className="h-9 w-9 sm:h-9 sm:w-9 inline-flex items-center justify-center rounded-full text-[var(--text-muted)] hover:text-[var(--text)] transition-colors relative shrink-0"
             style={{
               backgroundColor: 'color-mix(in oklab, var(--control-bg) 88%, transparent)',
             }}
           >
             <Bell size={16} />
-            <span className="absolute top-0 right-0 min-w-[18px] h-[18px] px-1 bg-rose-500 rounded-full flex items-center justify-center text-[10px] font-extrabold text-white shadow-[0_6px_14px_rgba(0,0,0,0.35)]">
+            <span className="absolute -top-0.5 -right-0.5 min-w-[17px] h-[17px] px-1 bg-rose-500 rounded-full flex items-center justify-center text-[9px] font-extrabold text-white shadow-[0_6px_14px_rgba(0,0,0,0.35)]">
               11
             </span>
           </button>
@@ -500,7 +569,7 @@ export function AppHeader({
           />
 
           <div
-            className="h-9 min-w-[36px] flex items-center gap-1.5 sm:gap-2 pl-1 pr-2 sm:pr-2.5 rounded-full cursor-pointer group transition-colors shrink-0 text-[var(--text-muted)] hover:text-[var(--text)]"
+            className="h-9 min-w-[32px] flex items-center gap-1.5 sm:gap-2 pl-1 pr-1.5 sm:pr-2.5 rounded-full cursor-pointer group transition-colors shrink-0 text-[var(--text-muted)] hover:text-[var(--text)]"
             style={{
               backgroundColor: 'color-mix(in oklab, var(--control-bg) 88%, transparent)',
             }}
@@ -513,7 +582,7 @@ export function AppHeader({
             >
             
             </div>
-            <span className="text-xs font-bold hidden sm:inline truncate max-w-[4rem] md:max-w-none">
+            <span className="text-xs font-bold hidden sm:inline truncate max-w-[3.75rem] md:max-w-[5rem] lg:max-w-none">
               3CORE
             </span>
             <ChevronRight size={12} className="rotate-90 opacity-70 shrink-0 hidden sm:block" />
