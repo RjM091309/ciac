@@ -101,12 +101,12 @@ export function LoginPage(props: { backendUrl: string; onLoggedIn: (user: { id: 
 
   return (
     <div
-      className="min-h-screen flex flex-col lg:flex-row overflow-hidden"
+      className="min-h-screen flex flex-col xl:flex-row overflow-x-hidden transition-all duration-300"
       style={{ backgroundColor: 'var(--background)', color: 'var(--foreground)' }}
     >
       <button
         onClick={() => setTheme((p) => (p === 'dark' ? 'light' : 'dark'))}
-        className="fixed top-6 right-6 p-3 rounded-full control-btn touch-target z-50 backdrop-blur-md"
+        className="fixed top-3 right-3 sm:top-4 sm:right-4 xl:top-6 xl:right-6 p-2.5 sm:p-3 rounded-full control-btn touch-target z-50 backdrop-blur-md"
         style={{
           backgroundColor: 'color-mix(in oklab, var(--surface) 78%, transparent)',
           color: 'var(--text)',
@@ -120,7 +120,28 @@ export function LoginPage(props: { backendUrl: string; onLoggedIn: (user: { id: 
       </button>
 
       <div
-        className="hidden lg:flex lg:w-1/2 relative items-center justify-center p-12 overflow-hidden border-r"
+        className="xl:hidden w-full border-b px-4 sm:px-6 py-4 sm:py-5 pr-16 sm:pr-20"
+        style={{
+          backgroundColor: 'var(--surface)',
+          borderColor: 'var(--border)',
+        }}
+      >
+        <div className="flex items-center gap-2.5">
+          <div
+            className="w-8 h-8 rounded-lg flex items-center justify-center"
+            style={{
+              backgroundColor: 'var(--nav-active-bg)',
+              color: 'var(--nav-active-text)',
+            }}
+          >
+            <ShieldCheck size={18} />
+          </div>
+          <span className="text-sm sm:text-base font-bold tracking-tight uppercase">CIAC Portal</span>
+        </div>
+      </div>
+
+      <div
+        className="hidden xl:flex xl:w-1/2 relative items-center justify-center p-12 overflow-hidden border-r"
         style={{
           backgroundColor: 'var(--surface)',
           borderColor: 'var(--border)',
@@ -146,7 +167,7 @@ export function LoginPage(props: { backendUrl: string; onLoggedIn: (user: { id: 
               <span className="text-xl font-bold tracking-tighter uppercase">CIAC Portal</span>
             </div>
 
-            <h1 className="text-6xl xl:text-7xl font-bold leading-[0.9] tracking-tighter mb-8">
+            <h1 className="text-4xl md:text-5xl xl:text-6xl 2xl:text-7xl font-bold leading-[0.9] tracking-tighter mb-8">
               LOCATOR <br />
               <span className="text-secondary">COMPLIANCE</span> <br />
               SYSTEM.
@@ -177,20 +198,20 @@ export function LoginPage(props: { backendUrl: string; onLoggedIn: (user: { id: 
         </div>
       </div>
 
-      <div className="flex-1 flex items-center justify-center p-6 sm:p-12 lg:p-24 relative">
+      <div className="flex-1 grid place-items-center px-4 py-6 sm:px-8 sm:py-8 xl:p-24 relative">
         <motion.div
           initial={{ opacity: 0, scale: 0.95 }}
           animate={{ opacity: 1, scale: 1 }}
           transition={{ duration: 0.5, delay: 0.2 }}
-          className="w-full max-w-[420px]"
+          className="w-full max-w-[420px] min-w-0 self-center"
         >
-          <div className="mb-10">
-            <h2 className="text-4xl font-bold tracking-tight mb-3">Sign in</h2>
+          <div className="mb-7 sm:mb-10">
+            <h2 className="text-3xl sm:text-4xl font-bold tracking-tight mb-2 sm:mb-3">Sign in</h2>
             <p className="text-secondary">Welcome back to your workspace.</p>
           
           </div>
 
-          <div className="mb-6">
+          <div className="mb-5 sm:mb-6">
             <div className="grid grid-cols-2 gap-1">
               <button
                 type="button"
@@ -198,7 +219,7 @@ export function LoginPage(props: { backendUrl: string; onLoggedIn: (user: { id: 
                   setTab('password');
                   setMessage({ type: 'muted', text: '' });
                 }}
-                className="relative rounded-lg px-3 py-2 text-[14px] font-semibold tracking-tight transition-colors cursor-pointer"
+                className="relative rounded-lg px-2.5 sm:px-3 py-2.5 text-[12px] sm:text-[14px] leading-tight font-semibold tracking-tight transition-colors cursor-pointer min-h-[44px]"
                 style={{
                   color: tab === 'password' ? 'var(--text)' : 'var(--text-secondary)',
                 }}
@@ -221,7 +242,7 @@ export function LoginPage(props: { backendUrl: string; onLoggedIn: (user: { id: 
                   setUsername('');
                   setMessage({ type: 'muted', text: '' });
                 }}
-                className="relative rounded-lg px-3 py-2 text-[14px] font-semibold tracking-tight transition-colors cursor-pointer"
+                className="relative rounded-lg px-2.5 sm:px-3 py-2.5 text-[12px] sm:text-[14px] leading-tight font-semibold tracking-tight transition-colors cursor-pointer min-h-[44px]"
                 style={{
                   color: tab === 'otp' ? 'var(--text)' : 'var(--text-secondary)',
                 }}
@@ -238,7 +259,7 @@ export function LoginPage(props: { backendUrl: string; onLoggedIn: (user: { id: 
             </div>
           </div>
 
-          <form onSubmit={onSubmit} className="space-y-6" autoComplete="off">
+          <form onSubmit={onSubmit} className="space-y-5 sm:space-y-6" autoComplete="off">
             <AnimatePresence mode="wait">
               {tab === 'password' ? (
                 <motion.div
@@ -261,7 +282,7 @@ export function LoginPage(props: { backendUrl: string; onLoggedIn: (user: { id: 
                       placeholder="your.username"
                       value={username}
                       onChange={(e) => setUsername(e.target.value)}
-                      className="input-field w-full px-5 py-4 text-sm focus:border-primary transition-all duration-300"
+                      className="input-field w-full px-4 sm:px-5 py-3.5 sm:py-4 text-sm focus:border-primary transition-all duration-300"
                       required
                     />
                   </div>
@@ -286,13 +307,13 @@ export function LoginPage(props: { backendUrl: string; onLoggedIn: (user: { id: 
                         placeholder="••••••••"
                         value={password}
                         onChange={(e) => setPassword(e.target.value)}
-                        className="input-field w-full px-5 py-4 pr-14 text-sm focus:border-primary transition-all duration-300"
+                        className="input-field w-full px-4 sm:px-5 py-3.5 sm:py-4 pr-12 sm:pr-14 text-sm focus:border-primary transition-all duration-300"
                         required
                       />
                       <button
                         type="button"
                         onClick={() => setShowPassword((p) => !p)}
-                        className="absolute right-4 top-1/2 -translate-y-1/2 text-secondary hover:text-primary transition-colors p-2 cursor-pointer"
+                        className="absolute right-2.5 sm:right-4 top-1/2 -translate-y-1/2 text-secondary hover:text-primary transition-colors p-2 cursor-pointer min-h-[40px] min-w-[40px] flex items-center justify-center"
                         aria-label={showPassword ? 'Hide password' : 'Show password'}
                       >
                         {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
@@ -321,7 +342,7 @@ export function LoginPage(props: { backendUrl: string; onLoggedIn: (user: { id: 
                       placeholder="name@ciac.gov.ph or +63..."
                       value={otpTarget}
                       onChange={(e) => setOtpTarget(e.target.value)}
-                      className="input-field w-full px-5 py-4 text-sm focus:border-primary transition-all duration-300"
+                      className="input-field w-full px-4 sm:px-5 py-3.5 sm:py-4 text-sm focus:border-primary transition-all duration-300"
                       required
                     />
                   </div>
@@ -352,7 +373,7 @@ export function LoginPage(props: { backendUrl: string; onLoggedIn: (user: { id: 
                       placeholder="123456"
                       value={otp}
                       onChange={(e) => setOtp(e.target.value)}
-                      className="input-field w-full px-5 py-4 text-sm focus:border-primary transition-all duration-300"
+                      className="input-field w-full px-4 sm:px-5 py-3.5 sm:py-4 text-sm focus:border-primary transition-all duration-300"
                       required
                     />
                   </div>
@@ -363,7 +384,7 @@ export function LoginPage(props: { backendUrl: string; onLoggedIn: (user: { id: 
             <button
               type="submit"
               disabled={submitting}
-              className="w-full font-bold py-4 rounded-xl hover:scale-[1.02] active:scale-[0.98] transition-all flex items-center justify-center gap-3 disabled:opacity-70 disabled:cursor-not-allowed shadow-xl"
+              className="w-full font-bold py-3.5 sm:py-4 rounded-xl hover:scale-[1.02] active:scale-[0.98] transition-all flex items-center justify-center gap-3 disabled:opacity-70 disabled:cursor-not-allowed shadow-xl min-h-[48px]"
               style={{
                 backgroundColor: 'var(--nav-active-bg)',
                 color: 'var(--nav-active-text)',
@@ -393,12 +414,12 @@ export function LoginPage(props: { backendUrl: string; onLoggedIn: (user: { id: 
             </div>
           </form>
 
-          <p className="mt-12 text-center text-[10px] uppercase tracking-[0.2em] text-secondary opacity-60">
+          <p className="mt-8 sm:mt-12 text-center text-[10px] uppercase tracking-[0.2em] text-secondary opacity-60">
             Protected by HTTP-only cookies
           </p>
         </motion.div>
 
-        <div className="absolute bottom-8 left-0 w-full flex justify-center gap-8 text-[10px] uppercase tracking-widest text-secondary opacity-50 lg:hidden">
+        <div className="absolute bottom-4 sm:bottom-8 left-0 w-full flex justify-center gap-5 sm:gap-8 text-[9px] sm:text-[10px] uppercase tracking-[0.16em] sm:tracking-widest text-secondary opacity-50 xl:hidden">
           <button type="button" className="hover:opacity-80" onClick={() => setMessage({ type: 'muted', text: 'Privacy policy not configured.' })}>
             Privacy
           </button>
