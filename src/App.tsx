@@ -6,6 +6,7 @@ import { SubHeader } from './components/SubHeader';
 import { FileCheck, FolderTree, ShieldCheck, Users, CalendarClock } from 'lucide-react';
 import { UsersManagement } from './components/settings/UsersManagement';
 import { LoginPage } from './components/auth/LoginPage';
+import { Toaster } from 'sonner';
 
 // --- Types ---
 type Role = 'admin' | 'officer' | 'proponent';
@@ -15,6 +16,34 @@ interface UserData {
   username: string;
   role: Role;
 }
+
+const VIEW_TO_PATH: Record<AppView, string> = {
+  dashboard: '/dashboard',
+  'applications:new': '/applications/new',
+  'applications:renewals': '/applications/renewals',
+  'applications:projects': '/applications/projects',
+  'verification:pending': '/verification/pending',
+  'verification:audit': '/verification/audit',
+  'directory:companies': '/directory/companies',
+  'directory:officers': '/directory/officers',
+  'directory:site-plans': '/directory/site-plans',
+  'compliance:permits': '/compliance/permits',
+  'compliance:bir': '/compliance/bir',
+  'compliance:expiry': '/compliance/expiry',
+  'operations:flowcharts': '/operations/flowcharts',
+  'operations:brochures': '/operations/brochures',
+  'operations:gad': '/operations/gad',
+  'settings:users': '/settings/users',
+  'settings:checklist': '/settings/checklist',
+};
+
+const PATH_TO_VIEW = Object.entries(VIEW_TO_PATH).reduce(
+  (acc, [view, routePath]) => {
+    acc[routePath] = view as AppView;
+    return acc;
+  },
+  {} as Record<string, AppView>
+);
 
 // --- Main App ---
 
@@ -50,8 +79,9 @@ export default function App() {
       setView('dashboard');
       return;
     }
-    if (path === '/dashboard') {
-      setView('dashboard');
+    const nextView = PATH_TO_VIEW[path];
+    if (nextView) {
+      setView(nextView);
       return;
     }
     // Fallback: unknown route -> dashboard
@@ -92,6 +122,16 @@ export default function App() {
     }
   }, [authState, navigate, path]);
 
+  const handleViewChange = useMemo(() => {
+    return (nextView: AppView) => {
+      setView(nextView);
+      const targetPath = VIEW_TO_PATH[nextView] || '/dashboard';
+      if (targetPath !== path) {
+        navigate(targetPath);
+      }
+    };
+  }, [navigate, path]);
+
   if (authState === 'guest') {
     return (
       <LoginPage
@@ -107,9 +147,10 @@ export default function App() {
 
   return (
     <>
+      <Toaster richColors position="top-right" />
       <AppLayout
         view={view}
-        onViewChange={setView}
+        onViewChange={handleViewChange}
         onLogout={async () => {
           try {
             await fetch(`${String(backendUrl).replace(/\/+$/, '')}/api/auth/logout`, {

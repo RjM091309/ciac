@@ -1,5 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { cn } from '../../lib/utils';
+import { toast } from 'sonner';
+import { SidePanel } from '../ui/SidePanel';
+import { ConfirmModal } from '../ui/ConfirmModal';
+import { AppSelect } from '../ui/AppSelect';
 
 type Role = {
   id: number;
@@ -31,6 +35,7 @@ export function UsersManagement() {
   const [roles, setRoles] = useState<Role[]>([]);
   const [editing, setEditing] = useState<UserRow | null>(null);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [confirmDeactivateId, setConfirmDeactivateId] = useState<number | null>(null);
 
   const [form, setForm] = useState({
     username: '',
@@ -45,6 +50,11 @@ export function UsersManagement() {
     const inactive = users.filter((u) => u.is_active === 0).length;
     return { active, inactive, total: users.length };
   }, [users]);
+
+  const roleOptions = useMemo(
+    () => roles.map((r) => ({ value: String(r.id), label: r.name })),
+    [roles]
+  );
 
   async function loadAll() {
     setLoading(true);
@@ -64,7 +74,9 @@ export function UsersManagement() {
       setUsers(uJson.data || []);
       setRoles(rJson.data || []);
     } catch (e: any) {
-      setError(e?.message || 'Failed to load data');
+      const message = e?.message || 'Failed to load data';
+      setError(message);
+      toast.error(message);
     } finally {
       setLoading(false);
     }
@@ -124,15 +136,17 @@ export function UsersManagement() {
 
       setIsCreateOpen(false);
       await loadAll();
+      toast.success(editing ? 'User updated successfully' : 'User created successfully');
     } catch (e: any) {
-      setError(e?.message || 'Save failed');
+      const message = e?.message || 'Save failed';
+      setError(message);
+      toast.error(message);
     } finally {
       setSaving(false);
     }
   }
 
   async function deactivate(id: number) {
-    if (!confirm('Deactivate this user?')) return;
     setSaving(true);
     setError(null);
     try {
@@ -143,8 +157,12 @@ export function UsersManagement() {
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json?.message || 'Deactivate failed');
       await loadAll();
+      toast.success('User deactivated successfully');
+      setConfirmDeactivateId(null);
     } catch (e: any) {
-      setError(e?.message || 'Deactivate failed');
+      const message = e?.message || 'Deactivate failed';
+      setError(message);
+      toast.error(message);
     } finally {
       setSaving(false);
     }
@@ -226,7 +244,7 @@ export function UsersManagement() {
                         <button
                           className="rounded-md px-2 py-1 text-[11px] font-semibold border"
                           style={{ borderColor: 'rgba(252,165,165,.35)', color: '#fca5a5' }}
-                          onClick={() => deactivate(u.id)}
+                          onClick={() => setConfirmDeactivateId(u.id)}
                           disabled={saving || u.is_active === 0}
                         >
                           Deactivate
@@ -248,98 +266,75 @@ export function UsersManagement() {
         )}
       </div>
 
-      {isCreateOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center px-3" style={{ backgroundColor: 'rgba(0,0,0,.45)' }}>
-          <div className="w-full max-w-lg rounded-2xl border p-4 sm:p-5" style={{ backgroundColor: 'var(--surface)', borderColor: 'var(--border-subtle)' }}>
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <div className="text-sm font-bold" style={{ color: 'var(--text)' }}>
-                  {editing ? 'Edit User' : 'New User'}
-                </div>
-                <div className="text-xs text-secondary">Users table + role mapping</div>
-              </div>
-              <button
-                className="rounded-lg px-2 py-1 text-xs border"
-                style={{ borderColor: 'var(--border-subtle)', color: 'var(--text-muted)' }}
-                onClick={() => setIsCreateOpen(false)}
-                disabled={saving}
-              >
-                Close
-              </button>
-            </div>
-
-            <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <Field label="Username">
-                <input
-                  className="w-full rounded-lg px-3 py-2 text-sm border bg-transparent"
-                  style={{ borderColor: 'var(--border-subtle)', color: 'var(--text)' }}
-                  value={form.username}
-                  onChange={(e) => setForm((p) => ({ ...p, username: e.target.value }))}
-                />
-              </Field>
-              <Field label="Role">
-                <select
-                  className="w-full rounded-lg px-3 py-2 text-sm border bg-transparent"
-                  style={{ borderColor: 'var(--border-subtle)', color: 'var(--text)' }}
-                  value={form.role_id}
-                  onChange={(e) => setForm((p) => ({ ...p, role_id: e.target.value }))}
-                >
-                  <option value="">(none)</option>
-                  {roles.map((r) => (
-                    <option key={r.id} value={String(r.id)}>
-                      {r.name}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-              <Field label="Full name">
-                <input
-                  className="w-full rounded-lg px-3 py-2 text-sm border bg-transparent"
-                  style={{ borderColor: 'var(--border-subtle)', color: 'var(--text)' }}
-                  value={form.full_name}
-                  onChange={(e) => setForm((p) => ({ ...p, full_name: e.target.value }))}
-                />
-              </Field>
-              <Field label="Email">
-                <input
-                  className="w-full rounded-lg px-3 py-2 text-sm border bg-transparent"
-                  style={{ borderColor: 'var(--border-subtle)', color: 'var(--text)' }}
-                  value={form.email}
-                  onChange={(e) => setForm((p) => ({ ...p, email: e.target.value }))}
-                />
-              </Field>
-              <Field label={editing ? 'Password (leave blank to keep)' : 'Password'}>
-                <input
-                  className="w-full rounded-lg px-3 py-2 text-sm border bg-transparent"
-                  style={{ borderColor: 'var(--border-subtle)', color: 'var(--text)' }}
-                  type="password"
-                  value={form.password}
-                  onChange={(e) => setForm((p) => ({ ...p, password: e.target.value }))}
-                />
-              </Field>
-            </div>
-
-            <div className="mt-4 flex items-center justify-end gap-2">
-              <button
-                className="rounded-lg px-3 py-2 text-sm font-semibold border"
-                style={{ borderColor: 'var(--border-subtle)', color: 'var(--text)' }}
-                onClick={() => setIsCreateOpen(false)}
-                disabled={saving}
-              >
-                Cancel
-              </button>
-              <button
-                className="rounded-lg px-3 py-2 text-sm font-semibold"
-                style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
-                onClick={save}
-                disabled={saving}
-              >
-                {saving ? 'Saving…' : 'Save'}
-              </button>
-            </div>
-          </div>
+      <SidePanel
+        open={isCreateOpen}
+        title={editing ? 'Edit User' : 'New User'}
+        subtitle="Users table + role mapping"
+        onClose={() => setIsCreateOpen(false)}
+        onSave={save}
+        saving={saving}
+      >
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <Field label="Username">
+            <input
+              className="w-full rounded-md px-3 py-2 text-sm border focus:outline-none focus:border-[var(--nav-active-bg)]"
+              style={{ borderColor: 'var(--input-border)', color: 'var(--text)', backgroundColor: 'var(--input-bg)' }}
+              value={form.username}
+              onChange={(e) => setForm((p) => ({ ...p, username: e.target.value }))}
+            />
+          </Field>
+          <Field label="Role">
+            <AppSelect
+              options={roleOptions}
+              value={form.role_id}
+              onChange={(value) => setForm((p) => ({ ...p, role_id: value }))}
+              placeholder="Select role..."
+              isClearable
+              isDisabled={saving}
+            />
+          </Field>
+          <Field label="Full name">
+            <input
+              className="w-full rounded-md px-3 py-2 text-sm border focus:outline-none focus:border-[var(--nav-active-bg)]"
+              style={{ borderColor: 'var(--input-border)', color: 'var(--text)', backgroundColor: 'var(--input-bg)' }}
+              value={form.full_name}
+              onChange={(e) => setForm((p) => ({ ...p, full_name: e.target.value }))}
+            />
+          </Field>
+          <Field label="Email">
+            <input
+              className="w-full rounded-md px-3 py-2 text-sm border focus:outline-none focus:border-[var(--nav-active-bg)]"
+              style={{ borderColor: 'var(--input-border)', color: 'var(--text)', backgroundColor: 'var(--input-bg)' }}
+              value={form.email}
+              onChange={(e) => setForm((p) => ({ ...p, email: e.target.value }))}
+            />
+          </Field>
+          <Field label={editing ? 'Password (leave blank to keep)' : 'Password'}>
+            <input
+              className="w-full rounded-md px-3 py-2 text-sm border focus:outline-none focus:border-[var(--nav-active-bg)]"
+              style={{ borderColor: 'var(--input-border)', color: 'var(--text)', backgroundColor: 'var(--input-bg)' }}
+              type="password"
+              value={form.password}
+              onChange={(e) => setForm((p) => ({ ...p, password: e.target.value }))}
+            />
+          </Field>
         </div>
-      )}
+      </SidePanel>
+
+      <ConfirmModal
+        open={confirmDeactivateId !== null}
+        title="Deactivate user?"
+        description="This user will no longer be able to access the system unless reactivated."
+        confirmText="Deactivate"
+        danger
+        loading={saving}
+        onCancel={() => setConfirmDeactivateId(null)}
+        onConfirm={() => {
+          if (confirmDeactivateId !== null) {
+            void deactivate(confirmDeactivateId);
+          }
+        }}
+      />
     </div>
   );
 }
