@@ -242,6 +242,18 @@ export function AppSidebar({
             </div>
           </SidebarGroup>
 
+          <SidebarGroup title="Proponent" collapsed={collapsed}>
+            <div className="flex flex-col gap-1.5">
+              <SidebarItem
+                icon={Users}
+                label="Proponent Management"
+                active={view === 'settings:proponents'}
+                onClick={() => onViewChange('settings:proponents')}
+                collapsed={collapsed}
+              />
+            </div>
+          </SidebarGroup>
+
           <SidebarGroup title="Verification" collapsed={collapsed}>
             <div className="flex flex-col gap-1.5">
               <SidebarDropdown
@@ -400,7 +412,7 @@ export function AppSidebar({
                   onClick={() => onViewChange('settings:users')}
                 />
                 <SidebarSubItem
-                  label="Proponent Management"
+                  label="Proponent"
                   active={view === 'settings:proponents'}
                   onClick={() => onViewChange('settings:proponents')}
                 />
