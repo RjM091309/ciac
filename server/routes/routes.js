@@ -5,23 +5,22 @@ const router = express.Router();
 
 // Public
 router.get("/authentication/signin", (req, res) => {
-  if (req.user) return res.redirect("/dashboard");
-  return res.render("authentication/signin", {
-    title: "Sign In",
-    subTitle: "CIAC Login",
-    FRONTEND_URL: process.env.FRONTEND_URL || "",
-    layout: "../views/layout/layout2",
-  });
+  const frontend = process.env.FRONTEND_URL;
+  if (frontend) return res.redirect(String(frontend).replace(/\/+$/, "") + "/");
+  return res.status(404).send("Not found");
 });
 
 router.get("/", (req, res) => {
-  if (req.user) return res.redirect("/dashboard");
-  return res.redirect("/authentication/signin");
+  const frontend = process.env.FRONTEND_URL;
+  if (frontend) return res.redirect(String(frontend).replace(/\/+$/, "") + "/");
+  return res.status(200).json({ success: true, message: "CIAC API server is running" });
 });
 
 // Protected
 router.get("/dashboard", isAuthenticated, (req, res) => {
-  return res.render("index", { title: "Dashboard", subTitle: "CIAC Overview" });
+  const frontend = process.env.FRONTEND_URL;
+  if (frontend) return res.redirect(String(frontend).replace(/\/+$/, "") + "/dashboard");
+  return res.status(404).send("Not found");
 });
 
 module.exports = function pageRouter(app) {

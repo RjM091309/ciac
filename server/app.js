@@ -1,6 +1,5 @@
 const express = require("express");
 const path = require("path");
-const expressLayouts = require("express-ejs-layouts");
 const cookieParser = require("cookie-parser");
 const cors = require("cors");
 require("dotenv").config({ path: path.join(__dirname, ".env"), override: true });
@@ -33,12 +32,6 @@ app.use(express.static(path.join(__dirname, "public")));
 app.use("/css", express.static(path.join(__dirname, "public", "css")));
 app.use("/images", express.static(path.join(__dirname, "public", "images")));
 app.use("/js", express.static(path.join(__dirname, "public", "js")));
-
-// View engine
-app.use(expressLayouts);
-app.set("layout", "./layout/layout2");
-app.set("views", path.join(__dirname, "views"));
-app.set("view engine", "ejs");
 
 // Routes
 const pageRouter = require("./routes/routes");

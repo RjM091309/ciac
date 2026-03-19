@@ -1,43 +1,128 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { AppLayout, AppView } from './layout/AppLayout';
 import { Dashboard } from './components/dashboard/Dashboard';
 import { SubHeader } from './components/SubHeader';
 import { FileCheck, FolderTree, ShieldCheck, Users, CalendarClock } from 'lucide-react';
 import { UsersManagement } from './components/settings/UsersManagement';
+import { LoginPage } from './components/auth/LoginPage';
 
 // --- Types ---
 type Role = 'admin' | 'officer' | 'proponent';
 
 interface UserData {
   id: number;
-  email: string;
-  name: string;
+  username: string;
   role: Role;
 }
 
 // --- Main App ---
 
 export default function App() {
-  const defaultUser: UserData = {
-    id: 1,
-    email: 'admin@bizreg.com',
-    name: 'Admin Demo',
-    role: 'admin',
-  };
+  const backendUrl = useMemo(
+    () => ((import.meta as any).env?.VITE_BACKEND_URL as string) || 'http://localhost:3100',
+    []
+  );
 
-  const [user, setUser] = useState<UserData>(defaultUser);
+  const [path, setPath] = useState<string>(() => window.location.pathname || '/');
+  const navigate = useMemo(() => {
+    return (to: string, opts?: { replace?: boolean }) => {
+      const next = to.startsWith('/') ? to : `/${to}`;
+      if (opts?.replace) window.history.replaceState({}, '', next);
+      else window.history.pushState({}, '', next);
+      setPath(next);
+    };
+  }, []);
+
+  const [user, setUser] = useState<UserData | null>(null);
+  const [authState, setAuthState] = useState<'authed' | 'guest'>('guest');
   const [view, setView] = useState<AppView>('dashboard');
-  const backendUrl = (import.meta as any).env?.VITE_BACKEND_URL || 'http://localhost:3100';
+
+  useEffect(() => {
+    const onPop = () => setPath(window.location.pathname || '/');
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, []);
+
+  useEffect(() => {
+    // Keep URL and view in sync (minimal router)
+    if (path === '/' || path === '') {
+      setView('dashboard');
+      return;
+    }
+    if (path === '/dashboard') {
+      setView('dashboard');
+      return;
+    }
+    // Fallback: unknown route -> dashboard
+    setView('dashboard');
+  }, [path]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function check() {
+      try {
+        const res = await fetch(`${String(backendUrl).replace(/\/+$/, '')}/api/auth/check`, { credentials: 'include' });
+        const json = await res.json().catch(() => ({} as any));
+        if (cancelled) return;
+        if (res.ok && json?.authenticated) {
+          const u = json?.user || {};
+          setUser({
+            id: Number(u.id || 0),
+            username: String(u.username || ''),
+            role: (u.role || 'admin') as Role,
+          });
+          setAuthState('authed');
+          return;
+        }
+      } catch {
+        // ignore (stay guest)
+      }
+    }
+    check();
+    return () => {
+      cancelled = true;
+    };
+  }, [backendUrl]);
+
+  useEffect(() => {
+    // Once authenticated, default landing should be /dashboard
+    if (authState === 'authed' && (path === '/' || path === '')) {
+      navigate('/dashboard', { replace: true });
+    }
+  }, [authState, navigate, path]);
+
+  if (authState === 'guest') {
+    return (
+      <LoginPage
+        backendUrl={backendUrl}
+        onLoggedIn={(u) => {
+          setUser({ id: u.id, username: u.username, role: ((u.role as Role) || 'admin') as Role });
+          setAuthState('authed');
+          navigate('/dashboard');
+        }}
+      />
+    );
+  }
 
   return (
     <>
       <AppLayout
         view={view}
         onViewChange={setView}
-        onLogout={() => {
-          setUser(defaultUser);
-          window.location.href = `${String(backendUrl).replace(/\/+$/, '')}/api/auth/logout`;
+        onLogout={async () => {
+          try {
+            await fetch(`${String(backendUrl).replace(/\/+$/, '')}/api/auth/logout`, {
+              method: 'POST',
+              credentials: 'include',
+            });
+          } catch {
+            // ignore
+          } finally {
+            setUser(null);
+            setAuthState('guest');
+            navigate('/', { replace: true });
+          }
         }}
       >
         {view === 'dashboard' ? (

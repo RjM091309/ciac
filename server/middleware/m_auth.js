@@ -30,6 +30,8 @@ function isAuthenticated(req, res, next) {
   if (req.path.startsWith("/api/")) {
     return res.status(401).json({ success: false, message: "Authentication required" });
   }
+  const frontend = process.env.FRONTEND_URL;
+  if (frontend) return res.redirect(String(frontend).replace(/\/+$/, "") + "/");
   return res.redirect("/authentication/signin");
 }
 

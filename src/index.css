@@ -197,6 +197,27 @@
   @apply rounded-xl focus:outline-none focus:ring-1 focus:ring-zinc-700 transition-all;
 }
 
+/* Ensure browser autofill matches input theme */
+input.input-field:-webkit-autofill,
+input.input-field:-webkit-autofill:hover,
+input.input-field:-webkit-autofill:focus,
+textarea.input-field:-webkit-autofill,
+textarea.input-field:-webkit-autofill:hover,
+textarea.input-field:-webkit-autofill:focus,
+select.input-field:-webkit-autofill,
+select.input-field:-webkit-autofill:hover,
+select.input-field:-webkit-autofill:focus {
+  -webkit-text-fill-color: var(--text);
+  caret-color: var(--text);
+  box-shadow: 0 0 0px 1000px var(--input-bg) inset;
+  -webkit-box-shadow: 0 0 0px 1000px var(--input-bg) inset;
+  transition: background-color 9999s ease-in-out 0s;
+}
+
+.writing-mode-vertical {
+  writing-mode: vertical-rl;
+}
+
 /* --- Premium mobile/tablet --- */
 @supports (padding: env(safe-area-inset-top)) {
   .safe-top { padding-top: env(safe-area-inset-top); }
