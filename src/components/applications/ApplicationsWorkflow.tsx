@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Calendar, CheckCircle2, Clock3, Eye, FileText, History as HistoryIcon, Loader2, Plus, Search, Upload, XCircle } from 'lucide-react';
+import { CheckCircle2, Clock3, Eye, FileText, Loader2, Plus, Search, Upload, XCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '../../lib/utils';
 import { SidePanel } from '../ui/SidePanel';
@@ -31,6 +31,8 @@ type AppRequirementRow = {
   requirement_name?: string | null;
   status: string;
   remarks?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
 };
 
 type DocumentRow = {
@@ -41,7 +43,21 @@ type DocumentRow = {
   original_file_name?: string | null;
   content_type?: string | null;
   file_size_bytes?: number | null;
+  requirement_code?: string | null;
+  requirement_name?: string | null;
   created_at?: string | null;
+};
+
+type ContractRow = {
+  id: number;
+  application_id: number;
+  contract_no?: string | null;
+  issue_date?: string | null;
+  effective_start?: string | null;
+  effective_end?: string | null;
+  document_id?: number | null;
+  created_at?: string | null;
+  updated_at?: string | null;
 };
 
 type StatusHistoryRow = {
@@ -112,6 +128,16 @@ function computeProgress(reqRows: AppRequirementRow[], docRows: DocumentRow[]): 
   return { total, verified, pending, rejected, missing, percent };
 }
 
+function toDateInputValue(v: string | null | undefined) {
+  if (!v) return '';
+  const d = new Date(v);
+  if (Number.isNaN(d.getTime())) return '';
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+}
+
 export function ApplicationsWorkflow({ renewalMode }: { renewalMode: boolean }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -123,12 +149,26 @@ export function ApplicationsWorkflow({ renewalMode }: { renewalMode: boolean }) 
   const [documents, setDocuments] = useState<DocumentRow[]>([]);
   const [history, setHistory] = useState<StatusHistoryRow[]>([]);
   const [detailsLoading, setDetailsLoading] = useState(false);
+  const [selectedContract, setSelectedContract] = useState<ContractRow | null>(null);
   const [previewRequirementId, setPreviewRequirementId] = useState<number | null>(null);
   const [progressByApp, setProgressByApp] = useState<Record<number, ProgressSummary>>({});
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [documentEditorOpen, setDocumentEditorOpen] = useState(false);
   const [documentEditorMode, setDocumentEditorMode] = useState<'insert' | 'update'>('insert');
   const [statusEditorOpen, setStatusEditorOpen] = useState(false);
+  const [contractOpen, setContractOpen] = useState(false);
+  const [contractApp, setContractApp] = useState<ApplicationRow | null>(null);
+  const [contractDocuments, setContractDocuments] = useState<DocumentRow[]>([]);
+  const [contractLoading, setContractLoading] = useState(false);
+  const [contractMode, setContractMode] = useState<'insert' | 'update'>('insert');
+  const [contractExistingId, setContractExistingId] = useState<number | null>(null);
+  const [contractForm, setContractForm] = useState({
+    contract_no: '',
+    issue_date: '',
+    effective_start: '',
+    effective_end: '',
+    document_id: '',
+  });
   const [appsSearchQuery, setAppsSearchQuery] = useState('');
   const [appsPageSize, setAppsPageSize] = useState(5);
   const [appsPage, setAppsPage] = useState(1);
@@ -214,6 +254,13 @@ export function ApplicationsWorkflow({ renewalMode }: { renewalMode: boolean }) 
     }
     return map;
   }, [documents]);
+
+  const selectedContractDoc = useMemo(() => {
+    if (!selectedContract?.document_id) return null;
+    const id = Number(selectedContract.document_id);
+    if (!Number.isFinite(id)) return null;
+    return documents.find((d) => d.id === id) || null;
+  }, [selectedContract, documents]);
   const filteredChecklistRequirements = useMemo(() => {
     const q = checklistSearchQuery.trim().toLowerCase();
     if (!q) return requirements;
@@ -298,15 +345,22 @@ export function ApplicationsWorkflow({ renewalMode }: { renewalMode: boolean }) 
   async function loadDetails(applicationId: number) {
     setDetailsLoading(true);
     try {
-      const [reqRes, docRes, historyRes] = await Promise.all([
+      const [reqRes, docRes, historyRes, contractRes] = await Promise.all([
         fetch(api(`/api/applications/${applicationId}/requirements`), { credentials: 'include' }),
         fetch(api(`/api/applications/${applicationId}/documents`), { credentials: 'include' }),
         fetch(api(`/api/applications/${applicationId}/status-history`), { credentials: 'include' }),
+        fetch(api(`/api/contracts/application/${applicationId}`), { credentials: 'include' }),
       ]);
-      const [reqJson, docJson, historyJson] = await Promise.all([reqRes.json(), docRes.json(), historyRes.json()]);
+      const [reqJson, docJson, historyJson, contractJson] = await Promise.all([
+        reqRes.json(),
+        docRes.json(),
+        historyRes.json(),
+        contractRes.json(),
+      ]);
       setRequirements(Array.isArray(reqJson?.data) ? reqJson.data : []);
       setDocuments(Array.isArray(docJson?.data) ? docJson.data : []);
       setHistory(Array.isArray(historyJson?.data) ? historyJson.data : []);
+      setSelectedContract(contractJson?.data || null);
     } catch (error: any) {
       toast.error(error?.message || 'Failed to load application details');
     } finally {
@@ -367,6 +421,95 @@ export function ApplicationsWorkflow({ renewalMode }: { renewalMode: boolean }) 
       to_status: String(currentStatus || prev.to_status || 'UNDER_REVIEW'),
     }));
     setStatusEditorOpen(true);
+  }
+
+  async function openContractEditor(application: ApplicationRow) {
+    const applicationId = application.id;
+    setContractApp(application);
+    setContractOpen(true);
+    setContractLoading(true);
+    setContractMode('insert');
+    setContractExistingId(null);
+    setContractForm({
+      contract_no: '',
+      issue_date: '',
+      effective_start: '',
+      effective_end: '',
+      document_id: '',
+    });
+    setContractDocuments([]);
+
+    try {
+      const [contractRes, docsRes] = await Promise.all([
+        fetch(api(`/api/contracts/application/${applicationId}`), { credentials: 'include' }),
+        fetch(api(`/api/applications/${applicationId}/documents`), { credentials: 'include' }),
+      ]);
+      const [contractJson, docsJson] = await Promise.all([contractRes.json(), docsRes.json()]);
+      const existing: ContractRow | null = contractJson?.data || null;
+
+      setContractDocuments(Array.isArray(docsJson?.data) ? docsJson.data : []);
+
+      if (existing && Number.isFinite(Number(existing.id))) {
+        setContractMode('update');
+        setContractExistingId(Number(existing.id));
+        setContractForm({
+          contract_no: existing.contract_no ? String(existing.contract_no) : '',
+          issue_date: toDateInputValue(existing.issue_date),
+          effective_start: toDateInputValue(existing.effective_start),
+          effective_end: toDateInputValue(existing.effective_end),
+          document_id: existing.document_id ? String(existing.document_id) : '',
+        });
+      }
+    } catch (error: any) {
+      toast.error(error?.message || 'Failed to load contract');
+      setContractOpen(false);
+    } finally {
+      setContractLoading(false);
+    }
+  }
+
+  async function saveContract() {
+    if (!contractApp) return;
+    if (!contractForm.contract_no.trim()) {
+      toast.error('Contract no. is required');
+      return;
+    }
+    if (!contractForm.issue_date) {
+      toast.error('Issue date is required');
+      return;
+    }
+
+    const payload = {
+      application_id: contractApp.id,
+      contract_no: contractForm.contract_no.trim(),
+      issue_date: contractForm.issue_date || null,
+      effective_start: contractForm.effective_start || null,
+      effective_end: contractForm.effective_end || null,
+      document_id: contractForm.document_id ? Number(contractForm.document_id) : null,
+    };
+
+    setSaving(true);
+    try {
+      const isInsert = contractMode === 'insert';
+      const url = isInsert ? api('/api/contracts') : api(`/api/contracts/${contractExistingId}`);
+      const method = isInsert ? 'POST' : 'PUT';
+
+      const res = await fetch(url, {
+        method,
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json?.success) throw new Error(json?.message || 'Failed to save contract');
+
+      toast.success(isInsert ? 'Contract created' : 'Contract updated');
+      setContractOpen(false);
+    } catch (error: any) {
+      toast.error(error?.message || 'Failed to save contract');
+    } finally {
+      setSaving(false);
+    }
   }
 
   function openDocumentEditor(row: AppRequirementRow, mode: 'insert' | 'update') {
@@ -647,6 +790,15 @@ export function ApplicationsWorkflow({ renewalMode }: { renewalMode: boolean }) 
                           <button
                             className="inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold"
                             style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'var(--control-bg)' }}
+                            onClick={() => openContractEditor(row)}
+                            disabled={saving || contractOpen}
+                          >
+                            {contractLoading && contractApp?.id === row.id ? <Loader2 size={14} className="animate-spin" /> : <FileText size={14} />}
+                            Contract
+                          </button>
+                          <button
+                            className="inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold"
+                            style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'var(--control-bg)' }}
                             onClick={() => openStatusEditor(row.id, row.status)}
                             disabled={saving}
                           >
@@ -768,98 +920,163 @@ export function ApplicationsWorkflow({ renewalMode }: { renewalMode: boolean }) 
                       </div>
 
                       <div className="flex-1 min-h-0 overflow-y-auto">
-                      {detailsLoading ? (
-                        <div className="p-5 text-sm text-secondary">Loading checklist...</div>
-                      ) : filteredChecklistRequirements.length === 0 ? (
-                        <div className="p-5 text-sm text-secondary">No requirements found.</div>
-                      ) : (
-                        pagedChecklistRequirements.map((r, idx) => {
-                          const absoluteIndex = checklistShowingRange.from + idx;
-                          const status = toUpper(r.status);
-                          const hasDoc = selectedDocByRequirement.has(Number(r.requirement_id));
-                          const displayStatus = hasDoc && status === 'PENDING' ? 'PENDING_REVIEW' : status;
-                          const badge = getBadgeStyles(displayStatus);
-                          const doc = selectedDocByRequirement.get(Number(r.requirement_id));
-                          return (
-                            <div key={r.id} className="px-4 py-3.5 border-b" style={{ borderColor: 'var(--border-subtle)' }}>
-                              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
-                                <div className="min-w-0">
-                                  <div className="font-semibold text-sm truncate">
-                                    {absoluteIndex}. {r.requirement_name || r.requirement_code || `Requirement #${r.requirement_id}`}
-                                  </div>
-                                  <div className="mt-1 text-[11px] text-secondary flex flex-wrap items-center gap-3">
-                                    <span className="inline-flex items-center gap-1">
-                                      <Calendar size={12} /> Updated: {doc?.created_at ? new Date(doc.created_at).toLocaleDateString() : '—'}
-                                    </span>
-                                    {r.remarks ? (
-                                      <span className="rounded px-1.5 py-0.5" style={{ backgroundColor: 'rgba(239,68,68,.12)', color: '#ef4444' }}>
-                                        Note: {r.remarks}
-                                      </span>
-                                    ) : null}
-                                  </div>
-                                </div>
+                        {detailsLoading ? (
+                          <div className="p-5 text-sm text-secondary">Loading checklist...</div>
+                        ) : filteredChecklistRequirements.length === 0 ? (
+                          <div className="p-5 text-sm text-secondary">No requirements found.</div>
+                        ) : (
+                          <div className="min-w-full">
+                            <table className="min-w-full text-left text-xs" style={{ borderCollapse: 'collapse' }}>
+                              <thead>
+                                <tr style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+                                  <th className="px-4 py-2.5 text-[10px] uppercase tracking-wider text-secondary">Requirement</th>
+                                  <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary">Updated</th>
+                                  <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary">Valid From - To</th>
+                                  <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary">Status</th>
+                                  <th className="px-2 py-2.5 text-[10px] uppercase tracking-wider text-secondary text-right">Preview</th>
+                                  <th className="px-2 py-2.5 text-[10px] uppercase tracking-wider text-secondary text-right">Insert</th>
+                                  <th className="px-2 py-2.5 text-[10px] uppercase tracking-wider text-secondary text-right">Update</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {pagedChecklistRequirements.map((r, idx) => {
+                                  const absoluteIndex = checklistShowingRange.from + idx;
+                                  const status = toUpper(r.status);
+                                  const hasDoc = selectedDocByRequirement.has(Number(r.requirement_id));
+                                  const displayStatus = hasDoc && status === 'PENDING' ? 'PENDING_REVIEW' : status;
+                                  const doc = selectedDocByRequirement.get(Number(r.requirement_id));
 
-                                <div className="flex items-center gap-2 lg:ml-4">
-                                  <select
-                                    value={status || 'PENDING'}
-                                    onChange={(e) => updateRequirementStatus(r, e.target.value)}
-                                    className="text-xs rounded-lg border py-1.5 pl-2.5 pr-7 bg-transparent"
-                                    style={{ borderColor: badge.border, color: badge.color, backgroundColor: badge.bg }}
-                                    disabled={saving}
-                                  >
-                                    <option value="PENDING">PENDING</option>
-                                    <option value="VERIFIED">VERIFIED</option>
-                                    <option value="REJECTED">REJECTED</option>
-                                  </select>
-                                  <div className="flex items-center gap-1.5">
-                                    <button
-                                      className="inline-flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-xs font-semibold"
-                                      style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'var(--control-bg)' }}
-                                      onClick={() => handleRequirementAction(r, 'preview')}
-                                      title="Preview"
-                                    >
-                                      <Eye size={13} />
-                                    </button>
-                                    <button
-                                      className="inline-flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-xs font-semibold"
-                                      style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'var(--control-bg)' }}
-                                      onClick={() => handleRequirementAction(r, 'insert')}
-                                      title="Insert document"
-                                    >
-                                      <Upload size={13} />
-                                    </button>
-                                    <button
-                                      className={cn(
-                                        'inline-flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-xs font-semibold',
-                                        !hasDoc && 'opacity-50 cursor-not-allowed'
+                                  const isLinkedContractRow =
+                                    !!selectedContractDoc && Number(selectedContractDoc.id) === Number(doc?.id);
+
+                                  const effectiveDisplayStatus = isLinkedContractRow ? 'VERIFIED' : displayStatus;
+                                  const effectiveBadge = getBadgeStyles(effectiveDisplayStatus);
+                                  const rowDocForDate = isLinkedContractRow ? selectedContractDoc ?? doc : doc;
+
+                                  const effectiveDateText =
+                                    isLinkedContractRow
+                                      ? `${selectedContract?.effective_start ? new Date(selectedContract.effective_start).toLocaleDateString() : '—'} - ${
+                                          selectedContract?.effective_end ? new Date(selectedContract.effective_end).toLocaleDateString() : '—'
+                                        }`
+                                      : '—';
+
+                                  const updatedAtText = r.updated_at
+                                    ? new Date(r.updated_at).toLocaleDateString()
+                                    : rowDocForDate?.created_at
+                                      ? new Date(rowDocForDate.created_at).toLocaleDateString()
+                                      : '—';
+
+                                  const docForPreview = rowDocForDate ?? doc;
+
+                                  return (
+                                    <React.Fragment key={r.id}>
+                                      <tr style={{ borderTop: '1px solid var(--border-subtle)' }}>
+                                        <td className="px-4 py-3.5 align-top" style={{ width: 'min(520px, 48vw)' }}>
+                                          <div className="font-semibold text-sm truncate">
+                                            {absoluteIndex}. {r.requirement_name || r.requirement_code || `Requirement #${r.requirement_id}`}
+                                          </div>
+                                          <div className="mt-1 text-[11px] text-secondary flex flex-wrap items-center gap-3">
+                                            {r.remarks ? (
+                                              <span className="rounded px-1.5 py-0.5" style={{ backgroundColor: 'rgba(239,68,68,.12)', color: '#ef4444' }}>
+                                                Note: {r.remarks}
+                                              </span>
+                                            ) : null}
+                                          </div>
+                                        </td>
+
+                                        <td className="px-3 py-3.5 align-top text-[11px] text-secondary" style={{ whiteSpace: 'nowrap' }}>
+                                          {updatedAtText !== '—' ? `Updated: ${updatedAtText}` : 'Updated: —'}
+                                        </td>
+
+                                        <td className="px-3 py-3.5 align-top text-[11px] text-secondary">
+                                          {effectiveDateText}
+                                        </td>
+
+                                        <td className="px-3 py-3.5 align-top">
+                                          <select
+                                            value={effectiveDisplayStatus || 'PENDING'}
+                                            onChange={(e) => updateRequirementStatus(r, e.target.value)}
+                                            className="text-xs rounded-lg border py-1.5 pl-2.5 pr-7 bg-transparent"
+                                            style={{
+                                              borderColor: effectiveBadge.border,
+                                              color: effectiveBadge.color,
+                                              backgroundColor: effectiveBadge.bg,
+                                            }}
+                                            disabled={saving}
+                                          >
+                                            <option value="PENDING">PENDING</option>
+                                            <option value="PENDING_REVIEW">PENDING_REVIEW</option>
+                                            <option value="VERIFIED">VERIFIED</option>
+                                            <option value="REJECTED">REJECTED</option>
+                                          </select>
+                                        </td>
+
+                                        <td className="px-2 py-3.5 align-top text-right">
+                                          <button
+                                            className={cn(
+                                              'inline-flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-xs font-semibold',
+                                              !hasDoc && 'opacity-50 cursor-not-allowed'
+                                            )}
+                                            style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'var(--control-bg)' }}
+                                            disabled={!hasDoc}
+                                            onClick={() => handleRequirementAction(r, 'preview')}
+                                            title="Preview"
+                                          >
+                                            <Eye size={13} />
+                                          </button>
+                                        </td>
+
+                                        <td className="px-2 py-3.5 align-top text-right">
+                                          <button
+                                            className="inline-flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-xs font-semibold"
+                                            style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'var(--control-bg)' }}
+                                            onClick={() => handleRequirementAction(r, 'insert')}
+                                            title="Insert document"
+                                          >
+                                            <Upload size={13} />
+                                          </button>
+                                        </td>
+
+                                        <td className="px-2 py-3.5 align-top text-right">
+                                          <button
+                                            className={cn(
+                                              'inline-flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-xs font-semibold',
+                                              !hasDoc && 'opacity-50 cursor-not-allowed'
+                                            )}
+                                            style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'var(--control-bg)' }}
+                                            disabled={!hasDoc}
+                                            onClick={() => handleRequirementAction(r, 'update')}
+                                            title="Update document"
+                                          >
+                                            <FileText size={13} />
+                                          </button>
+                                        </td>
+                                      </tr>
+
+                                      {previewRequirementId === r.requirement_id && hasDoc && (
+                                        <tr style={{ borderTop: '1px solid var(--border-subtle)' }}>
+                                          <td colSpan={7} className="px-4 py-3.5">
+                                            <div className="rounded-xl border p-4" style={{ borderColor: 'var(--border-subtle)', backgroundColor: '#081735' }}>
+                                              <div className="flex items-center justify-between">
+                                                <div className="inline-flex items-center gap-2 text-slate-300">
+                                                  <FileText size={16} />
+                                                  <span className="text-xs font-semibold">
+                                                    {docForPreview?.original_file_name || docForPreview?.file_name || 'Document preview'}
+                                                  </span>
+                                                </div>
+                                              </div>
+                                              <div className="mt-4 text-center py-8 text-slate-400 text-xs">Preview placeholder for file rendering.</div>
+                                            </div>
+                                          </td>
+                                        </tr>
                                       )}
-                                      style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'var(--control-bg)' }}
-                                      disabled={!hasDoc}
-                                      onClick={() => handleRequirementAction(r, 'update')}
-                                      title="Update document"
-                                    >
-                                      <FileText size={13} />
-                                    </button>
-                                  </div>
-                                </div>
-                              </div>
-
-                              {previewRequirementId === r.requirement_id && hasDoc && (
-                                <div className="mt-3 rounded-xl border p-4" style={{ borderColor: 'var(--border-subtle)', backgroundColor: '#081735' }}>
-                                  <div className="flex items-center justify-between">
-                                    <div className="inline-flex items-center gap-2 text-slate-300">
-                                      <FileText size={16} />
-                                      <span className="text-xs font-semibold">{doc?.original_file_name || doc?.file_name || 'Document preview'}</span>
-                                    </div>
-                                  </div>
-                                  <div className="mt-4 text-center py-8 text-slate-400 text-xs">Preview placeholder for file rendering.</div>
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })
-                      )}
-                      </div>
+                                    </React.Fragment>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
                     </div>
                   </div>
 
@@ -877,6 +1094,7 @@ export function ApplicationsWorkflow({ renewalMode }: { renewalMode: boolean }) 
                     loading={detailsLoading}
                   />
 
+                </div>
                 </>
               )}
             </div>
@@ -970,6 +1188,119 @@ export function ApplicationsWorkflow({ renewalMode }: { renewalMode: boolean }) 
                 }}
               >
                 Update
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {contractOpen ? (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center px-3" style={{ backgroundColor: 'rgba(0,0,0,.4)' }}>
+          <div className="w-full max-w-2xl rounded-2xl border p-4 sm:p-5" style={{ backgroundColor: 'var(--surface)', borderColor: 'var(--border-subtle)' }}>
+            <div className="flex items-start justify-between gap-3 border-b pb-3" style={{ borderColor: 'var(--input-border)' }}>
+              <div>
+                <div className="text-sm font-bold" style={{ color: 'var(--text)' }}>
+                  {contractMode === 'insert' ? 'Create Contract' : 'Update Contract'}
+                </div>
+                <div className="text-xs text-secondary mt-0.5">
+                  {contractApp ? `${contractApp.proponent_name || 'Application'} • ${contractApp.application_no}` : 'Selected application'}
+                </div>
+              </div>
+              <button
+                className="rounded-lg px-2 py-1 text-xs border"
+                style={{ borderColor: 'var(--border-subtle)', color: 'var(--text-muted)' }}
+                onClick={() => setContractOpen(false)}
+                disabled={saving}
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="pt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div className="md:col-span-2">
+                <label className="text-xs font-semibold uppercase tracking-wider text-secondary">Contract No.</label>
+                <input
+                  className="w-full rounded-lg border px-3 py-2 text-sm bg-transparent mt-1"
+                  style={{ borderColor: 'var(--input-border)' }}
+                  value={contractForm.contract_no}
+                  onChange={(e) => setContractForm((p) => ({ ...p, contract_no: e.target.value }))}
+                  placeholder="e.g. CN-2026-0001"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold uppercase tracking-wider text-secondary">Issue Date</label>
+                <input
+                  type="date"
+                  className="w-full rounded-lg border px-3 py-2 text-sm bg-transparent mt-1"
+                  style={{ borderColor: 'var(--input-border)' }}
+                  value={contractForm.issue_date}
+                  onChange={(e) => setContractForm((p) => ({ ...p, issue_date: e.target.value }))}
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold uppercase tracking-wider text-secondary">Effective Start</label>
+                <input
+                  type="date"
+                  className="w-full rounded-lg border px-3 py-2 text-sm bg-transparent mt-1"
+                  style={{ borderColor: 'var(--input-border)' }}
+                  value={contractForm.effective_start}
+                  onChange={(e) => setContractForm((p) => ({ ...p, effective_start: e.target.value }))}
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold uppercase tracking-wider text-secondary">Effective End</label>
+                <input
+                  type="date"
+                  className="w-full rounded-lg border px-3 py-2 text-sm bg-transparent mt-1"
+                  style={{ borderColor: 'var(--input-border)' }}
+                  value={contractForm.effective_end}
+                  onChange={(e) => setContractForm((p) => ({ ...p, effective_end: e.target.value }))}
+                />
+              </div>
+
+              <div className="md:col-span-2">
+                <label className="text-xs font-semibold uppercase tracking-wider text-secondary">Contract Document</label>
+                <select
+                  className="w-full rounded-lg border px-3 py-2 text-sm bg-transparent mt-1"
+                  style={{ borderColor: 'var(--input-border)' }}
+                  value={contractForm.document_id}
+                  onChange={(e) => setContractForm((p) => ({ ...p, document_id: e.target.value }))}
+                  disabled={contractLoading}
+                >
+                  <option value="">No document</option>
+                  {contractDocuments.map((d) => (
+                    <option key={d.id} value={String(d.id)}>
+                      {d.file_name}
+                      {d.requirement_code ? ` (${d.requirement_code})` : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="pt-4 flex justify-end gap-2">
+              <button
+                className="rounded-lg px-3 py-2 text-sm border font-semibold"
+                style={{ borderColor: 'var(--border-subtle)', color: 'var(--text-muted)' }}
+                onClick={() => setContractOpen(false)}
+                disabled={saving}
+              >
+                Cancel
+              </button>
+              <button
+                className={cn(
+                  'rounded-lg px-3 py-2 text-sm font-semibold inline-flex items-center justify-center gap-1.5',
+                  (saving || contractLoading) && 'opacity-60 cursor-not-allowed'
+                )}
+                style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
+                disabled={saving || contractLoading}
+                onClick={saveContract}
+              >
+                {saving || contractLoading ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}
+                {contractMode === 'insert' ? 'Save Contract' : 'Save Changes'}
               </button>
             </div>
           </div>
