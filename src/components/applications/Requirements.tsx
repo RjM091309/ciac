@@ -315,7 +315,7 @@ export function RequirementsManagement() {
             Requirements List
           </h3>
           <button
-            className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-semibold shadow-sm"
+            className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-semibold shadow-sm cursor-pointer"
             style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
             onClick={openCreate}
           >
@@ -462,7 +462,7 @@ export function RequirementsManagement() {
 
       <SidePanel
         open={isCreateOpen}
-        title={editing ? 'Edit Requirement' : 'New Requirement'}
+        title={editing ? 'Edit Requirement' : 'New Requirements'}
         subtitle="Requirements master table"
         onClose={() => setIsCreateOpen(false)}
         onSave={save}
@@ -554,7 +554,12 @@ export function RequirementsManagement() {
 
 function StatCard({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-xl px-3 py-3 border flex flex-col gap-1" style={{ backgroundColor: 'var(--control-bg)', borderColor: 'var(--border-subtle)' }}>
+    <div
+      className="rounded-xl px-3 py-3 flex flex-col gap-1 shadow-sm"
+      style={{
+        backgroundColor: 'color-mix(in oklab, var(--surface) 94%, white 6%)',
+      }}
+    >
       <span className="text-[10px] font-semibold text-secondary uppercase tracking-widest">{label}</span>
       <span className="text-base sm:text-lg font-bold leading-tight" style={{ color: 'var(--text)' }}>
         {value}
@@ -574,9 +579,16 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 function CheckToggle({ label, checked, onChange }: { label: string; checked: boolean; onChange: (v: boolean) => void }) {
   return (
-    <label className="flex items-center gap-2 rounded-md border px-3 py-2 text-xs" style={{ borderColor: 'var(--input-border)' }}>
-      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />
-      <span style={{ color: 'var(--text)' }}>{label}</span>
+    <label 
+      className="flex items-center gap-2 rounded-md border px-3 py-2 text-xs cursor-pointer hover:bg-white/5 transition-all" 
+      style={{ borderColor: 'var(--input-border)' }}
+    >
+      <input 
+      type="checkbox" 
+      className="cursor-pointer" 
+      checked={checked} 
+      onChange={(e) => onChange(e.target.checked)} />
+      <span style={{ color: 'var(--text)' }} className="cursor-pointer">{label}</span>
     </label>
   );
 }

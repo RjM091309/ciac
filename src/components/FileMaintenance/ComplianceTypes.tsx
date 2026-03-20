@@ -456,7 +456,12 @@ export function ComplianceTypesManagement() {
 
 function StatCard({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-xl px-3 py-3 border flex flex-col gap-1" style={{ backgroundColor: 'var(--control-bg)', borderColor: 'var(--border-subtle)' }}>
+    <div
+      className="rounded-xl px-3 py-3 flex flex-col gap-1 shadow-sm"
+      style={{
+        backgroundColor: 'color-mix(in oklab, var(--surface) 94%, white 6%)',
+      }}
+    >
       <span className="text-[10px] font-semibold text-secondary uppercase tracking-widest">{label}</span>
       <span className="text-base sm:text-lg font-bold leading-tight" style={{ color: 'var(--text)' }}>
         {value}

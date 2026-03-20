@@ -237,7 +237,7 @@ export function RequirementCategoriesManagement() {
             Requirement Categories List
           </h3>
           <button
-            className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-semibold shadow-sm"
+            className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-semibold shadow-sm cursor-pointer"
             style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
             onClick={openCreate}
           >
@@ -442,7 +442,12 @@ export function RequirementCategoriesManagement() {
 
 function StatCard({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-xl px-3 py-3 border flex flex-col gap-1" style={{ backgroundColor: 'var(--control-bg)', borderColor: 'var(--border-subtle)' }}>
+    <div
+      className="rounded-xl px-3 py-3 flex flex-col gap-1 shadow-sm"
+      style={{
+        backgroundColor: 'color-mix(in oklab, var(--surface) 94%, white 6%)',
+      }}
+    >
       <span className="text-[10px] font-semibold text-secondary uppercase tracking-widest">{label}</span>
       <span className="text-base sm:text-lg font-bold leading-tight" style={{ color: 'var(--text)' }}>
         {value}

@@ -705,7 +705,7 @@ export function ApplicationsWorkflow({ renewalMode }: { renewalMode: boolean }) 
           {renewalMode ? 'Renewal Applications Directory' : 'Proponents Directory'}
         </h3>
         <button
-          className="rounded-lg px-3 py-2 text-sm font-semibold inline-flex items-center gap-1.5 shadow-sm"
+          className="rounded-lg px-3 py-2 text-sm font-semibold inline-flex items-center gap-1.5 shadow-sm cursor-pointer"
           style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
           onClick={() => {
             const stamp = new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 14);
