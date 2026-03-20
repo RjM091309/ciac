@@ -212,7 +212,7 @@ export function ApplicationsWorkflow({ renewalMode }: { renewalMode: boolean }) 
   const [appsPageSize, setAppsPageSize] = useState(5);
   const [appsPage, setAppsPage] = useState(1);
   const [checklistSearchQuery, setChecklistSearchQuery] = useState('');
-  const [checklistPageSize, setChecklistPageSize] = useState(5);
+  const [checklistPageSize, setChecklistPageSize] = useState(20);
   const [checklistPage, setChecklistPage] = useState(1);
 
   const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -430,6 +430,9 @@ export function ApplicationsWorkflow({ renewalMode }: { renewalMode: boolean }) 
   async function openDetails(applicationId: number) {
     setSelectedId(applicationId);
     setPreviewRequirementId(null);
+    // Ensure the checklist shows the expected default amount every time the modal opens.
+    setChecklistPageSize(20);
+    setChecklistPage(1);
     setDetailsOpen(true);
     await loadDetails(applicationId);
   }
@@ -851,7 +854,7 @@ export function ApplicationsWorkflow({ renewalMode }: { renewalMode: boolean }) 
       {detailsOpen ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center px-2 sm:px-4" style={{ backgroundColor: 'rgba(0,0,0,.45)' }}>
           <div
-            className="w-full max-w-6xl rounded-2xl border shadow-2xl overflow-hidden"
+            className="w-full max-w-7xl rounded-2xl border shadow-2xl overflow-hidden flex flex-col"
             style={{ backgroundColor: 'var(--surface)', borderColor: 'var(--border-subtle)', height: 'min(82vh, 860px)' }}
           >
             <div className="px-4 sm:px-5 py-3 border-b flex items-start justify-between" style={{ borderColor: 'var(--border-subtle)' }}>
@@ -870,7 +873,7 @@ export function ApplicationsWorkflow({ renewalMode }: { renewalMode: boolean }) 
               </button>
             </div>
 
-            <div className="p-4 sm:p-5 h-[calc(100%-58px)] overflow-hidden flex flex-col">
+            <div className="p-4 sm:p-5 flex-1 overflow-hidden flex flex-col min-h-0">
               {!selectedApp ? (
                 <div className="py-8 text-center text-sm text-secondary">Select an application.</div>
               ) : (
@@ -909,7 +912,7 @@ export function ApplicationsWorkflow({ renewalMode }: { renewalMode: boolean }) 
                     </div>
                   </div>
 
-                  <div className="rounded-xl border overflow-hidden flex-1 min-h-0" style={{ borderColor: 'var(--border-subtle)' }}>
+                  <div className="rounded-xl border flex flex-col flex-1 min-h-0" style={{ borderColor: 'var(--border-subtle)' }}>
                     <div className="px-4 py-3 border-b flex items-center justify-between" style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'color-mix(in oklab, var(--control-bg) 65%, transparent)' }}>
                       <div className="text-sm font-semibold">Requirements Checklist</div>
                       <span className="text-[11px] rounded-full px-2.5 py-1 border" style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'var(--surface)' }}>
@@ -939,7 +942,7 @@ export function ApplicationsWorkflow({ renewalMode }: { renewalMode: boolean }) 
                         </div>
                       </div>
 
-                      <div className="flex-1 min-h-0 overflow-y-auto">
+                      <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
                         {detailsLoading ? (
                           <div className="p-5 text-sm text-secondary">Loading checklist...</div>
                         ) : filteredChecklistRequirements.length === 0 ? (
@@ -1100,19 +1103,21 @@ export function ApplicationsWorkflow({ renewalMode }: { renewalMode: boolean }) 
                     </div>
                   </div>
 
-                  <DataTableControls
-                    page={checklistPage}
-                    totalPages={checklistTotalPages}
-                    totalItems={filteredChecklistRequirements.length}
-                    showingFrom={checklistShowingRange.from}
-                    showingTo={checklistShowingRange.to}
-                    visiblePageNumbers={checklistVisiblePageNumbers}
-                    pageSize={checklistPageSize}
-                    pageSizeOptions={[5, 20, 50, 100, 200]}
-                    onPageSizeChange={setChecklistPageSize}
-                    onPageChange={setChecklistPage}
-                    loading={detailsLoading}
-                  />
+                  <div className="shrink-0">
+                    <DataTableControls
+                      page={checklistPage}
+                      totalPages={checklistTotalPages}
+                      totalItems={filteredChecklistRequirements.length}
+                      showingFrom={checklistShowingRange.from}
+                      showingTo={checklistShowingRange.to}
+                      visiblePageNumbers={checklistVisiblePageNumbers}
+                      pageSize={checklistPageSize}
+                      pageSizeOptions={[5, 20, 50, 100, 200]}
+                      onPageSizeChange={setChecklistPageSize}
+                      onPageChange={setChecklistPage}
+                      loading={detailsLoading}
+                    />
+                  </div>
 
                 </div>
                 </>
