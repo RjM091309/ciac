@@ -23,7 +23,9 @@ const createStyles = (compact: boolean): StylesConfig<AppSelectOption, false> =>
     backgroundColor: 'transparent',
     cursor: 'pointer',
     borderColor: state.isFocused ? 'var(--nav-active-bg)' : 'var(--input-border)',
+    borderRadius: '0.5rem',
     boxShadow: 'none',
+    outline: 'none',
     '&:hover': {
       borderColor: 'var(--nav-active-bg)',
     },

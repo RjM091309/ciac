@@ -4,7 +4,10 @@ import { toast } from 'sonner';
 import { cn } from '../../lib/utils';
 import { SidePanel } from '../ui/SidePanel';
 import { DataTableControls } from '../ui/DataTableControls';
+import { AppSelect } from '../ui/AppSelect';
 import { useSessionStorageCachedResource } from '../../hooks/useSessionStorageCachedResource';
+import { DatePicker } from '@mui/x-date-pickers/DatePicker';
+import { TextField } from '@mui/material';
 
 type ApplicationRow = {
   id: number;
@@ -144,6 +147,21 @@ function toDateInputValue(v: string | null | undefined) {
   return `${yyyy}-${mm}-${dd}`;
 }
 
+function toDatePickerValue(v: string | null | undefined) {
+  if (!v) return null;
+  const d = new Date(v);
+  if (Number.isNaN(d.getTime())) return null;
+  return d;
+}
+
+function formatDatePickerValue(v: Date | null) {
+  if (!v || Number.isNaN(v.getTime())) return '';
+  const yyyy = v.getFullYear();
+  const mm = String(v.getMonth() + 1).padStart(2, '0');
+  const dd = String(v.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+}
+
 export function ApplicationsWorkflow({ renewalMode }: { renewalMode: boolean }) {
   const [saving, setSaving] = useState(false);
   const [applications, setApplications] = useState<ApplicationRow[]>([]);
@@ -208,6 +226,9 @@ export function ApplicationsWorkflow({ renewalMode }: { renewalMode: boolean }) 
     effective_end: '',
     document_id: '',
   });
+  const [contractIssueDateOpen, setContractIssueDateOpen] = useState(false);
+  const [contractEffectiveStartOpen, setContractEffectiveStartOpen] = useState(false);
+  const [contractEffectiveEndOpen, setContractEffectiveEndOpen] = useState(false);
   const [appsSearchQuery, setAppsSearchQuery] = useState('');
   const [appsPageSize, setAppsPageSize] = useState(5);
   const [appsPage, setAppsPage] = useState(1);
@@ -1219,118 +1240,197 @@ export function ApplicationsWorkflow({ renewalMode }: { renewalMode: boolean }) 
         </div>
       ) : null}
 
-      {contractOpen ? (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center px-3" style={{ backgroundColor: 'rgba(0,0,0,.4)' }}>
-          <div className="w-full max-w-2xl rounded-2xl border p-4 sm:p-5" style={{ backgroundColor: 'var(--surface)', borderColor: 'var(--border-subtle)' }}>
-            <div className="flex items-start justify-between gap-3 border-b pb-3" style={{ borderColor: 'var(--input-border)' }}>
-              <div>
-                <div className="text-sm font-bold" style={{ color: 'var(--text)' }}>
-                  {contractMode === 'insert' ? 'Create Contract' : 'Update Contract'}
-                </div>
-                <div className="text-xs text-secondary mt-0.5">
-                  {contractApp ? `${contractApp.proponent_name || 'Application'} • ${contractApp.application_no}` : 'Selected application'}
-                </div>
-              </div>
-              <button
-                className="rounded-lg px-2 py-1 text-xs border"
-                style={{ borderColor: 'var(--border-subtle)', color: 'var(--text-muted)' }}
-                onClick={() => setContractOpen(false)}
-                disabled={saving}
-              >
-                Close
-              </button>
-            </div>
+      <SidePanel
+        open={contractOpen}
+        title={contractMode === 'insert' ? 'Create Contract' : 'Update Contract'}
+        subtitle={
+          contractApp ? `${contractApp.proponent_name || 'Application'} • ${contractApp.application_no}` : 'Selected application'
+        }
+        onClose={() => setContractOpen(false)}
+        onSave={saveContract}
+        saving={saving || contractLoading}
+        saveLabel={contractMode === 'insert' ? 'Save Contract' : 'Save Changes'}
+        widthClassName="max-w-2xl"
+      >
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div className="md:col-span-2">
+            <label className="text-xs font-semibold uppercase tracking-wider text-secondary">Contract No.</label>
+            <TextField
+              size="small"
+              value={contractForm.contract_no}
+              onChange={(e) => setContractForm((p) => ({ ...p, contract_no: e.target.value }))}
+              placeholder="e.g. CN-2026-0001"
+              sx={{
+                mt: 1,
+                width: '100%',
+                '& .MuiOutlinedInput-root': {
+                  backgroundColor: 'transparent',
+                  borderRadius: '0.5rem',
+                  boxShadow: 'none',
+                  height: '40px',
+                },
+                '& .MuiOutlinedInput-notchedOutline': {
+                  borderColor: 'var(--input-border)',
+                  borderWidth: '1px',
+                },
+                '&:hover .MuiOutlinedInput-notchedOutline': {
+                  borderColor: 'var(--nav-active-bg)',
+                  borderWidth: '1px',
+                },
+                '& .MuiOutlinedInput-root.Mui-focused .MuiOutlinedInput-notchedOutline': {
+                  borderColor: 'var(--nav-active-bg)',
+                  borderWidth: '1px',
+                },
+              }}
+            />
+          </div>
 
-            <div className="pt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div className="md:col-span-2">
-                <label className="text-xs font-semibold uppercase tracking-wider text-secondary">Contract No.</label>
-                <input
-                  className="w-full rounded-lg border px-3 py-2 text-sm bg-transparent mt-1"
-                  style={{ borderColor: 'var(--input-border)' }}
-                  value={contractForm.contract_no}
-                  onChange={(e) => setContractForm((p) => ({ ...p, contract_no: e.target.value }))}
-                  placeholder="e.g. CN-2026-0001"
-                />
-              </div>
+          <div>
+            <label className="text-xs font-semibold uppercase tracking-wider text-secondary">Issue Date</label>
+            <DatePicker
+              open={contractIssueDateOpen}
+              onOpen={() => setContractIssueDateOpen(true)}
+              onClose={() => setContractIssueDateOpen(false)}
+              value={toDatePickerValue(contractForm.issue_date)}
+              onChange={(newValue) => setContractForm((p) => ({ ...p, issue_date: formatDatePickerValue(newValue) }))}
+              format="yyyy-MM-dd"
+              slotProps={{
+                textField: {
+                  fullWidth: true,
+                  size: 'small',
+                  placeholder: 'YYYY-MM-DD',
+                  onClick: () => setContractIssueDateOpen(true),
+                  sx: {
+                    mt: 1,
+                    '& .MuiOutlinedInput-root': {
+                      backgroundColor: 'transparent',
+                      borderRadius: '0.5rem',
+                      boxShadow: 'none',
+                      height: '40px',
+                    },
+                    '& .MuiOutlinedInput-notchedOutline': {
+                      borderColor: 'var(--input-border)',
+                      borderWidth: '1px',
+                    },
+                    '&:hover .MuiOutlinedInput-notchedOutline': {
+                      borderColor: 'var(--nav-active-bg)',
+                      borderWidth: '1px',
+                    },
+                    '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
+                      borderColor: 'var(--nav-active-bg)',
+                      borderWidth: '1px',
+                    },
+                  },
+                },
+              }}
+            />
+          </div>
 
-              <div>
-                <label className="text-xs font-semibold uppercase tracking-wider text-secondary">Issue Date</label>
-                <input
-                  type="date"
-                  className="w-full rounded-lg border px-3 py-2 text-sm bg-transparent mt-1"
-                  style={{ borderColor: 'var(--input-border)' }}
-                  value={contractForm.issue_date}
-                  onChange={(e) => setContractForm((p) => ({ ...p, issue_date: e.target.value }))}
-                />
-              </div>
+          <div>
+            <label className="text-xs font-semibold uppercase tracking-wider text-secondary">Effective Start</label>
+            <DatePicker
+              open={contractEffectiveStartOpen}
+              onOpen={() => setContractEffectiveStartOpen(true)}
+              onClose={() => setContractEffectiveStartOpen(false)}
+              value={toDatePickerValue(contractForm.effective_start)}
+              onChange={(newValue) =>
+                setContractForm((p) => ({ ...p, effective_start: formatDatePickerValue(newValue) }))
+              }
+              format="yyyy-MM-dd"
+              slotProps={{
+                textField: {
+                  fullWidth: true,
+                  size: 'small',
+                  placeholder: 'YYYY-MM-DD',
+                  onClick: () => setContractEffectiveStartOpen(true),
+                  sx: {
+                    mt: 1,
+                    '& .MuiOutlinedInput-root': {
+                      backgroundColor: 'transparent',
+                      borderRadius: '0.5rem',
+                      boxShadow: 'none',
+                      height: '40px',
+                    },
+                    '& .MuiOutlinedInput-notchedOutline': {
+                      borderColor: 'var(--input-border)',
+                      borderWidth: '1px',
+                    },
+                    '&:hover .MuiOutlinedInput-notchedOutline': {
+                      borderColor: 'var(--nav-active-bg)',
+                      borderWidth: '1px',
+                    },
+                    '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
+                      borderColor: 'var(--nav-active-bg)',
+                      borderWidth: '1px',
+                    },
+                  },
+                },
+              }}
+            />
+          </div>
 
-              <div>
-                <label className="text-xs font-semibold uppercase tracking-wider text-secondary">Effective Start</label>
-                <input
-                  type="date"
-                  className="w-full rounded-lg border px-3 py-2 text-sm bg-transparent mt-1"
-                  style={{ borderColor: 'var(--input-border)' }}
-                  value={contractForm.effective_start}
-                  onChange={(e) => setContractForm((p) => ({ ...p, effective_start: e.target.value }))}
-                />
-              </div>
+          <div>
+            <label className="text-xs font-semibold uppercase tracking-wider text-secondary">Effective End</label>
+            <DatePicker
+              open={contractEffectiveEndOpen}
+              onOpen={() => setContractEffectiveEndOpen(true)}
+              onClose={() => setContractEffectiveEndOpen(false)}
+              value={toDatePickerValue(contractForm.effective_end)}
+              onChange={(newValue) =>
+                setContractForm((p) => ({ ...p, effective_end: formatDatePickerValue(newValue) }))
+              }
+              format="yyyy-MM-dd"
+              slotProps={{
+                textField: {
+                  fullWidth: true,
+                  size: 'small',
+                  placeholder: 'YYYY-MM-DD',
+                  onClick: () => setContractEffectiveEndOpen(true),
+                  sx: {
+                    mt: 1,
+                    '& .MuiOutlinedInput-root': {
+                      backgroundColor: 'transparent',
+                      borderRadius: '0.5rem',
+                      boxShadow: 'none',
+                      height: '40px',
+                    },
+                    '& .MuiOutlinedInput-notchedOutline': {
+                      borderColor: 'var(--input-border)',
+                      borderWidth: '1px',
+                    },
+                    '&:hover .MuiOutlinedInput-notchedOutline': {
+                      borderColor: 'var(--nav-active-bg)',
+                      borderWidth: '1px',
+                    },
+                    '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
+                      borderColor: 'var(--nav-active-bg)',
+                      borderWidth: '1px',
+                    },
+                  },
+                },
+              }}
+            />
+          </div>
 
-              <div>
-                <label className="text-xs font-semibold uppercase tracking-wider text-secondary">Effective End</label>
-                <input
-                  type="date"
-                  className="w-full rounded-lg border px-3 py-2 text-sm bg-transparent mt-1"
-                  style={{ borderColor: 'var(--input-border)' }}
-                  value={contractForm.effective_end}
-                  onChange={(e) => setContractForm((p) => ({ ...p, effective_end: e.target.value }))}
-                />
-              </div>
-
-              <div className="md:col-span-2">
-                <label className="text-xs font-semibold uppercase tracking-wider text-secondary">Contract Document</label>
-                <select
-                  className="w-full rounded-lg border px-3 py-2 text-sm bg-transparent mt-1"
-                  style={{ borderColor: 'var(--input-border)' }}
-                  value={contractForm.document_id}
-                  onChange={(e) => setContractForm((p) => ({ ...p, document_id: e.target.value }))}
-                  disabled={contractLoading}
-                >
-                  <option value="">No document</option>
-                  {contractDocuments.map((d) => (
-                    <option key={d.id} value={String(d.id)}>
-                      {d.file_name}
-                      {d.requirement_code ? ` (${d.requirement_code})` : ''}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
-            <div className="pt-4 flex justify-end gap-2">
-              <button
-                className="rounded-lg px-3 py-2 text-sm border font-semibold"
-                style={{ borderColor: 'var(--border-subtle)', color: 'var(--text-muted)' }}
-                onClick={() => setContractOpen(false)}
-                disabled={saving}
-              >
-                Cancel
-              </button>
-              <button
-                className={cn(
-                  'rounded-lg px-3 py-2 text-sm font-semibold inline-flex items-center justify-center gap-1.5',
-                  (saving || contractLoading) && 'opacity-60 cursor-not-allowed'
-                )}
-                style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
-                disabled={saving || contractLoading}
-                onClick={saveContract}
-              >
-                {saving || contractLoading ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}
-                {contractMode === 'insert' ? 'Save Contract' : 'Save Changes'}
-              </button>
-            </div>
+          <div className="md:col-span-2">
+            <label className="text-xs font-semibold uppercase tracking-wider text-secondary">Contract Document</label>
+            <AppSelect
+              options={[
+                { value: '', label: 'No document' },
+                ...contractDocuments.map((d) => ({
+                  value: String(d.id),
+                  label: `${d.file_name}${d.requirement_code ? ` (${d.requirement_code})` : ''}`,
+                })),
+              ]}
+              value={contractForm.document_id}
+              onChange={(value) => setContractForm((p) => ({ ...p, document_id: value }))}
+              placeholder="Select contract document..."
+              isDisabled={contractLoading}
+              isClearable={false}
+            />
           </div>
         </div>
-      ) : null}
+      </SidePanel>
 
       <SidePanel
         open={isCreateOpen}
