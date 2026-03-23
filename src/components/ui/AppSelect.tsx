@@ -22,12 +22,15 @@ const createStyles = (compact: boolean): StylesConfig<AppSelectOption, false> =>
     minHeight: compact ? 32 : 40,
     backgroundColor: 'transparent',
     cursor: 'pointer',
+    borderStyle: 'solid',
+    borderWidth: '1px',
     borderColor: state.isFocused ? 'var(--nav-active-bg)' : 'var(--input-border)',
     borderRadius: '0.5rem',
     boxShadow: 'none',
     outline: 'none',
     '&:hover': {
       borderColor: 'var(--nav-active-bg)',
+      borderWidth: '1px',
     },
   }),
   valueContainer: (base) => ({

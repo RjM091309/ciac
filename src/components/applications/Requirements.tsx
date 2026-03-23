@@ -472,16 +472,14 @@ export function RequirementsManagement() {
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Field label="Code">
             <input
-              className="w-full rounded-md px-3 py-2 text-sm border focus:outline-none focus:border-[var(--nav-active-bg)]"
-              style={{ borderColor: 'var(--input-border)', color: 'var(--text)', backgroundColor: 'var(--input-bg)' }}
+              className="app-form-control"
               value={form.code}
               onChange={(e) => setForm((p) => ({ ...p, code: e.target.value }))}
             />
           </Field>
           <Field label="Name">
             <input
-              className="w-full rounded-md px-3 py-2 text-sm border focus:outline-none focus:border-[var(--nav-active-bg)]"
-              style={{ borderColor: 'var(--input-border)', color: 'var(--text)', backgroundColor: 'var(--input-bg)' }}
+              className="app-form-control"
               value={form.name}
               onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))}
             />
@@ -498,8 +496,7 @@ export function RequirementsManagement() {
           </Field>
           <Field label="Description">
             <input
-              className="w-full rounded-md px-3 py-2 text-sm border focus:outline-none focus:border-[var(--nav-active-bg)]"
-              style={{ borderColor: 'var(--input-border)', color: 'var(--text)', backgroundColor: 'var(--input-bg)' }}
+              className="app-form-control"
               value={form.description}
               onChange={(e) => setForm((p) => ({ ...p, description: e.target.value }))}
             />
@@ -579,9 +576,8 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 function CheckToggle({ label, checked, onChange }: { label: string; checked: boolean; onChange: (v: boolean) => void }) {
   return (
-    <label 
-      className="flex items-center gap-2 rounded-md border px-3 py-2 text-xs cursor-pointer hover:bg-white/5 transition-all" 
-      style={{ borderColor: 'var(--input-border)' }}
+    <label
+      className="flex items-center gap-2 rounded-lg border border-solid border-[var(--input-border)] px-3 py-2 text-xs cursor-pointer transition-all hover:border-[var(--nav-active-bg)] hover:bg-white/5"
     >
       <input 
       type="checkbox" 

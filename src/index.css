@@ -197,6 +197,33 @@
   @apply rounded-xl focus:outline-none focus:ring-1 focus:ring-zinc-700 transition-all;
 }
 
+/* Same 1px border + hover/focus as AppSelect (no ring), for plain inputs beside selects */
+.app-form-control {
+  width: 100%;
+  border-radius: 0.5rem;
+  border: 1px solid var(--input-border);
+  padding: 0.5rem 0.75rem;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  background-color: transparent;
+  color: var(--text);
+  outline: none;
+}
+.app-form-control:hover:not(:disabled) {
+  border-color: var(--nav-active-bg);
+}
+.app-form-control:focus {
+  border-color: var(--nav-active-bg);
+  outline: none;
+}
+.app-form-control:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+textarea.app-form-control {
+  font-family: inherit;
+}
+
 /* Ensure browser autofill matches input theme */
 input.input-field:-webkit-autofill,
 input.input-field:-webkit-autofill:hover,

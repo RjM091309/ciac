@@ -226,6 +226,8 @@ export function ApplicationsWorkflow({ renewalMode }: { renewalMode: boolean }) 
     effective_end: '',
     document_id: '',
   });
+  /** Loaded values for update mode — Save stays disabled until something changes. */
+  const [contractInitialSnapshot, setContractInitialSnapshot] = useState<typeof contractForm | null>(null);
   const [contractIssueDateOpen, setContractIssueDateOpen] = useState(false);
   const [contractEffectiveStartOpen, setContractEffectiveStartOpen] = useState(false);
   const [contractEffectiveEndOpen, setContractEffectiveEndOpen] = useState(false);
@@ -259,6 +261,32 @@ export function ApplicationsWorkflow({ renewalMode }: { renewalMode: boolean }) 
 
   const applicationsEffective = baseData?.applications ?? applications;
   const proponentsEffective = baseData?.proponents ?? proponents;
+
+  const createFormCanSubmit = useMemo(() => {
+    const proponentId = Number(createForm.proponent_id);
+    if (!Number.isFinite(proponentId) || proponentId <= 0) return false;
+    if (!createForm.application_no.trim()) return false;
+    return true;
+  }, [createForm.application_no, createForm.proponent_id]);
+
+  const contractFormCanSave = useMemo(() => {
+    if (!contractForm.contract_no.trim() || !contractForm.issue_date) return false;
+    if (contractMode === 'insert') return true;
+    if (!contractInitialSnapshot) return false;
+    const s = contractInitialSnapshot;
+    return (
+      contractForm.contract_no.trim() !== s.contract_no.trim() ||
+      contractForm.issue_date !== s.issue_date ||
+      contractForm.effective_start !== s.effective_start ||
+      contractForm.effective_end !== s.effective_end ||
+      contractForm.document_id !== s.document_id
+    );
+  }, [contractForm, contractMode, contractInitialSnapshot]);
+
+  const proponentSelectOptions = useMemo(
+    () => proponentsEffective.map((p) => ({ value: String(p.id), label: p.business_name })),
+    [proponentsEffective]
+  );
 
   const appsByType = useMemo(
     () => applicationsEffective.filter((a) => Number(a.is_renewal) === (renewalMode ? 1 : 0)),
@@ -474,6 +502,7 @@ export function ApplicationsWorkflow({ renewalMode }: { renewalMode: boolean }) 
     setContractLoading(true);
     setContractMode('insert');
     setContractExistingId(null);
+    setContractInitialSnapshot(null);
     setContractForm({
       contract_no: '',
       issue_date: '',
@@ -496,13 +525,15 @@ export function ApplicationsWorkflow({ renewalMode }: { renewalMode: boolean }) 
       if (existing && Number.isFinite(Number(existing.id))) {
         setContractMode('update');
         setContractExistingId(Number(existing.id));
-        setContractForm({
+        const loaded = {
           contract_no: existing.contract_no ? String(existing.contract_no) : '',
           issue_date: toDateInputValue(existing.issue_date),
           effective_start: toDateInputValue(existing.effective_start),
           effective_end: toDateInputValue(existing.effective_end),
           document_id: existing.document_id ? String(existing.document_id) : '',
-        });
+        };
+        setContractForm(loaded);
+        setContractInitialSnapshot(loaded);
       }
     } catch (error: any) {
       toast.error(error?.message || 'Failed to load contract');
@@ -1168,15 +1199,13 @@ export function ApplicationsWorkflow({ renewalMode }: { renewalMode: boolean }) 
             </div>
             <div className="pt-3 grid grid-cols-1 gap-2.5">
               <input
-                className="w-full rounded-lg border px-3 py-2 text-sm bg-transparent"
-                style={{ borderColor: 'var(--input-border)' }}
+                className="app-form-control"
                 value={documentForm.file_name}
                 onChange={(e) => setDocumentForm((p) => ({ ...p, file_name: e.target.value }))}
                 placeholder="File name"
               />
               <input
-                className="w-full rounded-lg border px-3 py-2 text-sm bg-transparent"
-                style={{ borderColor: 'var(--input-border)' }}
+                className="app-form-control"
                 value={documentForm.storage_path}
                 onChange={(e) => setDocumentForm((p) => ({ ...p, storage_path: e.target.value }))}
                 placeholder="Storage path"
@@ -1218,8 +1247,7 @@ export function ApplicationsWorkflow({ renewalMode }: { renewalMode: boolean }) 
             </div>
             <div className="pt-3 grid grid-cols-1 gap-2.5">
               <input
-                className="w-full rounded-lg border px-3 py-2 text-sm bg-transparent"
-                style={{ borderColor: 'var(--input-border)' }}
+                className="app-form-control"
                 value={statusForm.to_status}
                 onChange={(e) => setStatusForm((p) => ({ ...p, to_status: e.target.value }))}
                 placeholder="UNDER_REVIEW"
@@ -1249,6 +1277,7 @@ export function ApplicationsWorkflow({ renewalMode }: { renewalMode: boolean }) 
         onClose={() => setContractOpen(false)}
         onSave={saveContract}
         saving={saving || contractLoading}
+        saveDisabled={!contractFormCanSave}
         saveLabel={contractMode === 'insert' ? 'Save Contract' : 'Save Changes'}
         widthClassName="max-w-2xl"
       >
@@ -1439,35 +1468,28 @@ export function ApplicationsWorkflow({ renewalMode }: { renewalMode: boolean }) 
         onClose={() => setIsCreateOpen(false)}
         onSave={createApplication}
         saving={saving}
+        saveDisabled={!createFormCanSubmit}
       >
         <div className="grid grid-cols-1 gap-3">
           <label className="text-xs font-semibold uppercase tracking-wider text-secondary">Proponent</label>
-          <select
-            className="w-full rounded-lg border px-3 py-2 text-sm bg-transparent"
-            style={{ borderColor: 'var(--input-border)' }}
+          <AppSelect
+            options={proponentSelectOptions}
             value={createForm.proponent_id}
-            onChange={(e) => setCreateForm((p) => ({ ...p, proponent_id: e.target.value }))}
-          >
-            <option value="">Select proponent...</option>
-            {proponentsEffective.map((p) => (
-              <option key={p.id} value={String(p.id)}>
-                {p.business_name}
-              </option>
-            ))}
-          </select>
+            onChange={(value) => setCreateForm((p) => ({ ...p, proponent_id: value }))}
+            placeholder="Select proponent..."
+            isDisabled={saving}
+          />
 
           <label className="text-xs font-semibold uppercase tracking-wider text-secondary">Application No.</label>
           <input
-            className="w-full rounded-lg border px-3 py-2 text-sm bg-transparent"
-            style={{ borderColor: 'var(--input-border)' }}
+            className="app-form-control"
             value={createForm.application_no}
             onChange={(e) => setCreateForm((p) => ({ ...p, application_no: e.target.value }))}
           />
 
           <label className="text-xs font-semibold uppercase tracking-wider text-secondary">Application Type</label>
           <input
-            className="w-full rounded-lg border px-3 py-2 text-sm bg-transparent"
-            style={{ borderColor: 'var(--input-border)' }}
+            className="app-form-control"
             value={createForm.application_type}
             onChange={(e) => setCreateForm((p) => ({ ...p, application_type: e.target.value }))}
           />

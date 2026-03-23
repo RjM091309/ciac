@@ -464,8 +464,7 @@ export function ProponentsManagement() {
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Field label="Business name">
             <input
-              className="w-full rounded-md px-3 py-2 text-sm border focus:outline-none focus:border-[var(--nav-active-bg)]"
-              style={{ borderColor: 'var(--input-border)', color: 'var(--text)', backgroundColor: 'var(--input-bg)' }}
+              className="app-form-control"
               value={form.business_name}
               onChange={(e) => setForm((p) => ({ ...p, business_name: e.target.value }))}
             />
@@ -482,32 +481,28 @@ export function ProponentsManagement() {
           </Field>
           <Field label="Registration no">
             <input
-              className="w-full rounded-md px-3 py-2 text-sm border focus:outline-none focus:border-[var(--nav-active-bg)]"
-              style={{ borderColor: 'var(--input-border)', color: 'var(--text)', backgroundColor: 'var(--input-bg)' }}
+              className="app-form-control"
               value={form.registration_no}
               onChange={(e) => setForm((p) => ({ ...p, registration_no: e.target.value }))}
             />
           </Field>
           <Field label="TIN">
             <input
-              className="w-full rounded-md px-3 py-2 text-sm border focus:outline-none focus:border-[var(--nav-active-bg)]"
-              style={{ borderColor: 'var(--input-border)', color: 'var(--text)', backgroundColor: 'var(--input-bg)' }}
+              className="app-form-control"
               value={form.tin}
               onChange={(e) => setForm((p) => ({ ...p, tin: e.target.value }))}
             />
           </Field>
           <Field label="Contact no">
             <input
-              className="w-full rounded-md px-3 py-2 text-sm border focus:outline-none focus:border-[var(--nav-active-bg)]"
-              style={{ borderColor: 'var(--input-border)', color: 'var(--text)', backgroundColor: 'var(--input-bg)' }}
+              className="app-form-control"
               value={form.contact_no}
               onChange={(e) => setForm((p) => ({ ...p, contact_no: e.target.value }))}
             />
           </Field>
           <Field label="Address">
             <input
-              className="w-full rounded-md px-3 py-2 text-sm border focus:outline-none focus:border-[var(--nav-active-bg)]"
-              style={{ borderColor: 'var(--input-border)', color: 'var(--text)', backgroundColor: 'var(--input-bg)' }}
+              className="app-form-control"
               value={form.address}
               onChange={(e) => setForm((p) => ({ ...p, address: e.target.value }))}
             />
