@@ -139,9 +139,9 @@ export function Dashboard() {
 
   return (
     <>
-      <div className="grid grid-cols-12 gap-4 sm:gap-4 lg:gap-5">
-        {/* Left side: hero + 4 cards (single block) */}
-        <div className="col-span-12 lg:col-span-8 flex flex-col gap-4 sm:gap-4">
+      <div className="grid grid-cols-12 gap-4 sm:gap-4 min-[1181px]:gap-5 w-full min-w-0 max-w-full">
+        {/* Left side: hero + metrics — full width until 1181px (iPad Pro 1024 matches iPad Air stack) */}
+        <div className="col-span-12 min-[1181px]:col-span-8 flex flex-col gap-4 sm:gap-4 w-full min-w-0">
           {/* Welcome + Weather Card (from provided design) */}
           <div
             className="relative overflow-hidden rounded-2xl px-4 py-5 sm:px-6 sm:py-6 !border-transparent"
@@ -220,7 +220,7 @@ export function Dashboard() {
           </div>
 
         {/* Metrics row directly under hero */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 min-[1181px]:grid-cols-4 gap-4 sm:gap-4 w-full min-w-0">
           <MetricCard title="Total Applications" value="126" icon={FileText} trend="up" trendValue="+8 this week" />
           <MetricCard title="Complete Requirements" value="89" icon={Users} trend="up" trendValue="71% cleared" />
           <MetricCard title="Pending Verification" value="27" icon={TrendingUp} trend="down" trendValue="-4 vs. last week" />
@@ -230,7 +230,7 @@ export function Dashboard() {
 
         {/* Insights Card on the right, same row height */}
         <div
-          className="col-span-12 lg:col-span-4 glass-card p-4 sm:p-6 flex flex-col !border-transparent"
+          className="col-span-12 min-[1181px]:col-span-4 glass-card p-4 sm:p-6 flex flex-col !border-transparent w-full min-w-0"
           style={{ backgroundColor: 'var(--surface)' }}
         >
           <h4
@@ -341,7 +341,7 @@ export function Dashboard() {
         </div>
 
         {/* Quick Tasks */}
-        <div className="col-span-12 md:col-span-6 xl:col-span-5 glass-card p-4 sm:p-6 !border-transparent lg:-mt-18.5" style={{ backgroundColor: 'var(--surface)' }}>
+        <div className="col-span-12 min-[1181px]:col-span-5 glass-card p-4 sm:p-6 !border-transparent min-[1181px]:-mt-18.5 w-full min-w-0" style={{ backgroundColor: 'var(--surface)' }}>
           <h4
             className="text-sm font-bold mb-1"
             style={{ color: 'var(--text)' }}
@@ -429,7 +429,7 @@ export function Dashboard() {
         </div>
 
         {/* Calendar */}
-        <div className="col-span-12 md:col-span-6 xl:col-span-3 glass-card p-4 sm:p-6 !border-transparent lg:-mt-18.5" style={{ backgroundColor: 'var(--surface)' }}>
+        <div className="col-span-12 min-[1181px]:col-span-3 glass-card p-4 sm:p-6 !border-transparent min-[1181px]:-mt-18.5 w-full min-w-0" style={{ backgroundColor: 'var(--surface)' }}>
           <h4
             className="text-sm font-bold mb-1"
             style={{ color: 'var(--text)' }}
@@ -499,7 +499,7 @@ export function Dashboard() {
 
         {/* Application Pipeline Analytics */}
         <div
-          className="col-span-12 xl:col-span-4 glass-card p-4 sm:p-6 !border-transparent"
+          className="col-span-12 min-[1181px]:col-span-4 glass-card p-4 sm:p-6 !border-transparent w-full min-w-0"
           style={{ backgroundColor: 'var(--surface)' }}
         >
           <div className="flex justify-between items-start gap-2 mb-1 min-w-0">

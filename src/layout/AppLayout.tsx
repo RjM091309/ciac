@@ -32,12 +32,16 @@ type Theme = 'light' | 'dark';
 type ThemeMode = 'system' | 'manual';
 
 const MOBILE_BREAKPOINT = 768;
-const DESKTOP_BREAKPOINT = 1024; // tablet = 768..1023, desktop = 1024+
+/**
+ * Inline sidebar defaults to icon-only below this width. Matches dashboard `min-[1181px]` desktop layout.
+ * iPad Pro / Safari often reports 1025–1112px instead of exactly 1024, so 1025 alone was not enough.
+ */
+const SIDEBAR_EXPANDED_MIN_WIDTH = 1181;
 
 function getSidebarDefaultCollapsed(width: number) {
   if (width < MOBILE_BREAKPOINT) return true; // mobile: drawer closed
-  if (width < DESKTOP_BREAKPOINT) return true; // tablet: icon-only default
-  return false; // desktop: expanded default
+  if (width < SIDEBAR_EXPANDED_MIN_WIDTH) return true; // tablet + iPad: icon rail (collapsed)
+  return false; // wide desktop: expanded by default
 }
 
 export function AppLayout({
@@ -79,7 +83,7 @@ export function AppLayout({
 
   useEffect(() => {
     const mobileQuery = window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT - 1}px)`);
-    const desktopQuery = window.matchMedia(`(min-width: ${DESKTOP_BREAKPOINT}px)`);
+    const desktopQuery = window.matchMedia(`(min-width: ${SIDEBAR_EXPANDED_MIN_WIDTH}px)`);
     const update = () => {
       const w = window.innerWidth;
       setIsMobile(w < MOBILE_BREAKPOINT);
@@ -87,10 +91,14 @@ export function AppLayout({
     };
     mobileQuery.addEventListener('change', update);
     desktopQuery.addEventListener('change', update);
+    window.addEventListener('resize', update);
+    window.addEventListener('orientationchange', update);
     update();
     return () => {
       mobileQuery.removeEventListener('change', update);
       desktopQuery.removeEventListener('change', update);
+      window.removeEventListener('resize', update);
+      window.removeEventListener('orientationchange', update);
     };
   }, []);
 
