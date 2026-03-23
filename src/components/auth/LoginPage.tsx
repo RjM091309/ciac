@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { ArrowRight, Eye, EyeOff, Moon, ShieldCheck, Sun } from 'lucide-react';
 import { ConfirmationResult, RecaptchaVerifier, signInWithPhoneNumber } from 'firebase/auth';
-import { firebaseAuth, isFirebasePhoneAuthTestMode } from '../../lib/firebase';
+import { getFirebaseAuth, isFirebaseClientConfigured, isFirebasePhoneAuthTestMode } from '../../lib/firebase';
 
 type LoginResult =
   | { ok: true; user: { id: number; username: string; role?: string } }
@@ -137,6 +137,14 @@ export function LoginPage(props: { backendUrl: string; onLoggedIn: (user: { id: 
   }, [resendCooldownSeconds]);
 
   async function sendOtpCode() {
+    if (!isFirebaseClientConfigured) {
+      setMessage({
+        type: 'error',
+        text: 'Verification code login is not configured. Add VITE_FIREBASE_* variables to .env (see .env.example).',
+      });
+      return;
+    }
+    const firebaseAuth = getFirebaseAuth();
     const phone = otpTarget.trim();
     if (!isLikelyE164Phone(phone)) {
       setMessage({ type: 'error', text: 'Use phone format like +639171234567.' });
@@ -224,6 +232,13 @@ export function LoginPage(props: { backendUrl: string; onLoggedIn: (user: { id: 
     setSubmitting(true);
     try {
       if (tab === 'otp') {
+        if (!isFirebaseClientConfigured) {
+          setMessage({
+            type: 'error',
+            text: 'Verification code login is not configured. Add VITE_FIREBASE_* variables to .env (see .env.example).',
+          });
+          return;
+        }
         const phone = otpTarget.trim();
         if (!isLikelyE164Phone(phone)) {
           setMessage({ type: 'error', text: 'Use phone format like +639171234567.' });
@@ -500,6 +515,16 @@ export function LoginPage(props: { backendUrl: string; onLoggedIn: (user: { id: 
                   transition={{ duration: 0.18, ease: 'easeOut' }}
                   className="space-y-2"
                 >
+                  {!isFirebaseClientConfigured ? (
+                    <p className="text-sm rounded-lg px-3 py-2.5" style={{ backgroundColor: 'color-mix(in oklab, var(--errorColor) 12%, transparent)', color: 'var(--errorColor)' }}>
+                      Verification code login needs Firebase web app settings. Add{' '}
+                      <code className="text-[11px] sm:text-xs">VITE_FIREBASE_API_KEY</code>,{' '}
+                      <code className="text-[11px] sm:text-xs">VITE_FIREBASE_AUTH_DOMAIN</code>,{' '}
+                      <code className="text-[11px] sm:text-xs">VITE_FIREBASE_PROJECT_ID</code>, and{' '}
+                      <code className="text-[11px] sm:text-xs">VITE_FIREBASE_APP_ID</code> to <code className="text-[11px] sm:text-xs">.env</code> (see{' '}
+                      <code className="text-[11px] sm:text-xs">.env.example</code>), then restart the dev server.
+                    </p>
+                  ) : null}
                   <div className="space-y-2">
                     <div className="flex items-center justify-between ml-1">
                       <label className="text-xs font-bold uppercase tracking-widest text-secondary" htmlFor="otp-target">
