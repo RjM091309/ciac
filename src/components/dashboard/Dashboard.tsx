@@ -220,7 +220,7 @@ export function Dashboard() {
           </div>
 
         {/* Metrics row directly under hero */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-4">
           <MetricCard title="Total Applications" value="126" icon={FileText} trend="up" trendValue="+8 this week" />
           <MetricCard title="Complete Requirements" value="89" icon={Users} trend="up" trendValue="71% cleared" />
           <MetricCard title="Pending Verification" value="27" icon={TrendingUp} trend="down" trendValue="-4 vs. last week" />
@@ -341,7 +341,7 @@ export function Dashboard() {
         </div>
 
         {/* Quick Tasks */}
-        <div className="col-span-12 md:col-span-6 xl:col-span-5 glass-card p-4 sm:p-6 !border-transparent w-full min-w-0" style={{ backgroundColor: 'var(--surface)' }}>
+        <div className="col-span-12 md:col-span-6 xl:col-span-5 glass-card p-4 sm:p-6 !border-transparent w-full min-w-0 lg:-mt-18.5 max-[1024px]:mt-0" style={{ backgroundColor: 'var(--surface)' }}>
           <h4
             className="text-sm font-bold mb-1"
             style={{ color: 'var(--text)' }}
@@ -429,7 +429,7 @@ export function Dashboard() {
         </div>
 
         {/* Calendar */}
-        <div className="col-span-12 md:col-span-6 xl:col-span-3 glass-card p-4 sm:p-6 !border-transparent w-full min-w-0" style={{ backgroundColor: 'var(--surface)' }}>
+        <div className="col-span-12 md:col-span-6 xl:col-span-3 glass-card p-4 sm:p-6 !border-transparent w-full min-w-0 lg:-mt-18.5 max-[1024px]:mt-0" style={{ backgroundColor: 'var(--surface)' }}>
           <h4
             className="text-sm font-bold mb-1"
             style={{ color: 'var(--text)' }}
