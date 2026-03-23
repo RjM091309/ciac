@@ -36,7 +36,7 @@ const MOBILE_BREAKPOINT = 768;
  * Inline sidebar defaults to icon-only below this width. Matches dashboard `min-[1181px]` desktop layout.
  * iPad Pro / Safari often reports 1025–1112px instead of exactly 1024, so 1025 alone was not enough.
  */
-const SIDEBAR_EXPANDED_MIN_WIDTH = 1181;
+const SIDEBAR_EXPANDED_MIN_WIDTH = 1025;
 
 function getSidebarDefaultCollapsed(width: number) {
   if (width < MOBILE_BREAKPOINT) return true; // mobile: drawer closed
@@ -188,4 +188,5 @@ export function AppLayout({
     </div>
   );
 }
+
 
