@@ -11,12 +11,37 @@ const User = require("./models/User");
 
 const app = express();
 
-// Allow Vite frontend to call API with cookies
-const allowedOrigin = process.env.FRONTEND_URL || "http://localhost:2500";
+function collectAllowedOrigins() {
+  const envOrigins = [
+    process.env.FRONTEND_URL,
+    process.env.FRONTEND_ORIGIN,
+    process.env.FRONTEND_ORIGINS,
+  ]
+    .filter(Boolean)
+    .flatMap((value) => String(value).split(","))
+    .map((value) => value.trim().replace(/\/+$/, ""))
+    .filter(Boolean);
+
+  const defaults = ["http://localhost:2500", "http://localhost:5173"];
+  return Array.from(new Set([...defaults, ...envOrigins]));
+}
+
+const allowedOrigins = collectAllowedOrigins();
+
+// Allow frontend clients to call API with cookies.
 app.use(
   cors({
-    origin: allowedOrigin,
+    origin(origin, callback) {
+      // Allow non-browser requests (curl/postman/server-to-server).
+      if (!origin) return callback(null, true);
+      const normalizedOrigin = String(origin).trim().replace(/\/+$/, "");
+      if (allowedOrigins.includes(normalizedOrigin)) {
+        return callback(null, true);
+      }
+      return callback(new Error(`CORS blocked for origin: ${origin}`));
+    },
     credentials: true,
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   })
 );
 
