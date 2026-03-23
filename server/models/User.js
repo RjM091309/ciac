@@ -22,6 +22,7 @@ async function ensureSchema() {
         id INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
         username NVARCHAR(100) NOT NULL,
         email NVARCHAR(255) NULL,
+        phone NVARCHAR(32) NULL,
         password_hash NVARCHAR(255) NOT NULL,
         full_name NVARCHAR(255) NULL,
         is_active BIT NOT NULL CONSTRAINT DF_users_is_active DEFAULT (1),
@@ -31,6 +32,24 @@ async function ensureSchema() {
 
       CREATE UNIQUE INDEX UX_users_username ON dbo.users(username);
       CREATE UNIQUE INDEX UX_users_email ON dbo.users(email) WHERE email IS NOT NULL;
+      CREATE UNIQUE INDEX UX_users_phone ON dbo.users(phone) WHERE phone IS NOT NULL;
+    END
+  `);
+
+  await updateSchema(`
+    IF COL_LENGTH('dbo.users', 'phone') IS NULL
+    BEGIN
+      ALTER TABLE dbo.users ADD phone NVARCHAR(32) NULL;
+    END
+
+    IF NOT EXISTS (
+      SELECT 1
+      FROM sys.indexes
+      WHERE name = 'UX_users_phone'
+        AND object_id = OBJECT_ID('dbo.users')
+    )
+    BEGIN
+      CREATE UNIQUE INDEX UX_users_phone ON dbo.users(phone) WHERE phone IS NOT NULL;
     END
   `);
 
@@ -85,6 +104,7 @@ async function listUsers() {
       u.id,
       u.username,
       u.email,
+      u.phone,
       u.full_name,
       u.is_active,
       u.created_at,
@@ -101,6 +121,7 @@ async function listUsers() {
     id: u.id,
     username: u.username,
     email: u.email ?? null,
+    phone: u.phone ?? null,
     full_name: u.full_name ?? null,
     is_active: u.is_active,
     created_at: u.created_at ?? null,
@@ -116,6 +137,7 @@ async function getUserById(id) {
       u.id,
       u.username,
       u.email,
+      u.phone,
       u.full_name,
       u.is_active,
       u.created_at,
@@ -143,6 +165,7 @@ async function getUserById(id) {
     id: user.id,
     username: user.username,
     email: user.email ?? null,
+    phone: user.phone ?? null,
     full_name: user.full_name ?? null,
     is_active: user.is_active,
     created_at: user.created_at ?? null,
@@ -151,17 +174,17 @@ async function getUserById(id) {
   };
 }
 
-async function createUser({ username, email, full_name, password, is_active = 1, role_id }) {
+async function createUser({ username, email, phone, full_name, password, is_active = 1, role_id }) {
   const active = is_active ? 1 : 0;
   const roleId = toInt(role_id);
   const hashedPassword = await hashPasswordIfNeeded(password);
   const result = await insertData(
     `
-    INSERT INTO users (username,email,password_hash,full_name,is_active,created_at,updated_at)
+    INSERT INTO users (username,email,phone,password_hash,full_name,is_active,created_at,updated_at)
     OUTPUT INSERTED.id
-    VALUES (@param0,@param1,@param2,@param3,@param4,GETDATE(),NULL)
+    VALUES (@param0,@param1,@param2,@param3,@param4,@param5,GETDATE(),NULL)
     `,
-    [username, email, hashedPassword, full_name, active]
+    [username, email, phone, hashedPassword, full_name, active]
   );
 
   const newId = result?.recordset?.[0]?.id;
@@ -200,7 +223,7 @@ async function setUserPrimaryRole(userId, roleId) {
   );
 }
 
-async function updateUser(id, { username, email, full_name, password, is_active, role_id }) {
+async function updateUser(id, { username, email, phone, full_name, password, is_active, role_id }) {
   const sets = [];
   const params = [];
   const pushSet = (sqlFrag, value) => {
@@ -210,6 +233,7 @@ async function updateUser(id, { username, email, full_name, password, is_active,
 
   if (username !== undefined) pushSet("username = ?", username);
   if (email !== undefined) pushSet("email = ?", email);
+  if (phone !== undefined) pushSet("phone = ?", phone);
   if (full_name !== undefined) pushSet("full_name = ?", full_name);
   if (password !== undefined && password !== "") {
     pushSet("password_hash = ?", await hashPasswordIfNeeded(password));
@@ -256,6 +280,34 @@ async function reactivateUser(id) {
   return await getUserById(id);
 }
 
+async function getActiveUserByPhone(phone) {
+  const rows = await selectData(
+    `
+    SELECT TOP (1)
+      u.id,
+      u.username,
+      u.phone,
+      u.is_active,
+      r.name as role_name
+    FROM users u
+    LEFT JOIN user_roles ur ON ur.user_id = u.id
+    LEFT JOIN roles r ON r.id = ur.role_id
+    WHERE u.phone = @param0
+      AND u.is_active = 1
+    `,
+    [phone]
+  );
+
+  const row = rows?.[0];
+  if (!row) return null;
+  return {
+    id: row.id,
+    username: row.username,
+    phone: row.phone ?? null,
+    role: row.role_name || "user",
+  };
+}
+
 module.exports = {
   ensureSchema,
   listUsers,
@@ -264,5 +316,6 @@ module.exports = {
   updateUser,
   deactivateUser,
   reactivateUser,
+  getActiveUserByPhone,
 };
 

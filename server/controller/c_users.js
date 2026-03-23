@@ -27,11 +27,11 @@ exports.getById = async (req, res) => {
 
 exports.create = async (req, res) => {
   try {
-    const { username, email, full_name, password, is_active, role_id } = req.body || {};
+    const { username, email, phone, full_name, password, is_active, role_id } = req.body || {};
     if (!username) return res.status(400).json({ success: false, message: "username is required" });
     if (!password) return res.status(400).json({ success: false, message: "password is required" });
 
-    const row = await User.createUser({ username, email, full_name, password, is_active, role_id });
+    const row = await User.createUser({ username, email, phone, full_name, password, is_active, role_id });
     return res.status(201).json({ success: true, data: row });
   } catch (error) {
     console.error("Create user error:", error);
@@ -44,8 +44,8 @@ exports.update = async (req, res) => {
     const id = Number(req.params.id);
     if (!Number.isFinite(id)) return res.status(400).json({ success: false, message: "Invalid id" });
 
-    const { username, email, full_name, password, is_active, role_id } = req.body || {};
-    const row = await User.updateUser(id, { username, email, full_name, password, is_active, role_id });
+    const { username, email, phone, full_name, password, is_active, role_id } = req.body || {};
+    const row = await User.updateUser(id, { username, email, phone, full_name, password, is_active, role_id });
     if (!row) return res.status(404).json({ success: false, message: "User not found" });
 
     return res.json({ success: true, data: row });

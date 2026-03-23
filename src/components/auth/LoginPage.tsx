@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { ArrowRight, Eye, EyeOff, Moon, ShieldCheck, Sun } from 'lucide-react';
+import { ConfirmationResult, RecaptchaVerifier, signInWithPhoneNumber } from 'firebase/auth';
+import { firebaseAuth, isFirebasePhoneAuthTestMode } from '../../lib/firebase';
 
 type LoginResult =
   | { ok: true; user: { id: number; username: string; role?: string } }
@@ -38,6 +40,51 @@ async function loginRequest(args: {
   return { ok: false, message: String(json?.message || 'Login failed.') };
 }
 
+async function firebasePhoneLoginRequest(args: { backendUrl: string; idToken: string }): Promise<LoginResult> {
+  const { backendUrl, idToken } = args;
+  const res = await fetch(`${normalizeBaseUrl(backendUrl)}/api/auth/firebase-phone-login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify({ idToken }),
+  });
+
+  const json = await res.json().catch(() => ({} as any));
+  if (res.ok && json?.success) {
+    const u = json?.user || {};
+    return { ok: true, user: { id: Number(u.id || 0), username: String(u.username || ''), role: u.role } };
+  }
+
+  return { ok: false, message: String(json?.message || 'Phone login failed.') };
+}
+
+function isLikelyE164Phone(phone: string) {
+  return /^\+[1-9]\d{7,14}$/.test(String(phone || '').trim());
+}
+
+function parseFirebaseAuthError(error: any) {
+  const code = String(error?.code || '').trim();
+  const rawMessage = String(error?.message || '').trim();
+  let friendly = '';
+
+  if (code === 'auth/too-many-requests' || rawMessage.includes('TOO_MANY_ATTEMPTS_TRY_LATER')) {
+    friendly = 'Too many attempts. Please wait before requesting another code.';
+  } else if (code === 'auth/invalid-phone-number') {
+    friendly = 'Invalid phone number format. Use +639XXXXXXXXX.';
+  } else if (code === 'auth/missing-phone-number') {
+    friendly = 'Phone number is required.';
+  } else if (code === 'auth/invalid-app-credential' || rawMessage.includes('INVALID_APP_CREDENTIAL')) {
+    friendly = 'Invalid app credential. Check domain/reCAPTCHA verification setup.';
+  } else if (code === 'auth/captcha-check-failed') {
+    friendly = 'reCAPTCHA check failed. Refresh and try again.';
+  } else {
+    friendly = 'Unable to send OTP.';
+  }
+
+  const details = code || rawMessage;
+  return details ? `${friendly} [${details}]` : friendly;
+}
+
 export function LoginPage(props: { backendUrl: string; onLoggedIn: (user: { id: number; username: string; role?: string }) => void }) {
   const backend = useMemo(() => normalizeBaseUrl(props.backendUrl), [props.backendUrl]);
 
@@ -54,10 +101,17 @@ export function LoginPage(props: { backendUrl: string; onLoggedIn: (user: { id: 
     return 'dark';
   });
   const [submitting, setSubmitting] = useState(false);
+  const [sendingCode, setSendingCode] = useState(false);
+  const [isCodeSent, setIsCodeSent] = useState(false);
+  const [phoneForOtp, setPhoneForOtp] = useState('');
+  const [resendCooldownSeconds, setResendCooldownSeconds] = useState(0);
+  const [useVisibleRecaptcha, setUseVisibleRecaptcha] = useState(false);
   const [message, setMessage] = useState<{ type: 'muted' | 'error' | 'success'; text: string }>({
     type: 'muted',
     text: '',
   });
+  const confirmationRef = React.useRef<ConfirmationResult | null>(null);
+  const recaptchaRef = React.useRef<RecaptchaVerifier | null>(null);
 
   useEffect(() => {
     if (theme === 'dark') document.documentElement.classList.add('dark');
@@ -65,17 +119,133 @@ export function LoginPage(props: { backendUrl: string; onLoggedIn: (user: { id: 
     window.localStorage.setItem('theme', theme);
   }, [theme]);
 
+  useEffect(() => {
+    return () => {
+      if (recaptchaRef.current) {
+        recaptchaRef.current.clear();
+        recaptchaRef.current = null;
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (resendCooldownSeconds <= 0) return;
+    const timer = window.setInterval(() => {
+      setResendCooldownSeconds((prev) => (prev > 0 ? prev - 1 : 0));
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [resendCooldownSeconds]);
+
+  async function sendOtpCode() {
+    const phone = otpTarget.trim();
+    if (!isLikelyE164Phone(phone)) {
+      setMessage({ type: 'error', text: 'Use phone format like +639171234567.' });
+      return;
+    }
+    if (resendCooldownSeconds > 0) {
+      setMessage({ type: 'muted', text: `Please wait ${resendCooldownSeconds}s before requesting another code.` });
+      return;
+    }
+
+    setSendingCode(true);
+    setMessage({ type: 'muted', text: '' });
+    try {
+      // Dev-only helper for Firebase fictional phone numbers.
+      if (isFirebasePhoneAuthTestMode) {
+        firebaseAuth.settings.appVerificationDisabledForTesting = true;
+      }
+      if (!recaptchaRef.current) {
+        const verifierAnchorId = 'firebase-recaptcha-container';
+        const anchorEl = document.getElementById(verifierAnchorId);
+        if (!anchorEl) {
+          throw new Error(`reCAPTCHA anchor element not found: ${verifierAnchorId}`);
+        }
+        anchorEl.innerHTML = '';
+        recaptchaRef.current = new RecaptchaVerifier(firebaseAuth, verifierAnchorId, {
+          size: useVisibleRecaptcha ? 'normal' : 'invisible',
+        });
+        await recaptchaRef.current.render();
+      }
+
+      const confirmation = await signInWithPhoneNumber(firebaseAuth, phone, recaptchaRef.current);
+      confirmationRef.current = confirmation;
+      setIsCodeSent(true);
+      setPhoneForOtp(phone);
+      setResendCooldownSeconds(60);
+      setMessage({ type: 'success', text: 'OTP sent. Enter the 6-digit code.' });
+    } catch (error: any) {
+      const errMsg = String(error?.message || '');
+      const errCode = String(error?.code || '');
+      const isArgumentError = errCode === 'auth/argument-error';
+      const shouldUseVisibleFallback =
+        !useVisibleRecaptcha &&
+        (errCode === 'auth/invalid-app-credential' ||
+          errCode === 'auth/captcha-check-failed' ||
+          errMsg.includes('INVALID_APP_CREDENTIAL') ||
+          errMsg.includes('CAPTCHA_CHECK_FAILED'));
+      if (recaptchaRef.current) {
+        recaptchaRef.current.clear();
+        recaptchaRef.current = null;
+      }
+      const containerEl = document.getElementById('firebase-recaptcha-container');
+      if (containerEl) containerEl.innerHTML = '';
+      if (isArgumentError) {
+        setUseVisibleRecaptcha(true);
+        setMessage({
+          type: 'error',
+          text: 'reCAPTCHA state reset. Please click Send code again and complete the visible challenge.',
+        });
+        return;
+      }
+      if (shouldUseVisibleFallback) {
+        setUseVisibleRecaptcha(true);
+        setMessage({
+          type: 'error',
+          text: 'Switching to visible reCAPTCHA for verification. Please try Send code again.',
+        });
+        return;
+      }
+      const isThrottled = errMsg.includes('auth/too-many-requests') || errMsg.includes('TOO_MANY_ATTEMPTS_TRY_LATER');
+      if (isThrottled) {
+        setResendCooldownSeconds(120);
+      }
+      setMessage({
+        type: 'error',
+        text: parseFirebaseAuthError(error),
+      });
+    } finally {
+      setSendingCode(false);
+    }
+  }
+
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setMessage({ type: 'muted', text: '' });
     setSubmitting(true);
     try {
       if (tab === 'otp') {
-        if (!otpTarget.trim()) {
-          setMessage({ type: 'error', text: 'Email or mobile is required.' });
+        const phone = otpTarget.trim();
+        if (!isLikelyE164Phone(phone)) {
+          setMessage({ type: 'error', text: 'Use phone format like +639171234567.' });
           return;
         }
-        setMessage({ type: 'error', text: 'OTP login is not wired to the server yet.' });
+        if (!confirmationRef.current || !isCodeSent || phoneForOtp !== phone) {
+          setMessage({ type: 'error', text: 'Please send OTP first for this phone number.' });
+          return;
+        }
+        if (!otp.trim()) {
+          setMessage({ type: 'error', text: 'OTP code is required.' });
+          return;
+        }
+        const credential = await confirmationRef.current.confirm(otp.trim());
+        const idToken = await credential.user.getIdToken();
+        const result = await firebasePhoneLoginRequest({ backendUrl: backend, idToken });
+        if (!result.ok) {
+          setMessage({ type: 'error', text: ('message' in result ? result.message : 'OTP login failed.') as string });
+          return;
+        }
+        setMessage({ type: 'success', text: 'Login successful. Redirecting…' });
+        props.onLoggedIn(result.user);
         return;
       }
       const result = await loginRequest({ backendUrl: backend, username: username.trim(), password });
@@ -333,16 +503,19 @@ export function LoginPage(props: { backendUrl: string; onLoggedIn: (user: { id: 
                   <div className="space-y-2">
                     <div className="flex items-center justify-between ml-1">
                       <label className="text-xs font-bold uppercase tracking-widest text-secondary" htmlFor="otp-target">
-                        Email or Mobile
+                        Mobile Number
                       </label>
                     </div>
                     <input
                       id="otp-target"
-                      type="text"
-                      placeholder="name@ciac.gov.ph or +63..."
+                      type="tel"
+                      placeholder="+639171234567"
                       value={otpTarget}
-                      onChange={(e) => setOtpTarget(e.target.value)}
-                      className="input-field w-full px-4 sm:px-5 py-3.5 sm:py-4 text-sm focus:border-primary transition-all duration-300"
+                      onChange={(e) => {
+                        setOtpTarget(e.target.value);
+                        setIsCodeSent(false);
+                      }}
+                      className="input-field w-full px-5 py-4 text-sm focus:border-primary transition-all duration-300"
                       required
                     />
                   </div>
@@ -354,16 +527,15 @@ export function LoginPage(props: { backendUrl: string; onLoggedIn: (user: { id: 
                       </label>
                       <button
                         type="button"
+                        disabled={sendingCode || resendCooldownSeconds > 0}
                         className="text-xs font-medium text-secondary hover:text-primary transition-colors cursor-pointer"
-                        onClick={() => {
-                          if (!otpTarget.trim()) {
-                            setMessage({ type: 'error', text: 'Enter email or mobile first.' });
-                            return;
-                          }
-                          setMessage({ type: 'muted', text: 'OTP request endpoint not implemented yet.' });
-                        }}
+                        onClick={sendOtpCode}
                       >
-                        Send code
+                        {sendingCode
+                          ? 'Sending...'
+                          : resendCooldownSeconds > 0
+                            ? `Resend in ${resendCooldownSeconds}s`
+                            : 'Send code'}
                       </button>
                     </div>
                     <input
@@ -380,6 +552,14 @@ export function LoginPage(props: { backendUrl: string; onLoggedIn: (user: { id: 
                 </motion.div>
               )}
             </AnimatePresence>
+            <div
+              id="firebase-recaptcha-container"
+              style={{
+                marginTop: 4,
+                minHeight: tab === 'otp' && useVisibleRecaptcha ? 78 : 0,
+                overflow: 'hidden',
+              }}
+            />
 
             <button
               type="submit"

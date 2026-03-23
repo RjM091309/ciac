@@ -3,6 +3,7 @@ const router = express.Router();
 const authController = require("../controller/c_auth");
 
 router.post("/login", authController.login);
+router.post("/firebase-phone-login", authController.firebasePhoneLogin);
 router.post("/logout", authController.logout);
 router.get("/logout", (req, res) => {
   res.clearCookie("jwt");
