@@ -139,9 +139,9 @@ export function Dashboard() {
 
   return (
     <>
-      <div className="grid grid-cols-12 gap-4 sm:gap-4 lg:gap-5">
+      <div className="grid grid-cols-12 gap-4 sm:gap-4 lg:gap-5 touch-landscape-dashboard-grid">
         {/* Left side: hero + metrics — full width until 1181px (iPad Pro 1024 matches iPad Air stack) */}
-        <div className="col-span-12 xl:col-span-8 flex flex-col gap-4 sm:gap-4">
+        <div className="col-span-12 xl:col-span-8 flex flex-col gap-4 sm:gap-4 touch-landscape-top-left">
           {/* Welcome + Weather Card (from provided design) */}
           <div
             className="relative overflow-hidden rounded-2xl px-4 py-5 sm:px-6 sm:py-6 !border-transparent"
@@ -220,7 +220,7 @@ export function Dashboard() {
           </div>
 
         {/* Metrics row directly under hero */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-4 touch-landscape-metrics">
           <MetricCard title="Total Applications" value="126" icon={FileText} trend="up" trendValue="+8 this week" />
           <MetricCard title="Complete Requirements" value="89" icon={Users} trend="up" trendValue="71% cleared" />
           <MetricCard title="Pending Verification" value="27" icon={TrendingUp} trend="down" trendValue="-4 vs. last week" />
@@ -230,7 +230,7 @@ export function Dashboard() {
 
         {/* Insights Card on the right, same row height */}
         <div
-          className="col-span-12 xl:col-span-4 glass-card p-4 sm:p-6 flex flex-col !border-transparent"
+          className="col-span-12 xl:col-span-4 glass-card p-4 sm:p-6 flex flex-col !border-transparent touch-landscape-top-right"
           style={{ backgroundColor: 'var(--surface)' }}
         >
           <h4
@@ -270,7 +270,7 @@ export function Dashboard() {
             }}
           >
             {/* Mobile: stack vertically; Desktop: side-by-side */}
-            <div className="flex flex-col md:flex-row items-center md:items-center gap-5 md:gap-5">
+            <div className="flex flex-col md:flex-row items-center md:items-center gap-5 md:gap-5 touch-landscape-requirements-row">
               <div className="relative w-32 h-32 sm:w-36 sm:h-36 md:w-40 md:h-40 shrink-0 flex items-center justify-center">
                 <svg className="w-full h-full" viewBox="0 0 240 240" preserveAspectRatio="xMidYMid meet">
                   <RadialProgress value={85} radius={90} strokeWidth={12} color="#3b82f6" delay={0} />
@@ -341,7 +341,7 @@ export function Dashboard() {
         </div>
 
         {/* Quick Tasks */}
-        <div className="col-span-12 md:col-span-6 xl:col-span-5 glass-card p-4 sm:p-6 !border-transparent w-full min-w-0 lg:-mt-18.5 max-[1024px]:mt-0" style={{ backgroundColor: 'var(--surface)' }}>
+        <div className="col-span-12 md:col-span-6 xl:col-span-5 glass-card p-4 sm:p-6 !border-transparent w-full min-w-0 xl:-mt-18.5 max-xl:mt-0 touch-landscape-no-lift" style={{ backgroundColor: 'var(--surface)' }}>
           <h4
             className="text-sm font-bold mb-1"
             style={{ color: 'var(--text)' }}
@@ -429,7 +429,7 @@ export function Dashboard() {
         </div>
 
         {/* Calendar */}
-        <div className="col-span-12 md:col-span-6 xl:col-span-3 glass-card p-4 sm:p-6 !border-transparent w-full min-w-0 lg:-mt-18.5 max-[1024px]:mt-0" style={{ backgroundColor: 'var(--surface)' }}>
+        <div className="col-span-12 md:col-span-6 xl:col-span-3 glass-card p-4 sm:p-6 !border-transparent w-full min-w-0 xl:-mt-18.5 max-xl:mt-0 touch-landscape-no-lift" style={{ backgroundColor: 'var(--surface)' }}>
           <h4
             className="text-sm font-bold mb-1"
             style={{ color: 'var(--text)' }}

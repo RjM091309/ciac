@@ -148,7 +148,9 @@
   }
 
   body {
-    @apply bg-background text-foreground font-sans antialiased;
+    font-family: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
     background-color: var(--background);
     color: var(--foreground);
     transition:
@@ -174,27 +176,66 @@
 .glass-card {
   background-color: #161616;
   border: 0.5px solid var(--border);
-  @apply rounded-2xl shadow-sm;
+  border-radius: 1rem;
+  box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+}
+
+/* Tablet landscape only (touch devices). Excludes desktop pointers. */
+@media (hover: none) and (pointer: coarse) and (orientation: landscape) and (min-width: 768px) and (max-width: 1366px) {
+  .touch-landscape-dashboard-grid {
+    gap: 0.875rem;
+  }
+
+  .touch-landscape-top-left,
+  .touch-landscape-top-right {
+    grid-column: span 12 / span 12 !important;
+  }
+
+  .touch-landscape-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 0.75rem !important;
+  }
+
+  .touch-landscape-no-lift {
+    margin-top: 0 !important;
+  }
+
+  .touch-landscape-requirements-row {
+    flex-direction: row !important;
+    align-items: center !important;
+  }
 }
 
 .sidebar-item {
-  @apply flex items-center gap-3 px-4 py-2.5 rounded-lg text-zinc-400 hover:text-white transition-all duration-200;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.625rem 1rem;
+  border-radius: 0.5rem;
+  color: rgb(161 161 170);
+  transition-property: all;
+  transition-duration: 200ms;
 }
 
 .sidebar-item-active {
   background-color: var(--selected-bg);
-  @apply text-white;
+  color: rgb(255 255 255);
 }
 
 .control-btn {
   background-color: var(--control-bg);
-  @apply border border-border rounded-xl transition-all hover:bg-[var(--control-bg-hover)];
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  transition-property: all;
+  transition-duration: 150ms;
 }
 
 .input-field {
   background-color: var(--input-bg);
   border: 1px solid var(--input-border);
-  @apply rounded-xl focus:outline-none focus:ring-1 focus:ring-zinc-700 transition-all;
+  border-radius: 0.75rem;
+  transition-property: all;
+  transition-duration: 150ms;
 }
 
 /* Same 1px border + hover/focus as AppSelect (no ring), for plain inputs beside selects */

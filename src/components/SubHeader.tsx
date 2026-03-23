@@ -30,9 +30,9 @@ export function SubHeader({ title, description, badge }: SubHeaderProps) {
           </span>
         </div>
 
-        <div className="w-full sm:w-auto min-w-0 max-w-full flex justify-center sm:justify-start overflow-hidden">
+        <div className="w-full sm:w-auto min-w-0 max-w-full flex justify-center overflow-x-auto overflow-y-hidden scrollbar-hide px-1">
           <div
-            className="flex items-center gap-1.5 rounded-full px-1 py-1 min-w-0 max-w-full overflow-x-auto overflow-y-hidden scrollbar-hide snap-x snap-mandatory lg:flex-wrap lg:overflow-visible"
+            className="inline-flex sm:flex items-center gap-1.5 rounded-full px-1 py-1 min-w-max sm:min-w-0 max-w-full snap-x snap-mandatory lg:flex-wrap mx-auto"
             style={{
               backgroundColor: 'color-mix(in oklab, var(--control-bg) 82%, transparent)',
               WebkitOverflowScrolling: 'touch',
@@ -54,7 +54,7 @@ export function SubHeader({ title, description, badge }: SubHeaderProps) {
                   }, 900);
                 }}
                 className={cn(
-                  'flex items-center gap-1.5 px-3 sm:px-3 py-2.5 sm:py-1.5 min-h-[44px] sm:min-h-0 rounded-full text-[11px] font-medium transition-colors snap-start shrink-0 whitespace-nowrap',
+                  'flex items-center gap-1.5 px-2.5 sm:px-3 py-2.5 sm:py-1.5 min-h-[44px] sm:min-h-0 rounded-full text-[10px] sm:text-[11px] font-medium transition-colors snap-start shrink-0 whitespace-nowrap',
                   isActive
                     ? 'shadow-sm text-[var(--nav-active-text)]'
                     : 'text-secondary hover:text-[var(--text)] hover:bg-[var(--selected-bg)]',
