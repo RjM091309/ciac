@@ -9,6 +9,67 @@ function toBit(v) {
   return Number(v) ? 1 : 0;
 }
 
+async function createStatusChangeNotifications({ application, toStatus, remarks, changedBy }) {
+  try {
+    const recipients = new Set();
+    const createdBy = toInt(application?.created_by);
+    const assignedOfficerId = toInt(application?.current_officer_id);
+    const proponentId = toInt(application?.proponent_id);
+    const actorId = toInt(changedBy);
+
+    if (createdBy) recipients.add(createdBy);
+    if (assignedOfficerId) recipients.add(assignedOfficerId);
+
+    if (proponentId) {
+      const proponentRows = await selectData(
+        `
+        SELECT TOP (1) user_id
+        FROM dbo.proponents
+        WHERE id = @param0
+        `,
+        [proponentId]
+      );
+      const proponentUserId = toInt(proponentRows?.[0]?.user_id);
+      if (proponentUserId) recipients.add(proponentUserId);
+    }
+
+    const adminAndOfficerRows = await selectData(
+      `
+      SELECT DISTINCT u.id
+      FROM dbo.users u
+      INNER JOIN dbo.user_roles ur ON ur.user_id = u.id
+      INNER JOIN dbo.roles r ON r.id = ur.role_id
+      WHERE u.is_active = 1
+        AND LOWER(LTRIM(RTRIM(r.name))) IN ('admin', 'administrator', 'officer', 'account officer')
+      `
+    );
+    for (const row of adminAndOfficerRows) {
+      const userId = toInt(row?.id);
+      if (userId) recipients.add(userId);
+    }
+
+    if (actorId) recipients.add(actorId);
+
+    const subject = `Application ${String(application?.application_no || "").trim()} status updated`;
+    const bodyBase = `Status changed from ${String(application?.status || "UNKNOWN").trim()} to ${String(toStatus || "").trim()}.`;
+    const body = remarks ? `${bodyBase} Remarks: ${String(remarks).trim()}` : bodyBase;
+
+    for (const recipientUserId of recipients) {
+      await insertData(
+        `
+        INSERT INTO dbo.notifications
+          (user_id, channel, subject, body, status, error_message, created_by, updated_by, created_at, updated_at)
+        VALUES
+          (@param0, @param1, @param2, @param3, @param4, NULL, @param5, NULL, SYSUTCDATETIME(), NULL)
+        `,
+        [recipientUserId, "IN_APP", subject, body, 1, actorId]
+      );
+    }
+  } catch (error) {
+    console.error("Create status-change notifications error:", error);
+  }
+}
+
 async function ensureSchema() {
   await updateSchema(`
     IF OBJECT_ID('dbo.applications', 'U') IS NULL
@@ -253,6 +314,13 @@ async function updateApplicationStatus(id, { to_status, remarks, changed_by }) {
     `,
     [id, application.status || null, toStatus, changedBy, remarks ?? null]
   );
+
+  await createStatusChangeNotifications({
+    application,
+    toStatus,
+    remarks,
+    changedBy,
+  });
 
   return getApplicationById(id);
 }

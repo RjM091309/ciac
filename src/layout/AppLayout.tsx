@@ -48,11 +48,17 @@ export function AppLayout({
   view,
   onViewChange,
   onLogout,
+  userRole,
+  userId,
+  backendUrl,
   children,
 }: {
   view: AppView;
   onViewChange: (view: AppView) => void;
   onLogout: () => void;
+  userRole: 'admin' | 'officer' | 'proponent';
+  userId?: number | null;
+  backendUrl: string;
   children: React.ReactNode;
 }) {
   const [isMobile, setIsMobile] = useState(() =>
@@ -139,7 +145,14 @@ export function AppLayout({
       )}
       style={{ backgroundColor: 'var(--background)', color: 'var(--foreground)', transition: 'background-color 220ms ease-out, color 220ms ease-out' }}
     >
-      <AppHeader onToggleSidebar={toggleSidebar} theme={theme} onToggleTheme={toggleTheme} />
+      <AppHeader
+        onToggleSidebar={toggleSidebar}
+        theme={theme}
+        onToggleTheme={toggleTheme}
+        userRole={userRole}
+        userId={userId}
+        backendUrl={backendUrl}
+      />
 
       <div className="flex-1 flex overflow-hidden relative">
         {/* Mobile: sidebar as overlay drawer, hidden by default */}

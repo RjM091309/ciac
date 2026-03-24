@@ -1,19 +1,174 @@
-import React, { useMemo } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Bell, ChevronRight, Moon, Search, SunMedium, Zap } from 'lucide-react';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import { useGlobalDate } from '../state/GlobalDateContext';
 import { DatePicker } from './ui/DatePicker';
+import {
+  countUnread,
+  filterNotificationsForUser,
+  NotificationItem,
+  Role,
+} from '../lib/notifications';
 
 export function AppHeader({
   onToggleSidebar,
   theme,
   onToggleTheme,
+  userRole,
+  userId,
+  backendUrl,
 }: {
   onToggleSidebar: () => void;
   theme: 'light' | 'dark';
   onToggleTheme: () => void;
+  userRole: Role;
+  userId?: number | null;
+  backendUrl: string;
 }) {
   const { range, setRange } = useGlobalDate();
+  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
+  const [notificationOpen, setNotificationOpen] = useState(false);
+  const notificationWrapRef = useRef<HTMLDivElement | null>(null);
+
+  const visibleNotifications = useMemo(
+    () => filterNotificationsForUser(notifications, { role: userRole, userId }),
+    [notifications, userRole, userId]
+  );
+  const unreadCount = useMemo(() => countUnread(visibleNotifications), [visibleNotifications]);
+
+  const loadNotifications = useCallback(async () => {
+    try {
+      const baseUrl = String(backendUrl || '').replace(/\/+$/, '');
+      let res = await fetch(`${baseUrl}/api/notifications/me?limit=50`, {
+        credentials: 'include',
+      });
+      if (!res.ok) {
+        res = await fetch('/api/notifications/me?limit=50', {
+          credentials: 'include',
+        });
+      }
+      const json = await res.json().catch(() => ({} as any));
+      if (!res.ok || !json?.success) return;
+      const rows = Array.isArray(json?.data) ? json.data : [];
+      const mapped: NotificationItem[] = rows.map((row: any) => {
+        const rawStatus = String(row?.status ?? '').trim();
+        const statusNum = Number(rawStatus);
+        const statusText = rawStatus.toUpperCase();
+        const isRead =
+          statusNum === 2 || statusText === 'READ' || statusText === 'SEEN' || statusText === 'READ_BY_USER';
+        return {
+          id: String(row?.id ?? ''),
+          roleTargets: [userRole],
+          category: 'application_status',
+          title: String(row?.subject || row?.channel || 'Notification'),
+          message: String(row?.body || row?.error_message || ''),
+          createdAt: String(row?.created_at || row?.updated_at || new Date().toISOString()),
+          isRead,
+          ownerUserId: Number(userId || 0),
+        };
+      });
+      setNotifications(mapped);
+    } catch {
+      // Keep UI responsive even when notifications endpoint is unavailable.
+      setNotifications([]);
+    }
+  }, [backendUrl, userRole, userId]);
+
+  useEffect(() => {
+    loadNotifications();
+  }, [loadNotifications]);
+
+  useEffect(() => {
+    if (!notificationOpen) return;
+    loadNotifications();
+  }, [notificationOpen, loadNotifications]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      loadNotifications();
+    }, 15000);
+    return () => window.clearInterval(timer);
+  }, [loadNotifications]);
+
+  useEffect(() => {
+    function onDocumentClick(event: MouseEvent) {
+      if (!notificationWrapRef.current) return;
+      if (!notificationWrapRef.current.contains(event.target as Node)) {
+        setNotificationOpen(false);
+      }
+    }
+    function onEsc(event: KeyboardEvent) {
+      if (event.key === 'Escape') setNotificationOpen(false);
+    }
+    document.addEventListener('mousedown', onDocumentClick);
+    document.addEventListener('keydown', onEsc);
+    return () => {
+      document.removeEventListener('mousedown', onDocumentClick);
+      document.removeEventListener('keydown', onEsc);
+    };
+  }, []);
+
+  function markOneAsRead(id: string) {
+    setNotifications((prev) => prev.map((item) => (item.id === id ? { ...item, isRead: true } : item)));
+    const baseUrl = String(backendUrl || '').replace(/\/+$/, '');
+    fetch(`${baseUrl}/api/notifications/${encodeURIComponent(id)}/read`, {
+      method: 'PATCH',
+      credentials: 'include',
+    }).then((res) => {
+      if (!res.ok) {
+        return fetch(`/api/notifications/${encodeURIComponent(id)}/read`, {
+          method: 'PATCH',
+          credentials: 'include',
+        });
+      }
+      return null;
+    }).finally(() => {
+      loadNotifications();
+    }).catch(() => {
+      // no-op (optimistic UI)
+    });
+  }
+
+  function markAllAsRead() {
+    if (visibleNotifications.length === 0) return;
+    setNotifications((prev) =>
+      prev.map((item) => {
+        const isVisibleForCurrentUser = filterNotificationsForUser([item], {
+          role: userRole,
+          userId,
+        }).length > 0;
+        return isVisibleForCurrentUser ? { ...item, isRead: true } : item;
+      })
+    );
+    const baseUrl = String(backendUrl || '').replace(/\/+$/, '');
+    fetch(`${baseUrl}/api/notifications/read-all`, {
+      method: 'PATCH',
+      credentials: 'include',
+    }).then((res) => {
+      if (!res.ok) {
+        return fetch('/api/notifications/read-all', {
+          method: 'PATCH',
+          credentials: 'include',
+        });
+      }
+      return null;
+    }).finally(() => {
+      loadNotifications();
+    }).catch(() => {
+      // no-op (optimistic UI)
+    });
+  }
+
+  function formatNotificationTime(value: string) {
+    const diff = Date.now() - new Date(value).getTime();
+    const minute = 60 * 1000;
+    const hour = 60 * minute;
+    const day = 24 * hour;
+    if (diff < hour) return `${Math.max(1, Math.floor(diff / minute))}m ago`;
+    if (diff < day) return `${Math.floor(diff / hour)}h ago`;
+    return `${Math.floor(diff / day)}d ago`;
+  }
+
   const muiTheme = useMemo(
     () =>
       createTheme({
@@ -61,7 +216,7 @@ export function AppHeader({
   );
 
   return (
-    <header className="shrink-0 px-2 sm:px-3 md:px-4 pt-2 sm:pt-2.5 md:pt-3 mb-2 safe-top">
+    <header className="relative z-[140] shrink-0 px-2 sm:px-3 md:px-4 pt-2 sm:pt-2.5 md:pt-3 mb-2 safe-top">
       <div
         className="min-h-11 sm:min-h-12 md:min-h-14 rounded-2xl backdrop-blur-xl px-2.5 sm:px-3 md:px-5 flex items-center justify-between gap-1.5 sm:gap-2 md:gap-3 flex-nowrap"
         style={{
@@ -162,18 +317,96 @@ export function AppHeader({
             {theme === 'dark' ? <SunMedium size={16} /> : <Moon size={16} />}
           </button>
 
-          <button
-            aria-label="Notifications"
-            className="h-9 w-9 sm:h-9 sm:w-9 inline-flex items-center justify-center rounded-full text-[var(--text-muted)] hover:text-[var(--text)] transition-colors relative shrink-0"
-            style={{
-              backgroundColor: 'color-mix(in oklab, var(--control-bg) 88%, transparent)',
-            }}
-          >
-            <Bell size={16} />
-            <span className="absolute -top-0.5 -right-0.5 min-w-[17px] h-[17px] px-1 bg-rose-500 rounded-full flex items-center justify-center text-[9px] font-extrabold text-white shadow-[0_6px_14px_rgba(0,0,0,0.35)]">
-              11
-            </span>
-          </button>
+          <div className="relative shrink-0" ref={notificationWrapRef}>
+            <button
+              aria-label="Notifications"
+              aria-expanded={notificationOpen}
+              onClick={() => setNotificationOpen((prev) => !prev)}
+              className="h-9 w-9 sm:h-9 sm:w-9 inline-flex items-center justify-center rounded-full text-[var(--text-muted)] hover:text-[var(--text)] transition-colors relative shrink-0 cursor-pointer"
+              style={{
+                backgroundColor: 'color-mix(in oklab, var(--control-bg) 88%, transparent)',
+              }}
+            >
+              <Bell size={16} />
+              {unreadCount > 0 && (
+                <span className="absolute -top-0.5 -right-0.5 min-w-[17px] h-[17px] px-1 bg-rose-500 rounded-full flex items-center justify-center text-[9px] font-extrabold text-white shadow-[0_6px_14px_rgba(0,0,0,0.35)]">
+                  {unreadCount > 99 ? '99+' : unreadCount}
+                </span>
+              )}
+            </button>
+
+            {notificationOpen && (
+              <div
+                className="absolute right-0 mt-2 w-[min(92vw,22rem)] rounded-2xl border z-[120] overflow-hidden"
+                style={{
+                  backgroundColor: theme === 'dark' ? '#0f1115' : '#ffffff',
+                  borderColor: 'var(--border-subtle)',
+                  boxShadow: '0 12px 34px rgba(0,0,0,0.24)',
+                  backdropFilter: 'none',
+                  opacity: 1,
+                }}
+              >
+                <div
+                  className="flex items-center justify-between px-3 py-2.5 border-b"
+                  style={{ borderColor: 'var(--border-subtle)' }}
+                >
+                  <span className="text-xs font-bold text-[var(--text)]">Notifications</span>
+                  <button
+                    type="button"
+                    onClick={markAllAsRead}
+                    className="text-[10px] font-semibold text-[var(--text-muted)] hover:text-[var(--text)] cursor-pointer"
+                  >
+                    Mark all as read
+                  </button>
+                </div>
+                <div className="max-h-80 overflow-y-auto p-2 custom-scrollbar">
+                  {visibleNotifications.length === 0 ? (
+                    <div className="px-3 py-10 text-center text-[11px] text-[var(--text-muted)]">
+                      No notifications for this account.
+                    </div>
+                  ) : (
+                    <div className="space-y-1">
+                      {visibleNotifications.map((item) => (
+                        <div
+                          key={item.id}
+                          className="rounded-xl border px-2.5 py-2"
+                          style={{
+                            borderColor: 'var(--border-subtle)',
+                            backgroundColor: item.isRead
+                              ? 'color-mix(in oklab, var(--control-bg) 55%, transparent)'
+                              : 'color-mix(in oklab, var(--nav-active-bg) 15%, transparent)',
+                          }}
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0">
+                              <div className="text-[11px] font-bold text-[var(--text)] truncate">
+                                {item.title}
+                              </div>
+                              <div className="text-[10px] text-[var(--text-muted)] mt-0.5">
+                                {item.message}
+                              </div>
+                              <div className="text-[9px] text-[var(--text-muted)] mt-1">
+                                {formatNotificationTime(item.createdAt)}
+                              </div>
+                            </div>
+                            {!item.isRead && (
+                              <button
+                                type="button"
+                                onClick={() => markOneAsRead(item.id)}
+                                className="text-[9px] font-semibold text-[var(--text-muted)] hover:text-[var(--text)] whitespace-nowrap cursor-pointer"
+                              >
+                                Mark read
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
 
           <div
             className="h-6 sm:h-9 w-px mx-0.5 sm:mx-1 shrink-0 hidden sm:block"

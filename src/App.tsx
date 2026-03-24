@@ -17,6 +17,12 @@ import { Toaster } from 'sonner';
 // --- Types ---
 type Role = 'admin' | 'officer' | 'proponent';
 
+function normalizeRole(value: unknown): Role {
+  const role = String(value || '').trim().toLowerCase();
+  if (role === 'admin' || role === 'officer' || role === 'proponent') return role;
+  return 'admin';
+}
+
 interface UserData {
   id: number;
   username: string;
@@ -103,7 +109,11 @@ export default function App() {
     let cancelled = false;
     async function check() {
       try {
-        const res = await fetch(`${String(backendUrl).replace(/\/+$/, '')}/api/auth/check`, { credentials: 'include' });
+        const primaryUrl = `${String(backendUrl).replace(/\/+$/, '')}/api/auth/check`;
+        let res = await fetch(primaryUrl, { credentials: 'include' });
+        if (!res.ok) {
+          res = await fetch('/api/auth/check', { credentials: 'include' });
+        }
         const json = await res.json().catch(() => ({} as any));
         if (cancelled) return;
         if (res.ok && json?.authenticated) {
@@ -111,7 +121,7 @@ export default function App() {
           setUser({
             id: Number(u.id || 0),
             username: String(u.username || ''),
-            role: (u.role || 'admin') as Role,
+            role: normalizeRole(u.role),
           });
           setAuthState('authed');
           return;
@@ -148,7 +158,7 @@ export default function App() {
       <LoginPage
         backendUrl={backendUrl}
         onLoggedIn={(u) => {
-          setUser({ id: u.id, username: u.username, role: ((u.role as Role) || 'admin') as Role });
+          setUser({ id: u.id, username: u.username, role: normalizeRole(u.role) });
           setAuthState('authed');
           navigate('/dashboard');
         }}
@@ -162,12 +172,22 @@ export default function App() {
       <AppLayout
         view={view}
         onViewChange={handleViewChange}
+        userRole={user?.role || 'admin'}
+        userId={user?.id ?? null}
+        backendUrl={backendUrl}
         onLogout={async () => {
           try {
-            await fetch(`${String(backendUrl).replace(/\/+$/, '')}/api/auth/logout`, {
+            const primaryUrl = `${String(backendUrl).replace(/\/+$/, '')}/api/auth/logout`;
+            let res = await fetch(primaryUrl, {
               method: 'POST',
               credentials: 'include',
             });
+            if (!res.ok) {
+              await fetch('/api/auth/logout', {
+                method: 'POST',
+                credentials: 'include',
+              });
+            }
           } catch {
             // ignore
           } finally {
