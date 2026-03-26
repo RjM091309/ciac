@@ -12,6 +12,7 @@ import {
   Sparkles,
   Users,
 } from 'lucide-react';
+import { useControlPanelAccess } from '../context/ControlPanelAccessContext';
 import { cn } from '../lib/utils';
 import type { AppView } from '../layout/AppLayout';
 
@@ -179,9 +180,18 @@ export function AppSidebar({
 }) {
   const isDrawer = variant === 'drawer';
   const [openDropdownId, setOpenDropdownId] = useState<string | null>(null);
+  const { ready, sidebarPermissions } = useControlPanelAccess();
 
   const toggleDropdown = (id: string) => {
     setOpenDropdownId((prev) => (prev === id ? null : id));
+  };
+
+  const canView = (menuKey: AppView) => {
+    if (!ready) return true;
+    if (Object.prototype.hasOwnProperty.call(sidebarPermissions, menuKey)) {
+      return Boolean(sidebarPermissions[menuKey]);
+    }
+    return true;
   };
 
   return (
@@ -204,13 +214,15 @@ export function AppSidebar({
         <nav className={cn('flex-1 px-3 py-5 flex flex-col items-stretch', isDrawer && 'min-h-0 overflow-y-auto')}>
           <SidebarGroup title="Overview" collapsed={collapsed}>
             <div className="flex flex-col gap-1.5">
-              <SidebarItem
-                icon={LayoutDashboard}
-                label="Dashboard"
-                active={view === 'dashboard'}
-                onClick={() => onViewChange('dashboard')}
-                collapsed={collapsed}
-              />
+              {canView('dashboard') && (
+                <SidebarItem
+                  icon={LayoutDashboard}
+                  label="Dashboard"
+                  active={view === 'dashboard'}
+                  onClick={() => onViewChange('dashboard')}
+                  collapsed={collapsed}
+                />
+              )}
             </div>
           </SidebarGroup>
 
@@ -223,38 +235,38 @@ export function AppSidebar({
                 isOpen={openDropdownId === 'applications'}
                 onToggle={() => toggleDropdown('applications')}
               >
-                <SidebarSubItem
+                {canView('applications:new') && <SidebarSubItem
                   label="New Applications"
                   active={view === 'applications:new'}
                   onClick={() => onViewChange('applications:new')}
-                />
-                <SidebarSubItem
+                />}
+                {canView('applications:renewals') && <SidebarSubItem
                   label="Renewal Tracking"
                   active={view === 'applications:renewals'}
                   onClick={() => onViewChange('applications:renewals')}
-                />
-                <SidebarSubItem
+                />}
+                {canView('applications:projects') && <SidebarSubItem
                   label="Project Evaluations"
                   active={view === 'applications:projects'}
                   onClick={() => onViewChange('applications:projects')}
-                />
+                />}
 
-                 <SidebarSubItem
+                 {canView('settings:proponents') && <SidebarSubItem
                   label="Proponent"
                   active={view === 'settings:proponents'}
                   onClick={() => onViewChange('settings:proponents')}
-                />
+                />}
             
-                <SidebarSubItem
+                {canView('applications:requirements') && <SidebarSubItem
                   label="Requirements"
                   active={view === 'applications:requirements'}
                   onClick={() => onViewChange('applications:requirements')}
-                />
-                <SidebarSubItem
+                />}
+                {canView('settings:requirement-categories') && <SidebarSubItem
                   label="Requirement Categories"
                   active={view === 'settings:requirement-categories'}
                   onClick={() => onViewChange('settings:requirement-categories')}
-                />
+                />}
               </SidebarDropdown>
             </div>
           </SidebarGroup>
@@ -268,16 +280,16 @@ export function AppSidebar({
                 isOpen={openDropdownId === 'verification'}
                 onToggle={() => toggleDropdown('verification')}
               >
-                <SidebarSubItem
+                {canView('verification:pending') && <SidebarSubItem
                   label="Pending Review"
                   active={view === 'verification:pending'}
                   onClick={() => onViewChange('verification:pending')}
-                />
-                <SidebarSubItem
+                />}
+                {canView('verification:audit') && <SidebarSubItem
                   label="Audit Trail"
                   active={view === 'verification:audit'}
                   onClick={() => onViewChange('verification:audit')}
-                />
+                />}
               </SidebarDropdown>
             </div>
           </SidebarGroup>
@@ -291,16 +303,16 @@ export function AppSidebar({
                 isOpen={openDropdownId === 'permits'}
                 onToggle={() => toggleDropdown('permits')}
               >
-                <SidebarSubItem
+                {canView('compliance:permits') && <SidebarSubItem
                   label="Environmental, Fire, Occupancy, Sanitary"
                   active={view === 'compliance:permits'}
                   onClick={() => onViewChange('compliance:permits')}
-                />
-                <SidebarSubItem
+                />}
+                {canView('compliance:permits') && <SidebarSubItem
                   label="Authority to Operate"
                   active={view === 'compliance:permits'}
                   onClick={() => onViewChange('compliance:permits')}
-                />
+                />}
               </SidebarDropdown>
               <SidebarDropdown
                 icon={FileCheck}
@@ -309,26 +321,26 @@ export function AppSidebar({
                 isOpen={openDropdownId === 'bir-tax'}
                 onToggle={() => toggleDropdown('bir-tax')}
               >
-                <SidebarSubItem
+                {canView('compliance:bir') && <SidebarSubItem
                   label="BIR Tax Clearance"
                   active={view === 'compliance:bir'}
                   onClick={() => onViewChange('compliance:bir')}
-                />
-                <SidebarSubItem
+                />}
+                {canView('compliance:bir') && <SidebarSubItem
                   label="Certificate of Registration"
                   active={view === 'compliance:bir'}
                   onClick={() => onViewChange('compliance:bir')}
-                />
-                <SidebarSubItem
+                />}
+                {canView('compliance:bir') && <SidebarSubItem
                   label="Receipts / Invoices / ATP"
                   active={view === 'compliance:bir'}
                   onClick={() => onViewChange('compliance:bir')}
-                />
-                <SidebarSubItem
+                />}
+                {canView('compliance:bir') && <SidebarSubItem
                   label="POS / CRM Permit"
                   active={view === 'compliance:bir'}
                   onClick={() => onViewChange('compliance:bir')}
-                />
+                />}
               </SidebarDropdown>
               <SidebarDropdown
                 icon={CalendarClock}
@@ -337,11 +349,11 @@ export function AppSidebar({
                 isOpen={openDropdownId === 'expiry-calendar'}
                 onToggle={() => toggleDropdown('expiry-calendar')}
               >
-                <SidebarSubItem
+                {canView('compliance:expiry') && <SidebarSubItem
                   label="Expiring Permits"
                   active={view === 'compliance:expiry'}
                   onClick={() => onViewChange('compliance:expiry')}
-                />
+                />}
               </SidebarDropdown>
             </div>
           </SidebarGroup>
@@ -355,21 +367,21 @@ export function AppSidebar({
                 isOpen={openDropdownId === 'operations'}
                 onToggle={() => toggleDropdown('operations')}
               >
-                <SidebarSubItem
+                {canView('operations:flowcharts') && <SidebarSubItem
                   label="Production Flowcharts"
                   active={view === 'operations:flowcharts'}
                   onClick={() => onViewChange('operations:flowcharts')}
-                />
-                <SidebarSubItem
+                />}
+                {canView('operations:brochures') && <SidebarSubItem
                   label="Brochures & Marketing"
                   active={view === 'operations:brochures'}
                   onClick={() => onViewChange('operations:brochures')}
-                />
-                <SidebarSubItem
+                />}
+                {canView('operations:gad') && <SidebarSubItem
                   label="GAD Programs"
                   active={view === 'operations:gad'}
                   onClick={() => onViewChange('operations:gad')}
-                />
+                />}
               </SidebarDropdown>
             </div>
           </SidebarGroup>
@@ -383,16 +395,21 @@ export function AppSidebar({
                 isOpen={openDropdownId === 'system-settings'}
                 onToggle={() => toggleDropdown('system-settings')}
               >
-                <SidebarSubItem
+                {canView('settings:users') && <SidebarSubItem
                   label="User Management"
                   active={view === 'settings:users'}
                   onClick={() => onViewChange('settings:users')}
-                />
-                <SidebarSubItem
+                />}
+                {canView('settings:checklist') && <SidebarSubItem
                   label="Master Checklist"
                   active={view === 'settings:checklist'}
                   onClick={() => onViewChange('settings:checklist')}
-                />
+                />}
+                {canView('settings:control-panel') && <SidebarSubItem
+                  label="Control Panel"
+                  active={view === 'settings:control-panel'}
+                  onClick={() => onViewChange('settings:control-panel')}
+                />}
               </SidebarDropdown>
               <SidebarDropdown
                 icon={FileCheck}
@@ -402,16 +419,16 @@ export function AppSidebar({
                 onToggle={() => toggleDropdown('file-maintenance')}
               >
                 
-                <SidebarSubItem
+                {canView('settings:inspection-types') && <SidebarSubItem
                   label="Inspection Types"
                   active={view === 'settings:inspection-types'}
                   onClick={() => onViewChange('settings:inspection-types')}
-                />
-                <SidebarSubItem
+                />}
+                {canView('settings:compliance-types') && <SidebarSubItem
                   label="Compliance Types"
                   active={view === 'settings:compliance-types'}
                   onClick={() => onViewChange('settings:compliance-types')}
-                />
+                />}
               </SidebarDropdown>
             </div>
           </SidebarGroup>

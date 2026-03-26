@@ -1,6 +1,8 @@
 const { selectData, insertData, updateData, updateSchema } = require("../config/database");
 const bcrypt = require("bcryptjs");
 
+let hasPhoneColumnCache = null;
+
 function toInt(v) {
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
@@ -11,6 +13,17 @@ async function hashPasswordIfNeeded(password) {
   if (!value) return value;
   if (value.startsWith("$2")) return value;
   return bcrypt.hash(value, 10);
+}
+
+async function hasPhoneColumn() {
+  if (hasPhoneColumnCache !== null) return hasPhoneColumnCache;
+  const rows = await selectData(
+    `
+    SELECT CAST(CASE WHEN COL_LENGTH('dbo.users', 'phone') IS NULL THEN 0 ELSE 1 END AS INT) AS has_phone
+    `
+  );
+  hasPhoneColumnCache = Number(rows?.[0]?.has_phone) === 1;
+  return hasPhoneColumnCache;
 }
 
 async function ensureSchema() {
@@ -52,6 +65,7 @@ async function ensureSchema() {
       CREATE UNIQUE INDEX UX_users_phone ON dbo.users(phone) WHERE phone IS NOT NULL;
     END
   `);
+  hasPhoneColumnCache = null;
 
   // user_roles
   await updateSchema(`
@@ -98,13 +112,14 @@ async function listUserRolesMap() {
 }
 
 async function listUsers() {
+  const includePhone = await hasPhoneColumn();
   const users = await selectData(
     `
     SELECT
       u.id,
       u.username,
       u.email,
-      u.phone,
+      ${includePhone ? "u.phone" : "NULL AS phone"},
       u.full_name,
       u.is_active,
       u.created_at,
@@ -131,13 +146,14 @@ async function listUsers() {
 }
 
 async function getUserById(id) {
+  const includePhone = await hasPhoneColumn();
   const rows = await selectData(
     `
     SELECT TOP (1)
       u.id,
       u.username,
       u.email,
-      u.phone,
+      ${includePhone ? "u.phone" : "NULL AS phone"},
       u.full_name,
       u.is_active,
       u.created_at,
@@ -178,13 +194,24 @@ async function createUser({ username, email, phone, full_name, password, is_acti
   const active = is_active ? 1 : 0;
   const roleId = toInt(role_id);
   const hashedPassword = await hashPasswordIfNeeded(password);
-  const result = await insertData(
-    `
+  const includePhone = await hasPhoneColumn();
+  const insertSql = includePhone
+    ? `
     INSERT INTO users (username,email,phone,password_hash,full_name,is_active,created_at,updated_at)
     OUTPUT INSERTED.id
     VALUES (@param0,@param1,@param2,@param3,@param4,@param5,GETDATE(),NULL)
-    `,
-    [username, email, phone, hashedPassword, full_name, active]
+    `
+    : `
+    INSERT INTO users (username,email,password_hash,full_name,is_active,created_at,updated_at)
+    OUTPUT INSERTED.id
+    VALUES (@param0,@param1,@param2,@param3,@param4,GETDATE(),NULL)
+    `;
+  const insertParams = includePhone
+    ? [username, email, phone, hashedPassword, full_name, active]
+    : [username, email, hashedPassword, full_name, active];
+  const result = await insertData(
+    insertSql,
+    insertParams
   );
 
   const newId = result?.recordset?.[0]?.id;
@@ -224,6 +251,7 @@ async function setUserPrimaryRole(userId, roleId) {
 }
 
 async function updateUser(id, { username, email, phone, full_name, password, is_active, role_id }) {
+  const includePhone = await hasPhoneColumn();
   const sets = [];
   const params = [];
   const pushSet = (sqlFrag, value) => {
@@ -233,7 +261,7 @@ async function updateUser(id, { username, email, phone, full_name, password, is_
 
   if (username !== undefined) pushSet("username = ?", username);
   if (email !== undefined) pushSet("email = ?", email);
-  if (phone !== undefined) pushSet("phone = ?", phone);
+  if (includePhone && phone !== undefined) pushSet("phone = ?", phone);
   if (full_name !== undefined) pushSet("full_name = ?", full_name);
   if (password !== undefined && password !== "") {
     pushSet("password_hash = ?", await hashPasswordIfNeeded(password));
@@ -281,6 +309,8 @@ async function reactivateUser(id) {
 }
 
 async function getActiveUserByPhone(phone) {
+  const includePhone = await hasPhoneColumn();
+  if (!includePhone) return null;
   const rows = await selectData(
     `
     SELECT TOP (1)

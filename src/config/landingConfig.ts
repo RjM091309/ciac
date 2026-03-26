@@ -1,258 +1,14 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { AnimatePresence, motion } from 'motion/react';
-import { AppLayout, AppView } from './layout/AppLayout';
-import { Dashboard } from './components/dashboard/Dashboard';
-import { SubHeader } from './components/SubHeader';
-import { FileCheck, FolderTree, ShieldCheck, Users, CalendarClock } from 'lucide-react';
-import { UsersManagement } from './components/settings/UsersManagement';
-import { ControlPanelManagement } from './components/settings/ControlPanelManagement';
-import { ProponentsManagement } from './components/proponent/ProponentsManagement';
-import { RequirementsManagement } from './components/applications/Requirements';
-import { RequirementCategoriesManagement } from './components/applications/RequirementCategories';
-import { ApplicationsWorkflow } from './components/applications/ApplicationsWorkflow';
-import { InspectionTypesManagement } from './components/FileMaintenance/InspectionTypes';
-import { ComplianceTypesManagement } from './components/FileMaintenance/ComplianceTypes';
-import { LoginPage } from './components/auth/LoginPage';
-import { Toaster } from 'sonner';
+import type { AppView } from '../layout/AppLayout';
+import { CalendarClock, FileCheck, FolderTree, ShieldCheck, Users } from 'lucide-react';
 
-// --- Types ---
-type Role = 'admin' | 'officer' | 'proponent';
-
-function normalizeRole(value: unknown): Role {
-  const role = String(value || '').trim().toLowerCase();
-  if (role === 'admin' || role === 'officer' || role === 'proponent') return role;
-  return 'admin';
-}
-
-interface UserData {
-  id: number;
-  username: string;
-  role: Role;
-}
-
-const VIEW_TO_PATH: Record<AppView, string> = {
-  dashboard: '/dashboard',
-  'applications:new': '/applications/new',
-  'applications:renewals': '/applications/renewals',
-  'applications:projects': '/applications/projects',
-  'applications:requirements': '/applications/requirements',
-  'verification:pending': '/verification/pending',
-  'verification:audit': '/verification/audit',
-  'directory:companies': '/directory/companies',
-  'directory:officers': '/directory/officers',
-  'directory:site-plans': '/directory/site-plans',
-  'compliance:permits': '/compliance/permits',
-  'compliance:bir': '/compliance/bir',
-  'compliance:expiry': '/compliance/expiry',
-  'operations:flowcharts': '/operations/flowcharts',
-  'operations:brochures': '/operations/brochures',
-  'operations:gad': '/operations/gad',
-  'settings:users': '/settings/users',
-  'settings:proponents': '/settings/proponents',
-  'settings:requirement-categories': '/settings/requirement-categories',
-  'settings:inspection-types': '/settings/inspection-types',
-  'settings:compliance-types': '/settings/compliance-types',
-  'settings:checklist': '/settings/checklist',
-  'settings:control-panel': '/settings/control-panel',
-};
-
-const PATH_TO_VIEW = Object.entries(VIEW_TO_PATH).reduce(
-  (acc, [view, routePath]) => {
-    acc[routePath] = view as AppView;
-    return acc;
-  },
-  {} as Record<string, AppView>
-);
-
-// --- Main App ---
-
-export default function App() {
-  const backendUrl = useMemo(
-    () => ((import.meta as any).env?.VITE_BACKEND_URL as string) || 'http://localhost:3100',
-    []
-  );
-
-  const [path, setPath] = useState<string>(() => window.location.pathname || '/');
-  const navigate = useMemo(() => {
-    return (to: string, opts?: { replace?: boolean }) => {
-      const next = to.startsWith('/') ? to : `/${to}`;
-      if (opts?.replace) window.history.replaceState({}, '', next);
-      else window.history.pushState({}, '', next);
-      setPath(next);
-    };
-  }, []);
-
-  const [user, setUser] = useState<UserData | null>(null);
-  const [authState, setAuthState] = useState<'authed' | 'guest'>('guest');
-  const [view, setView] = useState<AppView>('dashboard');
-
-  useEffect(() => {
-    const onPop = () => setPath(window.location.pathname || '/');
-    window.addEventListener('popstate', onPop);
-    return () => window.removeEventListener('popstate', onPop);
-  }, []);
-
-  useEffect(() => {
-    // Keep URL and view in sync (minimal router)
-    if (path === '/' || path === '') {
-      setView('dashboard');
-      return;
-    }
-    const nextView = PATH_TO_VIEW[path];
-    if (nextView) {
-      setView(nextView);
-      return;
-    }
-    // Fallback: unknown route -> dashboard
-    setView('dashboard');
-  }, [path]);
-
-  useEffect(() => {
-    let cancelled = false;
-    async function check() {
-      try {
-        const primaryUrl = `${String(backendUrl).replace(/\/+$/, '')}/api/auth/check`;
-        let res = await fetch(primaryUrl, { credentials: 'include' });
-        if (!res.ok) {
-          res = await fetch('/api/auth/check', { credentials: 'include' });
-        }
-        const json = await res.json().catch(() => ({} as any));
-        if (cancelled) return;
-        if (res.ok && json?.authenticated) {
-          const u = json?.user || {};
-          setUser({
-            id: Number(u.id || 0),
-            username: String(u.username || ''),
-            role: normalizeRole(u.role),
-          });
-          setAuthState('authed');
-          return;
-        }
-      } catch {
-        // ignore (stay guest)
-      }
-    }
-    check();
-    return () => {
-      cancelled = true;
-    };
-  }, [backendUrl]);
-
-  useEffect(() => {
-    // Once authenticated, default landing should be /dashboard
-    if (authState === 'authed' && (path === '/' || path === '')) {
-      navigate('/dashboard', { replace: true });
-    }
-  }, [authState, navigate, path]);
-
-  const handleViewChange = useMemo(() => {
-    return (nextView: AppView) => {
-      setView(nextView);
-      const targetPath = VIEW_TO_PATH[nextView] || '/dashboard';
-      if (targetPath !== path) {
-        navigate(targetPath);
-      }
-    };
-  }, [navigate, path]);
-
-  if (authState === 'guest') {
-    return (
-      <LoginPage
-        backendUrl={backendUrl}
-        onLoggedIn={(u) => {
-          setUser({ id: u.id, username: u.username, role: normalizeRole(u.role) });
-          setAuthState('authed');
-          navigate('/dashboard');
-        }}
-      />
-    );
-  }
-
-  return (
-    <>
-      <Toaster richColors position="top-right" />
-      <AppLayout
-        view={view}
-        onViewChange={handleViewChange}
-        userRole={user?.role || 'admin'}
-        userId={user?.id ?? null}
-        backendUrl={backendUrl}
-        onLogout={async () => {
-          try {
-            const primaryUrl = `${String(backendUrl).replace(/\/+$/, '')}/api/auth/logout`;
-            let res = await fetch(primaryUrl, {
-              method: 'POST',
-              credentials: 'include',
-            });
-            if (!res.ok) {
-              await fetch('/api/auth/logout', {
-                method: 'POST',
-                credentials: 'include',
-              });
-            }
-          } catch {
-            // ignore
-          } finally {
-            setUser(null);
-            setAuthState('guest');
-            navigate('/', { replace: true });
-          }
-        }}
-      >
-        {view === 'dashboard' ? (
-          <SubHeader />
-        ) : (
-          <SubHeader
-            title={LANDING_CONFIG[view].title}
-            description={LANDING_CONFIG[view].description}
-            badge={LANDING_CONFIG[view].badge}
-          />
-        )}
-
-        <AnimatePresence mode="wait" initial={false}>
-          <motion.div
-            key={view}
-            initial={{ opacity: 0, x: 24 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: -24 }}
-            transition={{ duration: 0.25, ease: [0.22, 0.8, 0.35, 1] }}
-            className="h-full"
-          >
-            {view === 'dashboard' ? (
-              <Dashboard />
-            ) : view === 'settings:users' ? (
-              <UsersManagement />
-            ) : view === 'applications:new' ? (
-              <ApplicationsWorkflow renewalMode={false} />
-            ) : view === 'applications:renewals' ? (
-              <ApplicationsWorkflow renewalMode={true} />
-            ) : view === 'applications:requirements' ? (
-              <RequirementsManagement />
-            ) : view === 'settings:proponents' ? (
-              <ProponentsManagement />
-            ) : view === 'settings:requirement-categories' ? (
-              <RequirementCategoriesManagement />
-            ) : view === 'settings:inspection-types' ? (
-              <InspectionTypesManagement />
-            ) : view === 'settings:compliance-types' ? (
-              <ComplianceTypesManagement />
-            ) : view === 'settings:control-panel' ? (
-              <ControlPanelManagement />
-            ) : (
-              <SectionLanding view={view} />
-            )}
-          </motion.div>
-        </AnimatePresence>
-      </AppLayout>
-    </>
-  );
-}
-
-type LandingConfig = {
+export type LandingConfig = {
   title: string;
   description: string;
   badge: string;
   icon: any;
+  // Used by Control Panel to decide which views show up under "Menu CRUD Permissions".
+  // Keep this in the same registry so adding a new CRUD page becomes automatic.
+  isCrud?: boolean;
   stats: { label: string; value: string; hint?: string }[];
   table: {
     columns: string[];
@@ -260,7 +16,7 @@ type LandingConfig = {
   };
 };
 
-const LANDING_CONFIG: Record<AppView, LandingConfig> = {
+export const LANDING_CONFIG: Record<AppView, LandingConfig> = {
   dashboard: {
     title: 'Dashboard',
     description: 'High-level overview of applications, permits, and daily tasks.',
@@ -331,6 +87,7 @@ const LANDING_CONFIG: Record<AppView, LandingConfig> = {
     description: 'Manage requirement definitions for new and renewal applications.',
     badge: 'Applications',
     icon: FileCheck,
+    isCrud: true,
     stats: [
       { label: 'Total Requirements', value: '—' },
       { label: 'For New', value: '—' },
@@ -559,6 +316,7 @@ const LANDING_CONFIG: Record<AppView, LandingConfig> = {
     description: 'Manage admin and staff accounts who assist in verification.',
     badge: 'System',
     icon: Users,
+    isCrud: true,
     stats: [
       { label: 'Active Users', value: '34' },
       { label: 'Pending Invitations', value: '5' },
@@ -578,6 +336,7 @@ const LANDING_CONFIG: Record<AppView, LandingConfig> = {
     description: 'Manage registered proponent business profiles and their status.',
     badge: 'Directory',
     icon: Users,
+    isCrud: true,
     stats: [
       { label: 'Total Proponents', value: '—' },
       { label: 'Active', value: '—' },
@@ -594,58 +353,61 @@ const LANDING_CONFIG: Record<AppView, LandingConfig> = {
   },
   'settings:requirement-categories': {
     title: 'Requirement Categories',
-    description: 'Manage requirement categories used in checklists and document grouping.',
-    badge: 'Proponent',
-    icon: FileCheck,
+    description: 'Organize requirements into categories to support filtering and templates.',
+    badge: 'Configuration',
+    icon: FolderTree,
+    isCrud: true,
     stats: [
-      { label: 'Total Categories', value: '—' },
-      { label: 'Active', value: '—' },
-      { label: 'Deactivated', value: '—' },
+      { label: 'Categories', value: '—' },
+      { label: 'Active Categories', value: '—' },
+      { label: 'Updated Recently', value: '—', hint: 'Last 30 days' },
     ],
     table: {
-      columns: ['Category Name', 'Description', 'Status', 'Last Updated'],
+      columns: ['Code', 'Name', 'Description', 'Status'],
       rows: [
-        ['Legal', 'Incorporation and legal identity docs', 'Active', 'Mar 19, 2026'],
-        ['Financial', 'Tax filings and financial statements', 'Active', 'Mar 18, 2026'],
-        ['Technical', 'Engineering plans and permits', 'Inactive', 'Mar 15, 2026'],
+        ['LEGAL', 'Legal', 'Company formation and corporate documents.', 'Active'],
+        ['FIN', 'Financial', 'Tax clearance and financial permits.', 'Active'],
+        ['TECH', 'Technical', 'Technical certifications and inspections.', 'Active'],
       ],
     },
   },
   'settings:inspection-types': {
     title: 'Inspection Types',
-    description: 'Manage inspection types for file maintenance.',
-    badge: 'File Maintenance',
+    description: 'Configure inspection types used during document verification and compliance checks.',
+    badge: 'Configuration',
     icon: FileCheck,
+    isCrud: true,
     stats: [
-      { label: 'Total Types', value: '—' },
-      { label: 'Active', value: '—' },
-      { label: 'Deactivated', value: '—' },
+      { label: 'Inspection Types', value: '—' },
+      { label: 'Active Types', value: '—' },
+      { label: 'Pending Updates', value: '—' },
     ],
     table: {
-      columns: ['Code', 'Name', 'Description', 'Status'],
+      columns: ['Type', 'Description', 'Applies To', 'Status'],
       rows: [
-        ['PRE', 'Pre-operation', 'Pre-operation inspection', 'Active'],
-        ['POST', 'Post-operation', 'Post-operation inspection', 'Active'],
-        ['RND', 'Random', 'Random spot check', 'Inactive'],
+        ['ENV', 'Environmental assessment', 'CDC/CIAC permits', 'Active'],
+        ['FIRE', 'Fire safety inspection', 'Occupancy / Fire Safety', 'Active'],
+        ['SAN', 'Sanitary compliance', 'Sanitary permits', 'Inactive'],
       ],
     },
   },
   'settings:compliance-types': {
     title: 'Compliance Types',
-    description: 'Manage compliance types for file maintenance.',
-    badge: 'File Maintenance',
-    icon: FileCheck,
+    description: 'Define compliance categories for verification and monitoring workflows.',
+    badge: 'Configuration',
+    icon: ShieldCheck,
+    isCrud: true,
     stats: [
-      { label: 'Total Types', value: '—' },
-      { label: 'Active', value: '—' },
-      { label: 'Deactivated', value: '—' },
+      { label: 'Compliance Types', value: '—' },
+      { label: 'Active Types', value: '—' },
+      { label: 'Obsolete Types', value: '—' },
     ],
     table: {
-      columns: ['Code', 'Name', 'Description', 'Status'],
+      columns: ['Type', 'Description', 'Applies To', 'Status'],
       rows: [
-        ['ENV', 'Environmental', 'Environmental compliance requirement', 'Active'],
-        ['FIRE', 'Fire Safety', 'Fire safety compliance requirement', 'Active'],
-        ['SAN', 'Sanitary', 'Sanitary compliance requirement', 'Inactive'],
+        ['BIR', 'BIR tax compliance', 'Tax-related documents', 'Active'],
+        ['DTI', 'DTI/Trade compliance', 'Registration documents', 'Active'],
+        ['SEC', 'SEC corporate compliance', 'Corporate documents', 'Active'],
       ],
     },
   },
@@ -654,6 +416,7 @@ const LANDING_CONFIG: Record<AppView, LandingConfig> = {
     description: 'Configure required and optional documents per application type.',
     badge: 'Configuration',
     icon: FileCheck,
+    isCrud: true,
     stats: [
       { label: 'Checklist Templates', value: '5' },
       { label: 'Last Updated By', value: 'Admin Demo' },
@@ -689,94 +452,3 @@ const LANDING_CONFIG: Record<AppView, LandingConfig> = {
   },
 };
 
-function SectionLanding({ view }: { view: AppView }) {
-  const config = LANDING_CONFIG[view];
-
-  if (!config || view === 'dashboard') return null;
-
-  const Icon = config.icon;
-
-  return (
-    <>
-      <div className="space-y-4 sm:space-y-5">
-        {config.stats.length > 0 && (
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4 mt-3">
-              {config.stats.map((stat) => (
-                <div
-                  key={stat.label}
-                  className="rounded-xl px-3 py-3 border flex flex-col gap-1"
-                  style={{
-                    backgroundColor: 'var(--control-bg)',
-                    borderColor: 'var(--border-subtle)',
-                  }}
-                >
-                  <span className="text-[10px] font-semibold text-secondary uppercase tracking-widest">
-                    {stat.label}
-                  </span>
-                  <span
-                    className="text-base sm:text-lg font-bold leading-tight"
-                    style={{ color: 'var(--text)' }}
-                  >
-                    {stat.value}
-                  </span>
-                  {stat.hint && <span className="text-[10px] text-secondary">{stat.hint}</span>}
-                </div>
-              ))}
-            </div>
-          )}
-
-        <div
-          className="glass-card p-4 sm:p-5 !border-transparent"
-          style={{ backgroundColor: 'var(--surface)' }}
-        >
-          <div className="flex items-center justify-between mb-3 gap-2">
-            <h3
-              className="text-sm font-bold tracking-tight"
-              style={{ color: 'var(--text)' }}
-            >
-              {config.title} List
-            </h3>
-            <button
-              className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-semibold shadow-sm cursor-pointer"
-              style={{
-                backgroundColor: 'var(--nav-active-bg)',
-                color: 'var(--nav-active-text)',
-              }}
-            >
-              + New Record
-            </button>
-          </div>
-
-          <div className="overflow-x-auto">
-            <table className="min-w-full text-left text-xs">
-              <thead>
-                <tr>
-                  {config.table.columns.map((col) => (
-                    <th
-                      key={col}
-                      className="px-3 py-2 font-semibold text-[10px] uppercase tracking-widest text-secondary border-b"
-                      style={{ borderColor: 'var(--border-subtle)' }}
-                    >
-                      {col}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {config.table.rows.map((row, idx) => (
-                  <tr key={idx} className="border-b last:border-b-0" style={{ borderColor: 'var(--border-subtle)' }}>
-                    {row.map((cell, i) => (
-                      <td key={i} className="px-3 py-2 text-[11px] text-secondary">
-                        {cell}
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-    </>
-  );
-}

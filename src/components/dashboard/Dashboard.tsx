@@ -515,8 +515,8 @@ export function Dashboard() {
           </div>
           <p className="text-[10px] text-secondary mb-4 sm:mb-6">Applications by processing stage</p>
 
-          <div className="h-40 sm:h-48 w-full min-h-[160px]">
-            <ResponsiveContainer width="100%" height="100%">
+          <div className="h-40 sm:h-48 w-full min-h-[160px] min-w-0">
+            <ResponsiveContainer width="100%" height="100%" minWidth={0}>
               <AreaChart
                 data={[
                   { name: 'Draft', value: 18 },

@@ -29,6 +29,7 @@ exports.create = async (req, res) => {
   try {
     const { username, email, phone, full_name, password, is_active, role_id } = req.body || {};
     if (!username) return res.status(400).json({ success: false, message: "username is required" });
+    if (!String(email || "").trim()) return res.status(400).json({ success: false, message: "email is required" });
     if (!password) return res.status(400).json({ success: false, message: "password is required" });
 
     const row = await User.createUser({ username, email, phone, full_name, password, is_active, role_id });
@@ -45,6 +46,9 @@ exports.update = async (req, res) => {
     if (!Number.isFinite(id)) return res.status(400).json({ success: false, message: "Invalid id" });
 
     const { username, email, phone, full_name, password, is_active, role_id } = req.body || {};
+    if (email !== undefined && !String(email || "").trim()) {
+      return res.status(400).json({ success: false, message: "email is required" });
+    }
     const row = await User.updateUser(id, { username, email, phone, full_name, password, is_active, role_id });
     if (!row) return res.status(404).json({ success: false, message: "User not found" });
 

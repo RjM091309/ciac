@@ -2,6 +2,7 @@ import React, { useEffect, useLayoutEffect, useState } from 'react';
 import { AppFooter } from '../components/AppFooter';
 import { AppHeader } from '../components/AppHeader';
 import { AppSidebar } from '../components/AppSidebar';
+import { ControlPanelAccessProvider } from '../context/ControlPanelAccessContext';
 import { cn } from '../lib/utils';
 
 export type AppView =
@@ -26,7 +27,8 @@ export type AppView =
   | 'settings:requirement-categories'
   | 'settings:inspection-types'
   | 'settings:compliance-types'
-  | 'settings:checklist';
+  | 'settings:checklist'
+  | 'settings:control-panel';
 
 type Theme = 'light' | 'dark';
 type ThemeMode = 'system' | 'manual';
@@ -139,66 +141,68 @@ export function AppLayout({
   };
 
   return (
-    <div
-      className={cn(
-        'h-screen overflow-hidden flex flex-col font-sans selection:bg-white/10 relative',
-      )}
-      style={{ backgroundColor: 'var(--background)', color: 'var(--foreground)', transition: 'background-color 220ms ease-out, color 220ms ease-out' }}
-    >
-      <AppHeader
-        onToggleSidebar={toggleSidebar}
-        theme={theme}
-        onToggleTheme={toggleTheme}
-        userRole={userRole}
-        userId={userId}
-        backendUrl={backendUrl}
-      />
-
-      <div className="flex-1 flex overflow-hidden relative">
-        {/* Mobile: sidebar as overlay drawer, hidden by default */}
-        {isMobile ? (
-          <>
-            <div
-              className="fixed left-0 bottom-0 z-50 w-64 max-w-[85vw] pt-1 pb-6 flex flex-col"
-              style={{
-                top: 'calc(3.5rem + env(safe-area-inset-top, 0px))',
-                paddingBottom: 'max(1.5rem, env(safe-area-inset-bottom, 0px))',
-                transform: sidebarCollapsed ? 'translateX(-100%)' : 'translateX(0)',
-                transition: 'transform 0.35s cubic-bezier(0.32, 0.72, 0, 1)',
-                willChange: 'transform',
-              }}
-            >
-              <AppSidebar
-                view={view}
-                onViewChange={(v) => {
-                  onViewChange(v);
-                  closeSidebar();
-                }}
-                onLogout={onLogout}
-                collapsed={false}
-                variant="drawer"
-              />
-            </div>
-          </>
-        ) : (
-          <AppSidebar
-            view={view}
-            onViewChange={onViewChange}
-            onLogout={onLogout}
-            collapsed={sidebarCollapsed}
-          />
+    <ControlPanelAccessProvider>
+      <div
+        className={cn(
+          'h-screen overflow-hidden flex flex-col font-sans selection:bg-white/10 relative',
         )}
+        style={{ backgroundColor: 'var(--background)', color: 'var(--foreground)', transition: 'background-color 220ms ease-out, color 220ms ease-out' }}
+      >
+        <AppHeader
+          onToggleSidebar={toggleSidebar}
+          theme={theme}
+          onToggleTheme={toggleTheme}
+          userRole={userRole}
+          userId={userId}
+          backendUrl={backendUrl}
+        />
 
-        <div className="flex-1 flex flex-col overflow-hidden min-w-0">
-          <main className="flex-1 overflow-y-auto overflow-x-hidden px-3 sm:px-4 pt-6 sm:pt-8 pb-safe custom-scrollbar">
-            <div className="min-h-full flex flex-col">
-              <div className="flex-1">{children}</div>
-              <AppFooter />
-            </div>
-          </main>
+        <div className="flex-1 flex overflow-hidden relative">
+          {/* Mobile: sidebar as overlay drawer, hidden by default */}
+          {isMobile ? (
+            <>
+              <div
+                className="fixed left-0 bottom-0 z-50 w-64 max-w-[85vw] pt-1 pb-6 flex flex-col"
+                style={{
+                  top: 'calc(3.5rem + env(safe-area-inset-top, 0px))',
+                  paddingBottom: 'max(1.5rem, env(safe-area-inset-bottom, 0px))',
+                  transform: sidebarCollapsed ? 'translateX(-100%)' : 'translateX(0)',
+                  transition: 'transform 0.35s cubic-bezier(0.32, 0.72, 0, 1)',
+                  willChange: 'transform',
+                }}
+              >
+                <AppSidebar
+                  view={view}
+                  onViewChange={(v) => {
+                    onViewChange(v);
+                    closeSidebar();
+                  }}
+                  onLogout={onLogout}
+                  collapsed={false}
+                  variant="drawer"
+                />
+              </div>
+            </>
+          ) : (
+            <AppSidebar
+              view={view}
+              onViewChange={onViewChange}
+              onLogout={onLogout}
+              collapsed={sidebarCollapsed}
+            />
+          )}
+
+          <div className="flex-1 flex flex-col overflow-hidden min-w-0">
+            <main className="flex-1 overflow-y-auto overflow-x-hidden px-3 sm:px-4 pt-6 sm:pt-8 pb-safe custom-scrollbar">
+              <div className="min-h-full flex flex-col">
+                <div className="flex-1">{children}</div>
+                <AppFooter />
+              </div>
+            </main>
+          </div>
         </div>
       </div>
-    </div>
+    </ControlPanelAccessProvider>
   );
 }
 

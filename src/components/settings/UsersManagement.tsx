@@ -77,7 +77,7 @@ export function UsersManagement() {
     },
   });
 
-  const users = usersRoles?.users ?? [];
+  const userRows = Array.isArray(usersRoles?.users) ? usersRoles.users : [];
   const roles = usersRoles?.roles ?? [];
 
   const [form, setForm] = useState({
@@ -89,15 +89,15 @@ export function UsersManagement() {
   });
 
   const stats = useMemo(() => {
-    const active = users.filter((u) => u.is_active === 1).length;
-    const inactive = users.filter((u) => u.is_active === 0).length;
-    return { active, inactive, total: users.length };
-  }, [users]);
+    const active = userRows.filter((u) => u.is_active === 1).length;
+    const inactive = userRows.filter((u) => u.is_active === 0).length;
+    return { active, inactive, total: userRows.length };
+  }, [userRows]);
 
   const filteredUsers = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
-    if (!q) return users;
-    return users.filter((u) => {
+    if (!q) return userRows;
+    return userRows.filter((u) => {
       const roleStr = u.roles?.length ? u.roles.map((r) => r.name).join(', ') : '';
       const statusStr = u.is_active === 1 ? 'active' : 'inactive';
       return (
@@ -108,7 +108,7 @@ export function UsersManagement() {
         statusStr.includes(q)
       );
     });
-  }, [users, searchQuery]);
+  }, [userRows, searchQuery]);
 
   const totalPages = useMemo(() => {
     const count = Math.max(1, Math.ceil(filteredUsers.length / Math.max(1, pageSize)));
@@ -149,6 +149,7 @@ export function UsersManagement() {
     const roleId = form.role_id;
 
     if (!username) return false;
+    if (!email) return false;
 
     if (!editing) {
       // For create mode, require required fields and at least one input activity.
@@ -209,13 +210,14 @@ export function UsersManagement() {
     try {
       const payload: any = {
         username: form.username.trim(),
-        email: form.email.trim() || null,
+        email: form.email.trim(),
         full_name: form.full_name.trim() || null,
         role_id: form.role_id ? Number(form.role_id) : null,
       };
       if (form.password.trim()) payload.password = form.password;
 
       if (!payload.username) throw new Error('Username is required');
+      if (!payload.email) throw new Error('Email is required');
       if (!editing && !payload.password) throw new Error('Password is required');
 
       const res = await fetch(api(editing ? `/api/users/${editing.id}` : '/api/users'), {
@@ -486,6 +488,8 @@ export function UsersManagement() {
           </Field>
           <Field label="Email">
             <input
+              type="email"
+              required
               className="w-full rounded-md px-3 py-2 text-sm border focus:outline-none focus:border-[var(--nav-active-bg)]"
               style={{ borderColor: 'var(--input-border)', color: 'var(--text)', backgroundColor: 'var(--input-bg)' }}
               value={form.email}
