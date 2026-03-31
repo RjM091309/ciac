@@ -1,4 +1,5 @@
 const { selectData, insertData, updateData, updateSchema } = require("../config/database");
+const Notification = require("./Notification");
 
 function toInt(v) {
   const n = Number(v);
@@ -11,62 +12,88 @@ function toBit(v) {
 
 async function createStatusChangeNotifications({ application, toStatus, remarks, changedBy }) {
   try {
-    const recipients = new Set();
-    const createdBy = toInt(application?.created_by);
-    const assignedOfficerId = toInt(application?.current_officer_id);
-    const proponentId = toInt(application?.proponent_id);
-    const actorId = toInt(changedBy);
-
-    if (createdBy) recipients.add(createdBy);
-    if (assignedOfficerId) recipients.add(assignedOfficerId);
-
-    if (proponentId) {
-      const proponentRows = await selectData(
-        `
-        SELECT TOP (1) user_id
-        FROM dbo.proponents
-        WHERE id = @param0
-        `,
-        [proponentId]
-      );
-      const proponentUserId = toInt(proponentRows?.[0]?.user_id);
-      if (proponentUserId) recipients.add(proponentUserId);
-    }
-
-    const adminAndOfficerRows = await selectData(
-      `
-      SELECT DISTINCT u.id
-      FROM dbo.users u
-      INNER JOIN dbo.user_roles ur ON ur.user_id = u.id
-      INNER JOIN dbo.roles r ON r.id = ur.role_id
-      WHERE u.is_active = 1
-        AND LOWER(LTRIM(RTRIM(r.name))) IN ('admin', 'administrator', 'officer', 'account officer')
-      `
-    );
-    for (const row of adminAndOfficerRows) {
-      const userId = toInt(row?.id);
-      if (userId) recipients.add(userId);
-    }
-
-    if (actorId) recipients.add(actorId);
-
     const subject = `Application ${String(application?.application_no || "").trim()} status updated`;
     const bodyBase = `Status changed from ${String(application?.status || "UNKNOWN").trim()} to ${String(toStatus || "").trim()}.`;
     const body = remarks ? `${bodyBase} Remarks: ${String(remarks).trim()}` : bodyBase;
-
-    for (const recipientUserId of recipients) {
-      await insertData(
-        `
-        INSERT INTO dbo.notifications
-          (user_id, channel, subject, body, status, error_message, created_by, updated_by, created_at, updated_at)
-        VALUES
-          (@param0, @param1, @param2, @param3, @param4, NULL, @param5, NULL, SYSUTCDATETIME(), NULL)
-        `,
-        [recipientUserId, "IN_APP", subject, body, 1, actorId]
-      );
-    }
+    await Notification.createApplicationScopedNotifications({
+      applicationId: application?.id,
+      actorId: changedBy,
+      eventType: "application_status",
+      subject,
+      body,
+    });
   } catch (error) {
     console.error("Create status-change notifications error:", error);
+  }
+}
+
+async function createApplicationCreatedNotifications({ applicationId, applicationNo, isRenewal, status, createdBy }) {
+  try {
+    const entryLabel = Number(isRenewal) ? "Renewal" : "New application";
+    const appNo = String(applicationNo || "").trim();
+    const currentStatus = String(status || "SUBMITTED").trim();
+    await Notification.createApplicationScopedNotifications({
+      applicationId,
+      actorId: createdBy,
+      eventType: "application_status",
+      subject: `${entryLabel} ${appNo} created`,
+      body: `${entryLabel} ${appNo} was created with initial status ${currentStatus}.`,
+    });
+  } catch (error) {
+    console.error("Create application notifications error:", error);
+  }
+}
+
+async function createRequirementStatusNotifications({
+  application,
+  requirementCode,
+  requirementName,
+  nextStatus,
+  remarks,
+  actorId,
+}) {
+  try {
+    const requirementLabel = [String(requirementCode || "").trim(), String(requirementName || "").trim()]
+      .filter(Boolean)
+      .join(" - ");
+    const subject = `Requirement updated for ${String(application?.application_no || "").trim()}`;
+    const bodyBase = `${requirementLabel || "Requirement"} changed to ${String(nextStatus || "").trim()}.`;
+    const body = remarks ? `${bodyBase} Remarks: ${String(remarks).trim()}` : bodyBase;
+    await Notification.createApplicationScopedNotifications({
+      applicationId: application?.id,
+      actorId,
+      eventType: "requirement",
+      subject,
+      body,
+    });
+  } catch (error) {
+    console.error("Create requirement notifications error:", error);
+  }
+}
+
+async function createDocumentNotifications({
+  application,
+  requirementCode,
+  requirementName,
+  fileName,
+  originalFileName,
+  actorId,
+}) {
+  try {
+    const requirementLabel = [String(requirementCode || "").trim(), String(requirementName || "").trim()]
+      .filter(Boolean)
+      .join(" - ");
+    const documentLabel = String(originalFileName || fileName || "Document").trim();
+    const bodySuffix = requirementLabel ? ` for ${requirementLabel}` : "";
+    await Notification.createApplicationScopedNotifications({
+      applicationId: application?.id,
+      actorId,
+      eventType: "document",
+      subject: `Document uploaded for ${String(application?.application_no || "").trim()}`,
+      body: `${documentLabel} was uploaded${bodySuffix}.`,
+    });
+  } catch (error) {
+    console.error("Create document notifications error:", error);
   }
 }
 
@@ -215,6 +242,7 @@ async function createApplication({
   created_by,
 }) {
   await ensureSchema();
+  await Notification.ensureSchema();
   const proponentId = toInt(proponent_id);
   const officerId = toInt(current_officer_id);
   const createdBy = toInt(created_by);
@@ -281,11 +309,20 @@ async function createApplication({
     [id, String(status || "SUBMITTED").trim(), createdBy, "Initial status on create"]
   );
 
+  await createApplicationCreatedNotifications({
+    applicationId: id,
+    applicationNo: application_no,
+    isRenewal: is_renewal,
+    status,
+    createdBy,
+  });
+
   return getApplicationById(id);
 }
 
 async function updateApplicationStatus(id, { to_status, remarks, changed_by }) {
   await ensureSchema();
+  await Notification.ensureSchema();
   const application = await getApplicationById(id);
   if (!application) return null;
 
@@ -355,11 +392,18 @@ async function listApplicationRequirements(applicationId) {
 
 async function updateApplicationRequirementStatus(id, { status, remarks, updated_by }) {
   await ensureSchema();
+  await Notification.ensureSchema();
   const rows = await selectData(
     `
-    SELECT TOP (1) id, application_id
-    FROM dbo.application_requirements
-    WHERE id = @param0
+    SELECT TOP (1)
+      ar.id,
+      ar.application_id,
+      ar.requirement_id,
+      r.code AS requirement_code,
+      r.name AS requirement_name
+    FROM dbo.application_requirements ar
+    LEFT JOIN dbo.requirements r ON r.id = ar.requirement_id
+    WHERE ar.id = @param0
     `,
     [id]
   );
@@ -396,7 +440,19 @@ async function updateApplicationRequirementStatus(id, { status, remarks, updated
     `,
     [id]
   );
-  return updatedRows?.[0] || null;
+  const updated = updatedRows?.[0] || null;
+  if (updated) {
+    const application = await getApplicationById(row.application_id);
+    await createRequirementStatusNotifications({
+      application,
+      requirementCode: row.requirement_code,
+      requirementName: row.requirement_name,
+      nextStatus: status,
+      remarks,
+      actorId: updated_by,
+    });
+  }
+  return updated;
 }
 
 async function listDocumentsByApplication(applicationId) {
@@ -439,6 +495,7 @@ async function createDocument({
   created_by,
 }) {
   await ensureSchema();
+  await Notification.ensureSchema();
   const result = await insertData(
     `
     INSERT INTO dbo.documents
@@ -459,8 +516,31 @@ async function createDocument({
     ]
   );
   const id = result?.recordset?.[0]?.id;
-  const rows = await selectData(`SELECT TOP (1) * FROM dbo.documents WHERE id = @param0`, [id]);
-  return rows?.[0] || null;
+  const rows = await selectData(
+    `
+    SELECT TOP (1)
+      d.*,
+      r.code AS requirement_code,
+      r.name AS requirement_name
+    FROM dbo.documents d
+    LEFT JOIN dbo.requirements r ON r.id = d.requirement_id
+    WHERE d.id = @param0
+    `,
+    [id]
+  );
+  const document = rows?.[0] || null;
+  if (document) {
+    const application = await getApplicationById(application_id);
+    await createDocumentNotifications({
+      application,
+      requirementCode: document.requirement_code,
+      requirementName: document.requirement_name,
+      fileName: document.file_name,
+      originalFileName: document.original_file_name,
+      actorId: created_by,
+    });
+  }
+  return document;
 }
 
 async function listApplicationStatusHistory(applicationId) {

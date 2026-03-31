@@ -72,13 +72,23 @@ export default function App() {
     []
   );
 
-  const [path, setPath] = useState<string>(() => window.location.pathname || '/');
+  const [locationState, setLocationState] = useState<{ pathname: string; search: string }>(() => ({
+    pathname: window.location.pathname || '/',
+    search: window.location.search || '',
+  }));
+  const path = locationState.pathname;
+  const locationSearch = locationState.search;
   const navigate = useMemo(() => {
     return (to: string, opts?: { replace?: boolean }) => {
       const next = to.startsWith('/') ? to : `/${to}`;
-      if (opts?.replace) window.history.replaceState({}, '', next);
-      else window.history.pushState({}, '', next);
-      setPath(next);
+      const nextUrl = new URL(next, window.location.origin);
+      const nextHref = `${nextUrl.pathname}${nextUrl.search}`;
+      if (opts?.replace) window.history.replaceState({}, '', nextHref);
+      else window.history.pushState({}, '', nextHref);
+      setLocationState({
+        pathname: nextUrl.pathname || '/',
+        search: nextUrl.search || '',
+      });
     };
   }, []);
 
@@ -87,7 +97,11 @@ export default function App() {
   const [view, setView] = useState<AppView>('dashboard');
 
   useEffect(() => {
-    const onPop = () => setPath(window.location.pathname || '/');
+    const onPop = () =>
+      setLocationState({
+        pathname: window.location.pathname || '/',
+        search: window.location.search || '',
+      });
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
   }, []);
@@ -174,6 +188,7 @@ export default function App() {
       <AppLayout
         view={view}
         onViewChange={handleViewChange}
+        navigate={navigate}
         userRole={user?.role || 'admin'}
         userId={user?.id ?? null}
         backendUrl={backendUrl}
@@ -223,9 +238,9 @@ export default function App() {
             ) : view === 'settings:users' ? (
               <UsersManagement />
             ) : view === 'applications:new' ? (
-              <ApplicationsWorkflow renewalMode={false} />
+              <ApplicationsWorkflow renewalMode={false} locationSearch={locationSearch} navigate={navigate} />
             ) : view === 'applications:renewals' ? (
-              <ApplicationsWorkflow renewalMode={true} />
+              <ApplicationsWorkflow renewalMode={true} locationSearch={locationSearch} navigate={navigate} />
             ) : view === 'applications:requirements' ? (
               <RequirementsManagement />
             ) : view === 'settings:proponents' ? (

@@ -1,4 +1,5 @@
 const Notification = require("../models/Notification");
+const { subscribeUser, writeEvent } = require("../lib/notificationStream");
 
 exports.listMine = async (req, res) => {
   try {
@@ -35,4 +36,34 @@ exports.markAllRead = async (req, res) => {
     console.error("Mark all notifications read error:", error);
     return res.status(500).json({ success: false, message: error.message || "Internal server error" });
   }
+};
+
+exports.stream = async (req, res) => {
+  const userId = Number(req.user?.id || 0);
+  if (!Number.isFinite(userId) || userId <= 0) {
+    return res.status(401).json({ success: false, message: "Access token required" });
+  }
+
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache, no-transform");
+  res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no");
+
+  if (typeof res.flushHeaders === "function") {
+    res.flushHeaders();
+  }
+
+  res.write("retry: 5000\n\n");
+
+  const unsubscribe = subscribeUser(userId, res);
+  writeEvent(res, "connected", { ok: true, user_id: userId });
+
+  const heartbeat = setInterval(() => {
+    writeEvent(res, "heartbeat", { ts: Date.now() });
+  }, 25000);
+
+  req.on("close", () => {
+    clearInterval(heartbeat);
+    unsubscribe();
+  });
 };

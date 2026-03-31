@@ -49,6 +49,7 @@ function getSidebarDefaultCollapsed(width: number) {
 export function AppLayout({
   view,
   onViewChange,
+  navigate,
   onLogout,
   userRole,
   userId,
@@ -57,6 +58,7 @@ export function AppLayout({
 }: {
   view: AppView;
   onViewChange: (view: AppView) => void;
+  navigate: (to: string, opts?: { replace?: boolean }) => void;
   onLogout: () => void;
   userRole: 'admin' | 'officer' | 'proponent';
   userId?: number | null;
@@ -155,6 +157,7 @@ export function AppLayout({
           userRole={userRole}
           userId={userId}
           backendUrl={backendUrl}
+        navigate={navigate}
         />
 
         <div className="flex-1 flex overflow-hidden relative">

@@ -1,4 +1,5 @@
 const { selectData, insertData, updateData, updateSchema } = require("../config/database");
+const Notification = require("./Notification");
 
 function toInt(v) {
   const n = Number(v);
@@ -40,6 +41,21 @@ async function ensureSchema() {
         ALTER TABLE dbo.contracts ADD updated_at DATETIME2(3) NULL;
     END;
   `);
+}
+
+async function createContractNotifications({ applicationId, contractNo, actorId, isUpdate }) {
+  try {
+    const normalizedContractNo = String(contractNo || "").trim();
+    await Notification.createApplicationScopedNotifications({
+      applicationId,
+      actorId,
+      eventType: "contract",
+      subject: `Contract ${isUpdate ? "updated" : "created"}`,
+      body: `Contract ${normalizedContractNo || "record"} was ${isUpdate ? "updated" : "created"} for this application.`,
+    });
+  } catch (error) {
+    console.error("Create contract notifications error:", error);
+  }
 }
 
 async function getById(id) {
@@ -101,6 +117,7 @@ async function createContract({
   created_by,
 }) {
   await ensureSchema();
+  await Notification.ensureSchema();
   const result = await insertData(
     `
     INSERT INTO dbo.contracts
@@ -122,6 +139,12 @@ async function createContract({
 
   const id = result?.recordset?.[0]?.id;
   if (!id) return null;
+  await createContractNotifications({
+    applicationId: application_id,
+    contractNo: contract_no,
+    actorId: created_by,
+    isUpdate: false,
+  });
   return getById(id);
 }
 
@@ -130,6 +153,7 @@ async function updateContract(
   { contract_no, issue_date, effective_start, effective_end, document_id, updated_by }
 ) {
   await ensureSchema();
+  await Notification.ensureSchema();
   await updateData(
     `
     UPDATE dbo.contracts
@@ -154,7 +178,15 @@ async function updateContract(
     ]
   );
 
-  return getById(id);
+  const current = await getById(id);
+  await createContractNotifications({
+    applicationId: current?.application_id,
+    contractNo: contract_no,
+    actorId: updated_by,
+    isUpdate: true,
+  });
+
+  return current;
 }
 
 module.exports = {

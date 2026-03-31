@@ -13,13 +13,18 @@ export interface NotificationItem {
   id: string;
   roleTargets: Role[];
   category: NotificationCategory;
+  eventType?: string;
   title: string;
   message: string;
   createdAt: string;
   isRead: boolean;
   applicationId?: number;
+  applicationNumber?: string;
+  targetPath?: string;
   ownerUserId?: number;
 }
+
+export type NotificationFilter = 'all' | 'unread' | 'read';
 
 export function filterNotificationsForUser(
   notifications: NotificationItem[],
@@ -39,4 +44,23 @@ export function filterNotificationsForUser(
 
 export function countUnread(notifications: NotificationItem[]) {
   return notifications.reduce((count, item) => count + (item.isRead ? 0 : 1), 0);
+}
+
+export function filterNotificationsByState(
+  notifications: NotificationItem[],
+  filter: NotificationFilter
+) {
+  if (filter === 'unread') return notifications.filter((item) => !item.isRead);
+  if (filter === 'read') return notifications.filter((item) => item.isRead);
+  return notifications;
+}
+
+export function getNotificationCounts(notifications: NotificationItem[]) {
+  const unread = notifications.reduce((count, item) => count + (item.isRead ? 0 : 1), 0);
+  const read = notifications.length - unread;
+  return {
+    all: notifications.length,
+    unread,
+    read,
+  };
 }

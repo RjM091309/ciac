@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CheckCircle2, Clock3, Eye, FileText, Loader2, Plus, Search, Upload, XCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '../../lib/utils';
@@ -6,8 +6,11 @@ import { SidePanel } from '../ui/SidePanel';
 import { DataTableControls } from '../ui/DataTableControls';
 import { AppSelect } from '../ui/AppSelect';
 import { useSessionStorageCachedResource } from '../../hooks/useSessionStorageCachedResource';
+import { requestNotificationsRefresh } from '../../lib/notificationRefresh';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { TextField } from '@mui/material';
+
+const NOTIFICATION_HIGHLIGHT_DURATION_MS = 5000;
 
 type ApplicationRow = {
   id: number;
@@ -162,7 +165,27 @@ function formatDatePickerValue(v: Date | null) {
   return `${yyyy}-${mm}-${dd}`;
 }
 
-export function ApplicationsWorkflow({ renewalMode }: { renewalMode: boolean }) {
+function stripNotificationQueryParams(search: string) {
+  const raw = String(search || '').trim();
+  if (!raw) return '';
+  const normalized = raw.startsWith('?') ? raw.slice(1) : raw;
+  const params = new URLSearchParams(normalized);
+  params.delete('applicationId');
+  params.delete('notificationId');
+  params.delete('focus');
+  const next = params.toString();
+  return next ? `?${next}` : '';
+}
+
+export function ApplicationsWorkflow({
+  renewalMode,
+  locationSearch = '',
+  navigate,
+}: {
+  renewalMode: boolean;
+  locationSearch?: string;
+  navigate: (to: string, opts?: { replace?: boolean }) => void;
+}) {
   const [saving, setSaving] = useState(false);
   const [applications, setApplications] = useState<ApplicationRow[]>([]);
   const [proponents, setProponents] = useState<ProponentRow[]>([]);
@@ -231,9 +254,14 @@ export function ApplicationsWorkflow({ renewalMode }: { renewalMode: boolean }) 
   const [contractIssueDateOpen, setContractIssueDateOpen] = useState(false);
   const [contractEffectiveStartOpen, setContractEffectiveStartOpen] = useState(false);
   const [contractEffectiveEndOpen, setContractEffectiveEndOpen] = useState(false);
+  const consumedNotificationQueryRef = useRef<string>('');
+  const applicationRowRefs = useRef<Record<number, HTMLTableRowElement | null>>({});
   const [appsSearchQuery, setAppsSearchQuery] = useState('');
   const [appsPageSize, setAppsPageSize] = useState(5);
   const [appsPage, setAppsPage] = useState(1);
+  const [highlightedApplicationId, setHighlightedApplicationId] = useState<number | null>(null);
+  const [highlightedApplicationTick, setHighlightedApplicationTick] = useState(0);
+  const [shouldCleanNotificationQuery, setShouldCleanNotificationQuery] = useState(false);
   const [checklistSearchQuery, setChecklistSearchQuery] = useState('');
   const [checklistPageSize, setChecklistPageSize] = useState(20);
   const [checklistPage, setChecklistPage] = useState(1);
@@ -388,6 +416,11 @@ export function ApplicationsWorkflow({ renewalMode }: { renewalMode: boolean }) 
     return [checklistPage - 2, checklistPage - 1, checklistPage, checklistPage + 1, checklistPage + 2];
   }, [checklistPage, checklistTotalPages]);
 
+  const highlightApplicationRow = useCallback((applicationId: number) => {
+    setHighlightedApplicationId(applicationId);
+    setHighlightedApplicationTick((current) => current + 1);
+  }, []);
+
   async function loadProgressForApplications(appIds: number[]) {
     if (!appIds.length) {
       setProgressByApp({});
@@ -461,6 +494,64 @@ export function ApplicationsWorkflow({ renewalMode }: { renewalMode: boolean }) 
   }, [selectedId]);
 
   useEffect(() => {
+    const search = String(locationSearch || '').trim();
+    if (!search || consumedNotificationQueryRef.current === search) return;
+    const params = new URLSearchParams(search.startsWith('?') ? search : `?${search}`);
+    const rawId = Number(params.get('applicationId') || '');
+    if (!Number.isFinite(rawId) || rawId <= 0) return;
+    const existsInCurrentTable = appsByType.some((application) => application.id === rawId);
+    if (!existsInCurrentTable) return;
+
+    const targetIndex = filteredApps.findIndex((application) => application.id === rawId);
+    if (targetIndex === -1) {
+      if (appsSearchQuery.trim()) {
+        setAppsSearchQuery('');
+      }
+      return;
+    }
+
+    consumedNotificationQueryRef.current = search;
+    setPreviewRequirementId(null);
+    setChecklistPageSize(20);
+    setChecklistPage(1);
+    setDetailsOpen(false);
+    setAppsPage(Math.floor(targetIndex / Math.max(1, appsPageSize)) + 1);
+    setShouldCleanNotificationQuery(true);
+    highlightApplicationRow(rawId);
+  }, [appsByType, appsPageSize, appsSearchQuery, filteredApps, highlightApplicationRow, locationSearch]);
+
+  useEffect(() => {
+    if (!highlightedApplicationId) return;
+    const row = applicationRowRefs.current[highlightedApplicationId];
+    if (!row) return;
+    row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, [highlightedApplicationId, pagedApps]);
+
+  useEffect(() => {
+    if (!highlightedApplicationId) return;
+    const timerId = window.setTimeout(() => {
+      setHighlightedApplicationId((current) => (current === highlightedApplicationId ? null : current));
+    }, NOTIFICATION_HIGHLIGHT_DURATION_MS);
+    return () => window.clearTimeout(timerId);
+  }, [highlightedApplicationId, highlightedApplicationTick]);
+
+  useEffect(() => {
+    if (!shouldCleanNotificationQuery || highlightedApplicationId !== null) return;
+    const normalizedSearch = String(locationSearch || '').trim();
+    const cleanedSearch = stripNotificationQueryParams(normalizedSearch);
+    setShouldCleanNotificationQuery(false);
+    consumedNotificationQueryRef.current = '';
+    if (cleanedSearch === normalizedSearch) return;
+    const nextPathname =
+      typeof window !== 'undefined'
+        ? window.location.pathname || (renewalMode ? '/applications/renewals' : '/applications/new')
+        : renewalMode
+          ? '/applications/renewals'
+          : '/applications/new';
+    navigate(`${nextPathname}${cleanedSearch}`, { replace: true });
+  }, [highlightedApplicationId, locationSearch, navigate, renewalMode, shouldCleanNotificationQuery]);
+
+  useEffect(() => {
     loadProgressForApplications(filteredApps.map((a) => a.id));
   }, [filteredApps]);
   useEffect(() => {
@@ -477,6 +568,7 @@ export function ApplicationsWorkflow({ renewalMode }: { renewalMode: boolean }) 
   }, [checklistPage, checklistTotalPages]);
 
   async function openDetails(applicationId: number) {
+    consumedNotificationQueryRef.current = '';
     setSelectedId(applicationId);
     setPreviewRequirementId(null);
     // Ensure the checklist shows the expected default amount every time the modal opens.
@@ -579,6 +671,7 @@ export function ApplicationsWorkflow({ renewalMode }: { renewalMode: boolean }) 
       if (!res.ok || !json?.success) throw new Error(json?.message || 'Failed to save contract');
 
       toast.success(isInsert ? 'Contract created' : 'Contract updated');
+      requestNotificationsRefresh();
       setContractOpen(false);
     } catch (error: any) {
       toast.error(error?.message || 'Failed to save contract');
@@ -649,6 +742,7 @@ export function ApplicationsWorkflow({ renewalMode }: { renewalMode: boolean }) 
       if (!res.ok || !json?.success) throw new Error(json?.message || 'Failed to create application');
 
       toast.success('Application created. Requirements auto-generated.');
+      requestNotificationsRefresh();
       setIsCreateOpen(false);
       setCreateForm((p) => ({ ...p, application_no: '' }));
       await refreshBase({ showLoading: false });
@@ -692,6 +786,7 @@ export function ApplicationsWorkflow({ renewalMode }: { renewalMode: boolean }) 
       const json = await res.json().catch(() => ({}));
       if (!res.ok || !json?.success) throw new Error(json?.message || 'Failed to add document');
       toast.success('Document inserted');
+      requestNotificationsRefresh();
       await loadDetails(selectedId);
     } catch (error: any) {
       toast.error(error?.message || 'Failed to add document');
@@ -721,6 +816,7 @@ export function ApplicationsWorkflow({ renewalMode }: { renewalMode: boolean }) 
       const json = await res.json().catch(() => ({}));
       if (!res.ok || !json?.success) throw new Error(json?.message || 'Failed to update status');
       toast.success('Application status updated');
+      requestNotificationsRefresh();
       await refreshBase({ showLoading: false });
       await loadDetails(selectedId);
     } catch (error: any) {
@@ -742,6 +838,7 @@ export function ApplicationsWorkflow({ renewalMode }: { renewalMode: boolean }) 
       const json = await res.json().catch(() => ({}));
       if (!res.ok || !json?.success) throw new Error(json?.message || 'Failed to update requirement');
       toast.success(`Requirement marked as ${nextStatus}`);
+      requestNotificationsRefresh();
       if (selectedId) await loadDetails(selectedId);
       await refreshBase({ showLoading: false });
     } catch (error: any) {
@@ -815,13 +912,46 @@ export function ApplicationsWorkflow({ renewalMode }: { renewalMode: boolean }) 
                   const percent = summary?.percent ?? 0;
                   const barColor = percent >= 100 ? '#10b981' : percent >= 50 ? '#3b82f6' : '#f59e0b';
                   const badge = getBadgeStyles(row.status);
+                  const isHighlighted = row.id === highlightedApplicationId;
+                  const highlightStyle = isHighlighted
+                    ? {
+                        background:
+                          'linear-gradient(90deg, rgba(59,130,246,0.14) 0%, rgba(59,130,246,0.07) 34%, rgba(59,130,246,0.02) 100%)',
+                        boxShadow: 'inset 3px 0 0 #2563eb, inset 0 0 0 1px rgba(59,130,246,0.22)',
+                      }
+                    : undefined;
                   return (
-                    <tr key={row.id} className="transition-colors" style={{ borderTop: '1px solid var(--border-subtle)' }}>
+                    <tr
+                      key={row.id}
+                      ref={(node) => {
+                        applicationRowRefs.current[row.id] = node;
+                      }}
+                      className="transition-[background-color,box-shadow] duration-500"
+                      style={{
+                        borderTop: '1px solid var(--border-subtle)',
+                        ...highlightStyle,
+                      }}
+                    >
                       <td className="px-3 py-2.5">
                         <div className="font-semibold" style={{ color: 'var(--text)' }}>
                           {row.proponent_name || `#${row.proponent_id}`}
                         </div>
-                        <div className="text-[11px] text-secondary">{row.application_no}</div>
+                        <div className="mt-0.5 flex items-center gap-2 flex-wrap">
+                          <div className="text-[11px] text-secondary">{row.application_no}</div>
+                          {isHighlighted ? (
+                            <span
+                              className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold"
+                              style={{
+                                color: '#1d4ed8',
+                                backgroundColor: 'rgba(219,234,254,0.95)',
+                                borderColor: 'rgba(59,130,246,0.22)',
+                              }}
+                            >
+                              <span className="h-1.5 w-1.5 rounded-full animate-pulse" style={{ backgroundColor: '#2563eb' }} />
+                              From notification
+                            </span>
+                          ) : null}
+                        </div>
                       </td>
                       <td className="px-3 py-2.5">
                         <span

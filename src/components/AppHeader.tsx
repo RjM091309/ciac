@@ -6,9 +6,19 @@ import { DatePicker } from './ui/DatePicker';
 import {
   countUnread,
   filterNotificationsForUser,
+  filterNotificationsByState,
+  getNotificationCounts,
+  NotificationFilter,
   NotificationItem,
   Role,
 } from '../lib/notifications';
+import {
+  fetchNotificationsList,
+  formatNotificationTime,
+  markAllNotificationsReadRequest,
+  markNotificationReadRequest,
+} from '../lib/notificationClient';
+import { NOTIFICATIONS_REFRESH_EVENT, requestNotificationsRefresh } from '../lib/notificationRefresh';
 
 export function AppHeader({
   onToggleSidebar,
@@ -17,6 +27,7 @@ export function AppHeader({
   userRole,
   userId,
   backendUrl,
+  navigate,
 }: {
   onToggleSidebar: () => void;
   theme: 'light' | 'dark';
@@ -24,54 +35,36 @@ export function AppHeader({
   userRole: Role;
   userId?: number | null;
   backendUrl: string;
+  navigate: (to: string, opts?: { replace?: boolean }) => void;
 }) {
   const { range, setRange } = useGlobalDate();
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [notificationOpen, setNotificationOpen] = useState(false);
+  const [notificationFilter, setNotificationFilter] = useState<NotificationFilter>('all');
   const notificationWrapRef = useRef<HTMLDivElement | null>(null);
+  const latestLoadIdRef = useRef(0);
 
   const visibleNotifications = useMemo(
     () => filterNotificationsForUser(notifications, { role: userRole, userId }),
     [notifications, userRole, userId]
   );
+  const notificationCounts = useMemo(() => getNotificationCounts(visibleNotifications), [visibleNotifications]);
+  const displayedNotifications = useMemo(
+    () => filterNotificationsByState(visibleNotifications, notificationFilter),
+    [visibleNotifications, notificationFilter]
+  );
   const unreadCount = useMemo(() => countUnread(visibleNotifications), [visibleNotifications]);
 
   const loadNotifications = useCallback(async () => {
-    try {
-      const baseUrl = String(backendUrl || '').replace(/\/+$/, '');
-      let res = await fetch(`${baseUrl}/api/notifications/me?limit=50`, {
-        credentials: 'include',
-      });
-      if (!res.ok) {
-        res = await fetch('/api/notifications/me?limit=50', {
-          credentials: 'include',
-        });
-      }
-      const json = await res.json().catch(() => ({} as any));
-      if (!res.ok || !json?.success) return;
-      const rows = Array.isArray(json?.data) ? json.data : [];
-      const mapped: NotificationItem[] = rows.map((row: any) => {
-        const rawStatus = String(row?.status ?? '').trim();
-        const statusNum = Number(rawStatus);
-        const statusText = rawStatus.toUpperCase();
-        const isRead =
-          statusNum === 2 || statusText === 'READ' || statusText === 'SEEN' || statusText === 'READ_BY_USER';
-        return {
-          id: String(row?.id ?? ''),
-          roleTargets: [userRole],
-          category: 'application_status',
-          title: String(row?.subject || row?.channel || 'Notification'),
-          message: String(row?.body || row?.error_message || ''),
-          createdAt: String(row?.created_at || row?.updated_at || new Date().toISOString()),
-          isRead,
-          ownerUserId: Number(userId || 0),
-        };
-      });
-      setNotifications(mapped);
-    } catch {
-      // Keep UI responsive even when notifications endpoint is unavailable.
-      setNotifications([]);
-    }
+    const loadId = ++latestLoadIdRef.current;
+    const nextNotifications = await fetchNotificationsList({
+      backendUrl,
+      userRole,
+      userId,
+      limit: 50,
+    });
+    if (loadId !== latestLoadIdRef.current) return;
+    setNotifications(nextNotifications);
   }, [backendUrl, userRole, userId]);
 
   useEffect(() => {
@@ -88,6 +81,47 @@ export function AppHeader({
       loadNotifications();
     }, 15000);
     return () => window.clearInterval(timer);
+  }, [loadNotifications]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof EventSource === 'undefined') return;
+    const source = new EventSource('/api/notifications/stream', { withCredentials: true });
+    const onNotification = () => {
+      requestNotificationsRefresh();
+    };
+    source.addEventListener('notification', onNotification);
+    source.addEventListener('connected', onNotification);
+    return () => {
+      source.removeEventListener('notification', onNotification);
+      source.removeEventListener('connected', onNotification);
+      source.close();
+    };
+  }, []);
+
+  useEffect(() => {
+    function onNotificationsRefresh() {
+      loadNotifications();
+    }
+
+    function onWindowFocus() {
+      loadNotifications();
+    }
+
+    function onVisibilityChange() {
+      if (document.visibilityState === 'visible') {
+        loadNotifications();
+      }
+    }
+
+    window.addEventListener(NOTIFICATIONS_REFRESH_EVENT, onNotificationsRefresh);
+    window.addEventListener('focus', onWindowFocus);
+    document.addEventListener('visibilitychange', onVisibilityChange);
+
+    return () => {
+      window.removeEventListener(NOTIFICATIONS_REFRESH_EVENT, onNotificationsRefresh);
+      window.removeEventListener('focus', onWindowFocus);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
   }, [loadNotifications]);
 
   useEffect(() => {
@@ -110,23 +144,13 @@ export function AppHeader({
 
   function markOneAsRead(id: string) {
     setNotifications((prev) => prev.map((item) => (item.id === id ? { ...item, isRead: true } : item)));
-    const baseUrl = String(backendUrl || '').replace(/\/+$/, '');
-    fetch(`${baseUrl}/api/notifications/${encodeURIComponent(id)}/read`, {
-      method: 'PATCH',
-      credentials: 'include',
-    }).then((res) => {
-      if (!res.ok) {
-        return fetch(`/api/notifications/${encodeURIComponent(id)}/read`, {
-          method: 'PATCH',
-          credentials: 'include',
-        });
-      }
-      return null;
-    }).finally(() => {
-      loadNotifications();
-    }).catch(() => {
-      // no-op (optimistic UI)
-    });
+    markNotificationReadRequest(backendUrl, id)
+      .finally(() => {
+        requestNotificationsRefresh();
+      })
+      .catch(() => {
+        // no-op (optimistic UI)
+      });
   }
 
   function markAllAsRead() {
@@ -140,33 +164,22 @@ export function AppHeader({
         return isVisibleForCurrentUser ? { ...item, isRead: true } : item;
       })
     );
-    const baseUrl = String(backendUrl || '').replace(/\/+$/, '');
-    fetch(`${baseUrl}/api/notifications/read-all`, {
-      method: 'PATCH',
-      credentials: 'include',
-    }).then((res) => {
-      if (!res.ok) {
-        return fetch('/api/notifications/read-all', {
-          method: 'PATCH',
-          credentials: 'include',
-        });
-      }
-      return null;
-    }).finally(() => {
-      loadNotifications();
-    }).catch(() => {
-      // no-op (optimistic UI)
-    });
+    markAllNotificationsReadRequest(backendUrl)
+      .finally(() => {
+        requestNotificationsRefresh();
+      })
+      .catch(() => {
+        // no-op (optimistic UI)
+      });
   }
 
-  function formatNotificationTime(value: string) {
-    const diff = Date.now() - new Date(value).getTime();
-    const minute = 60 * 1000;
-    const hour = 60 * minute;
-    const day = 24 * hour;
-    if (diff < hour) return `${Math.max(1, Math.floor(diff / minute))}m ago`;
-    if (diff < day) return `${Math.floor(diff / hour)}h ago`;
-    return `${Math.floor(diff / day)}d ago`;
+  function handleNotificationClick(item: NotificationItem) {
+    if (!item.targetPath || !item.applicationId) return;
+    if (!item.isRead) markOneAsRead(item.id);
+    navigate(
+      `${item.targetPath}?applicationId=${item.applicationId}&notificationId=${encodeURIComponent(item.id)}&focus=${Date.now()}`
+    );
+    setNotificationOpen(false);
   }
 
   const muiTheme = useMemo(
@@ -359,22 +372,54 @@ export function AppHeader({
                     Mark all as read
                   </button>
                 </div>
+                <div
+                  className="grid grid-cols-3 gap-1 px-2 py-2 border-b"
+                  style={{ borderColor: 'var(--border-subtle)' }}
+                >
+                  {([
+                    { id: 'all', label: 'All', count: notificationCounts.all },
+                    { id: 'unread', label: 'Unread', count: notificationCounts.unread },
+                    { id: 'read', label: 'Read', count: notificationCounts.read },
+                  ] as const).map((tab) => {
+                    const isActive = notificationFilter === tab.id;
+                    return (
+                      <button
+                        key={tab.id}
+                        type="button"
+                        onClick={() => setNotificationFilter(tab.id)}
+                        className="rounded-full px-2.5 py-1.5 text-[10px] font-semibold cursor-pointer transition-colors"
+                        style={{
+                          backgroundColor: isActive
+                            ? 'var(--nav-active-bg)'
+                            : 'color-mix(in oklab, var(--control-bg) 82%, transparent)',
+                          color: isActive ? 'var(--nav-active-text)' : 'var(--text-muted)',
+                        }}
+                      >
+                        {tab.label} ({tab.count})
+                      </button>
+                    );
+                  })}
+                </div>
                 <div className="max-h-80 overflow-y-auto p-2 custom-scrollbar">
-                  {visibleNotifications.length === 0 ? (
+                  {displayedNotifications.length === 0 ? (
                     <div className="px-3 py-10 text-center text-[11px] text-[var(--text-muted)]">
-                      No notifications for this account.
+                      {notificationFilter === 'all'
+                        ? 'No notifications for this account.'
+                        : `No ${notificationFilter} notifications.`}
                     </div>
                   ) : (
                     <div className="space-y-1">
-                      {visibleNotifications.map((item) => (
+                      {displayedNotifications.map((item) => (
                         <div
                           key={item.id}
                           className="rounded-xl border px-2.5 py-2"
+                          onClick={() => handleNotificationClick(item)}
                           style={{
                             borderColor: 'var(--border-subtle)',
                             backgroundColor: item.isRead
                               ? 'color-mix(in oklab, var(--control-bg) 55%, transparent)'
                               : 'color-mix(in oklab, var(--nav-active-bg) 15%, transparent)',
+                            cursor: item.targetPath ? 'pointer' : 'default',
                           }}
                         >
                           <div className="flex items-start justify-between gap-2">
@@ -382,6 +427,11 @@ export function AppHeader({
                               <div className="text-[11px] font-bold text-[var(--text)] truncate">
                                 {item.title}
                               </div>
+                              {(item.applicationNumber || item.category) && (
+                                <div className="text-[9px] uppercase tracking-wide text-[var(--text-muted)] mt-0.5">
+                                  {item.applicationNumber || item.category.replace(/_/g, ' ')}
+                                </div>
+                              )}
                               <div className="text-[10px] text-[var(--text-muted)] mt-0.5">
                                 {item.message}
                               </div>
@@ -392,7 +442,10 @@ export function AppHeader({
                             {!item.isRead && (
                               <button
                                 type="button"
-                                onClick={() => markOneAsRead(item.id)}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  markOneAsRead(item.id);
+                                }}
                                 className="text-[9px] font-semibold text-[var(--text-muted)] hover:text-[var(--text)] whitespace-nowrap cursor-pointer"
                               >
                                 Mark read
