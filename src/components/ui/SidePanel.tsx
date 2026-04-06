@@ -29,7 +29,7 @@ export function SidePanel({
   return (
     <AnimatePresence>
       {open ? (
-        <div className="fixed inset-0 z-50">
+        <div className="fixed inset-0 z-[60]">
           <motion.div
             className="absolute inset-0"
             style={{ backgroundColor: 'rgba(0,0,0,.45)' }}
@@ -39,9 +39,9 @@ export function SidePanel({
             exit={{ opacity: 0 }}
             transition={{ duration: 0.2, ease: 'easeOut' }}
           />
-          <div className="absolute inset-y-0 right-0 flex w-full justify-end p-2 sm:p-3">
+          <div className="absolute inset-y-0 right-0 flex w-full justify-end p-0 sm:p-0">
             <motion.div
-              className={`h-full w-full ${widthClassName} rounded-2xl border p-4 sm:p-5 flex flex-col`}
+              className={`h-full w-full ${widthClassName} border-l p-4 sm:p-5 flex flex-col`}
               style={{ backgroundColor: 'var(--surface)', borderColor: 'var(--border-subtle)' }}
               initial={{ x: 64, opacity: 0.98 }}
               animate={{ x: 0, opacity: 1 }}

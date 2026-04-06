@@ -1,6 +1,17 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Bell, ChevronRight, Moon, Search, SunMedium, Zap } from 'lucide-react';
-import { ThemeProvider, createTheme } from '@mui/material/styles';
+import {
+  Bell,
+  ChevronRight,
+  ClipboardList,
+  FileCheck,
+  FileSignature,
+  FileText,
+  Moon,
+  Search,
+  ShieldCheck,
+  SunMedium,
+  Zap,
+} from 'lucide-react';
 import { useGlobalDate } from '../state/GlobalDateContext';
 import { DatePicker } from './ui/DatePicker';
 import {
@@ -15,10 +26,87 @@ import {
 import {
   fetchNotificationsList,
   formatNotificationTime,
+  getNotificationCategoryLabel,
   markAllNotificationsReadRequest,
   markNotificationReadRequest,
 } from '../lib/notificationClient';
 import { NOTIFICATIONS_REFRESH_EVENT, requestNotificationsRefresh } from '../lib/notificationRefresh';
+
+function getNotificationTypeMeta(item: NotificationItem) {
+  switch (item.category) {
+    case 'requirement':
+      return {
+        Icon: ClipboardList,
+        label: getNotificationCategoryLabel(item.eventType || item.category),
+        color: '#f59e0b',
+        iconBg: 'rgba(245,158,11,0.16)',
+        chipBg: 'rgba(245,158,11,0.12)',
+        border: 'rgba(245,158,11,0.24)',
+        unreadBg: 'rgba(245,158,11,0.08)',
+      };
+    case 'document':
+      return {
+        Icon: FileText,
+        label: getNotificationCategoryLabel(item.eventType || item.category),
+        color: '#06b6d4',
+        iconBg: 'rgba(6,182,212,0.16)',
+        chipBg: 'rgba(6,182,212,0.12)',
+        border: 'rgba(6,182,212,0.24)',
+        unreadBg: 'rgba(6,182,212,0.08)',
+      };
+    case 'inspection':
+      return {
+        Icon: Search,
+        label: getNotificationCategoryLabel(item.eventType || item.category),
+        color: '#8b5cf6',
+        iconBg: 'rgba(139,92,246,0.16)',
+        chipBg: 'rgba(139,92,246,0.12)',
+        border: 'rgba(139,92,246,0.24)',
+        unreadBg: 'rgba(139,92,246,0.08)',
+      };
+    case 'compliance':
+      return {
+        Icon: ShieldCheck,
+        label: getNotificationCategoryLabel(item.eventType || item.category),
+        color: '#10b981',
+        iconBg: 'rgba(16,185,129,0.16)',
+        chipBg: 'rgba(16,185,129,0.12)',
+        border: 'rgba(16,185,129,0.24)',
+        unreadBg: 'rgba(16,185,129,0.08)',
+      };
+    case 'assessment':
+      return {
+        Icon: FileCheck,
+        label: getNotificationCategoryLabel(item.eventType || item.category),
+        color: '#f97316',
+        iconBg: 'rgba(249,115,22,0.16)',
+        chipBg: 'rgba(249,115,22,0.12)',
+        border: 'rgba(249,115,22,0.24)',
+        unreadBg: 'rgba(249,115,22,0.08)',
+      };
+    case 'contract':
+      return {
+        Icon: FileSignature,
+        label: getNotificationCategoryLabel(item.eventType || item.category),
+        color: '#e11d48',
+        iconBg: 'rgba(225,29,72,0.16)',
+        chipBg: 'rgba(225,29,72,0.12)',
+        border: 'rgba(225,29,72,0.24)',
+        unreadBg: 'rgba(225,29,72,0.08)',
+      };
+    case 'application_status':
+    default:
+      return {
+        Icon: Zap,
+        label: getNotificationCategoryLabel(item.eventType || item.category),
+        color: '#6366f1',
+        iconBg: 'rgba(99,102,241,0.16)',
+        chipBg: 'rgba(99,102,241,0.12)',
+        border: 'rgba(99,102,241,0.24)',
+        unreadBg: 'rgba(99,102,241,0.08)',
+      };
+  }
+}
 
 export function AppHeader({
   onToggleSidebar,
@@ -182,54 +270,8 @@ export function AppHeader({
     setNotificationOpen(false);
   }
 
-  const muiTheme = useMemo(
-    () =>
-      createTheme({
-        palette: {
-          mode: theme,
-          primary:
-            theme === 'dark'
-              ? { main: '#ffffff', contrastText: '#000000' }
-              : { main: '#000000', contrastText: '#ffffff' },
-          background:
-            theme === 'dark'
-              ? { default: '#000000', paper: '#0b0b0b' }
-              : { default: '#ffffff', paper: '#ffffff' },
-          text:
-            theme === 'dark'
-              ? { primary: '#ffffff', secondary: 'rgba(255,255,255,0.72)' }
-              : { primary: '#000000', secondary: 'rgba(0,0,0,0.72)' },
-          divider: theme === 'dark' ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.18)',
-        },
-        typography: {
-          fontFamily: '"Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif',
-        },
-        shape: { borderRadius: 12 },
-        components: {
-          MuiOutlinedInput: {
-            styleOverrides: {
-              root: {
-                backgroundColor: theme === 'dark' ? '#0b0b0b' : '#ffffff',
-              },
-              notchedOutline: {
-                borderColor: theme === 'dark' ? 'rgba(255,255,255,0.28)' : 'rgba(0,0,0,0.28)',
-              },
-            },
-          },
-          MuiPaper: {
-            styleOverrides: {
-              root: {
-                backgroundImage: 'none',
-              },
-            },
-          },
-        },
-      }),
-    [theme]
-  );
-
   return (
-    <header className="relative z-[140] shrink-0 px-2 sm:px-3 md:px-4 pt-2 sm:pt-2.5 md:pt-3 mb-2 safe-top">
+    <header className="relative z-40 shrink-0 px-2 sm:px-3 md:px-4 pt-2 sm:pt-2.5 md:pt-3 mb-2 safe-top">
       <div
         className="min-h-11 sm:min-h-12 md:min-h-14 rounded-2xl backdrop-blur-xl px-2.5 sm:px-3 md:px-5 flex items-center justify-between gap-1.5 sm:gap-2 md:gap-3 flex-nowrap"
         style={{
@@ -297,15 +339,11 @@ export function AppHeader({
           </div>
 
           <div className="block xl:hidden shrink-0">
-            <ThemeProvider theme={muiTheme}>
-              <DatePicker value={range} onChange={setRange} compact showPresets />
-            </ThemeProvider>
+            <DatePicker value={range} onChange={setRange} compact showPresets />
           </div>
 
           <div className="hidden xl:block shrink-0 max-w-[190px] lg:max-w-none">
-            <ThemeProvider theme={muiTheme}>
-              <DatePicker value={range} onChange={setRange} showPresets />
-            </ThemeProvider>
+            <DatePicker value={range} onChange={setRange} showPresets />
           </div>
 
           <div
@@ -409,51 +447,85 @@ export function AppHeader({
                     </div>
                   ) : (
                     <div className="space-y-1">
-                      {displayedNotifications.map((item) => (
-                        <div
-                          key={item.id}
-                          className="rounded-xl border px-2.5 py-2"
-                          onClick={() => handleNotificationClick(item)}
-                          style={{
-                            borderColor: 'var(--border-subtle)',
-                            backgroundColor: item.isRead
-                              ? 'color-mix(in oklab, var(--control-bg) 55%, transparent)'
-                              : 'color-mix(in oklab, var(--nav-active-bg) 15%, transparent)',
-                            cursor: item.targetPath ? 'pointer' : 'default',
-                          }}
-                        >
-                          <div className="flex items-start justify-between gap-2">
-                            <div className="min-w-0">
-                              <div className="text-[11px] font-bold text-[var(--text)] truncate">
-                                {item.title}
+                      {displayedNotifications.map((item) => {
+                        const typeMeta = getNotificationTypeMeta(item);
+                        return (
+                          <div
+                            key={item.id}
+                            className="rounded-xl border px-2.5 py-2"
+                            onClick={() => handleNotificationClick(item)}
+                            style={{
+                              borderColor: item.isRead ? 'var(--border-subtle)' : typeMeta.border,
+                              backgroundColor: item.isRead
+                                ? 'color-mix(in oklab, var(--control-bg) 55%, transparent)'
+                                : typeMeta.unreadBg,
+                              cursor: item.targetPath ? 'pointer' : 'default',
+                            }}
+                          >
+                            <div className="flex items-start gap-2.5">
+                              <div
+                                className="mt-0.5 h-8 w-8 rounded-xl border shrink-0 inline-flex items-center justify-center"
+                                style={{
+                                  backgroundColor: typeMeta.iconBg,
+                                  borderColor: typeMeta.border,
+                                  color: typeMeta.color,
+                                }}
+                              >
+                                <typeMeta.Icon size={15} />
                               </div>
-                              {(item.applicationNumber || item.category) && (
-                                <div className="text-[9px] uppercase tracking-wide text-[var(--text-muted)] mt-0.5">
-                                  {item.applicationNumber || item.category.replace(/_/g, ' ')}
+
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-start justify-between gap-2">
+                                  <div className="min-w-0">
+                                    <div className="text-[11px] font-bold text-[var(--text)] truncate">
+                                      {item.title}
+                                    </div>
+
+                                    <div className="mt-0.5 flex items-center gap-1.5 flex-wrap">
+                                      <span
+                                        className="inline-flex items-center rounded-full border px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide"
+                                        style={{
+                                          color: typeMeta.color,
+                                          backgroundColor: typeMeta.chipBg,
+                                          borderColor: typeMeta.border,
+                                        }}
+                                      >
+                                        {typeMeta.label}
+                                      </span>
+
+                                      {item.applicationNumber ? (
+                                        <span className="text-[9px] uppercase tracking-wide text-[var(--text-muted)]">
+                                          {item.applicationNumber}
+                                        </span>
+                                      ) : null}
+                                    </div>
+
+                                    <div className="text-[10px] text-[var(--text-muted)] mt-1">
+                                      {item.message}
+                                    </div>
+                                    <div className="text-[9px] text-[var(--text-muted)] mt-1">
+                                      {formatNotificationTime(item.createdAt)}
+                                    </div>
+                                  </div>
+
+                                  {!item.isRead && (
+                                    <button
+                                      type="button"
+                                      onClick={(event) => {
+                                        event.stopPropagation();
+                                        markOneAsRead(item.id);
+                                      }}
+                                      className="text-[9px] font-semibold text-[var(--text-muted)] hover:text-[var(--text)] whitespace-nowrap cursor-pointer"
+                                    >
+                                      Mark read
+                                    </button>
+                                  )}
                                 </div>
-                              )}
-                              <div className="text-[10px] text-[var(--text-muted)] mt-0.5">
-                                {item.message}
-                              </div>
-                              <div className="text-[9px] text-[var(--text-muted)] mt-1">
-                                {formatNotificationTime(item.createdAt)}
                               </div>
                             </div>
-                            {!item.isRead && (
-                              <button
-                                type="button"
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  markOneAsRead(item.id);
-                                }}
-                                className="text-[9px] font-semibold text-[var(--text-muted)] hover:text-[var(--text)] whitespace-nowrap cursor-pointer"
-                              >
-                                Mark read
-                              </button>
-                            )}
                           </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                 </div>

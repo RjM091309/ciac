@@ -7,7 +7,7 @@ import { DataTableControls } from '../ui/DataTableControls';
 import { AppSelect } from '../ui/AppSelect';
 import { useSessionStorageCachedResource } from '../../hooks/useSessionStorageCachedResource';
 import { requestNotificationsRefresh } from '../../lib/notificationRefresh';
-import { DatePicker } from '@mui/x-date-pickers/DatePicker';
+import { DatePicker } from '../ui/DatePicker';
 import { TextField } from '@mui/material';
 
 const NOTIFICATION_HIGHLIGHT_DURATION_MS = 5000;
@@ -251,9 +251,6 @@ export function ApplicationsWorkflow({
   });
   /** Loaded values for update mode — Save stays disabled until something changes. */
   const [contractInitialSnapshot, setContractInitialSnapshot] = useState<typeof contractForm | null>(null);
-  const [contractIssueDateOpen, setContractIssueDateOpen] = useState(false);
-  const [contractEffectiveStartOpen, setContractEffectiveStartOpen] = useState(false);
-  const [contractEffectiveEndOpen, setContractEffectiveEndOpen] = useState(false);
   const consumedNotificationQueryRef = useRef<string>('');
   const applicationRowRefs = useRef<Record<number, HTMLTableRowElement | null>>({});
   const [appsSearchQuery, setAppsSearchQuery] = useState('');
@@ -1420,11 +1417,10 @@ export function ApplicationsWorkflow({
               onChange={(e) => setContractForm((p) => ({ ...p, contract_no: e.target.value }))}
               placeholder="e.g. CN-2026-0001"
               sx={{
-                mt: 1,
                 width: '100%',
                 '& .MuiOutlinedInput-root': {
                   backgroundColor: 'transparent',
-                  borderRadius: '0.5rem',
+                  borderRadius: '1.5rem',
                   boxShadow: 'none',
                   height: '40px',
                 },
@@ -1440,134 +1436,47 @@ export function ApplicationsWorkflow({
                   borderColor: 'var(--nav-active-bg)',
                   borderWidth: '1px',
                 },
+                '& .MuiInputBase-input': {
+                  color: 'var(--text)',
+                },
+                '& .MuiInputBase-input::placeholder': {
+                  color: 'var(--text-muted)',
+                  opacity: 1,
+                },
               }}
             />
           </div>
 
           <div>
-            <label className="text-xs font-semibold uppercase tracking-wider text-secondary">Issue Date</label>
+            <label className="text-xs font-semibold uppercase tracking-wider text-secondary block mb-1">Issue Date</label>
             <DatePicker
-              open={contractIssueDateOpen}
-              onOpen={() => setContractIssueDateOpen(true)}
-              onClose={() => setContractIssueDateOpen(false)}
+              mode="single"
+              fullWidth
               value={toDatePickerValue(contractForm.issue_date)}
               onChange={(newValue) => setContractForm((p) => ({ ...p, issue_date: formatDatePickerValue(newValue) }))}
-              format="yyyy-MM-dd"
-              slotProps={{
-                textField: {
-                  fullWidth: true,
-                  size: 'small',
-                  placeholder: 'YYYY-MM-DD',
-                  onClick: () => setContractIssueDateOpen(true),
-                  sx: {
-                    mt: 1,
-                    '& .MuiOutlinedInput-root': {
-                      backgroundColor: 'transparent',
-                      borderRadius: '0.5rem',
-                      boxShadow: 'none',
-                      height: '40px',
-                    },
-                    '& .MuiOutlinedInput-notchedOutline': {
-                      borderColor: 'var(--input-border)',
-                      borderWidth: '1px',
-                    },
-                    '&:hover .MuiOutlinedInput-notchedOutline': {
-                      borderColor: 'var(--nav-active-bg)',
-                      borderWidth: '1px',
-                    },
-                    '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
-                      borderColor: 'var(--nav-active-bg)',
-                      borderWidth: '1px',
-                    },
-                  },
-                },
-              }}
+              placeholder="YYYY-MM-DD"
             />
           </div>
 
           <div>
-            <label className="text-xs font-semibold uppercase tracking-wider text-secondary">Effective Start</label>
+            <label className="text-xs font-semibold uppercase tracking-wider text-secondary block mb-1">Effective Start</label>
             <DatePicker
-              open={contractEffectiveStartOpen}
-              onOpen={() => setContractEffectiveStartOpen(true)}
-              onClose={() => setContractEffectiveStartOpen(false)}
+              mode="single"
+              fullWidth
               value={toDatePickerValue(contractForm.effective_start)}
-              onChange={(newValue) =>
-                setContractForm((p) => ({ ...p, effective_start: formatDatePickerValue(newValue) }))
-              }
-              format="yyyy-MM-dd"
-              slotProps={{
-                textField: {
-                  fullWidth: true,
-                  size: 'small',
-                  placeholder: 'YYYY-MM-DD',
-                  onClick: () => setContractEffectiveStartOpen(true),
-                  sx: {
-                    mt: 1,
-                    '& .MuiOutlinedInput-root': {
-                      backgroundColor: 'transparent',
-                      borderRadius: '0.5rem',
-                      boxShadow: 'none',
-                      height: '40px',
-                    },
-                    '& .MuiOutlinedInput-notchedOutline': {
-                      borderColor: 'var(--input-border)',
-                      borderWidth: '1px',
-                    },
-                    '&:hover .MuiOutlinedInput-notchedOutline': {
-                      borderColor: 'var(--nav-active-bg)',
-                      borderWidth: '1px',
-                    },
-                    '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
-                      borderColor: 'var(--nav-active-bg)',
-                      borderWidth: '1px',
-                    },
-                  },
-                },
-              }}
+              onChange={(newValue) => setContractForm((p) => ({ ...p, effective_start: formatDatePickerValue(newValue) }))}
+              placeholder="YYYY-MM-DD"
             />
           </div>
 
           <div>
-            <label className="text-xs font-semibold uppercase tracking-wider text-secondary">Effective End</label>
+            <label className="text-xs font-semibold uppercase tracking-wider text-secondary block mb-1">Effective End</label>
             <DatePicker
-              open={contractEffectiveEndOpen}
-              onOpen={() => setContractEffectiveEndOpen(true)}
-              onClose={() => setContractEffectiveEndOpen(false)}
+              mode="single"
+              fullWidth
               value={toDatePickerValue(contractForm.effective_end)}
-              onChange={(newValue) =>
-                setContractForm((p) => ({ ...p, effective_end: formatDatePickerValue(newValue) }))
-              }
-              format="yyyy-MM-dd"
-              slotProps={{
-                textField: {
-                  fullWidth: true,
-                  size: 'small',
-                  placeholder: 'YYYY-MM-DD',
-                  onClick: () => setContractEffectiveEndOpen(true),
-                  sx: {
-                    mt: 1,
-                    '& .MuiOutlinedInput-root': {
-                      backgroundColor: 'transparent',
-                      borderRadius: '0.5rem',
-                      boxShadow: 'none',
-                      height: '40px',
-                    },
-                    '& .MuiOutlinedInput-notchedOutline': {
-                      borderColor: 'var(--input-border)',
-                      borderWidth: '1px',
-                    },
-                    '&:hover .MuiOutlinedInput-notchedOutline': {
-                      borderColor: 'var(--nav-active-bg)',
-                      borderWidth: '1px',
-                    },
-                    '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
-                      borderColor: 'var(--nav-active-bg)',
-                      borderWidth: '1px',
-                    },
-                  },
-                },
-              }}
+              onChange={(newValue) => setContractForm((p) => ({ ...p, effective_end: formatDatePickerValue(newValue) }))}
+              placeholder="YYYY-MM-DD"
             />
           </div>
 

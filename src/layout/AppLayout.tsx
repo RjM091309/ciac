@@ -1,9 +1,10 @@
-import React, { useEffect, useLayoutEffect, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useState, useMemo } from 'react';
 import { AppFooter } from '../components/AppFooter';
 import { AppHeader } from '../components/AppHeader';
 import { AppSidebar } from '../components/AppSidebar';
 import { ControlPanelAccessProvider } from '../context/ControlPanelAccessContext';
 import { cn } from '../lib/utils';
+import { ThemeProvider, createTheme } from '@mui/material/styles';
 
 export type AppView =
   | 'dashboard'
@@ -142,8 +143,55 @@ export function AppLayout({
     setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'));
   };
 
+  const muiTheme = useMemo(
+    () =>
+      createTheme({
+        palette: {
+          mode: theme,
+          primary:
+            theme === 'dark'
+              ? { main: '#ffffff', contrastText: '#000000' }
+              : { main: '#000000', contrastText: '#ffffff' },
+          background:
+            theme === 'dark'
+              ? { default: '#000000', paper: '#0b0b0b' }
+              : { default: '#ffffff', paper: '#ffffff' },
+          text:
+            theme === 'dark'
+              ? { primary: '#ffffff', secondary: 'rgba(255,255,255,0.72)' }
+              : { primary: '#000000', secondary: 'rgba(0,0,0,0.72)' },
+          divider: theme === 'dark' ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.18)',
+        },
+        typography: {
+          fontFamily: '"Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif',
+        },
+        shape: { borderRadius: 12 },
+        components: {
+          MuiOutlinedInput: {
+            styleOverrides: {
+              root: {
+                backgroundColor: theme === 'dark' ? '#0b0b0b' : '#ffffff',
+              },
+              notchedOutline: {
+                borderColor: theme === 'dark' ? 'rgba(255,255,255,0.28)' : 'rgba(0,0,0,0.28)',
+              },
+            },
+          },
+          MuiPaper: {
+            styleOverrides: {
+              root: {
+                backgroundImage: 'none',
+              },
+            },
+          },
+        },
+      }),
+    [theme]
+  );
+
   return (
-    <ControlPanelAccessProvider>
+    <ThemeProvider theme={muiTheme}>
+      <ControlPanelAccessProvider>
       <div
         className={cn(
           'h-screen overflow-hidden flex flex-col font-sans selection:bg-white/10 relative',
@@ -206,6 +254,7 @@ export function AppLayout({
         </div>
       </div>
     </ControlPanelAccessProvider>
+    </ThemeProvider>
   );
 }
 

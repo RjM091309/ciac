@@ -5,9 +5,9 @@ import { alpha, styled } from '@mui/material/styles';
 import { DateCalendar } from '@mui/x-date-pickers/DateCalendar';
 import { PickersDay } from '@mui/x-date-pickers/PickersDay';
 
-function formatRange(value: [Date | null, Date | null]) {
+function formatRange(value: [Date | null, Date | null], placeholder: string = 'Enter Date') {
   const [start, end] = value;
-  if (!start && !end) return 'Enter Date';
+  if (!start && !end) return placeholder;
   const fmt = (d: Date) =>
     d.toLocaleDateString(undefined, {
       month: 'short',
@@ -125,26 +125,41 @@ function detectPreset(range: [Date | null, Date | null]): PresetKey {
   return 'custom';
 }
 
-type DatePickerProps = {
-  value: [Date | null, Date | null];
-  onChange: (next: [Date | null, Date | null]) => void;
-  compact?: boolean;
-  showPresets?: boolean;
-};
-
 export function DatePicker({
   value,
   onChange,
   compact = false,
   showPresets = false,
-}: DatePickerProps) {
+  mode = 'range',
+  placeholder = 'Enter Date',
+  fullWidth = false,
+}: {
+  value: any;
+  onChange: (next: any) => void;
+  compact?: boolean;
+  showPresets?: boolean;
+  mode?: 'single' | 'range';
+  placeholder?: string;
+  fullWidth?: boolean;
+}) {
   const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
   const open = Boolean(anchorEl);
 
-  const rangeText = formatRange(value);
-  const [start, end] = value;
-  const isEmpty = !start && !end;
-  const selectedPreset = detectPreset(value);
+  let rangeText = '';
+  let start: Date | null = null;
+  let end: Date | null = null;
+  let isEmpty = true;
+  let selectedPreset: PresetKey | null = null;
+
+  if (mode === 'single') {
+    isEmpty = !value;
+    rangeText = value ? value.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : placeholder;
+  } else {
+    rangeText = formatRange(value, placeholder);
+    [start, end] = value || [null, null];
+    isEmpty = !start && !end;
+    selectedPreset = detectPreset(value || [null, null]);
+  }
   const presets: { key: PresetKey; label: string; range?: [Date, Date] }[] = [
     { key: 'today', label: 'Today', range: getTodayRange() },
     { key: 'yesterday', label: 'Yesterday', range: getYesterdayRange() },
@@ -170,7 +185,7 @@ export function DatePicker({
           <CalendarDays size={16} />
         </button>
       ) : (
-        <div className="relative group w-full sm:w-36 md:w-44 lg:w-64 xl:w-72 max-w-[170px] lg:max-w-none">
+        <div className={`relative group w-full ${fullWidth ? '' : 'sm:w-36 md:w-44 lg:w-64 xl:w-72 max-w-[170px] lg:max-w-none'}`}>
           <CalendarDays
             className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)] group-focus-within:text-[var(--text)] transition-colors pointer-events-none"
             size={14}
@@ -179,7 +194,7 @@ export function DatePicker({
             type="text"
             readOnly
             value={isEmpty ? '' : rangeText}
-            placeholder="Enter Date Range"
+            placeholder={placeholder}
             aria-label="Date range"
             onClick={(e) => setAnchorEl(e.currentTarget)}
             className="h-9 rounded-full pl-9 pr-3 text-xs w-full focus:outline-none focus:ring-1 focus:ring-[var(--border)] text-[var(--text)] placeholder:text-[var(--text-muted)] transition-all cursor-pointer"
@@ -224,7 +239,7 @@ export function DatePicker({
             variant="overline"
             sx={{ opacity: 0.9, letterSpacing: '0.12em', fontWeight: 700, lineHeight: 1.2, fontSize: { xs: 10, sm: 11 } }}
           >
-            SELECTED RANGE
+            {mode === 'single' ? 'SELECTED DATE' : 'SELECTED RANGE'}
           </Typography>
           <Typography
             variant="body1"
@@ -298,10 +313,16 @@ export function DatePicker({
           ) : null}
 
           <DateCalendar
-            value={start}
+            value={mode === 'single' ? value : start}
             onChange={(picked) => {
               if (!picked) return;
               const day = stripTime(picked);
+
+              if (mode === 'single') {
+                onChange(day);
+                setAnchorEl(null);
+                return;
+              }
 
               if (!start || (start && end)) {
                 onChange([day, null]);
@@ -343,30 +364,34 @@ export function DatePicker({
                 fontSize: { xs: 13, sm: 14 },
               },
             }}
-            slots={{
-              day: (dayProps) => {
-                const day = stripTime(dayProps.day as Date);
-                const s = start ? stripTime(start) : null;
-                const e = end ? stripTime(end) : null;
+            slots={
+              mode === 'single'
+                ? undefined
+                : {
+                    day: (dayProps) => {
+                      const day = stripTime(dayProps.day as Date);
+                      const s = start ? stripTime(start) : null;
+                      const e = end ? stripTime(end) : null;
 
-                const inSpan = Boolean(s && e && isBetweenInclusive(day, s, e));
-                const isStart = Boolean(s && isSameDay(day, s));
-                const isEnd = Boolean(e && isSameDay(day, e));
-                const isRangeMiddle = Boolean(inSpan && !isStart && !isEnd);
-                const selected = Boolean(isStart || isEnd);
+                      const inSpan = Boolean(s && e && isBetweenInclusive(day, s, e));
+                      const isStart = Boolean(s && isSameDay(day, s));
+                      const isEnd = Boolean(e && isSameDay(day, e));
+                      const isRangeMiddle = Boolean(inSpan && !isStart && !isEnd);
+                      const selected = Boolean(isStart || isEnd);
 
-                return (
-                  <RangePickersDay
-                    {...dayProps}
-                    day={dayProps.day}
-                    selected={selected}
-                    isRangeMiddle={isRangeMiddle}
-                    isRangeStart={isStart}
-                    isRangeEnd={isEnd}
-                  />
-                );
-              },
-            }}
+                      return (
+                        <RangePickersDay
+                          {...dayProps}
+                          day={dayProps.day}
+                          selected={selected}
+                          isRangeMiddle={isRangeMiddle}
+                          isRangeStart={isStart}
+                          isRangeEnd={isEnd}
+                        />
+                      );
+                    },
+                  }
+            }
           />
         </Box>
 
@@ -386,7 +411,8 @@ export function DatePicker({
               size="small"
               fullWidth
               onClick={() => {
-                onChange([null, null]);
+                onChange(mode === 'single' ? null : [null, null]);
+                if (mode === 'single') setAnchorEl(null);
               }}
             >
               Clear

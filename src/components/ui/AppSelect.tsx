@@ -25,7 +25,7 @@ const createStyles = (compact: boolean): StylesConfig<AppSelectOption, false> =>
     borderStyle: 'solid',
     borderWidth: '1px',
     borderColor: state.isFocused ? 'var(--nav-active-bg)' : 'var(--input-border)',
-    borderRadius: '0.5rem',
+    borderRadius: '1.5rem',
     boxShadow: 'none',
     outline: 'none',
     '&:hover': {
