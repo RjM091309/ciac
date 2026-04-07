@@ -5,6 +5,8 @@ import { cn } from '../../lib/utils';
 import { SidePanel } from '../ui/SidePanel';
 import { DataTableControls } from '../ui/DataTableControls';
 import { AppSelect } from '../ui/AppSelect';
+import { Skeleton, TableSkeleton } from '../ui/Skeleton';
+import { EmptyState } from '../ui/EmptyState';
 import { useSessionStorageCachedResource } from '../../hooks/useSessionStorageCachedResource';
 import { requestNotificationsRefresh } from '../../lib/notificationRefresh';
 import { DatePicker } from '../ui/DatePicker';
@@ -888,9 +890,29 @@ export function ApplicationsWorkflow({
           </div>
         </div>
         {baseLoading ? (
-          <div className="text-xs text-secondary py-8 text-center">Loading...</div>
+          <div className="py-2">
+            <TableSkeleton columns={5} rows={5} />
+          </div>
         ) : filteredApps.length === 0 ? (
-          <div className="text-xs text-secondary py-8 text-center">No records yet. Click "New Application".</div>
+          <EmptyState
+            title="No applications found"
+            description={
+              appsSearchQuery 
+                ? 'Try adjusting your search filters.' 
+                : 'There are no records here yet. Click "New Application" to get started.'
+            }
+            action={
+              !appsSearchQuery ? (
+                <button
+                  className="rounded-lg px-4 py-2 text-sm font-semibold shadow-sm transition-colors"
+                  style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
+                  onClick={() => setIsCreateOpen(true)}
+                >
+                  Create Application
+                </button>
+              ) : undefined
+            }
+          />
         ) : (
           <div className="overflow-x-auto">
             <table className="min-w-full text-left text-xs">
@@ -1123,9 +1145,19 @@ export function ApplicationsWorkflow({
 
                       <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
                         {detailsLoading ? (
-                          <div className="p-5 text-sm text-secondary">Loading checklist...</div>
+                          <div className="p-5">
+                            <TableSkeleton columns={7} rows={6} />
+                          </div>
                         ) : filteredChecklistRequirements.length === 0 ? (
-                          <div className="p-5 text-sm text-secondary">No requirements found.</div>
+                          <EmptyState
+                            icon={<FileText size={40} className="opacity-40" />}
+                            title="No requirements found"
+                            description={
+                              checklistSearchQuery 
+                                ? 'No requirements match your search query.' 
+                                : 'There are no requirements assigned to this application yet.'
+                            }
+                          />
                         ) : (
                           <div className="min-w-full">
                             <table className="min-w-full text-left text-xs" style={{ borderCollapse: 'collapse' }}>

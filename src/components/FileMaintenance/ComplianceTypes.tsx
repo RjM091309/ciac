@@ -5,6 +5,8 @@ import { toast } from 'sonner';
 import { SidePanel } from '../ui/SidePanel';
 import { ConfirmModal } from '../ui/ConfirmModal';
 import { DataTableControls } from '../ui/DataTableControls';
+import { Skeleton, TableSkeleton } from '../ui/Skeleton';
+import { EmptyState } from '../ui/EmptyState';
 
 type ComplianceTypeRow = {
   id: number;
@@ -257,7 +259,29 @@ export function ComplianceTypesManagement() {
         )}
 
         {loading ? (
-          <div className="text-xs text-secondary">Loading…</div>
+          <div className="py-2">
+            <TableSkeleton columns={5} rows={5} />
+          </div>
+        ) : filteredItems.length === 0 ? (
+          <EmptyState
+            title="No compliance types found"
+            description={
+              searchQuery 
+                ? 'Try adjusting your search filters.' 
+                : 'There are no compliance types to show here yet. Create a new compliance type to get started.'
+            }
+            action={
+              !searchQuery ? (
+                <button
+                  className="rounded-lg px-4 py-2 text-sm font-semibold shadow-sm transition-colors"
+                  style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
+                  onClick={openCreate}
+                >
+                  Create Compliance Type
+                </button>
+              ) : undefined
+            }
+          />
         ) : (
           <div className="overflow-x-auto">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-3">
@@ -360,13 +384,6 @@ export function ComplianceTypesManagement() {
                     </td>
                   </tr>
                 ))}
-                {filteredItems.length === 0 && (
-                  <tr>
-                    <td className="px-3 py-6 text-center text-xs text-secondary" colSpan={5}>
-                      No compliance types found.
-                    </td>
-                  </tr>
-                )}
               </tbody>
             </table>
             <DataTableControls

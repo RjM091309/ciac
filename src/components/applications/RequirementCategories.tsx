@@ -4,7 +4,10 @@ import { cn } from '../../lib/utils';
 import { toast } from 'sonner';
 import { SidePanel } from '../ui/SidePanel';
 import { ConfirmModal } from '../ui/ConfirmModal';
+import { AppSelect } from '../ui/AppSelect';
 import { DataTableControls } from '../ui/DataTableControls';
+import { Skeleton, TableSkeleton } from '../ui/Skeleton';
+import { EmptyState } from '../ui/EmptyState';
 import { useSessionStorageCachedResource } from '../../hooks/useSessionStorageCachedResource';
 
 type RequirementCategoryRow = {
@@ -252,7 +255,29 @@ export function RequirementCategoriesManagement() {
         )}
 
         {isLoading ? (
-          <div className="text-xs text-secondary">Loading…</div>
+          <div className="py-2">
+            <TableSkeleton columns={4} rows={5} />
+          </div>
+        ) : filteredItems.length === 0 ? (
+          <EmptyState
+            title="No requirement categories found"
+            description={
+              searchQuery 
+                ? 'Try adjusting your search filters.' 
+                : 'There are no requirement categories to show here yet. Create a new category to get started.'
+            }
+            action={
+              !searchQuery ? (
+                <button
+                  className="rounded-lg px-4 py-2 text-sm font-semibold shadow-sm transition-colors"
+                  style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
+                  onClick={openCreate}
+                >
+                  Create Category
+                </button>
+              ) : undefined
+            }
+          />
         ) : (
           <div className="overflow-x-auto">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-3">
@@ -352,13 +377,6 @@ export function RequirementCategoriesManagement() {
                     </td>
                   </tr>
                 ))}
-                {filteredItems.length === 0 && (
-                  <tr>
-                    <td className="px-3 py-6 text-center text-xs text-secondary" colSpan={4}>
-                      No requirement categories found.
-                    </td>
-                  </tr>
-                )}
               </tbody>
             </table>
             <DataTableControls

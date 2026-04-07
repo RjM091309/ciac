@@ -2,6 +2,8 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { Check, Loader2, Save } from 'lucide-react';
 import { toast } from 'sonner';
+import { Skeleton, TableSkeleton } from '../ui/Skeleton';
+import { EmptyState } from '../ui/EmptyState';
 import { LANDING_CONFIG } from '../../config/landingConfig';
 
 type Role = {
@@ -262,8 +264,15 @@ export function ControlPanelManagement() {
       </div>
 
       <div className="glass-card p-4 sm:p-5 !border-transparent" style={{ backgroundColor: 'var(--surface)' }}>
-        {!selectedRoleId ? (
-          <div className="text-xs text-secondary">No role found.</div>
+        {loading && !roles.length ? (
+          <div className="py-2">
+            <Skeleton className="h-[200px] w-full rounded-xl" />
+          </div>
+        ) : !selectedRoleId ? (
+          <EmptyState
+            title="No roles found"
+            description="There are no roles available to manage permissions for."
+          />
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-[280px_1fr] gap-4">
             <div

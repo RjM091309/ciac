@@ -6,6 +6,8 @@ import { SidePanel } from '../ui/SidePanel';
 import { ConfirmModal } from '../ui/ConfirmModal';
 import { AppSelect } from '../ui/AppSelect';
 import { DataTableControls } from '../ui/DataTableControls';
+import { Skeleton, TableSkeleton } from '../ui/Skeleton';
+import { EmptyState } from '../ui/EmptyState';
 import { useSessionStorageCachedResource } from '../../hooks/useSessionStorageCachedResource';
 
 type Role = {
@@ -316,28 +318,51 @@ export function UsersManagement() {
           </div>
         )}
 
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-3">
+          <div className="relative group w-full sm:w-72">
+            <Search
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)] group-focus-within:text-[var(--text)] transition-colors pointer-events-none"
+              size={14}
+            />
+            <input
+              type="text"
+              placeholder="Search users..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="h-9 rounded-full pl-9 pr-3 text-xs w-full focus:outline-none focus:ring-1 focus:ring-[var(--border)] text-[var(--text)] placeholder:text-[var(--text-muted)] transition-all"
+              style={{
+                backgroundColor: 'color-mix(in oklab, var(--control-bg) 70%, transparent)',
+              }}
+            />
+          </div>
+        </div>
+
         {isLoading ? (
-          <div className="text-xs text-secondary">Loading…</div>
+          <div className="py-2">
+            <TableSkeleton columns={6} rows={5} />
+          </div>
+        ) : filteredUsers.length === 0 ? (
+          <EmptyState
+            title="No users found"
+            description={
+              searchQuery 
+                ? 'Try adjusting your search filters.' 
+                : 'There are no users to show here yet. Create a new user to get started.'
+            }
+            action={
+              !searchQuery ? (
+                <button
+                  className="rounded-lg px-4 py-2 text-sm font-semibold shadow-sm transition-colors"
+                  style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
+                  onClick={openCreate}
+                >
+                  Create User
+                </button>
+              ) : undefined
+            }
+          />
         ) : (
           <div className="overflow-x-auto">
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-3">
-              <div className="relative group w-full sm:w-72">
-                <Search
-                  className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)] group-focus-within:text-[var(--text)] transition-colors pointer-events-none"
-                  size={14}
-                />
-                <input
-                  type="text"
-                  placeholder="Search users..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="h-9 rounded-full pl-9 pr-3 text-xs w-full focus:outline-none focus:ring-1 focus:ring-[var(--border)] text-[var(--text)] placeholder:text-[var(--text-muted)] transition-all"
-                  style={{
-                    backgroundColor: 'color-mix(in oklab, var(--control-bg) 70%, transparent)',
-                  }}
-                />
-              </div>
-            </div>
             <table className="min-w-full text-left text-xs">
               <thead>
                 <tr>
@@ -423,13 +448,6 @@ export function UsersManagement() {
                     </td>
                   </tr>
                 ))}
-                {filteredUsers.length === 0 && (
-                  <tr>
-                    <td className="px-3 py-6 text-center text-xs text-secondary" colSpan={6}>
-                      No users found.
-                    </td>
-                  </tr>
-                )}
               </tbody>
             </table>
 
