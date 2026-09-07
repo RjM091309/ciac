@@ -49,21 +49,21 @@ async function ensureSchema() {
     END
   `);
 
+  // Must run in a separate batch from CREATE INDEX: SQL Server validates the whole batch
+  // before execution, so "CREATE INDEX ... (phone)" fails if phone was added in the same batch.
   await updateSchema(`
     IF COL_LENGTH('dbo.users', 'phone') IS NULL
-    BEGIN
       ALTER TABLE dbo.users ADD phone NVARCHAR(32) NULL;
-    END
+  `);
 
+  await updateSchema(`
     IF NOT EXISTS (
       SELECT 1
       FROM sys.indexes
       WHERE name = 'UX_users_phone'
         AND object_id = OBJECT_ID('dbo.users')
     )
-    BEGIN
       CREATE UNIQUE INDEX UX_users_phone ON dbo.users(phone) WHERE phone IS NOT NULL;
-    END
   `);
   hasPhoneColumnCache = null;
 
