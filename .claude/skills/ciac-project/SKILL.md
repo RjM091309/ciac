@@ -9,8 +9,8 @@ Full-stack app: React 19 + Vite frontend (`/`) and an Express backend (`server/`
 
 ## Stack
 
-- Frontend: React 19, TypeScript, Vite 6, Tailwind CSS 4, MUI 7 (+ `x-date-pickers-pro`), `recharts`, `sonner`, `lucide-react`, Firebase (client SDK for phone OTP).
-- Backend: Express 4 (CommonJS), MSSQL (`mssql` / `msnodesqlv8`), `better-sqlite3` is also a root dependency (see `bizreg.db` at repo root — check `server/config/database.js` to confirm which DB is actually live), JWT auth via cookies (`jsonwebtoken`, `cookie-parser`), Firebase Admin (phone OTP verification), `nodemailer` for email, `node-cache`.
+- Frontend: React 19, TypeScript, Vite 6, Tailwind CSS 4, MUI 7 (+ `x-date-pickers-pro`), `recharts`, `sonner`, `lucide-react`.
+- Backend: Express 4 (CommonJS), MSSQL (`mssql` / `msnodesqlv8`), `better-sqlite3` is also a root dependency (see `bizreg.db` at repo root — check `server/config/database.js` to confirm which DB is actually live), JWT auth via cookies (`jsonwebtoken`, `cookie-parser`), TOTP 2FA (`otplib` + `qrcode`), `nodemailer` for email, `node-cache`.
 
 ## Repo layout
 
@@ -27,8 +27,8 @@ server/               Backend (separate npm workspace, CommonJS)
   models/              Role, User, Proponent, Contract, ApplicationWorkflow, Requirement(Category),
                         ComplianceType, InspectionType, Notification, ControlPanelPermission, Auth
   middleware/m_auth.js  attachUserFromJwt, isAuthenticated
-  config/               database.js, firebaseAdmin.js, mailer.js, cache.js
-  lib/notificationStream.js
+  config/               database.js, mailer.js, cache.js
+  lib/                  notificationStream.js, totp.js (Google Authenticator secrets/verify)
 ecosystem.config.cjs   PM2 config (two apps: ciac-dev, ciac-backend-dev)
 ```
 
@@ -36,7 +36,7 @@ ecosystem.config.cjs   PM2 config (two apps: ciac-dev, ciac-backend-dev)
 
 `/api/auth`, `/api/users`, `/api/roles`, `/api/proponents`, `/api/applications`, `/api/contracts`, `/api/notifications`, `/api/requirements`, `/api/requirement-categories`, `/api/inspection-types`, `/api/compliance-types`, `/api/control-panel`.
 
-Auth: JWT stored in an httpOnly cookie; `attachUserFromJwt` middleware runs globally, `isAuthenticated` guards protected routes. Phone OTP login also available: `POST /api/auth/firebase-phone-login` (requires Firebase Admin credentials, returns same JWT-cookie session as password login — see root `README.md`).
+Auth: JWT stored in an httpOnly cookie; `attachUserFromJwt` middleware runs globally, `isAuthenticated` guards protected routes. Login is `POST /api/auth/login` (username + password, plus a `token` field once a code is needed). TOTP 2FA is mandatory for non-admin roles: after the password checks out the response is `enrollmentRequired` (returns a QR to self-enroll) or `mfaRequired` (authenticator active) until a valid code is sent. Users with the `admin` role skip enrollment (password only), though an authenticator they opted into is still enforced. Admins can `POST /api/users/:id/totp/reset` a lost authenticator (see root `README.md`).
 
 ## Ports & proxy
 
@@ -71,8 +71,6 @@ pm2 logs ciac-backend-dev
 
 Frontend (`.env`, Vite-exposed vars need `VITE_` prefix):
 - `VITE_BACKEND_URL` — backend origin for the `/api` proxy.
-- `VITE_FIREBASE_API_KEY`, `VITE_FIREBASE_AUTH_DOMAIN`, `VITE_FIREBASE_PROJECT_ID`, `VITE_FIREBASE_APP_ID` — Firebase client config for phone OTP.
-- `VITE_FIREBASE_PHONE_AUTH_TEST_MODE` — dev-only, use Firebase test phone numbers when `"true"`.
 - `GEMINI_API_KEY` — injected into `process.env` at build time via `vite.config.ts` `define`.
 
 Backend (`server/.env`):
@@ -81,7 +79,7 @@ Backend (`server/.env`):
 - `FRONTEND_URL` (also accepts `FRONTEND_ORIGIN` / `FRONTEND_ORIGINS`, comma-separated)
 - `DB_SERVER`, `DB_NAME`, `DB_TRUSTED_CONNECTION`, `DB_USER`, `DB_PASSWORD`
 - `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS`
-- `FIREBASE_SERVICE_ACCOUNT_JSON` (stringified service account JSON) or `FIREBASE_SERVICE_ACCOUNT_BASE64`
+- `TOTP_ISSUER` (authenticator app label, default `3CORE Portal`), `TOTP_ENC_KEY` (optional; encrypts stored TOTP secrets, falls back to `JWT_SECRET`)
 
 ## Build & deploy
 
@@ -91,7 +89,7 @@ npm run build     # emits static frontend to dist/
 
 `dist/` is served as the built frontend; the Express server (`server/app.js`) serves its own static assets from `server/public` and JSON/API routes — the two are deployed/run as separate processes (see `ecosystem.config.cjs`), with the frontend's dev proxy (or a reverse proxy in production) routing `/api` to the backend port.
 
-Auth/session guard on startup: `server/app.js` calls `initializeDatabase()` then `Role.ensureSchema()` / `User.ensureSchema()` before listening — if the DB is unreachable, the server still starts (login page still loads) but DB-backed routes will fail.
+Auth/session guard on startup: `server/app.js` calls `initializeDatabase()` then `Role.ensureSchema()` / `User.ensureSchema()` before listening — if the DB is unreachable, the server still starts (login page still loads) but DB-backed routes will fail. `User.ensureSchema()` also auto-adds the `users.totp_secret` / `users.totp_enabled` columns for 2FA.
 
 ## Notes / gotchas
 

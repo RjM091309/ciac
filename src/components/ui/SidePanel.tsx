@@ -37,16 +37,16 @@ export function SidePanel({
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            transition={{ duration: 0.2, ease: 'easeOut' }}
+            transition={{ duration: 0.3, ease: 'easeOut' }}
           />
           <div className="absolute inset-y-0 right-0 flex w-full justify-end p-0 sm:p-0">
             <motion.div
-              className={`h-full w-full ${widthClassName} border-l p-4 sm:p-5 flex flex-col`}
+              className={`h-full w-full ${widthClassName} border-l p-4 sm:p-5 flex flex-col shadow-2xl`}
               style={{ backgroundColor: 'var(--surface)', borderColor: 'var(--border-subtle)' }}
-              initial={{ x: 64, opacity: 0.98 }}
-              animate={{ x: 0, opacity: 1 }}
-              exit={{ x: 64, opacity: 0.98 }}
-              transition={{ duration: 0.24, ease: [0.22, 0.8, 0.35, 1] }}
+              initial={{ x: '100%' }}
+              animate={{ x: 0 }}
+              exit={{ x: '100%' }}
+              transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
             >
               <div className="flex items-start justify-between gap-3 border-b pb-3" style={{ borderColor: 'var(--input-border)' }}>
                 <div>

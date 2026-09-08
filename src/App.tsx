@@ -1,21 +1,20 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, Suspense, lazy } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { AppLayout, AppView } from './layout/AppLayout';
-import { RoleDashboard } from './components/dashboard/RoleDashboard';
-import { PreviewDashboard } from './components/dashboard/PreviewDashboard';
-import { SubHeader, type DashboardPreviewRole } from './components/SubHeader';
-import { FileCheck, FolderTree, ShieldCheck, Users, CalendarClock } from 'lucide-react';
-import { UsersManagement } from './components/settings/UsersManagement';
-import { ControlPanelManagement } from './components/settings/ControlPanelManagement';
-import { ProponentsManagement } from './components/proponent/ProponentsManagement';
-import { RequirementsManagement } from './components/applications/Requirements';
-import { RequirementCategoriesManagement } from './components/applications/RequirementCategories';
-import { ApplicationsWorkflow } from './components/applications/ApplicationsWorkflow';
-import { InspectionTypesManagement } from './components/FileMaintenance/InspectionTypes';
-import { ComplianceTypesManagement } from './components/FileMaintenance/ComplianceTypes';
-import { MasterChecklist } from './components/settings/MasterChecklist';
+import { SubHeader } from './components/SubHeader';
+import { FileCheck, FolderTree, ShieldCheck, Users, CalendarClock, Loader2 } from 'lucide-react';
 import { LoginPage } from './components/auth/LoginPage';
 import { Toaster } from 'sonner';
+
+const Dashboard = lazy(() => import('./components/dashboard/Dashboard').then((m) => ({ default: m.Dashboard })));
+const UsersManagement = lazy(() => import('./components/settings/UsersManagement').then((m) => ({ default: m.UsersManagement })));
+const ControlPanelManagement = lazy(() => import('./components/settings/ControlPanelManagement').then((m) => ({ default: m.ControlPanelManagement })));
+const ProponentsManagement = lazy(() => import('./components/proponent/ProponentsManagement').then((m) => ({ default: m.ProponentsManagement })));
+const RequirementsManagement = lazy(() => import('./components/applications/Requirements').then((m) => ({ default: m.RequirementsManagement })));
+const RequirementCategoriesManagement = lazy(() => import('./components/applications/RequirementCategories').then((m) => ({ default: m.RequirementCategoriesManagement })));
+const ApplicationsWorkflow = lazy(() => import('./components/applications/ApplicationsWorkflow').then((m) => ({ default: m.ApplicationsWorkflow })));
+const InspectionTypesManagement = lazy(() => import('./components/FileMaintenance/InspectionTypes').then((m) => ({ default: m.InspectionTypesManagement })));
+const ComplianceTypesManagement = lazy(() => import('./components/FileMaintenance/ComplianceTypes').then((m) => ({ default: m.ComplianceTypesManagement })));
 
 // --- Types ---
 type Role = 'admin' | 'officer' | 'proponent';
@@ -243,41 +242,35 @@ export default function App() {
             transition={{ duration: 0.25, ease: [0.22, 0.8, 0.35, 1] }}
             className="h-full"
           >
-            {view === 'dashboard' ? (
-              user?.role === 'admin' ? (
-                dashboardPreviewRole === 'account-officer' ? (
-                  <PreviewDashboard role="account-officer" />
-                ) : dashboardPreviewRole === 'proponent' ? (
-                  <PreviewDashboard role="proponent" />
-                ) : (
-                  <RoleDashboard />
-                )
+            <Suspense fallback={
+              <div className="flex h-full w-full items-center justify-center min-h-[400px]">
+                <Loader2 className="h-8 w-8 animate-spin text-secondary opacity-50" />
+              </div>
+            }>
+              {view === 'dashboard' ? (
+                <Dashboard />
+              ) : view === 'settings:users' ? (
+                <UsersManagement />
+              ) : view === 'applications:new' ? (
+                <ApplicationsWorkflow renewalMode={false} locationSearch={locationSearch} navigate={navigate} />
+              ) : view === 'applications:renewals' ? (
+                <ApplicationsWorkflow renewalMode={true} locationSearch={locationSearch} navigate={navigate} />
+              ) : view === 'applications:requirements' ? (
+                <RequirementsManagement />
+              ) : view === 'settings:proponents' ? (
+                <ProponentsManagement />
+              ) : view === 'settings:requirement-categories' ? (
+                <RequirementCategoriesManagement />
+              ) : view === 'settings:inspection-types' ? (
+                <InspectionTypesManagement />
+              ) : view === 'settings:compliance-types' ? (
+                <ComplianceTypesManagement />
+              ) : view === 'settings:control-panel' ? (
+                <ControlPanelManagement />
               ) : (
-                <RoleDashboard />
-              )
-            ) : view === 'settings:users' ? (
-              <UsersManagement />
-            ) : view === 'applications:new' ? (
-              <ApplicationsWorkflow renewalMode={false} locationSearch={locationSearch} navigate={navigate} />
-            ) : view === 'applications:renewals' ? (
-              <ApplicationsWorkflow renewalMode={true} locationSearch={locationSearch} navigate={navigate} />
-            ) : view === 'applications:requirements' ? (
-              <RequirementsManagement />
-            ) : view === 'settings:proponents' ? (
-              <ProponentsManagement />
-            ) : view === 'settings:requirement-categories' ? (
-              <RequirementCategoriesManagement />
-            ) : view === 'settings:inspection-types' ? (
-              <InspectionTypesManagement />
-            ) : view === 'settings:compliance-types' ? (
-              <ComplianceTypesManagement />
-            ) : view === 'settings:checklist' ? (
-              <MasterChecklist />
-            ) : view === 'settings:control-panel' ? (
-              <ControlPanelManagement />
-            ) : (
-              <SectionLanding view={view} />
-            )}
+                <SectionLanding view={view} />
+              )}
+            </Suspense>
           </motion.div>
         </AnimatePresence>
       </AppLayout>

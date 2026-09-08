@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { ChevronLeft, ChevronRight, Pencil, RotateCcw, Search, UserX } from 'lucide-react';
+import { Pencil, RotateCcw, Search, ShieldCheck, ShieldOff, Smartphone, UserX } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { toast } from 'sonner';
 import { SidePanel } from '../ui/SidePanel';
@@ -23,6 +23,7 @@ type UserRow = {
   email: string | null;
   full_name: string | null;
   is_active: number;
+  totp_enabled?: number;
   created_at?: string | null;
   updated_at?: string | null;
   roles: { id: number; name: string; description?: string | null }[];
@@ -68,6 +69,7 @@ export function UsersManagement() {
         users: (uJson.data || []).map((u: any) => ({
           ...u,
           is_active: Number(u?.is_active) ? 1 : 0,
+          totp_enabled: Number(u?.totp_enabled) ? 1 : 0,
         })),
         roles: rJson.data || [],
       };
@@ -366,7 +368,7 @@ export function UsersManagement() {
             <table className="min-w-full text-left text-xs">
               <thead>
                 <tr>
-                  {['Username', 'Full Name', 'Email', 'Role', 'Status', 'Actions'].map((col) => (
+                  {['Username', 'Full Name', 'Email', 'Role', '2FA', 'Status', 'Actions'].map((col) => (
                     <th
                       key={col}
                       className={cn(
@@ -390,6 +392,18 @@ export function UsersManagement() {
                     <td className="px-3 py-2 text-[11px] text-secondary">{u.email || '-'}</td>
                     <td className="px-3 py-2 text-[11px] text-secondary">
                       {u.roles && u.roles.length ? u.roles.map((r) => r.name).join(', ') : '-'}
+                    </td>
+                    <td className="px-3 py-2 text-[11px]">
+                      {u.totp_enabled === 1 ? (
+                        <span
+                          className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold"
+                          style={{ backgroundColor: 'rgba(34,197,94,.14)', color: 'rgba(34,197,94,.95)' }}
+                        >
+                          <ShieldCheck size={11} /> On
+                        </span>
+                      ) : (
+                        <span className="text-secondary">-</span>
+                      )}
                     </td>
                     <td className="px-3 py-2 text-[11px]">
                       <span
@@ -524,6 +538,17 @@ export function UsersManagement() {
             />
           </Field>
         </div>
+
+        {editing ? (
+          <TotpSection
+            user={editing}
+            onChanged={() => refresh({ showLoading: false })}
+          />
+        ) : (
+          <p className="mt-4 text-[11px] text-secondary">
+            Save the user first, then reopen to set up their Google Authenticator.
+          </p>
+        )}
       </SidePanel>
 
       <ConfirmModal
@@ -579,6 +604,115 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
     <div className="space-y-1">
       <div className="text-[11px] font-semibold text-secondary uppercase tracking-widest">{label}</div>
       {children}
+    </div>
+  );
+}
+
+function TotpSection({ user, onChanged }: { user: UserRow; onChanged: () => void }) {
+  const [enabled, setEnabled] = useState<boolean>(user.totp_enabled === 1);
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  const isAdmin = (user.roles || []).some((r) => String(r.name).toLowerCase() === 'admin');
+
+  useEffect(() => {
+    setEnabled(user.totp_enabled === 1);
+    setConfirming(false);
+  }, [user.id, user.totp_enabled]);
+
+  async function reset() {
+    setBusy(true);
+    try {
+      const res = await fetch(api(`/api/users/${user.id}/totp/reset`), {
+        method: 'POST',
+        credentials: 'include',
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.message || 'Failed to reset authenticator');
+      setEnabled(false);
+      setConfirming(false);
+      toast.success('Authenticator reset — the user sets it up again on next login');
+      onChanged();
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to reset authenticator');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div
+      className="mt-5 rounded-lg border p-3 sm:p-4 space-y-3"
+      style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'color-mix(in oklab, var(--surface) 94%, white 6%)' }}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <Smartphone size={15} className="text-secondary" />
+          <span className="text-[11px] font-semibold text-secondary uppercase tracking-widest">
+            Two-factor authentication
+          </span>
+        </div>
+        <span
+          className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold"
+          style={
+            enabled
+              ? { backgroundColor: 'rgba(34,197,94,.14)', color: 'rgba(34,197,94,.95)' }
+              : { backgroundColor: 'rgba(148,163,184,.14)', color: 'rgba(148,163,184,.95)' }
+          }
+        >
+          {enabled ? <ShieldCheck size={11} /> : <ShieldOff size={11} />}
+          {enabled ? 'Enrolled' : isAdmin ? 'Not required' : 'Not enrolled'}
+        </span>
+      </div>
+
+      {enabled ? (
+        <div className="space-y-2">
+          <p className="text-[11px] text-secondary">
+            This user set up their authenticator and is asked for a 6-digit code at every login. Reset it if they
+            lost their device — they will be walked through setup again on their next login.
+          </p>
+          {confirming ? (
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={reset}
+                disabled={busy}
+                className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[11px] font-semibold cursor-pointer disabled:opacity-50"
+                style={{ backgroundColor: '#dc2626', color: '#fff' }}
+              >
+                <ShieldOff size={13} />
+                {busy ? 'Resetting…' : 'Confirm reset'}
+              </button>
+              <button
+                type="button"
+                onClick={() => setConfirming(false)}
+                disabled={busy}
+                className="text-[11px] font-medium text-secondary hover:text-primary cursor-pointer"
+              >
+                Cancel
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setConfirming(true)}
+              className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[11px] font-semibold border cursor-pointer"
+              style={{ borderColor: 'var(--border-subtle)', color: '#fca5a5' }}
+            >
+              <ShieldOff size={13} />
+              Reset authenticator
+            </button>
+          )}
+        </div>
+      ) : isAdmin ? (
+        <p className="text-[11px] text-secondary">
+          Admins are exempt from mandatory two-factor — this user signs in with a password only.
+        </p>
+      ) : (
+        <p className="text-[11px] text-secondary">
+          This user will set up their authenticator app themselves the next time they log in. Nothing to do here.
+        </p>
+      )}
     </div>
   );
 }

@@ -12,4 +12,7 @@ router.put("/:id", requireMenuAccess(MENU_KEY, "edit"), usersController.update);
 router.patch("/:id/deactivate", requireMenuAccess(MENU_KEY, "delete"), usersController.deactivate);
 router.patch("/:id/reactivate", requireMenuAccess(MENU_KEY, "edit"), usersController.reactivate);
 
+// Two-factor: users self-enroll on login; admins can only reset a lost authenticator.
+router.post("/:id/totp/reset", requireMenuAccess(MENU_KEY, "edit"), usersController.resetTotp);
+
 module.exports = router;

@@ -2,6 +2,7 @@ const { selectData, insertData, updateData, updateSchema } = require("../config/
 const bcrypt = require("bcryptjs");
 
 let hasPhoneColumnCache = null;
+let hasTotpColumnsCache = null;
 
 function toInt(v) {
   const n = Number(v);
@@ -24,6 +25,20 @@ async function hasPhoneColumn() {
   );
   hasPhoneColumnCache = Number(rows?.[0]?.has_phone) === 1;
   return hasPhoneColumnCache;
+}
+
+async function hasTotpColumns() {
+  if (hasTotpColumnsCache !== null) return hasTotpColumnsCache;
+  const rows = await selectData(
+    `
+    SELECT CAST(CASE
+      WHEN COL_LENGTH('dbo.users', 'totp_secret') IS NULL THEN 0
+      WHEN COL_LENGTH('dbo.users', 'totp_enabled') IS NULL THEN 0
+      ELSE 1 END AS INT) AS has_totp
+    `
+  );
+  hasTotpColumnsCache = Number(rows?.[0]?.has_totp) === 1;
+  return hasTotpColumnsCache;
 }
 
 async function ensureSchema() {
@@ -66,6 +81,18 @@ async function ensureSchema() {
       CREATE UNIQUE INDEX UX_users_phone ON dbo.users(phone) WHERE phone IS NOT NULL;
   `);
   hasPhoneColumnCache = null;
+
+  // Two-factor (Google Authenticator / TOTP) columns.
+  // totp_secret holds the AES-256-GCM encrypted Base32 secret (see server/lib/totp.js).
+  await updateSchema(`
+    IF COL_LENGTH('dbo.users', 'totp_secret') IS NULL
+      ALTER TABLE dbo.users ADD totp_secret NVARCHAR(512) NULL;
+  `);
+  await updateSchema(`
+    IF COL_LENGTH('dbo.users', 'totp_enabled') IS NULL
+      ALTER TABLE dbo.users ADD totp_enabled BIT NOT NULL CONSTRAINT DF_users_totp_enabled DEFAULT (0);
+  `);
+  hasTotpColumnsCache = null;
 
   // user_roles
   await updateSchema(`
@@ -113,6 +140,7 @@ async function listUserRolesMap() {
 
 async function listUsers() {
   const includePhone = await hasPhoneColumn();
+  const includeTotp = await hasTotpColumns();
   const users = await selectData(
     `
     SELECT
@@ -120,6 +148,7 @@ async function listUsers() {
       u.username,
       u.email,
       ${includePhone ? "u.phone" : "NULL AS phone"},
+      ${includeTotp ? "u.totp_enabled" : "CAST(0 AS BIT) AS totp_enabled"},
       u.full_name,
       u.is_active,
       u.created_at,
@@ -137,6 +166,7 @@ async function listUsers() {
     username: u.username,
     email: u.email ?? null,
     phone: u.phone ?? null,
+    totp_enabled: Number(u.totp_enabled) ? 1 : 0,
     full_name: u.full_name ?? null,
     is_active: u.is_active,
     created_at: u.created_at ?? null,
@@ -147,6 +177,7 @@ async function listUsers() {
 
 async function getUserById(id) {
   const includePhone = await hasPhoneColumn();
+  const includeTotp = await hasTotpColumns();
   const rows = await selectData(
     `
     SELECT TOP (1)
@@ -154,6 +185,7 @@ async function getUserById(id) {
       u.username,
       u.email,
       ${includePhone ? "u.phone" : "NULL AS phone"},
+      ${includeTotp ? "u.totp_enabled" : "CAST(0 AS BIT) AS totp_enabled"},
       u.full_name,
       u.is_active,
       u.created_at,
@@ -182,6 +214,7 @@ async function getUserById(id) {
     username: user.username,
     email: user.email ?? null,
     phone: user.phone ?? null,
+    totp_enabled: Number(user.totp_enabled) ? 1 : 0,
     full_name: user.full_name ?? null,
     is_active: user.is_active,
     created_at: user.created_at ?? null,
@@ -308,34 +341,60 @@ async function reactivateUser(id) {
   return await getUserById(id);
 }
 
-async function getActiveUserByPhone(phone) {
-  const includePhone = await hasPhoneColumn();
-  if (!includePhone) return null;
+async function getTotpRecord(userId) {
+  if (!(await hasTotpColumns())) return null;
   const rows = await selectData(
     `
-    SELECT TOP (1)
-      u.id,
-      u.username,
-      u.phone,
-      u.is_active,
-      r.name as role_name
+    SELECT TOP (1) u.id, u.username, u.totp_secret, u.totp_enabled
     FROM users u
-    LEFT JOIN user_roles ur ON ur.user_id = u.id
-    LEFT JOIN roles r ON r.id = ur.role_id
-    WHERE u.phone = @param0
-      AND u.is_active = 1
+    WHERE u.id = @param0
     `,
-    [phone]
+    [userId]
   );
-
   const row = rows?.[0];
   if (!row) return null;
   return {
     id: row.id,
     username: row.username,
-    phone: row.phone ?? null,
-    role: row.role_name || "user",
+    totp_secret: row.totp_secret ?? null,
+    totp_enabled: Number(row.totp_enabled) ? 1 : 0,
   };
+}
+
+async function setTotpSecret(userId, encryptedSecret) {
+  await updateData(
+    `
+    UPDATE users
+    SET totp_secret = @param1, totp_enabled = 0, updated_at = GETDATE()
+    WHERE id = @param0
+    `,
+    [userId, encryptedSecret]
+  );
+  return getTotpRecord(userId);
+}
+
+async function enableTotp(userId) {
+  await updateData(
+    `
+    UPDATE users
+    SET totp_enabled = 1, updated_at = GETDATE()
+    WHERE id = @param0 AND totp_secret IS NOT NULL
+    `,
+    [userId]
+  );
+  return getTotpRecord(userId);
+}
+
+async function disableTotp(userId) {
+  await updateData(
+    `
+    UPDATE users
+    SET totp_secret = NULL, totp_enabled = 0, updated_at = GETDATE()
+    WHERE id = @param0
+    `,
+    [userId]
+  );
+  return getTotpRecord(userId);
 }
 
 module.exports = {
@@ -346,6 +405,9 @@ module.exports = {
   updateUser,
   deactivateUser,
   reactivateUser,
-  getActiveUserByPhone,
+  getTotpRecord,
+  setTotpSecret,
+  enableTotp,
+  disableTotp,
 };
 

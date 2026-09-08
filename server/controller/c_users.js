@@ -74,6 +74,26 @@ exports.deactivate = async (req, res) => {
   }
 };
 
+// --- Two-factor (Google Authenticator / TOTP) ---
+// Users self-enroll on their next login; admins can only reset a lost
+// authenticator, which clears it and forces re-enrollment.
+
+exports.resetTotp = async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ success: false, message: "Invalid id" });
+
+    const record = await User.getTotpRecord(id);
+    if (!record) return res.status(404).json({ success: false, message: "User not found" });
+
+    await User.disableTotp(id);
+    return res.json({ success: true, data: { enabled: false } });
+  } catch (error) {
+    console.error("Reset TOTP error:", error);
+    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+  }
+};
+
 exports.reactivate = async (req, res) => {
   try {
     const id = Number(req.params.id);

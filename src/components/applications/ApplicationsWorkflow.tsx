@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { AnimatePresence, motion } from 'motion/react';
 import { CheckCircle2, Clock3, Eye, FileText, Loader2, Plus, Search, Upload, XCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '../../lib/utils';
@@ -450,21 +451,19 @@ export function ApplicationsWorkflow({
   async function loadDetails(applicationId: number) {
     setDetailsLoading(true);
     try {
-      const [reqRes, docRes, historyRes, contractRes] = await Promise.all([
+      const [reqRes, docRes, contractRes] = await Promise.all([
         fetch(api(`/api/applications/${applicationId}/requirements`), { credentials: 'include' }),
         fetch(api(`/api/applications/${applicationId}/documents`), { credentials: 'include' }),
-        fetch(api(`/api/applications/${applicationId}/status-history`), { credentials: 'include' }),
         fetch(api(`/api/contracts/application/${applicationId}`), { credentials: 'include' }),
       ]);
-      const [reqJson, docJson, historyJson, contractJson] = await Promise.all([
+      const [reqJson, docJson, contractJson] = await Promise.all([
         reqRes.json(),
         docRes.json(),
-        historyRes.json(),
         contractRes.json(),
       ]);
       setRequirements(Array.isArray(reqJson?.data) ? reqJson.data : []);
       setDocuments(Array.isArray(docJson?.data) ? docJson.data : []);
-      setHistory(Array.isArray(historyJson?.data) ? historyJson.data : []);
+      setHistory([]); // History is not used in UI but kept for state shape if needed
       setSelectedContract(contractJson?.data || null);
     } catch (error: any) {
       toast.error(error?.message || 'Failed to load application details');
@@ -486,11 +485,6 @@ export function ApplicationsWorkflow({
     const nextId = exists ? selectedId : filteredApps[0].id;
     if (nextId !== selectedId) setSelectedId(nextId || null);
   }, [filteredApps, selectedId]);
-
-  useEffect(() => {
-    if (!selectedId) return;
-    loadDetails(selectedId);
-  }, [selectedId]);
 
   useEffect(() => {
     const search = String(locationSearch || '').trim();
@@ -568,6 +562,11 @@ export function ApplicationsWorkflow({
 
   async function openDetails(applicationId: number) {
     consumedNotificationQueryRef.current = '';
+    if (applicationId !== selectedId) {
+      setRequirements([]);
+      setDocuments([]);
+      setSelectedContract(null);
+    }
     setSelectedId(applicationId);
     setPreviewRequirementId(null);
     // Ensure the checklist shows the expected default amount every time the modal opens.
@@ -1052,13 +1051,27 @@ export function ApplicationsWorkflow({
         />
       </div>
 
-      {detailsOpen ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center px-2 sm:px-4" style={{ backgroundColor: 'rgba(0,0,0,.45)' }}>
-          <div
-            className="w-full max-w-7xl rounded-2xl border shadow-2xl overflow-hidden flex flex-col"
-            style={{ backgroundColor: 'var(--surface)', borderColor: 'var(--border-subtle)', height: 'min(82vh, 860px)' }}
-          >
-            <div className="px-4 sm:px-5 py-3 border-b flex items-start justify-between" style={{ borderColor: 'var(--border-subtle)' }}>
+      <AnimatePresence>
+        {detailsOpen ? (
+          <div className="fixed inset-0 z-50 flex items-center justify-center px-2 sm:px-4">
+            <motion.div
+              className="absolute inset-0"
+              style={{ backgroundColor: 'rgba(0,0,0,.45)' }}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.2, ease: 'easeOut' }}
+              onClick={() => setDetailsOpen(false)}
+            />
+            <motion.div
+              className="w-full max-w-7xl rounded-2xl border shadow-2xl overflow-hidden flex flex-col relative z-10"
+              style={{ backgroundColor: 'var(--surface)', borderColor: 'var(--border-subtle)', height: 'min(82vh, 860px)' }}
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              transition={{ duration: 0.2, ease: 'easeOut' }}
+            >
+              <div className="px-4 sm:px-5 py-3 border-b flex items-start justify-between" style={{ borderColor: 'var(--border-subtle)' }}>
               <div>
                 <div className="text-lg font-bold" style={{ color: 'var(--text)' }}>{detailsTitle}</div>
                 <div className="text-xs text-secondary">
@@ -1334,13 +1347,31 @@ export function ApplicationsWorkflow({
                 </>
               )}
             </div>
-          </div>
+          </motion.div>
         </div>
       ) : null}
+      </AnimatePresence>
 
+      <AnimatePresence>
       {documentEditorOpen ? (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center px-3" style={{ backgroundColor: 'rgba(0,0,0,.4)' }}>
-          <div className="w-full max-w-xl rounded-2xl border p-4 sm:p-5" style={{ backgroundColor: 'var(--surface)', borderColor: 'var(--border-subtle)' }}>
+        <div className="fixed inset-0 z-[60] flex items-center justify-center px-3">
+          <motion.div
+            className="absolute inset-0"
+            style={{ backgroundColor: 'rgba(0,0,0,.45)' }}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2, ease: 'easeOut' }}
+            onClick={() => setDocumentEditorOpen(false)}
+          />
+          <motion.div
+            className="w-full max-w-xl rounded-2xl border p-4 sm:p-5 relative z-10"
+            style={{ backgroundColor: 'var(--surface)', borderColor: 'var(--border-subtle)' }}
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.95 }}
+            transition={{ duration: 0.2, ease: 'easeOut' }}
+          >
             <div className="flex items-start justify-between gap-3 border-b pb-3" style={{ borderColor: 'var(--input-border)' }}>
               <div>
                 <div className="text-sm font-bold" style={{ color: 'var(--text)' }}>
@@ -1382,13 +1413,31 @@ export function ApplicationsWorkflow({
                 {documentEditorMode === 'insert' ? 'Insert Document' : 'Update Document'}
               </button>
             </div>
-          </div>
+          </motion.div>
         </div>
       ) : null}
+      </AnimatePresence>
 
+      <AnimatePresence>
       {statusEditorOpen ? (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center px-3" style={{ backgroundColor: 'rgba(0,0,0,.4)' }}>
-          <div className="w-full max-w-lg rounded-2xl border p-4 sm:p-5" style={{ backgroundColor: 'var(--surface)', borderColor: 'var(--border-subtle)' }}>
+        <div className="fixed inset-0 z-[60] flex items-center justify-center px-3">
+          <motion.div
+            className="absolute inset-0"
+            style={{ backgroundColor: 'rgba(0,0,0,.45)' }}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2, ease: 'easeOut' }}
+            onClick={() => setStatusEditorOpen(false)}
+          />
+          <motion.div
+            className="w-full max-w-lg rounded-2xl border p-4 sm:p-5 relative z-10"
+            style={{ backgroundColor: 'var(--surface)', borderColor: 'var(--border-subtle)' }}
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.95 }}
+            transition={{ duration: 0.2, ease: 'easeOut' }}
+          >
             <div className="flex items-start justify-between gap-3 border-b pb-3" style={{ borderColor: 'var(--input-border)' }}>
               <div>
                 <div className="text-sm font-bold" style={{ color: 'var(--text)' }}>Update Application Status</div>
@@ -1423,9 +1472,10 @@ export function ApplicationsWorkflow({
                 Update
               </button>
             </div>
-          </div>
+          </motion.div>
         </div>
       ) : null}
+      </AnimatePresence>
 
       <SidePanel
         open={contractOpen}

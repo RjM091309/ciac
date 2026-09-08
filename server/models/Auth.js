@@ -1,6 +1,8 @@
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcryptjs");
 const { selectData } = require("../config/database");
+const User = require("./User");
+const { decryptSecret, encryptSecret, newSecret, buildEnrollment, verifyToken } = require("../lib/totp");
 
 function getJwtSecret() {
   const secret = process.env.JWT_SECRET;
@@ -30,7 +32,7 @@ function pickPasswordField(row) {
   return actualKey || null;
 }
 
-async function loginViaDatabase(username, password) {
+async function loginViaDatabase(username, password, totpCode) {
   const userKey = normalizeString(username);
   const pass = String(password ?? "");
 
@@ -87,16 +89,70 @@ async function loginViaDatabase(username, password) {
   if (!matches) return { success: false, message: "Username and Password incorrect!" };
 
   const id = row.id ?? row.user_id ?? 0;
-  const role = row.role_name || row.role || "user";
-  const user = { id, username: row.username || row.email || userKey, role };
+  const effectiveRole = row.role_name || row.role || "user";
+  const isAdmin = String(effectiveRole).toLowerCase() === "admin";
+
+  // --- Two-factor (Google Authenticator / TOTP) ---
+  // Non-admin users must have an authenticator; they self-enroll on login (the QR
+  // is only issued once the password checks out). Admins are exempt from forced
+  // enrollment, but an authenticator they chose to set up is still enforced.
+  if ("totp_secret" in row) {
+    const code = String(totpCode ?? "").replace(/\D/g, "");
+    const enabled = Number(row.totp_enabled) === 1 && !!row.totp_secret;
+    const label = row.email || row.username || `user-${id}`;
+
+    if (enabled) {
+      let secret;
+      try {
+        secret = decryptSecret(row.totp_secret);
+      } catch {
+        return { success: false, message: "Authenticator is misconfigured. Contact the administrator." };
+      }
+      if (!code) {
+        return { success: false, mfaRequired: true, message: "Enter the 6-digit code from your authenticator app." };
+      }
+      if (!(await verifyToken(code, secret))) {
+        return { success: false, mfaRequired: true, message: "Invalid authenticator code. Try again." };
+      }
+    } else if (!isAdmin) {
+      // First-time enrollment. Reuse any pending secret so a re-submit doesn't
+      // invalidate a QR the user already scanned; mint one otherwise.
+      let secret = null;
+      if (row.totp_secret) {
+        try {
+          secret = decryptSecret(row.totp_secret);
+        } catch {
+          secret = null;
+        }
+      }
+      if (!secret) {
+        secret = newSecret();
+        await User.setTotpSecret(id, encryptSecret(secret));
+      }
+      if (!code) {
+        return { success: false, enrollmentRequired: true, enrollment: await buildEnrollment(secret, label) };
+      }
+      if (!(await verifyToken(code, secret))) {
+        return {
+          success: false,
+          enrollmentRequired: true,
+          enrollment: await buildEnrollment(secret, label),
+          message: "That code didn't match. Enter the current 6-digit code.",
+        };
+      }
+      await User.enableTotp(id);
+    }
+  }
+
+  const user = { id, username: row.username || row.email || userKey, role: effectiveRole };
   const token = jwt.sign(user, getJwtSecret(), { expiresIn: "24h" });
   return { success: true, message: "Login successful", user, token };
 }
 
-async function login(username, password) {
+async function login(username, password, totpCode) {
   // Prefer DB if configured; fallback to demo creds
   try {
-    return await loginViaDatabase(username, password);
+    return await loginViaDatabase(username, password, totpCode);
   } catch (err) {
     // Only fallback if DB isn't configured; otherwise surface the real issue.
     const msg = err && typeof err === "object" && "message" in err ? String(err.message) : "";
