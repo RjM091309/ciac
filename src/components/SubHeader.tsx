@@ -2,21 +2,26 @@ import React, { useState } from 'react';
 import { ChevronRight, Home, ShieldCheck, UserCog, User } from 'lucide-react';
 import { cn } from '../lib/utils';
 
+export type DashboardPreviewRole = 'admin' | 'account-officer' | 'proponent';
+
 type SubHeaderProps = {
   title?: string;
   description?: string;
   badge?: string;
+  /** Admin-only "preview other roles' dashboard" switcher. Omit to hide it. */
+  previewRole?: DashboardPreviewRole;
+  onPreviewRoleChange?: (role: DashboardPreviewRole) => void;
 };
 
-export function SubHeader({ title, description, badge }: SubHeaderProps) {
+export function SubHeader({ title, description, badge, previewRole, onPreviewRoleChange }: SubHeaderProps) {
   const roles = [
     { id: 'admin', label: 'Administrator', icon: ShieldCheck },
     { id: 'account-officer', label: 'Account Officer', icon: UserCog },
     { id: 'proponent', label: 'Proponent', icon: User },
   ] as const;
 
-  const [activeRole, setActiveRole] = useState<(typeof roles)[number]['id']>('admin');
   const [shimmerRole, setShimmerRole] = useState<(typeof roles)[number]['id'] | null>(null);
+  const showRoleSwitcher = Boolean(onPreviewRoleChange);
 
   return (
     <>
@@ -30,6 +35,7 @@ export function SubHeader({ title, description, badge }: SubHeaderProps) {
           </span>
         </div>
 
+        {showRoleSwitcher && (
         <div className="w-full sm:w-auto min-w-0 max-w-full flex justify-center overflow-x-auto overflow-y-hidden scrollbar-hide px-1">
           <div
             className="inline-flex sm:flex items-center gap-1.5 rounded-full px-1 py-1 min-w-max sm:min-w-0 max-w-full snap-x snap-mandatory lg:flex-wrap mx-auto"
@@ -40,14 +46,14 @@ export function SubHeader({ title, description, badge }: SubHeaderProps) {
           >
           {roles.map((role) => {
             const Icon = role.icon;
-            const isActive = activeRole === role.id;
+            const isActive = previewRole === role.id;
             return (
               <button
                 key={role.id}
                 type="button"
                 title={role.label}
                 onClick={() => {
-                  setActiveRole(role.id);
+                  onPreviewRoleChange?.(role.id);
                   setShimmerRole(role.id);
                   setTimeout(() => {
                     setShimmerRole((current) => (current === role.id ? null : current));
@@ -81,6 +87,7 @@ export function SubHeader({ title, description, badge }: SubHeaderProps) {
           })}
         </div>
         </div>
+        )}
       </div>
 
       {/* Page title */}

@@ -5,12 +5,15 @@ export type CrudPermissionMap = Record<string, CrudPermission>;
 
 type ControlPanelAccess = {
   ready: boolean;
+  /** True for roles exempt from Control Panel restrictions (currently: admin). */
+  fullAccess: boolean;
   sidebarPermissions: Record<string, boolean>;
   crudPermissions: CrudPermissionMap;
 };
 
 const ControlPanelAccessContext = createContext<ControlPanelAccess>({
   ready: false,
+  fullAccess: false,
   sidebarPermissions: {},
   crudPermissions: {},
 });
@@ -21,6 +24,7 @@ function api(path: string) {
 
 export function ControlPanelAccessProvider({ children }: { children: React.ReactNode }) {
   const [ready, setReady] = useState(false);
+  const [fullAccess, setFullAccess] = useState(false);
   const [sidebarPermissions, setSidebarPermissions] = useState<Record<string, boolean>>({});
   const [crudPermissions, setCrudPermissions] = useState<CrudPermissionMap>({});
 
@@ -28,7 +32,6 @@ export function ControlPanelAccessProvider({ children }: { children: React.React
     let cancelled = false;
     async function load() {
       setReady(false);
-      let didError = false;
       try {
         const [sRes, cRes] = await Promise.all([
           fetch(api('/api/control-panel/me/sidebar-menu'), { credentials: 'include' }),
@@ -56,17 +59,19 @@ export function ControlPanelAccessProvider({ children }: { children: React.React
         });
 
         if (cancelled) return;
+        setFullAccess(Boolean(sJson?.fullAccess) || Boolean(cJson?.fullAccess));
         setSidebarPermissions(nextSidebar);
         setCrudPermissions(nextCrud);
       } catch {
-        didError = true;
-        // If permissions can't be loaded, keep UI permissive (do not hide everything).
+        // Fail closed: if permissions can't be loaded, do not fall back to
+        // showing everything. The sidebar/CRUD gates below treat "not ready"
+        // as "no access yet", not "unrestricted".
         if (cancelled) return;
+        setFullAccess(false);
         setSidebarPermissions({});
         setCrudPermissions({});
-        return;
       } finally {
-        if (!cancelled && !didError) setReady(true);
+        if (!cancelled) setReady(true);
       }
     }
 
@@ -79,10 +84,11 @@ export function ControlPanelAccessProvider({ children }: { children: React.React
   const value = useMemo(
     () => ({
       ready,
+      fullAccess,
       sidebarPermissions,
       crudPermissions,
     }),
-    [ready, sidebarPermissions, crudPermissions]
+    [ready, fullAccess, sidebarPermissions, crudPermissions]
   );
 
   return <ControlPanelAccessContext.Provider value={value}>{children}</ControlPanelAccessContext.Provider>;

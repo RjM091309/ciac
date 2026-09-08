@@ -1,4 +1,4 @@
-const { selectData, updateData, updateSchema } = require("../config/database");
+const { selectData, updateSchema, runInTransaction } = require("../config/database");
 
 async function ensureSchema() {
   await updateSchema(`
@@ -47,23 +47,25 @@ async function getSidebarPermissions(roleId) {
 }
 
 async function setSidebarPermissions(roleId, permissions) {
-  await updateData(
-    `
-      DELETE FROM role_sidebar_menu_permissions
-      WHERE role_id = @param0
-    `,
-    [roleId]
-  );
-
-  for (const row of permissions) {
-    await updateData(
-      `
-        INSERT INTO role_sidebar_menu_permissions (role_id, menu_key, is_enabled, created_at, updated_at)
-        VALUES (@param0, @param1, @param2, SYSUTCDATETIME(), SYSUTCDATETIME())
-      `,
-      [roleId, String(row.menu_key), row.is_enabled ? 1 : 0]
+  // Delete + re-insert must be atomic: if any row fails to insert mid-loop,
+  // a non-transactional version would leave the role with zero (or partial)
+  // sidebar permissions until an admin retries the save.
+  await runInTransaction(async (tx) => {
+    await tx.query(
+      `DELETE FROM role_sidebar_menu_permissions WHERE role_id = @param0`,
+      [roleId]
     );
-  }
+
+    for (const row of permissions) {
+      await tx.query(
+        `
+          INSERT INTO role_sidebar_menu_permissions (role_id, menu_key, is_enabled, created_at, updated_at)
+          VALUES (@param0, @param1, @param2, SYSUTCDATETIME(), SYSUTCDATETIME())
+        `,
+        [roleId, String(row.menu_key), row.is_enabled ? 1 : 0]
+      );
+    }
+  });
 }
 
 async function getMenuCrudPermissions(roleId) {
@@ -79,23 +81,54 @@ async function getMenuCrudPermissions(roleId) {
 }
 
 async function setMenuCrudPermissions(roleId, permissions) {
-  await updateData(
-    `
-      DELETE FROM role_menu_crud_permissions
-      WHERE role_id = @param0
-    `,
-    [roleId]
-  );
-
-  for (const row of permissions) {
-    await updateData(
-      `
-        INSERT INTO role_menu_crud_permissions (role_id, menu_key, can_add, can_edit, can_delete, created_at, updated_at)
-        VALUES (@param0, @param1, @param2, @param3, @param4, SYSUTCDATETIME(), SYSUTCDATETIME())
-      `,
-      [roleId, String(row.menu_key), row.can_add ? 1 : 0, row.can_edit ? 1 : 0, row.can_delete ? 1 : 0]
+  await runInTransaction(async (tx) => {
+    await tx.query(
+      `DELETE FROM role_menu_crud_permissions WHERE role_id = @param0`,
+      [roleId]
     );
-  }
+
+    for (const row of permissions) {
+      await tx.query(
+        `
+          INSERT INTO role_menu_crud_permissions (role_id, menu_key, can_add, can_edit, can_delete, created_at, updated_at)
+          VALUES (@param0, @param1, @param2, @param3, @param4, SYSUTCDATETIME(), SYSUTCDATETIME())
+        `,
+        [roleId, String(row.menu_key), row.can_add ? 1 : 0, row.can_edit ? 1 : 0, row.can_delete ? 1 : 0]
+      );
+    }
+  });
+}
+
+/** Fail-closed: a menu with no saved row for this role is treated as hidden. */
+async function isSidebarVisible(roleId, menuKey) {
+  const rows = await selectData(
+    `
+      SELECT is_enabled
+      FROM role_sidebar_menu_permissions
+      WHERE role_id = @param0 AND menu_key = @param1
+    `,
+    [roleId, menuKey]
+  );
+  if (!rows.length) return false;
+  return Number(rows[0].is_enabled) === 1;
+}
+
+const CRUD_ACTION_COLUMNS = { add: "can_add", edit: "can_edit", delete: "can_delete" };
+
+/** Fail-closed: a menu with no saved row for this role is treated as no permission. */
+async function hasCrudPermission(roleId, menuKey, action) {
+  const column = CRUD_ACTION_COLUMNS[action];
+  if (!column) return false;
+  const rows = await selectData(
+    `
+      SELECT can_add, can_edit, can_delete
+      FROM role_menu_crud_permissions
+      WHERE role_id = @param0 AND menu_key = @param1
+    `,
+    [roleId, menuKey]
+  );
+  if (!rows.length) return false;
+  return Number(rows[0][column]) === 1;
 }
 
 module.exports = {
@@ -104,4 +137,6 @@ module.exports = {
   setSidebarPermissions,
   getMenuCrudPermissions,
   setMenuCrudPermissions,
+  isSidebarVisible,
+  hasCrudPermission,
 };

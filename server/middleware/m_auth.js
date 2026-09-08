@@ -1,4 +1,6 @@
 const jwt = require("jsonwebtoken");
+const Role = require("../models/Role");
+const ControlPanelPermission = require("../models/ControlPanelPermission");
 
 function getJwtSecret() {
   const secret = process.env.JWT_SECRET;
@@ -56,10 +58,46 @@ function requireRole(...allowedRoles) {
   };
 }
 
+/**
+ * Gates a route behind the Control Panel's per-role permissions for `menuKey`.
+ * action 'view' checks Sidebar Menu visibility; 'add'/'edit'/'delete' check
+ * Menu CRUD permissions. 'admin' always bypasses (it's exempt from Control
+ * Panel restrictions, matching the UI which excludes it from the manageable
+ * role list). Any role with no saved permission row is denied (fail-closed).
+ */
+function requireMenuAccess(menuKey, action = "view") {
+  return async function menuAccessGuard(req, res, next) {
+    if (!req.user) {
+      return res.status(401).json({ success: false, message: "Access token required" });
+    }
+    const role = String(req.user.role || "").toLowerCase();
+    if (role === "admin") return next();
+
+    try {
+      const roleId = await Role.getActiveRoleIdByName(req.user.role);
+      if (!roleId) {
+        return res.status(403).json({ success: false, message: "Forbidden" });
+      }
+      const allowed =
+        action === "view"
+          ? await ControlPanelPermission.isSidebarVisible(roleId, menuKey)
+          : await ControlPanelPermission.hasCrudPermission(roleId, menuKey, action);
+      if (!allowed) {
+        return res.status(403).json({ success: false, message: "Forbidden" });
+      }
+      return next();
+    } catch (error) {
+      console.error("Menu access check failed:", error);
+      return res.status(500).json({ success: false, message: "Internal server error" });
+    }
+  };
+}
+
 module.exports = {
   attachUserFromJwt,
   isAuthenticated,
   authenticateToken,
   requireRole,
+  requireMenuAccess,
 };
 

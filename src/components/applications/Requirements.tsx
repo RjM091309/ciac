@@ -258,6 +258,9 @@ export function RequirementsManagement() {
       const message = e?.message || 'Save failed';
       setError(message);
       toast.error(message);
+      // Category list may be stale (cached client-side); refresh so a bad
+      // selection doesn't keep getting offered on the next attempt.
+      await refresh({ showLoading: false });
     } finally {
       setSaving(false);
     }

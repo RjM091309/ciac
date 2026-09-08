@@ -208,10 +208,52 @@ async function reactivateProponent(id, updated_by) {
   return await getProponentById(id);
 }
 
+async function getProponentByUserId(userId) {
+  await ensureSchema();
+  const rows = await selectData(
+    `
+    SELECT TOP (1)
+      p.id,
+      p.user_id,
+      p.business_name,
+      p.registration_no,
+      p.tin,
+      p.address,
+      p.contact_no,
+      p.created_by,
+      p.updated_by,
+      p.created_at,
+      p.updated_at,
+      p.is_active
+    FROM dbo.proponents p
+    WHERE p.user_id = @param0 AND p.is_active = 1
+    `,
+    [userId]
+  );
+
+  const p = rows?.[0] || null;
+  if (!p) return null;
+  return {
+    id: p.id,
+    user_id: p.user_id ?? null,
+    business_name: p.business_name,
+    registration_no: p.registration_no ?? null,
+    tin: p.tin ?? null,
+    address: p.address ?? null,
+    contact_no: p.contact_no ?? null,
+    created_by: p.created_by ?? null,
+    updated_by: p.updated_by ?? null,
+    created_at: p.created_at ?? null,
+    updated_at: p.updated_at ?? null,
+    is_active: p.is_active,
+  };
+}
+
 module.exports = {
   ensureSchema,
   listProponents,
   getProponentById,
+  getProponentByUserId,
   createProponent,
   updateProponent,
   deactivateProponent,

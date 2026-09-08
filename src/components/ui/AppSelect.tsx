@@ -45,11 +45,17 @@ const createStyles = (compact: boolean): StylesConfig<AppSelectOption, false> =>
     ...base,
     color: 'var(--text-muted)',
     fontSize: compact ? 12 : 14,
+    whiteSpace: 'nowrap',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
   }),
   singleValue: (base) => ({
     ...base,
     color: 'var(--text)',
     fontSize: compact ? 12 : 14,
+    whiteSpace: 'nowrap',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
   }),
   menuPortal: (base) => ({
     ...base,
@@ -61,6 +67,11 @@ const createStyles = (compact: boolean): StylesConfig<AppSelectOption, false> =>
     border: '1px solid var(--input-border)',
     boxShadow: '0 10px 30px rgba(0,0,0,.25)',
     overflow: 'hidden',
+  }),
+  menuList: (base) => ({
+    ...base,
+    scrollbarWidth: 'thin',
+    scrollbarColor: 'var(--border) transparent',
   }),
   option: (base, state) => ({
     ...base,
@@ -102,7 +113,10 @@ export function AppSelect({
       options={options}
       value={selected}
       styles={createStyles(compact)}
+      classNamePrefix="app-select"
       menuPortalTarget={typeof document !== 'undefined' ? document.body : null}
+      menuPlacement="auto"
+      menuPosition="fixed"
       placeholder={placeholder}
       isDisabled={isDisabled}
       isClearable={isClearable}

@@ -359,6 +359,19 @@ select.input-field:-webkit-autofill:focus {
   pointer-events: none;
 }
 
+.app-select__menu-list::-webkit-scrollbar {
+  width: 6px;
+}
+
+.app-select__menu-list::-webkit-scrollbar-thumb {
+  background-color: var(--border);
+  border-radius: 3px;
+}
+
+.app-select__menu-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
 @keyframes shimmer-slide {
   0% {
     transform: translateX(-100%);

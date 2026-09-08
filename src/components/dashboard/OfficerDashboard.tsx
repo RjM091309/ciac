@@ -1,0 +1,165 @@
+import React from 'react';
+import { ClipboardList, FileCheck, FileText, Inbox } from 'lucide-react';
+import { EmptyState } from '../ui/EmptyState';
+import { getStatusBadgeStyles } from './statusBadge';
+
+type DashboardApplicationRow = {
+  id: number;
+  proponent_name: string | null;
+  application_no: string;
+  application_type: string;
+  is_renewal: boolean | number;
+  status: string;
+  submitted_at: string | null;
+  created_at: string;
+  requirements_total: number;
+  requirements_verified: number;
+};
+
+export type OfficerDashboardData = {
+  applications: DashboardApplicationRow[];
+  stats: { total: number; pending: number; approved: number; requirementsTotal: number; requirementsVerified: number };
+};
+
+function StatCard({ label, value, icon: Icon }: { label: string; value: string | number; icon: any }) {
+  return (
+    <div
+      className="glass-card p-3.5 flex flex-col gap-2 !border-transparent"
+      style={{ backgroundColor: 'var(--surface)' }}
+    >
+      <div className="flex items-center gap-2">
+        <div
+          className="p-1.5 rounded-lg border shrink-0"
+          style={{ backgroundColor: 'var(--control-bg)', borderColor: 'var(--border-subtle)' }}
+        >
+          <Icon size={16} style={{ color: 'var(--text)' }} />
+        </div>
+        <span className="text-[11px] font-medium text-secondary truncate">{label}</span>
+      </div>
+      <p className="text-xl font-bold tracking-tight" style={{ color: 'var(--text)' }}>
+        {value}
+      </p>
+    </div>
+  );
+}
+
+function formatDate(value: string | null) {
+  if (!value) return '—';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return '—';
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+export function OfficerDashboard({ data }: { data: OfficerDashboardData | null }) {
+  const applications = data?.applications ?? [];
+  const stats = data?.stats ?? { total: 0, pending: 0, approved: 0, requirementsTotal: 0, requirementsVerified: 0 };
+
+  return (
+    <div className="space-y-4 sm:space-y-5">
+      <div
+        className="relative overflow-hidden rounded-2xl px-4 py-5 sm:px-6 sm:py-6 !border-transparent"
+        style={{
+          backgroundColor: 'var(--surface)',
+          boxShadow: '0 6px 16px rgba(0,0,0,0.12), 0 0 0 1px color-mix(in oklab, var(--border-subtle) 70%, transparent)',
+        }}
+      >
+        <div className="pointer-events-none absolute -top-32 -right-32 h-80 w-80 rounded-full bg-blue-600/30 blur-[100px]" />
+        <div className="relative flex items-center gap-3">
+          <div className="p-2.5 rounded-xl border shrink-0" style={{ backgroundColor: 'var(--control-bg)', borderColor: 'var(--border-subtle)' }}>
+            <ClipboardList size={22} style={{ color: 'var(--text)' }} />
+          </div>
+          <div className="min-w-0">
+            <h3 className="text-lg sm:text-xl font-bold tracking-tight" style={{ color: 'var(--text)' }}>
+              My Assigned Applications
+            </h3>
+            <p className="text-xs text-secondary">Applications currently routed to you for action.</p>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
+        <StatCard label="Total Assigned" value={stats.total} icon={FileText} />
+        <StatCard label="Pending" value={stats.pending} icon={Inbox} />
+        <StatCard label="Approved" value={stats.approved} icon={FileCheck} />
+        <StatCard
+          label="Requirements Verified"
+          value={`${stats.requirementsVerified}/${stats.requirementsTotal}`}
+          icon={FileCheck}
+        />
+      </div>
+
+      <div className="glass-card p-4 sm:p-5 !border-transparent" style={{ backgroundColor: 'var(--surface)' }}>
+        <h4 className="text-sm font-bold mb-3" style={{ color: 'var(--text)' }}>
+          Assigned to Me
+        </h4>
+
+        {applications.length === 0 ? (
+          <EmptyState
+            title="No applications assigned"
+            description="You don't have any applications routed to you right now."
+          />
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-left text-xs">
+              <thead>
+                <tr>
+                  {['Application No.', 'Proponent', 'Type', 'Status', 'Requirements', 'Submitted'].map((col) => (
+                    <th
+                      key={col}
+                      className="px-3 py-2 font-semibold text-[10px] uppercase tracking-widest text-secondary border-b"
+                      style={{ borderColor: 'var(--border-subtle)' }}
+                    >
+                      {col}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {applications.map((app) => {
+                  const badge = getStatusBadgeStyles(app.status);
+                  const total = Number(app.requirements_total || 0);
+                  const verified = Number(app.requirements_verified || 0);
+                  const pct = total > 0 ? Math.round((verified / total) * 100) : 0;
+                  return (
+                    <tr key={app.id} className="border-b last:border-b-0" style={{ borderColor: 'var(--border-subtle)' }}>
+                      <td className="px-3 py-2 text-[11px] font-semibold" style={{ color: 'var(--text)' }}>
+                        {app.application_no}
+                      </td>
+                      <td className="px-3 py-2 text-[11px] text-secondary">{app.proponent_name || '—'}</td>
+                      <td className="px-3 py-2 text-[11px] text-secondary">
+                        {Number(app.is_renewal) ? 'Renewal' : 'New'}
+                      </td>
+                      <td className="px-3 py-2 text-[11px]">
+                        <span
+                          className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold border"
+                          style={{ backgroundColor: badge.bg, color: badge.color, borderColor: badge.border }}
+                        >
+                          {app.status}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2 text-[11px] text-secondary w-40">
+                        <div className="flex items-center gap-2">
+                          <div
+                            className="h-1.5 flex-1 rounded-full overflow-hidden"
+                            style={{ backgroundColor: 'var(--control-bg)' }}
+                          >
+                            <div
+                              className="h-full rounded-full"
+                              style={{ width: `${pct}%`, backgroundColor: 'var(--nav-active-bg)' }}
+                            />
+                          </div>
+                          <span className="shrink-0 text-[10px]">{verified}/{total}</span>
+                        </div>
+                      </td>
+                      <td className="px-3 py-2 text-[11px] text-secondary">{formatDate(app.submitted_at || app.created_at)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

@@ -235,7 +235,7 @@ export function ControlPanelManagement() {
           <button
             role="tab"
             aria-selected={activeTab === 'sidebar'}
-            className="flex-1 rounded-lg px-3 py-3 flex flex-col gap-1 text-left transition-colors"
+            className="flex-1 rounded-lg px-3 py-2 flex flex-col gap-0.5 text-left transition-colors cursor-pointer"
             style={
               activeTab === 'sidebar'
                 ? { backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }
@@ -244,12 +244,12 @@ export function ControlPanelManagement() {
             onClick={() => setActiveTab('sidebar')}
           >
             <span className="text-[10px] font-semibold uppercase tracking-widest opacity-80">Sidebar</span>
-            <span className="text-base sm:text-lg font-bold leading-tight">Menu Permissions</span>
+            <span className="text-sm font-bold leading-tight tracking-tight">Menu Permissions</span>
           </button>
           <button
             role="tab"
             aria-selected={activeTab === 'crud'}
-            className="flex-1 rounded-lg px-3 py-3 flex flex-col gap-1 text-left transition-colors"
+            className="flex-1 rounded-lg px-3 py-2 flex flex-col gap-0.5 text-left transition-colors cursor-pointer"
             style={
               activeTab === 'crud'
                 ? { backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }
@@ -258,7 +258,7 @@ export function ControlPanelManagement() {
             onClick={() => setActiveTab('crud')}
           >
             <span className="text-[10px] font-semibold uppercase tracking-widest opacity-80">CRUD</span>
-            <span className="text-base sm:text-lg font-bold leading-tight">Permissions</span>
+            <span className="text-sm font-bold leading-tight tracking-tight">Permissions</span>
           </button>
         </div>
       </div>
@@ -287,7 +287,7 @@ export function ControlPanelManagement() {
                     <button
                       key={role.id}
                       onClick={() => setSelectedRoleId(String(role.id))}
-                      className="w-full rounded-lg px-2.5 py-2 text-left text-[12px]"
+                      className="w-full rounded-lg px-2.5 py-2 text-left text-[11px] cursor-pointer"
                       style={
                         isActive
                           ? { backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }
@@ -321,7 +321,7 @@ export function ControlPanelManagement() {
                 </div>
                 <button
                   type="button"
-                  className="group relative inline-flex shrink-0 items-center justify-center gap-2 overflow-hidden rounded-xl px-4 py-2.5 text-[12px] font-semibold tracking-wide shadow-md transition-[transform,box-shadow,filter,opacity] duration-200 ease-out hover:brightness-110 hover:shadow-lg active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:brightness-100 disabled:active:scale-100"
+                  className="group relative inline-flex shrink-0 items-center justify-center gap-1.5 overflow-hidden rounded-lg px-3 py-1.5 text-[11px] font-semibold tracking-wide shadow-sm transition-[transform,box-shadow,filter,opacity] duration-200 ease-out hover:brightness-110 hover:shadow-md active:scale-[0.98] cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:brightness-100 disabled:active:scale-100"
                   style={{
                     backgroundColor: 'var(--nav-active-bg)',
                     color: 'var(--nav-active-text)',
@@ -339,9 +339,9 @@ export function ControlPanelManagement() {
                     }}
                   />
                   {saving ? (
-                    <Loader2 className="relative h-4 w-4 shrink-0 animate-spin opacity-95" aria-hidden />
+                    <Loader2 className="relative h-3.5 w-3.5 shrink-0 animate-spin opacity-95" aria-hidden />
                   ) : (
-                    <Save className="relative h-4 w-4 shrink-0 opacity-95 transition-transform duration-200 group-hover:scale-105" aria-hidden />
+                    <Save className="relative h-3.5 w-3.5 shrink-0 opacity-95 transition-transform duration-200 group-hover:scale-105" aria-hidden />
                   )}
                   <span className="relative">{saving ? 'Saving…' : 'Save changes'}</span>
                 </button>
@@ -384,7 +384,7 @@ export function ControlPanelManagement() {
                               className="grid grid-cols-[minmax(0,1fr)_3.25rem] items-center gap-x-3 gap-y-1 px-3 py-2.5 border rounded-lg transition-colors"
                               style={{ borderColor: 'var(--border-subtle)' }}
                             >
-                              <span className="min-w-0 text-[12px]" style={{ color: 'var(--text)' }}>
+                              <span className="min-w-0 text-[11px]" style={{ color: 'var(--text)' }}>
                                 {item.label}
                               </span>
                               <div className="flex min-h-[1.75rem] items-center justify-center">
@@ -441,7 +441,7 @@ export function ControlPanelManagement() {
                           className={`group ${CRUD_TOGGLE_COLS_CLASS} gap-y-1 px-3 py-2.5 border rounded-lg transition-colors`}
                           style={{ borderColor: 'var(--border-subtle)' }}
                         >
-                          <span className="min-w-0 text-[12px] font-medium" style={{ color: 'var(--text)' }}>
+                          <span className="min-w-0 text-[11px] font-medium" style={{ color: 'var(--text)' }}>
                             {item.label}
                           </span>
                           <div className="flex min-h-[1.75rem] items-center justify-center">

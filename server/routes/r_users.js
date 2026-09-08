@@ -1,14 +1,15 @@
 const express = require("express");
 const router = express.Router();
 const usersController = require("../controller/c_users");
-const { requireRole } = require("../middleware/m_auth");
+const { requireMenuAccess } = require("../middleware/m_auth");
 
-router.get("/", requireRole("admin"), usersController.list);
-router.get("/:id", requireRole("admin"), usersController.getById);
-router.post("/", requireRole("admin"), usersController.create);
-router.put("/:id", requireRole("admin"), usersController.update);
-router.patch("/:id/deactivate", requireRole("admin"), usersController.deactivate);
-router.patch("/:id/reactivate", requireRole("admin"), usersController.reactivate);
+const MENU_KEY = "settings:users";
+
+router.get("/", requireMenuAccess(MENU_KEY, "view"), usersController.list);
+router.get("/:id", requireMenuAccess(MENU_KEY, "view"), usersController.getById);
+router.post("/", requireMenuAccess(MENU_KEY, "add"), usersController.create);
+router.put("/:id", requireMenuAccess(MENU_KEY, "edit"), usersController.update);
+router.patch("/:id/deactivate", requireMenuAccess(MENU_KEY, "delete"), usersController.deactivate);
+router.patch("/:id/reactivate", requireMenuAccess(MENU_KEY, "edit"), usersController.reactivate);
 
 module.exports = router;
-

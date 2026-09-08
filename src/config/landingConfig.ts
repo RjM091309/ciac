@@ -413,10 +413,9 @@ export const LANDING_CONFIG: Record<AppView, LandingConfig> = {
   },
   'settings:checklist': {
     title: 'Master Checklist',
-    description: 'Configure required and optional documents per application type.',
+    description: 'Add, edit, and organize required/optional documents per application type.',
     badge: 'Configuration',
     icon: FileCheck,
-    isCrud: true,
     stats: [
       { label: 'Checklist Templates', value: '5' },
       { label: 'Last Updated By', value: 'Admin Demo' },

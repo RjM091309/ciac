@@ -34,7 +34,10 @@ async function loginViaDatabase(username, password) {
   const userKey = normalizeString(username);
   const pass = String(password ?? "");
 
-  // Prefer active accounts first
+  // Prefer active accounts first. A user can have multiple roles assigned in
+  // user_roles; without an explicit tie-break, SQL Server can return them in
+  // any order, making the "effective" role in the JWT non-deterministic across
+  // logins. Prefer 'admin' when present, then fall back to a stable order.
   const activeRows = await selectData(
     `
       SELECT TOP (1)
@@ -45,6 +48,7 @@ async function loginViaDatabase(username, password) {
       LEFT JOIN roles r ON r.id = ur.role_id
       WHERE (u.username = @param0 OR u.email = @param0)
         AND u.is_active = 1
+      ORDER BY CASE WHEN LOWER(r.name) = 'admin' THEN 0 ELSE 1 END, r.id ASC
     `,
     [userKey]
   );

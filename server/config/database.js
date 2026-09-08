@@ -96,6 +96,36 @@ async function updateSchema(query, params = []) {
   return await updateData(query, params);
 }
 
+/**
+ * Runs `work` inside a single SQL transaction. `work` receives a `{ query }` helper
+ * scoped to the transaction; if `work` throws (including a failed statement), everything
+ * executed so far is rolled back instead of left half-applied.
+ */
+async function runInTransaction(work) {
+  const pool = await getConnection();
+  const transaction = new sql.Transaction(pool);
+  await transaction.begin();
+  try {
+    const scoped = {
+      query: async (queryText, params = []) => {
+        const request = new sql.Request(transaction);
+        params.forEach((param, index) => request.input(`param${index}`, param));
+        return await request.query(queryText);
+      },
+    };
+    const result = await work(scoped);
+    await transaction.commit();
+    return result;
+  } catch (error) {
+    try {
+      await transaction.rollback();
+    } catch {
+      // Rollback failure is secondary to the original error; ignore.
+    }
+    throw error;
+  }
+}
+
 module.exports = {
   initializeDatabase,
   getConnection,
@@ -103,5 +133,6 @@ module.exports = {
   insertData,
   updateData,
   updateSchema,
+  runInTransaction,
 };
 

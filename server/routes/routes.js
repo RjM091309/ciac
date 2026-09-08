@@ -36,6 +36,7 @@ module.exports = function pageRouter(app) {
   app.use("/api/inspection-types", require("./r_inspection_types"));
   app.use("/api/compliance-types", require("./r_compliance_types"));
   app.use("/api/control-panel", require("./r_control_panel"));
+  app.use("/api/dashboard", require("./r_dashboard"));
   app.use("/", router);
 };
 

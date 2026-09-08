@@ -204,6 +204,114 @@ async function listApplications() {
   return rows;
 }
 
+/** System-wide, same row shape as listApplicationsForOfficer. Used for the
+ * admin-only "preview what an Officer/Proponent dashboard looks like" tool. */
+async function listAllApplicationsWithProgress() {
+  await ensureSchema();
+  const rows = await selectData(`
+    SELECT
+      a.id,
+      a.proponent_id,
+      p.business_name AS proponent_name,
+      a.application_no,
+      a.application_type,
+      a.is_renewal,
+      a.status,
+      a.submitted_at,
+      a.current_officer_id,
+      a.created_at,
+      a.updated_at,
+      (
+        SELECT COUNT(1) FROM dbo.application_requirements ar WHERE ar.application_id = a.id
+      ) AS requirements_total,
+      (
+        SELECT COUNT(1) FROM dbo.application_requirements ar
+        WHERE ar.application_id = a.id AND ar.status = 'VERIFIED'
+      ) AS requirements_verified
+    FROM dbo.applications a
+    LEFT JOIN dbo.proponents p ON p.id = a.proponent_id
+    ORDER BY a.id DESC
+  `);
+  return rows;
+}
+
+async function getMostActiveProponentId() {
+  await ensureSchema();
+  const rows = await selectData(`
+    SELECT TOP (1) proponent_id
+    FROM dbo.applications
+    GROUP BY proponent_id
+    ORDER BY COUNT(1) DESC
+  `);
+  return rows?.[0]?.proponent_id ?? null;
+}
+
+async function listApplicationsForProponent(proponentId) {
+  await ensureSchema();
+  const rows = await selectData(
+    `
+    SELECT
+      a.id,
+      a.proponent_id,
+      p.business_name AS proponent_name,
+      a.application_no,
+      a.application_type,
+      a.is_renewal,
+      a.status,
+      a.submitted_at,
+      a.current_officer_id,
+      a.created_at,
+      a.updated_at,
+      (
+        SELECT COUNT(1) FROM dbo.application_requirements ar WHERE ar.application_id = a.id
+      ) AS requirements_total,
+      (
+        SELECT COUNT(1) FROM dbo.application_requirements ar
+        WHERE ar.application_id = a.id AND ar.status = 'VERIFIED'
+      ) AS requirements_verified
+    FROM dbo.applications a
+    LEFT JOIN dbo.proponents p ON p.id = a.proponent_id
+    WHERE a.proponent_id = @param0
+    ORDER BY a.id DESC
+    `,
+    [proponentId]
+  );
+  return rows;
+}
+
+async function listApplicationsForOfficer(officerId) {
+  await ensureSchema();
+  const rows = await selectData(
+    `
+    SELECT
+      a.id,
+      a.proponent_id,
+      p.business_name AS proponent_name,
+      a.application_no,
+      a.application_type,
+      a.is_renewal,
+      a.status,
+      a.submitted_at,
+      a.current_officer_id,
+      a.created_at,
+      a.updated_at,
+      (
+        SELECT COUNT(1) FROM dbo.application_requirements ar WHERE ar.application_id = a.id
+      ) AS requirements_total,
+      (
+        SELECT COUNT(1) FROM dbo.application_requirements ar
+        WHERE ar.application_id = a.id AND ar.status = 'VERIFIED'
+      ) AS requirements_verified
+    FROM dbo.applications a
+    LEFT JOIN dbo.proponents p ON p.id = a.proponent_id
+    WHERE a.current_officer_id = @param0
+    ORDER BY a.id DESC
+    `,
+    [officerId]
+  );
+  return rows;
+}
+
 async function getApplicationById(id) {
   await ensureSchema();
   const rows = await selectData(
@@ -567,6 +675,10 @@ async function listApplicationStatusHistory(applicationId) {
 module.exports = {
   ensureSchema,
   listApplications,
+  listAllApplicationsWithProgress,
+  getMostActiveProponentId,
+  listApplicationsForProponent,
+  listApplicationsForOfficer,
   getApplicationById,
   createApplication,
   updateApplicationStatus,

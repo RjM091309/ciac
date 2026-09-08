@@ -1,8 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { AppLayout, AppView } from './layout/AppLayout';
-import { Dashboard } from './components/dashboard/Dashboard';
-import { SubHeader } from './components/SubHeader';
+import { RoleDashboard } from './components/dashboard/RoleDashboard';
+import { PreviewDashboard } from './components/dashboard/PreviewDashboard';
+import { SubHeader, type DashboardPreviewRole } from './components/SubHeader';
 import { FileCheck, FolderTree, ShieldCheck, Users, CalendarClock } from 'lucide-react';
 import { UsersManagement } from './components/settings/UsersManagement';
 import { ControlPanelManagement } from './components/settings/ControlPanelManagement';
@@ -12,6 +13,7 @@ import { RequirementCategoriesManagement } from './components/applications/Requi
 import { ApplicationsWorkflow } from './components/applications/ApplicationsWorkflow';
 import { InspectionTypesManagement } from './components/FileMaintenance/InspectionTypes';
 import { ComplianceTypesManagement } from './components/FileMaintenance/ComplianceTypes';
+import { MasterChecklist } from './components/settings/MasterChecklist';
 import { LoginPage } from './components/auth/LoginPage';
 import { Toaster } from 'sonner';
 
@@ -21,7 +23,11 @@ type Role = 'admin' | 'officer' | 'proponent';
 function normalizeRole(value: unknown): Role {
   const role = String(value || '').trim().toLowerCase();
   if (role === 'admin' || role === 'officer' || role === 'proponent') return role;
-  return 'admin';
+  // Custom roles created via Role Management don't fit this 3-value UI type.
+  // Falling back to 'admin' here would silently grant admin-level treatment
+  // (e.g. notification targeting) to any role the admin didn't literally name
+  // "admin" — default to the least-privileged known value instead.
+  return 'officer';
 }
 
 interface UserData {
@@ -95,6 +101,7 @@ export default function App() {
   const [user, setUser] = useState<UserData | null>(null);
   const [authState, setAuthState] = useState<'authed' | 'guest'>('guest');
   const [view, setView] = useState<AppView>('dashboard');
+  const [dashboardPreviewRole, setDashboardPreviewRole] = useState<DashboardPreviewRole>('admin');
 
   useEffect(() => {
     const onPop = () =>
@@ -189,7 +196,7 @@ export default function App() {
         view={view}
         onViewChange={handleViewChange}
         navigate={navigate}
-        userRole={user?.role || 'admin'}
+        userRole={user?.role || 'officer'}
         userId={user?.id ?? null}
         backendUrl={backendUrl}
         onLogout={async () => {
@@ -215,7 +222,10 @@ export default function App() {
         }}
       >
         {view === 'dashboard' ? (
-          <SubHeader />
+          <SubHeader
+            previewRole={dashboardPreviewRole}
+            onPreviewRoleChange={user?.role === 'admin' ? setDashboardPreviewRole : undefined}
+          />
         ) : (
           <SubHeader
             title={LANDING_CONFIG[view].title}
@@ -226,7 +236,7 @@ export default function App() {
 
         <AnimatePresence mode="wait" initial={false}>
           <motion.div
-            key={view}
+            key={view === 'dashboard' ? `dashboard-${dashboardPreviewRole}` : view}
             initial={{ opacity: 0, x: 24 }}
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, x: -24 }}
@@ -234,7 +244,17 @@ export default function App() {
             className="h-full"
           >
             {view === 'dashboard' ? (
-              <Dashboard />
+              user?.role === 'admin' ? (
+                dashboardPreviewRole === 'account-officer' ? (
+                  <PreviewDashboard role="account-officer" />
+                ) : dashboardPreviewRole === 'proponent' ? (
+                  <PreviewDashboard role="proponent" />
+                ) : (
+                  <RoleDashboard />
+                )
+              ) : (
+                <RoleDashboard />
+              )
             ) : view === 'settings:users' ? (
               <UsersManagement />
             ) : view === 'applications:new' ? (
@@ -251,6 +271,8 @@ export default function App() {
               <InspectionTypesManagement />
             ) : view === 'settings:compliance-types' ? (
               <ComplianceTypesManagement />
+            ) : view === 'settings:checklist' ? (
+              <MasterChecklist />
             ) : view === 'settings:control-panel' ? (
               <ControlPanelManagement />
             ) : (
@@ -666,7 +688,7 @@ const LANDING_CONFIG: Record<AppView, LandingConfig> = {
   },
   'settings:checklist': {
     title: 'Master Checklist',
-    description: 'Configure required and optional documents per application type.',
+    description: 'Add, edit, and organize required/optional documents per application type.',
     badge: 'Configuration',
     icon: FileCheck,
     stats: [

@@ -1,23 +1,8 @@
 const ControlPanelPermission = require("../models/ControlPanelPermission");
-const { selectData } = require("../config/database");
+const Role = require("../models/Role");
 
 function parseRoleId(v) {
   const id = Number(v);
-  return Number.isFinite(id) ? id : null;
-}
-
-async function getRoleIdByName(roleName) {
-  if (!roleName) return null;
-  const rows = await selectData(
-    `
-    SELECT TOP (1) id
-    FROM roles
-    WHERE LOWER(name) = LOWER(@param0) AND is_active = 1
-    `,
-    [roleName]
-  );
-  const row = rows?.[0];
-  const id = Number(row?.id);
   return Number.isFinite(id) ? id : null;
 }
 
@@ -38,6 +23,9 @@ exports.setSidebarPermissions = async (req, res) => {
   try {
     const roleId = parseRoleId(req.params.roleId);
     if (!roleId) return res.status(400).json({ success: false, message: "Invalid role id" });
+    if (!(await Role.roleExists(roleId))) {
+      return res.status(404).json({ success: false, message: "Role not found" });
+    }
 
     const permissions = Array.isArray(req.body?.permissions) ? req.body.permissions : [];
     await ControlPanelPermission.setSidebarPermissions(roleId, permissions);
@@ -65,6 +53,9 @@ exports.setMenuCrudPermissions = async (req, res) => {
   try {
     const roleId = parseRoleId(req.params.roleId);
     if (!roleId) return res.status(400).json({ success: false, message: "Invalid role id" });
+    if (!(await Role.roleExists(roleId))) {
+      return res.status(404).json({ success: false, message: "Role not found" });
+    }
 
     const permissions = Array.isArray(req.body?.permissions) ? req.body.permissions : [];
     await ControlPanelPermission.setMenuCrudPermissions(roleId, permissions);
@@ -75,13 +66,23 @@ exports.setMenuCrudPermissions = async (req, res) => {
   }
 };
 
+// 'admin' is exempt from Control Panel restrictions (it's excluded from the
+// manageable role list in the UI), so it never has rows of its own here.
+// Flag full access explicitly instead of relying on "no rows = unrestricted".
+function isExemptRole(roleName) {
+  return String(roleName || "").trim().toLowerCase() === "admin";
+}
+
 exports.getMySidebarPermissions = async (req, res) => {
   try {
     const roleName = req.user?.role;
-    const roleId = await getRoleIdByName(roleName);
-    if (!roleId) return res.json({ success: true, data: [] });
+    if (isExemptRole(roleName)) {
+      return res.json({ success: true, fullAccess: true, data: [] });
+    }
+    const roleId = await Role.getActiveRoleIdByName(roleName);
+    if (!roleId) return res.json({ success: true, fullAccess: false, data: [] });
     const rows = await ControlPanelPermission.getSidebarPermissions(roleId);
-    return res.json({ success: true, data: rows });
+    return res.json({ success: true, fullAccess: false, data: rows });
   } catch (error) {
     console.error("Get my sidebar permissions error:", error);
     return res.status(500).json({ success: false, message: error.message || "Internal server error" });
@@ -91,10 +92,13 @@ exports.getMySidebarPermissions = async (req, res) => {
 exports.getMyMenuCrudPermissions = async (req, res) => {
   try {
     const roleName = req.user?.role;
-    const roleId = await getRoleIdByName(roleName);
-    if (!roleId) return res.json({ success: true, data: [] });
+    if (isExemptRole(roleName)) {
+      return res.json({ success: true, fullAccess: true, data: [] });
+    }
+    const roleId = await Role.getActiveRoleIdByName(roleName);
+    if (!roleId) return res.json({ success: true, fullAccess: false, data: [] });
     const rows = await ControlPanelPermission.getMenuCrudPermissions(roleId);
-    return res.json({ success: true, data: rows });
+    return res.json({ success: true, fullAccess: false, data: rows });
   } catch (error) {
     console.error("Get my menu CRUD permissions error:", error);
     return res.status(500).json({ success: false, message: error.message || "Internal server error" });

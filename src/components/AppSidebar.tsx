@@ -68,7 +68,7 @@ const SidebarItem = ({
     <button
       onClick={handleClick}
       className={cn(
-        'flex items-center rounded-lg transition-all duration-200 w-full group',
+        'flex items-center rounded-lg transition-all duration-200 w-full group cursor-pointer',
         collapsed ? 'justify-center px-1.5 py-2.5' : 'justify-start gap-3 px-3 py-2',
         active
           ? 'shadow-sm text-[var(--nav-active-text)]'
@@ -118,7 +118,7 @@ const SidebarSubItem = ({
     <button
       onClick={onClick}
       className={cn(
-        'group w-full flex items-center gap-2 pl-9 pr-3 py-1.5 rounded-lg text-[12px] hover:text-[var(--text)] transition-colors',
+        'group w-full flex items-center gap-2 pl-9 pr-3 py-1.5 rounded-lg text-[12px] hover:text-[var(--text)] transition-colors cursor-pointer',
         active ? 'text-[var(--text)]' : 'text-[var(--text-muted)]',
       )}
     >
@@ -180,18 +180,19 @@ export function AppSidebar({
 }) {
   const isDrawer = variant === 'drawer';
   const [openDropdownId, setOpenDropdownId] = useState<string | null>(null);
-  const { ready, sidebarPermissions } = useControlPanelAccess();
+  const { ready, fullAccess, sidebarPermissions } = useControlPanelAccess();
 
   const toggleDropdown = (id: string) => {
     setOpenDropdownId((prev) => (prev === id ? null : id));
   };
 
+  // Fail-closed: while permissions are loading (or failed to load), show
+  // nothing restricted rather than everything. Roles exempt from Control
+  // Panel restrictions (fullAccess, e.g. admin) always see every menu.
   const canView = (menuKey: AppView) => {
-    if (!ready) return true;
-    if (Object.prototype.hasOwnProperty.call(sidebarPermissions, menuKey)) {
-      return Boolean(sidebarPermissions[menuKey]);
-    }
-    return true;
+    if (fullAccess) return true;
+    if (!ready) return false;
+    return Boolean(sidebarPermissions[menuKey]);
   };
 
   return (
@@ -443,7 +444,7 @@ export function AppSidebar({
         >
           <button
             onClick={onLogout}
-            className="flex items-center justify-center gap-3 px-3 py-2 rounded-lg transition-all duration-200 w-full text-[var(--text-muted)] hover:text-[var(--text)] group"
+            className="flex items-center justify-center gap-3 px-3 py-2 rounded-lg transition-all duration-200 w-full text-[var(--text-muted)] hover:text-[var(--text)] group cursor-pointer"
             style={{
               backgroundColor: 'color-mix(in oklab, var(--control-bg) 88%, transparent)',
             }}

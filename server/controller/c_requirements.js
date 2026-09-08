@@ -1,5 +1,9 @@
 const Requirement = require("../models/Requirement");
 
+function isForeignKeyViolation(error) {
+  return error?.number === 547 || /FOREIGN KEY constraint/i.test(String(error?.message || ""));
+}
+
 exports.list = async (req, res) => {
   try {
     const rows = await Requirement.listRequirements();
@@ -43,6 +47,12 @@ exports.create = async (req, res) => {
     return res.status(201).json({ success: true, data: row });
   } catch (error) {
     console.error("Create requirement error:", error);
+    if (isForeignKeyViolation(error)) {
+      return res.status(400).json({
+        success: false,
+        message: "Selected category no longer exists. Please refresh and choose another category.",
+      });
+    }
     return res.status(500).json({ success: false, message: error.message || "Internal server error" });
   }
 };
@@ -68,6 +78,12 @@ exports.update = async (req, res) => {
     return res.json({ success: true, data: row });
   } catch (error) {
     console.error("Update requirement error:", error);
+    if (isForeignKeyViolation(error)) {
+      return res.status(400).json({
+        success: false,
+        message: "Selected category no longer exists. Please refresh and choose another category.",
+      });
+    }
     return res.status(500).json({ success: false, message: error.message || "Internal server error" });
   }
 };
