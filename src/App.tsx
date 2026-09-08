@@ -13,6 +13,7 @@ const ProponentsManagement = lazy(() => import('./components/proponent/Proponent
 const RequirementsManagement = lazy(() => import('./components/applications/Requirements').then((m) => ({ default: m.RequirementsManagement })));
 const RequirementCategoriesManagement = lazy(() => import('./components/applications/RequirementCategories').then((m) => ({ default: m.RequirementCategoriesManagement })));
 const ApplicationsWorkflow = lazy(() => import('./components/applications/ApplicationsWorkflow').then((m) => ({ default: m.ApplicationsWorkflow })));
+const AssessmentEvaluation = lazy(() => import('./components/assessment/AssessmentEvaluation').then((m) => ({ default: m.AssessmentEvaluation })));
 const InspectionTypesManagement = lazy(() => import('./components/FileMaintenance/InspectionTypes').then((m) => ({ default: m.InspectionTypesManagement })));
 const ComplianceTypesManagement = lazy(() => import('./components/FileMaintenance/ComplianceTypes').then((m) => ({ default: m.ComplianceTypesManagement })));
 
@@ -41,6 +42,7 @@ const VIEW_TO_PATH: Record<AppView, string> = {
   'applications:renewals': '/applications/renewals',
   'applications:projects': '/applications/projects',
   'applications:requirements': '/applications/requirements',
+  'assessment:queue': '/assessment',
   'verification:pending': '/verification/pending',
   'verification:audit': '/verification/audit',
   'directory:companies': '/directory/companies',
@@ -257,6 +259,8 @@ export default function App() {
                 <ApplicationsWorkflow renewalMode={true} locationSearch={locationSearch} navigate={navigate} />
               ) : view === 'applications:requirements' ? (
                 <RequirementsManagement />
+              ) : view === 'assessment:queue' ? (
+                <AssessmentEvaluation />
               ) : view === 'settings:proponents' ? (
                 <ProponentsManagement />
               ) : view === 'settings:requirement-categories' ? (
@@ -372,6 +376,25 @@ const LANDING_CONFIG: Record<AppView, LandingConfig> = {
         ['SEC-AOI', 'Articles of Incorporation', 'Legal', 'New, Mandatory', 'Active'],
         ['BIR-CLR', 'BIR Tax Clearance', 'Financial', 'New, Renewal, Mandatory', 'Active'],
         ['FSIC', 'Fire Safety Certificate', 'Technical', 'Renewal', 'Inactive'],
+      ],
+    },
+  },
+  'assessment:queue': {
+    title: 'Assessment & Evaluation',
+    description: 'Review submitted applications, evaluate compliance, assess charges, and record findings.',
+    badge: 'Assessment',
+    icon: FileCheck,
+    stats: [
+      { label: 'In Assessment', value: '—' },
+      { label: 'Unassigned', value: '—' },
+      { label: 'Overdue', value: '—' },
+    ],
+    table: {
+      columns: ['Application', 'Proponent', 'Stage', 'Evaluator', 'Charges'],
+      rows: [
+        ['APP-NEW-0001', 'SkyPort Logistics Inc.', 'In Review', 'AO Santos', '₱610,000'],
+        ['APP-REN-0007', 'Delta AeroTech', 'For Recommendation', 'AO Cruz', '₱120,000'],
+        ['APP-NEW-0012', 'Metro Agro Trading', 'Unassigned', '—', '—'],
       ],
     },
   },

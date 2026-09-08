@@ -102,6 +102,26 @@ export const LANDING_CONFIG: Record<AppView, LandingConfig> = {
       ],
     },
   },
+  'assessment:queue': {
+    title: 'Assessment & Evaluation',
+    description: 'Review submitted applications, evaluate documentary and regulatory compliance, assess fees and charges, record findings, and assign evaluators.',
+    badge: 'Assessment',
+    icon: FileCheck,
+    isCrud: true,
+    stats: [
+      { label: 'In Assessment', value: '—' },
+      { label: 'Unassigned', value: '—' },
+      { label: 'Overdue', value: '—', hint: 'More than 5 days assigned' },
+    ],
+    table: {
+      columns: ['Application', 'Proponent', 'Stage', 'Evaluator', 'Charges'],
+      rows: [
+        ['APP-NEW-0001', 'SkyPort Logistics Inc.', 'In Review', 'AO Santos', '₱610,000'],
+        ['APP-REN-0007', 'Delta AeroTech', 'For Recommendation', 'AO Cruz', '₱120,000'],
+        ['APP-NEW-0012', 'Metro Agro Trading', 'Unassigned', '—', '—'],
+      ],
+    },
+  },
   'verification:pending': {
     title: 'Pending Document Verification',
     description: 'Queue of SEC, DTI, BIR and permit documents awaiting admin verification.',

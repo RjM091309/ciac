@@ -3,6 +3,7 @@ import {
   Briefcase,
   CalendarClock,
   ChevronRight,
+  ClipboardCheck,
   FileCheck,
   Globe,
   LayoutDashboard,
@@ -267,6 +268,24 @@ export function AppSidebar({
                   label="Requirement Categories"
                   active={view === 'settings:requirement-categories'}
                   onClick={() => onViewChange('settings:requirement-categories')}
+                />}
+              </SidebarDropdown>
+            </div>
+          </SidebarGroup>
+
+          <SidebarGroup title="Assessment & Evaluation" collapsed={collapsed}>
+            <div className="flex flex-col gap-1.5">
+              <SidebarDropdown
+                icon={ClipboardCheck}
+                label="Assessment"
+                collapsed={collapsed}
+                isOpen={openDropdownId === 'assessment'}
+                onToggle={() => toggleDropdown('assessment')}
+              >
+                {canView('assessment:queue') && <SidebarSubItem
+                  label="Evaluation Queue"
+                  active={view === 'assessment:queue'}
+                  onClick={() => onViewChange('assessment:queue')}
                 />}
               </SidebarDropdown>
             </div>

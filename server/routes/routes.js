@@ -29,6 +29,7 @@ module.exports = function pageRouter(app) {
   app.use("/api/roles", require("./r_roles"));
   app.use("/api/proponents", require("./r_proponents"));
   app.use("/api/applications", require("./r_applications"));
+  app.use("/api/assessments", require("./r_assessments"));
   app.use("/api/contracts", require("./r_contracts"));
   app.use("/api/notifications", require("./r_notifications"));
   app.use("/api/requirements", require("./r_requirements"));
