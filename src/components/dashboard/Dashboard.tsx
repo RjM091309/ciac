@@ -1,8 +1,31 @@
 import React, { useEffect, useState } from 'react';
-import { ChevronLeft, ChevronRight, CircleDot, Clock, FileText, MoreHorizontal, Plus, Rocket, Target, TrendingUp, User, Users, Zap } from 'lucide-react';
+import { Building2, ChevronLeft, ChevronRight, CircleDot, Clock, FileText, MoreHorizontal, Plus, Rocket, Target, TrendingUp, XCircle } from 'lucide-react';
 import { motion } from 'motion/react';
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip } from 'recharts';
 import { cn } from '../../lib/utils';
+
+export type AdminDashboardData = {
+  totals: {
+    registeredBusinesses: number;
+    totalBusinesses: number;
+    totalApplications: number;
+    newApplications: number;
+    renewalApplications: number;
+    applicationsToday: number;
+  };
+  statusBreakdown: { pending: number; approved: number; rejected: number; returned: number };
+  requirements: { total: number; verified: number };
+  monthlyTrend: { label: string; total: number; approved: number }[];
+  categoryCompletion: { category_name: string; total: number; verified: number }[];
+};
+
+const RING_COLORS = ['#3b82f6', '#22c55e', '#f59e0b', '#a855f7'];
+const CATEGORY_ICON_COLORS = [
+  { color: 'text-blue-400', bgColor: 'bg-blue-400/10' },
+  { color: 'text-emerald-400', bgColor: 'bg-emerald-400/10' },
+  { color: 'text-amber-400', bgColor: 'bg-amber-400/10' },
+  { color: 'text-secondary', bgColor: 'bg-zinc-500/10' },
+];
 
 const RadialProgress = ({
   value,
@@ -116,7 +139,7 @@ const MetricCard = ({
   </div>
 );
 
-export function Dashboard() {
+export function Dashboard({ data }: { data: AdminDashboardData | null }) {
   const [currentTime, setCurrentTime] = useState(new Date());
 
   useEffect(() => {
@@ -136,6 +159,28 @@ export function Dashboard() {
   const month = currentTime.getMonth();
   const daysInMonth = new Date(year, month + 1, 0).getDate();
   const startWeekday = new Date(year, month, 1).getDay();
+
+  const totals = data?.totals ?? {
+    registeredBusinesses: 0,
+    totalBusinesses: 0,
+    totalApplications: 0,
+    newApplications: 0,
+    renewalApplications: 0,
+    applicationsToday: 0,
+  };
+  const statusBreakdown = data?.statusBreakdown ?? { pending: 0, approved: 0, rejected: 0, returned: 0 };
+  const requirements = data?.requirements ?? { total: 0, verified: 0 };
+  const monthlyTrend = data?.monthlyTrend ?? [];
+  const categoryCompletion = data?.categoryCompletion ?? [];
+
+  const overallPct = requirements.total > 0 ? Math.round((requirements.verified / requirements.total) * 100) : 0;
+  const rejectedReturned = statusBreakdown.rejected + statusBreakdown.returned;
+  const topCategories = categoryCompletion.slice(0, 3).map((c) => ({
+    ...c,
+    pct: c.total > 0 ? Math.round((c.verified / c.total) * 100) : 0,
+  }));
+  const thisMonth = monthlyTrend[monthlyTrend.length - 1]?.total ?? 0;
+  const lastMonth = monthlyTrend[monthlyTrend.length - 2]?.total ?? 0;
 
   return (
     <>
@@ -191,10 +236,10 @@ export function Dashboard() {
                       className="text-2xl sm:text-3xl md:text-4xl font-bold"
                       style={{ color: 'var(--text)' }}
                     >
-                      18
+                      {totals.applicationsToday}
                     </span>
                     <span className="text-[11px] text-secondary font-medium tracking-tight">
-                      active applications today
+                      applications submitted today
                     </span>
                   </div>
                   <FileText
@@ -221,10 +266,34 @@ export function Dashboard() {
 
         {/* Metrics row directly under hero */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-4 touch-landscape-metrics">
-          <MetricCard title="Total Applications" value="126" icon={FileText} trend="up" trendValue="+8 this week" />
-          <MetricCard title="Complete Requirements" value="89" icon={Users} trend="up" trendValue="71% cleared" />
-          <MetricCard title="Pending Verification" value="27" icon={TrendingUp} trend="down" trendValue="-4 vs. last week" />
-          <MetricCard title="Permits Near Expiry" value="9" icon={Clock} trend="up" trendValue="next 60 days" />
+          <MetricCard
+            title="Total Applications"
+            value={totals.totalApplications}
+            icon={FileText}
+            trend="up"
+            trendValue={`${totals.newApplications} new · ${totals.renewalApplications} renewal`}
+          />
+          <MetricCard
+            title="Registered Businesses"
+            value={totals.registeredBusinesses}
+            icon={Building2}
+            trend="up"
+            trendValue={`${totals.totalBusinesses} on record`}
+          />
+          <MetricCard
+            title="Pending Review"
+            value={statusBreakdown.pending}
+            icon={Clock}
+            trend={statusBreakdown.pending > 0 ? 'down' : 'up'}
+            trendValue={`${statusBreakdown.approved} approved`}
+          />
+          <MetricCard
+            title="Rejected / Returned"
+            value={rejectedReturned}
+            icon={XCircle}
+            trend={rejectedReturned > 0 ? 'down' : 'up'}
+            trendValue={`${statusBreakdown.rejected} rejected, ${statusBreakdown.returned} returned`}
+          />
           </div>
         </div>
 
@@ -239,7 +308,7 @@ export function Dashboard() {
           >
             Requirements Overview
           </h4>
-          <p className="text-xs text-secondary mb-4 md:mb-6">Completion rate by document group</p>
+          <p className="text-xs text-secondary mb-4 md:mb-6">Completion rate by requirement category</p>
 
           <div
             className="flex gap-2 p-1 rounded-xl mb-4 md:mb-6 border"
@@ -273,9 +342,20 @@ export function Dashboard() {
             <div className="flex flex-col md:flex-row items-center md:items-center gap-5 md:gap-5 touch-landscape-requirements-row">
               <div className="relative w-32 h-32 sm:w-36 sm:h-36 md:w-40 md:h-40 shrink-0 flex items-center justify-center">
                 <svg className="w-full h-full" viewBox="0 0 240 240" preserveAspectRatio="xMidYMid meet">
-                  <RadialProgress value={85} radius={90} strokeWidth={12} color="#3b82f6" delay={0} />
-                  <RadialProgress value={84} radius={70} strokeWidth={12} color="#22c55e" delay={0.2} />
-                  <RadialProgress value={78} radius={50} strokeWidth={12} color="#64748b" delay={0.4} />
+                  {topCategories.length > 0 ? (
+                    topCategories.map((cat, i) => (
+                      <RadialProgress
+                        key={cat.category_name}
+                        value={cat.pct}
+                        radius={90 - i * 20}
+                        strokeWidth={12}
+                        color={RING_COLORS[i % RING_COLORS.length]}
+                        delay={i * 0.2}
+                      />
+                    ))
+                  ) : (
+                    <RadialProgress value={overallPct} radius={90} strokeWidth={12} color="#3b82f6" delay={0} />
+                  )}
                 </svg>
                 <div className="absolute inset-0 flex items-center justify-center">
                   <motion.span
@@ -285,56 +365,40 @@ export function Dashboard() {
                     className="text-lg md:text-xl font-extrabold tracking-tight"
                     style={{ color: 'var(--text)' }}
                   >
-                    85%
+                    {overallPct}%
                   </motion.span>
                 </div>
               </div>
 
               <div className="w-full min-w-0 md:flex-1 space-y-4 md:space-y-5">
-                {[
-                  {
-                    label: 'Proponent & Company',
-                    value: '92%',
-                    subtext: 'LOI, company profile, board resolution, registrations, IDs',
-                    icon: CircleDot,
-                    color: 'text-blue-400',
-                    bgColor: 'bg-blue-400/10',
-                  },
-                  {
-                    label: 'BIR Documents',
-                    value: '84%',
-                    subtext: 'Tax clearance, registration, receipts, POS/CRM permits',
-                    icon: User,
-                    color: 'text-emerald-400',
-                    bgColor: 'bg-emerald-400/10',
-                  },
-                  {
-                    label: 'CDC Permits & Licenses',
-                    value: '78%',
-                    subtext: 'Environmental, fire safety, occupancy, sanitary, others',
-                    icon: Clock,
-                    color: 'text-secondary',
-                    bgColor: 'bg-zinc-500/10',
-                  },
-                ].map((item) => (
-                  <div key={item.label} className="flex items-center justify-between gap-3 group min-w-0">
-                    <div className="flex items-center gap-3 min-w-0 flex-1">
-                      <div className={cn('p-2 rounded-full shrink-0 transition-colors', item.bgColor)}>
-                        <item.icon size={16} className={item.color} />
+                {topCategories.length > 0 ? (
+                  topCategories.map((cat, i) => {
+                    const style = CATEGORY_ICON_COLORS[i % CATEGORY_ICON_COLORS.length];
+                    return (
+                      <div key={cat.category_name} className="flex items-center justify-between gap-3 group min-w-0">
+                        <div className="flex items-center gap-3 min-w-0 flex-1">
+                          <div className={cn('p-2 rounded-full shrink-0 transition-colors', style.bgColor)}>
+                            <CircleDot size={16} className={style.color} />
+                          </div>
+                          <div className="min-w-0">
+                            <p
+                              className="text-xs font-bold leading-none mb-1 truncate sm:whitespace-normal"
+                              style={{ color: 'var(--text)' }}
+                            >
+                              {cat.category_name}
+                            </p>
+                            <p className="text-[10px] text-secondary leading-none">
+                              {cat.verified}/{cat.total} requirements verified
+                            </p>
+                          </div>
+                        </div>
+                        <span className={cn('text-xs font-bold shrink-0', style.color)}>{cat.pct}%</span>
                       </div>
-                      <div className="min-w-0">
-                        <p
-                          className="text-xs font-bold leading-none mb-1 truncate sm:whitespace-normal"
-                          style={{ color: 'var(--text)' }}
-                        >
-                          {item.label}
-                        </p>
-                        <p className="text-[10px] text-secondary leading-none line-clamp-2">{item.subtext}</p>
-                      </div>
-                    </div>
-                    <span className={cn('text-xs font-bold shrink-0', item.color)}>{item.value}</span>
-                  </div>
-                ))}
+                    );
+                  })
+                ) : (
+                  <p className="text-xs text-secondary">No requirement categories with data yet.</p>
+                )}
               </div>
             </div>
           </div>
@@ -510,21 +574,15 @@ export function Dashboard() {
               Application Pipeline
             </h4>
             <div className="flex items-center gap-1 text-[10px] font-bold text-secondary cursor-pointer hover:text-[var(--text)] transition-colors shrink-0">
-              This Quarter <ChevronRight size={10} className="rotate-90" />
+              Last 6 Months <ChevronRight size={10} className="rotate-90" />
             </div>
           </div>
-          <p className="text-[10px] text-secondary mb-4 sm:mb-6">Applications by processing stage</p>
+          <p className="text-[10px] text-secondary mb-4 sm:mb-6">Applications submitted per month</p>
 
           <div className="h-40 sm:h-48 w-full min-h-[160px] min-w-0">
             <ResponsiveContainer width="100%" height="100%" minWidth={0}>
               <AreaChart
-                data={[
-                  { name: 'Draft', value: 18 },
-                  { name: 'Submitted', value: 42 },
-                  { name: 'For Evaluation', value: 31 },
-                  { name: 'For Board Approval', value: 21 },
-                  { name: 'Approved', value: 14 },
-                ]}
+                data={monthlyTrend.map((m) => ({ name: m.label, value: m.total }))}
               >
                 <defs>
                   <linearGradient id="colorValue" x1="0" y1="0" x2="0" y2="1">
@@ -563,21 +621,21 @@ export function Dashboard() {
 
           <div className="flex justify-between mt-3 sm:mt-4">
             <div className="flex flex-col">
-              <span className="text-[10px] font-bold text-secondary uppercase tracking-widest">Min</span>
+              <span className="text-[10px] font-bold text-secondary uppercase tracking-widest">Last Month</span>
               <span
                 className="text-xs font-bold"
                 style={{ color: 'var(--text)' }}
               >
-                $30k
+                {lastMonth}
               </span>
             </div>
             <div className="flex flex-col items-end">
-              <span className="text-[10px] font-bold text-secondary uppercase tracking-widest">Max</span>
+              <span className="text-[10px] font-bold text-secondary uppercase tracking-widest">This Month</span>
               <span
                 className="text-xs font-bold"
                 style={{ color: 'var(--text)' }}
               >
-                $60k
+                {thisMonth}
               </span>
             </div>
           </div>

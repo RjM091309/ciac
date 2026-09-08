@@ -1,12 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import { Loader2 } from 'lucide-react';
-import { Dashboard } from './Dashboard';
+import { Dashboard, type AdminDashboardData } from './Dashboard';
 import { OfficerDashboard, type OfficerDashboardData } from './OfficerDashboard';
 import { ProponentDashboard, type ProponentDashboardData } from './ProponentDashboard';
 
 type DashboardState =
   | { status: 'loading' }
-  | { status: 'admin' }
+  | { status: 'admin'; data: AdminDashboardData | null }
   | { status: 'officer'; data: OfficerDashboardData }
   | { status: 'proponent'; data: ProponentDashboardData };
 
@@ -29,9 +29,9 @@ export function RoleDashboard() {
           setState({ status: 'proponent', data: json?.data });
           return;
         }
-        setState({ status: 'admin' });
+        setState({ status: 'admin', data: json?.data ?? null });
       } catch {
-        if (!cancelled) setState({ status: 'admin' });
+        if (!cancelled) setState({ status: 'admin', data: null });
       }
     }
     load();
@@ -50,5 +50,5 @@ export function RoleDashboard() {
 
   if (state.status === 'officer') return <OfficerDashboard data={state.data} />;
   if (state.status === 'proponent') return <ProponentDashboard data={state.data} />;
-  return <Dashboard />;
+  return <Dashboard data={state.data} />;
 }

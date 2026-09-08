@@ -235,6 +235,28 @@ async function listAllApplicationsWithProgress() {
   return rows;
 }
 
+/** System-wide requirement completion grouped by requirement category, for the
+ * admin dashboard's "Requirements Overview" widget. */
+async function getRequirementCompletionByCategory() {
+  await ensureSchema();
+  const rows = await selectData(`
+    SELECT
+      ISNULL(rc.name, 'Uncategorized') AS category_name,
+      COUNT(1) AS total,
+      SUM(CASE WHEN ar.status = 'VERIFIED' THEN 1 ELSE 0 END) AS verified
+    FROM dbo.application_requirements ar
+    INNER JOIN dbo.requirements r ON r.id = ar.requirement_id
+    LEFT JOIN dbo.requirement_categories rc ON rc.id = r.category_id
+    GROUP BY ISNULL(rc.name, 'Uncategorized')
+    ORDER BY total DESC
+  `);
+  return rows.map((r) => ({
+    category_name: r.category_name,
+    total: Number(r.total || 0),
+    verified: Number(r.verified || 0),
+  }));
+}
+
 async function getMostActiveProponentId() {
   await ensureSchema();
   const rows = await selectData(`
@@ -676,6 +698,7 @@ module.exports = {
   ensureSchema,
   listApplications,
   listAllApplicationsWithProgress,
+  getRequirementCompletionByCategory,
   getMostActiveProponentId,
   listApplicationsForProponent,
   listApplicationsForOfficer,
