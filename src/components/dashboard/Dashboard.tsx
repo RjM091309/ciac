@@ -1,8 +1,27 @@
 import React, { useEffect, useState } from 'react';
-import { Building2, ChevronLeft, ChevronRight, CircleDot, Clock, FileText, MoreHorizontal, Plus, Rocket, Target, TrendingUp, XCircle } from 'lucide-react';
+import {
+  AlertTriangle,
+  Building2,
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  CircleDot,
+  Clock,
+  FileText,
+  Gauge,
+  MoreHorizontal,
+  Plus,
+  Rocket,
+  Trash2,
+  TrendingUp,
+  XCircle,
+} from 'lucide-react';
 import { motion } from 'motion/react';
-import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip } from 'recharts';
+import { Area, AreaChart, Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis } from 'recharts';
+import { toast } from 'sonner';
 import { cn } from '../../lib/utils';
+
+type TrendPoint = { label: string; total: number; approved: number };
 
 export type AdminDashboardData = {
   totals: {
@@ -13,11 +32,209 @@ export type AdminDashboardData = {
     renewalApplications: number;
     applicationsToday: number;
   };
-  statusBreakdown: { pending: number; approved: number; rejected: number; returned: number };
+  statusBreakdown: { draft?: number; pending: number; approved: number; rejected: number; returned: number };
   requirements: { total: number; verified: number };
-  monthlyTrend: { label: string; total: number; approved: number }[];
+  monthlyTrend: TrendPoint[];
+  trends?: {
+    daily: TrendPoint[];
+    weekly: TrendPoint[];
+    monthly: TrendPoint[];
+    quarterly: TrendPoint[];
+    yearly: TrendPoint[];
+  };
   categoryCompletion: { category_name: string; total: number; verified: number }[];
+  turnaround?: {
+    avgTurnaroundDays: number | null;
+    completedCount: number;
+    openCount: number;
+    avgOpenAgeDays: number | null;
+    oldestOpenDays: number | null;
+  };
+  attention?: { application_id: number; application_no: string; proponent_name: string | null; status: string; days_waiting: number }[];
 };
+
+type QuickTask = { id: number; title: string; is_done: boolean; created_at: string };
+
+/** DBM-06 (real half): a personal to-do list backed by /api/quick-tasks —
+ * replaces what used to be three hardcoded sample rows with no storage. */
+function QuickTasks() {
+  const [tasks, setTasks] = useState<QuickTask[]>([]);
+  const [tab, setTab] = useState<'active' | 'done'>('active');
+  const [draft, setDraft] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  async function load() {
+    try {
+      const res = await fetch('/api/quick-tasks', { credentials: 'include' });
+      const json = await res.json().catch(() => ({}));
+      if (res.ok) setTasks(json?.data ?? []);
+    } catch {
+      // Quiet failure — this widget is a convenience, not core dashboard data.
+    }
+  }
+
+  useEffect(() => {
+    load();
+  }, []);
+
+  const active = tasks.filter((t) => !t.is_done);
+  const done = tasks.filter((t) => t.is_done);
+  const visible = tab === 'active' ? active : done;
+
+  async function addTask() {
+    const title = draft.trim();
+    if (!title || busy) return;
+    setBusy(true);
+    try {
+      const res = await fetch('/api/quick-tasks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ title }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.message || 'Failed to add task');
+      setTasks((prev) => [json.data, ...prev]);
+      setDraft('');
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to add task');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function toggleTask(task: QuickTask) {
+    setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, is_done: !t.is_done } : t)));
+    try {
+      await fetch(`/api/quick-tasks/${task.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ is_done: !task.is_done }),
+      });
+    } catch {
+      load();
+    }
+  }
+
+  async function removeTask(id: number) {
+    setTasks((prev) => prev.filter((t) => t.id !== id));
+    try {
+      await fetch(`/api/quick-tasks/${id}`, { method: 'DELETE', credentials: 'include' });
+    } catch {
+      load();
+    }
+  }
+
+  return (
+    <div
+      className="col-span-12 md:col-span-6 xl:col-span-5 glass-card p-4 sm:p-6 !border-transparent w-full min-w-0 touch-landscape-no-lift"
+      style={{ backgroundColor: 'var(--surface)' }}
+    >
+      <h4 className="text-sm font-bold mb-1" style={{ color: 'var(--text)' }}>
+        Quick Tasks
+      </h4>
+      <p className="text-[10px] text-secondary mb-4 sm:mb-6">Personal follow-ups — only visible to you</p>
+
+      <div
+        className="flex gap-2 p-1 rounded-xl mb-4 sm:mb-6 border"
+        style={{ backgroundColor: 'var(--control-bg)', borderColor: 'var(--border-subtle)' }}
+      >
+        <button
+          onClick={() => setTab('active')}
+          className="flex-1 py-2.5 sm:py-1.5 min-h-[44px] sm:min-h-0 rounded-lg text-[10px] font-bold transition-colors"
+          style={
+            tab === 'active'
+              ? { backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }
+              : { color: 'var(--text-muted)' }
+          }
+        >
+          Active ({active.length})
+        </button>
+        <button
+          onClick={() => setTab('done')}
+          className="flex-1 py-2.5 sm:py-1.5 min-h-[44px] sm:min-h-0 rounded-lg text-[10px] font-bold transition-colors"
+          style={
+            tab === 'done'
+              ? { backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }
+              : { color: 'var(--text-muted)' }
+          }
+        >
+          Completed ({done.length})
+        </button>
+      </div>
+
+      <div className="space-y-2 sm:space-y-3 mb-4 sm:mb-6 min-h-[2.5rem]">
+        {visible.length === 0 ? (
+          <p className="text-[11px] text-secondary">
+            {tab === 'active' ? 'No open tasks — add one below.' : 'Nothing completed yet.'}
+          </p>
+        ) : (
+          visible.map((task) => (
+            <div
+              key={task.id}
+              className="flex items-center justify-between gap-2 p-3 rounded-xl transition-all group min-w-0"
+              style={{
+                backgroundColor: 'color-mix(in oklab, var(--surface-hover) 70%, transparent)',
+                border: '1px solid var(--border-subtle)',
+              }}
+            >
+              <button
+                onClick={() => toggleTask(task)}
+                className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1 text-left cursor-pointer"
+              >
+                <span
+                  className="w-4 h-4 rounded-full border shrink-0 flex items-center justify-center"
+                  style={{
+                    borderColor: task.is_done ? 'var(--nav-active-bg)' : 'var(--border-subtle)',
+                    backgroundColor: task.is_done ? 'var(--nav-active-bg)' : 'transparent',
+                  }}
+                >
+                  {task.is_done ? <Check size={10} style={{ color: 'var(--nav-active-text)' }} /> : null}
+                </span>
+                <p
+                  className={cn('text-xs font-bold truncate min-w-0', task.is_done && 'line-through opacity-60')}
+                  style={{ color: 'var(--text)' }}
+                >
+                  {task.title}
+                </p>
+              </button>
+              <button
+                onClick={() => removeTask(task.id)}
+                className="shrink-0 p-1 rounded-md text-secondary hover:text-rose-500 cursor-pointer opacity-0 group-hover:opacity-100 transition-opacity"
+                aria-label="Delete task"
+              >
+                <Trash2 size={13} />
+              </button>
+            </div>
+          ))
+        )}
+      </div>
+
+      <div className="relative">
+        <input
+          type="text"
+          placeholder="Add a quick task..."
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') addTask();
+          }}
+          className="w-full rounded-2xl pr-12 pl-4 py-2.5 text-xs focus:outline-none focus:ring-1 transition-all"
+          style={{ backgroundColor: 'var(--input-bg)', border: '1px solid var(--input-border)', color: 'var(--text)' }}
+        />
+        <button
+          onClick={addTask}
+          disabled={busy || !draft.trim()}
+          className="absolute inset-y-1 right-1 px-3 rounded-2xl transition-colors flex items-center justify-center disabled:opacity-40 cursor-pointer"
+          style={{ backgroundColor: 'var(--control-bg)' }}
+        >
+          <Plus size={14} style={{ color: 'var(--text)' }} />
+        </button>
+      </div>
+    </div>
+  );
+}
 
 const RING_COLORS = ['#3b82f6', '#22c55e', '#f59e0b', '#a855f7'];
 const CATEGORY_ICON_COLORS = [
@@ -172,6 +389,21 @@ export function Dashboard({ data }: { data: AdminDashboardData | null }) {
   const requirements = data?.requirements ?? { total: 0, verified: 0 };
   const monthlyTrend = data?.monthlyTrend ?? [];
   const categoryCompletion = data?.categoryCompletion ?? [];
+  const turnaround = data?.turnaround ?? null;
+  const attention = data?.attention ?? [];
+
+  // DBM-04: daily/weekly/monthly/quarterly/yearly reporting periods, all real
+  // (backend-bucketed) counts — this tab strip is what actually drives the
+  // Application Pipeline chart below, not just cosmetic.
+  const [period, setPeriod] = useState<'daily' | 'weekly' | 'monthly' | 'quarterly' | 'yearly'>('monthly');
+  const PERIOD_LABELS: Record<typeof period, string> = {
+    daily: 'Last 14 Days',
+    weekly: 'Last 8 Weeks',
+    monthly: 'Last 6 Months',
+    quarterly: 'Last 4 Quarters',
+    yearly: 'Last 3 Years',
+  };
+  const activeTrend = data?.trends?.[period] ?? (period === 'monthly' ? monthlyTrend : []);
 
   const overallPct = requirements.total > 0 ? Math.round((requirements.verified / requirements.total) * 100) : 0;
   const rejectedReturned = statusBreakdown.rejected + statusBreakdown.returned;
@@ -179,8 +411,6 @@ export function Dashboard({ data }: { data: AdminDashboardData | null }) {
     ...c,
     pct: c.total > 0 ? Math.round((c.verified / c.total) * 100) : 0,
   }));
-  const thisMonth = monthlyTrend[monthlyTrend.length - 1]?.total ?? 0;
-  const lastMonth = monthlyTrend[monthlyTrend.length - 2]?.total ?? 0;
 
   return (
     <>
@@ -311,27 +541,6 @@ export function Dashboard({ data }: { data: AdminDashboardData | null }) {
           <p className="text-xs text-secondary mb-4 md:mb-6">Completion rate by requirement category</p>
 
           <div
-            className="flex gap-2 p-1 rounded-xl mb-4 md:mb-6 border"
-            style={{
-              backgroundColor: 'var(--control-bg)',
-              borderColor: 'var(--border-subtle)',
-            }}
-          >
-            <button
-              className="flex-1 flex items-center justify-center gap-1.5 sm:gap-2 py-2.5 sm:py-2 min-h-[44px] rounded-lg text-xs font-bold shadow-sm"
-              style={{
-                backgroundColor: 'var(--nav-active-bg)',
-                color: 'var(--nav-active-text)',
-              }}
-            >
-              <Target size={14} /> <span className="truncate">Performance</span>
-            </button>
-            <button className="flex-1 flex items-center justify-center gap-1.5 sm:gap-2 py-2.5 sm:py-2 min-h-[44px] text-secondary text-xs font-bold hover:text-[var(--text)] transition-colors">
-              <TrendingUp size={14} /> <span className="truncate">Trends</span>
-            </button>
-          </div>
-
-          <div
             className="flex-1 rounded-2xl p-4 md:p-6 border flex flex-col"
             style={{
               backgroundColor: 'var(--control-bg)',
@@ -404,96 +613,58 @@ export function Dashboard({ data }: { data: AdminDashboardData | null }) {
           </div>
         </div>
 
-        {/* Quick Tasks */}
-        <div className="col-span-12 md:col-span-6 xl:col-span-5 glass-card p-4 sm:p-6 !border-transparent w-full min-w-0 xl:-mt-18.5 max-xl:mt-0 touch-landscape-no-lift" style={{ backgroundColor: 'var(--surface)' }}>
-          <h4
-            className="text-sm font-bold mb-1"
-            style={{ color: 'var(--text)' }}
-          >
-            Quick Tasks
-          </h4>
-          <p className="text-[10px] text-secondary mb-4 sm:mb-6">Follow-ups for lease requirements</p>
+        <QuickTasks />
 
-          <div
-            className="flex gap-2 p-1 rounded-xl mb-4 sm:mb-6 border"
-            style={{
-              backgroundColor: 'var(--control-bg)',
-              borderColor: 'var(--border-subtle)',
-            }}
-          >
-            <button
-              className="flex-1 py-2.5 sm:py-1.5 min-h-[44px] sm:min-h-0 rounded-lg text-[10px] font-bold shadow-sm"
-              style={{
-                backgroundColor: 'var(--nav-active-bg)',
-                color: 'var(--nav-active-text)',
-              }}
-            >
-              Active (3)
-            </button>
-            <button className="flex-1 py-2.5 sm:py-1.5 min-h-[44px] sm:min-h-0 text-secondary text-[10px] font-bold hover:text-[var(--text)] transition-colors">
-              Completed (12)
-            </button>
+        {/* Needs Attention — real oldest-waiting applications, replaces what
+            used to be nothing (the old widget only had the mock list above). */}
+        <div
+          className="col-span-12 xl:col-span-4 glass-card p-4 sm:p-6 !border-transparent w-full min-w-0 touch-landscape-no-lift"
+          style={{ backgroundColor: 'var(--surface)' }}
+        >
+          <div className="flex items-center gap-2 mb-1">
+            <AlertTriangle size={14} className="text-amber-500 shrink-0" />
+            <h4 className="text-sm font-bold" style={{ color: 'var(--text)' }}>
+              Needs Attention
+            </h4>
           </div>
+          <p className="text-[10px] text-secondary mb-4 sm:mb-6">Oldest applications still awaiting action</p>
 
-          <div className="space-y-2 sm:space-y-3 mb-4 sm:mb-6">
-            {[
-              { title: 'Call Proponent A for missing LOI', priority: 'High', time: '2h ago' },
-              { title: 'Verify BIR Tax Clearance for Proponent B', priority: 'Medium', time: '5h ago' },
-              { title: 'Confirm Fire Safety Inspection schedule for Warehouse C', priority: 'Low', time: 'Tomorrow' },
-            ].map((task) => (
-              <div
-                key={task.title}
-                className="flex items-center justify-between gap-2 p-3 rounded-xl transition-all group cursor-pointer min-w-0"
-                style={{
-                  backgroundColor: 'color-mix(in oklab, var(--surface-hover) 70%, transparent)',
-                  border: '1px solid var(--border-subtle)',
-                }}
-              >
-                <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
-                  <div
-                    className={cn(
-                      'w-2 h-2 rounded-full shrink-0',
-                      task.priority === 'High'
-                        ? 'bg-rose-500'
-                        : task.priority === 'Medium'
-                          ? 'bg-amber-500'
-                          : 'bg-emerald-500',
-                    )}
-                  ></div>
-                  <p
-                    className="text-xs font-bold transition-colors truncate min-w-0"
-                    style={{ color: 'var(--text)' }}
+          {attention.length === 0 ? (
+            <p className="text-[11px] text-secondary">Nothing waiting — the queue is clear.</p>
+          ) : (
+            <div className="space-y-2">
+              {attention.map((item) => (
+                <div
+                  key={item.application_id}
+                  className="flex items-center justify-between gap-2 p-2.5 rounded-xl min-w-0"
+                  style={{
+                    backgroundColor: 'color-mix(in oklab, var(--surface-hover) 70%, transparent)',
+                    border: '1px solid var(--border-subtle)',
+                  }}
+                >
+                  <div className="min-w-0">
+                    <p className="text-[11px] font-bold truncate" style={{ color: 'var(--text)' }}>
+                      {item.application_no}
+                    </p>
+                    <p className="text-[10px] text-secondary truncate">{item.proponent_name || 'Unknown business'}</p>
+                  </div>
+                  <span
+                    className="shrink-0 text-[10px] font-bold px-2 py-1 rounded-full"
+                    style={{
+                      backgroundColor: item.days_waiting > 14 ? 'rgba(244,63,94,.12)' : 'var(--control-bg)',
+                      color: item.days_waiting > 14 ? '#f43f5e' : 'var(--text-muted)',
+                    }}
                   >
-                    {task.title}
-                  </p>
+                    {item.days_waiting}d
+                  </span>
                 </div>
-                <span className="text-[10px] text-secondary shrink-0">{task.time}</span>
-              </div>
-            ))}
-          </div>
-
-          <div className="relative">
-            <input
-              type="text"
-              placeholder="Add a quick task..."
-              className="w-full rounded-2xl pr-12 pl-4 py-2.5 text-xs focus:outline-none focus:ring-1 transition-all"
-              style={{
-                backgroundColor: 'var(--input-bg)',
-                border: '1px solid var(--input-border)',
-                color: 'var(--text)',
-              }}
-            />
-            <button
-              className="absolute inset-y-1 right-1 px-3 rounded-2xl transition-colors flex items-center justify-center"
-              style={{ backgroundColor: 'var(--control-bg)' }}
-            >
-              <Plus size={14} style={{ color: 'var(--text)' }} />
-            </button>
-          </div>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Calendar */}
-        <div className="col-span-12 md:col-span-6 xl:col-span-3 glass-card p-4 sm:p-6 !border-transparent w-full min-w-0 xl:-mt-18.5 max-xl:mt-0 touch-landscape-no-lift" style={{ backgroundColor: 'var(--surface)' }}>
+        <div className="col-span-12 md:col-span-6 xl:col-span-3 glass-card p-4 sm:p-6 !border-transparent w-full min-w-0 touch-landscape-no-lift" style={{ backgroundColor: 'var(--surface)' }}>
           <h4
             className="text-sm font-bold mb-1"
             style={{ color: 'var(--text)' }}
@@ -563,27 +734,37 @@ export function Dashboard({ data }: { data: AdminDashboardData | null }) {
 
         {/* Application Pipeline Analytics */}
         <div
-          className="col-span-12 xl:col-span-4 max-[1024px]:col-span-12 glass-card p-4 sm:p-6 !border-transparent"
+          className="col-span-12 xl:col-span-5 max-[1024px]:col-span-12 glass-card p-4 sm:p-6 !border-transparent"
           style={{ backgroundColor: 'var(--surface)' }}
         >
-          <div className="flex justify-between items-start gap-2 mb-1 min-w-0">
-            <h4
-              className="text-sm font-bold truncate min-w-0"
-              style={{ color: 'var(--text)' }}
-            >
-              Application Pipeline
-            </h4>
-            <div className="flex items-center gap-1 text-[10px] font-bold text-secondary cursor-pointer hover:text-[var(--text)] transition-colors shrink-0">
-              Last 6 Months <ChevronRight size={10} className="rotate-90" />
+          <div className="flex justify-between items-start gap-2 mb-3 min-w-0 flex-wrap">
+            <div>
+              <h4 className="text-sm font-bold truncate min-w-0" style={{ color: 'var(--text)' }}>
+                Application Pipeline
+              </h4>
+              <p className="text-[10px] text-secondary">{PERIOD_LABELS[period]}</p>
+            </div>
+            <div className="flex gap-0.5 p-0.5 rounded-lg border shrink-0" style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'var(--control-bg)' }}>
+              {(['daily', 'weekly', 'monthly', 'quarterly', 'yearly'] as const).map((p) => (
+                <button
+                  key={p}
+                  onClick={() => setPeriod(p)}
+                  className="px-2 py-1 rounded-md text-[9px] font-bold uppercase tracking-wide transition-colors"
+                  style={
+                    period === p
+                      ? { backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }
+                      : { color: 'var(--text-muted)' }
+                  }
+                >
+                  {p.slice(0, 1)}
+                </button>
+              ))}
             </div>
           </div>
-          <p className="text-[10px] text-secondary mb-4 sm:mb-6">Applications submitted per month</p>
 
           <div className="h-40 sm:h-48 w-full min-h-[160px] min-w-0">
             <ResponsiveContainer width="100%" height="100%" minWidth={0}>
-              <AreaChart
-                data={monthlyTrend.map((m) => ({ name: m.label, value: m.total }))}
-              >
+              <AreaChart data={activeTrend.map((m) => ({ name: m.label, value: m.total }))}>
                 <defs>
                   <linearGradient id="colorValue" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="5%" stopColor="var(--primaryColor)" stopOpacity={0.12} />
@@ -596,6 +777,7 @@ export function Dashboard({ data }: { data: AdminDashboardData | null }) {
                   stroke="var(--border-subtle)"
                   strokeOpacity={0.6}
                 />
+                <XAxis dataKey="name" tick={{ fontSize: 9, fill: 'var(--text-muted)' }} axisLine={false} tickLine={false} />
                 <Tooltip
                   contentStyle={{
                     backgroundColor: 'var(--surface)',
@@ -621,22 +803,85 @@ export function Dashboard({ data }: { data: AdminDashboardData | null }) {
 
           <div className="flex justify-between mt-3 sm:mt-4">
             <div className="flex flex-col">
-              <span className="text-[10px] font-bold text-secondary uppercase tracking-widest">Last Month</span>
-              <span
-                className="text-xs font-bold"
-                style={{ color: 'var(--text)' }}
-              >
-                {lastMonth}
+              <span className="text-[10px] font-bold text-secondary uppercase tracking-widest">Previous</span>
+              <span className="text-xs font-bold" style={{ color: 'var(--text)' }}>
+                {activeTrend[activeTrend.length - 2]?.total ?? 0}
               </span>
             </div>
             <div className="flex flex-col items-end">
-              <span className="text-[10px] font-bold text-secondary uppercase tracking-widest">This Month</span>
-              <span
-                className="text-xs font-bold"
-                style={{ color: 'var(--text)' }}
-              >
-                {thisMonth}
+              <span className="text-[10px] font-bold text-secondary uppercase tracking-widest">Current</span>
+              <span className="text-xs font-bold" style={{ color: 'var(--text)' }}>
+                {activeTrend[activeTrend.length - 1]?.total ?? 0}
               </span>
+            </div>
+          </div>
+        </div>
+
+        {/* Status Breakdown — the pending/approved/rejected/returned split as
+            an actual chart (DBM-05), not just the four MetricCards above. */}
+        <div className="col-span-12 xl:col-span-4 glass-card p-4 sm:p-6 !border-transparent" style={{ backgroundColor: 'var(--surface)' }}>
+          <h4 className="text-sm font-bold mb-1" style={{ color: 'var(--text)' }}>
+            Status Breakdown
+          </h4>
+          <p className="text-[10px] text-secondary mb-4 sm:mb-6">Every application, by current status</p>
+          <div className="h-40 sm:h-48 w-full min-h-[160px] min-w-0">
+            <ResponsiveContainer width="100%" height="100%" minWidth={0}>
+              <BarChart
+                data={[
+                  { name: 'Pending', value: statusBreakdown.pending, fill: '#f59e0b' },
+                  { name: 'Approved', value: statusBreakdown.approved, fill: '#22c55e' },
+                  { name: 'Rejected', value: statusBreakdown.rejected, fill: '#ef4444' },
+                  { name: 'Returned', value: statusBreakdown.returned, fill: '#a855f7' },
+                ]}
+              >
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border-subtle)" strokeOpacity={0.6} />
+                <XAxis dataKey="name" tick={{ fontSize: 9, fill: 'var(--text-muted)' }} axisLine={false} tickLine={false} />
+                <Tooltip
+                  contentStyle={{
+                    backgroundColor: 'var(--surface)',
+                    border: '1px solid var(--border-subtle)',
+                    borderRadius: '12px',
+                    fontSize: '10px',
+                    color: 'var(--text)',
+                  }}
+                  cursor={{ fill: 'var(--control-bg)' }}
+                />
+                <Bar dataKey="value" radius={[6, 6, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        {/* Turnaround & Processing Performance (DBM-09) */}
+        <div className="col-span-12 xl:col-span-3 glass-card p-4 sm:p-6 !border-transparent" style={{ backgroundColor: 'var(--surface)' }}>
+          <div className="flex items-center gap-2 mb-1">
+            <Gauge size={14} className="shrink-0" style={{ color: 'var(--text)' }} />
+            <h4 className="text-sm font-bold" style={{ color: 'var(--text)' }}>
+              Processing Performance
+            </h4>
+          </div>
+          <p className="text-[10px] text-secondary mb-4 sm:mb-6">Submission to final decision</p>
+
+          <div className="space-y-4">
+            <div>
+              <span className="text-[10px] font-bold text-secondary uppercase tracking-widest">Avg. Turnaround</span>
+              <p className="text-xl font-bold" style={{ color: 'var(--text)' }}>
+                {turnaround?.avgTurnaroundDays != null ? `${turnaround.avgTurnaroundDays}d` : '—'}
+              </p>
+              <p className="text-[10px] text-secondary">across {turnaround?.completedCount ?? 0} decided applications</p>
+            </div>
+            <div className="h-px" style={{ backgroundColor: 'var(--border-subtle)' }} />
+            <div className="flex justify-between">
+              <div>
+                <span className="text-[10px] font-bold text-secondary uppercase tracking-widest">Open Now</span>
+                <p className="text-sm font-bold" style={{ color: 'var(--text)' }}>{turnaround?.openCount ?? 0}</p>
+              </div>
+              <div className="text-right">
+                <span className="text-[10px] font-bold text-secondary uppercase tracking-widest">Oldest Open</span>
+                <p className="text-sm font-bold" style={{ color: 'var(--text)' }}>
+                  {turnaround?.oldestOpenDays != null ? `${turnaround.oldestOpenDays}d` : '—'}
+                </p>
+              </div>
             </div>
           </div>
         </div>

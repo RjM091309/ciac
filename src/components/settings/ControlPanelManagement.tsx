@@ -15,6 +15,7 @@ type Role = {
 
 type SidebarPermissionMap = Record<string, boolean>;
 type CrudPermissionMap = Record<string, { can_add: boolean; can_edit: boolean; can_delete: boolean }>;
+type WidgetPermissionMap = Record<string, boolean>;
 
 type MenuItem = {
   key: string;
@@ -24,6 +25,15 @@ type MenuItem = {
 function api(path: string) {
   return path;
 }
+
+// DBM-08: the officer/proponent dashboard cards an admin can toggle per
+// role. Admin's own dashboard is exempt (fullAccess), so this list only ever
+// affects what Officer/Proponent accounts see.
+const DASHBOARD_WIDGETS: MenuItem[] = [
+  { key: 'dashboard:stats', label: 'Stat Cards' },
+  { key: 'dashboard:attention', label: 'Needs Attention List (Officer)' },
+  { key: 'dashboard:table', label: 'Applications Table' },
+];
 
 /** Fixed widths so CRUD header labels line up with toggle columns. */
 const CRUD_TOGGLE_COLS_CLASS =
@@ -75,13 +85,14 @@ function PermissionToggle({
 }
 
 export function ControlPanelManagement() {
-  const [activeTab, setActiveTab] = useState<'sidebar' | 'crud'>('sidebar');
+  const [activeTab, setActiveTab] = useState<'sidebar' | 'crud' | 'widgets'>('sidebar');
   const [roles, setRoles] = useState<Role[]>([]);
   const [selectedRoleId, setSelectedRoleId] = useState<string>('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [sidebarPermissions, setSidebarPermissions] = useState<SidebarPermissionMap>({});
   const [crudPermissions, setCrudPermissions] = useState<CrudPermissionMap>({});
+  const [widgetPermissions, setWidgetPermissions] = useState<WidgetPermissionMap>({});
 
   const isExcludedRole = (role: Role) => String(role.name || '').trim().toLowerCase() === 'admin';
 
@@ -161,11 +172,26 @@ export function ControlPanelManagement() {
     loadRoles();
   }, []);
 
+  async function loadWidgetPermissions(roleId: string) {
+    const res = await fetch(api(`/api/control-panel/dashboard-widgets/${roleId}`), { credentials: 'include' });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(json?.message || 'Failed to load dashboard widget permissions');
+    const next: WidgetPermissionMap = {};
+    (json?.data || []).forEach((row: any) => {
+      next[String(row.widget_key)] = Number(row.is_enabled) === 1 || row.is_enabled === true;
+    });
+    setWidgetPermissions(next);
+  }
+
   useEffect(() => {
     if (!selectedRoleId) return;
     const run = async () => {
       try {
-        await Promise.all([loadSidebarPermissions(selectedRoleId), loadCrudPermissions(selectedRoleId)]);
+        await Promise.all([
+          loadSidebarPermissions(selectedRoleId),
+          loadCrudPermissions(selectedRoleId),
+          loadWidgetPermissions(selectedRoleId),
+        ]);
       } catch (e: any) {
         toast.error(e?.message || 'Failed to load control panel data');
       }
@@ -192,6 +218,32 @@ export function ControlPanelManagement() {
       toast.success('Sidebar menu permissions saved');
     } catch (e: any) {
       toast.error(e?.message || 'Failed to save sidebar permissions');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function saveWidgetPermissions() {
+    if (!selectedRoleId) return;
+    setSaving(true);
+    try {
+      const payload = DASHBOARD_WIDGETS.map((item) => ({
+        widget_key: item.key,
+        // Missing key defaults to visible (fail-open) — write that default
+        // back explicitly so "no row yet" and "explicitly turned on" agree.
+        is_enabled: widgetPermissions[item.key] ?? true,
+      }));
+      const res = await fetch(api(`/api/control-panel/dashboard-widgets/${selectedRoleId}`), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ permissions: payload }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.message || 'Failed to save dashboard widget permissions');
+      toast.success('Dashboard widget permissions saved');
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to save dashboard widget permissions');
     } finally {
       setSaving(false);
     }
@@ -260,6 +312,20 @@ export function ControlPanelManagement() {
             <span className="text-[10px] font-semibold uppercase tracking-widest opacity-80">CRUD</span>
             <span className="text-sm font-bold leading-tight tracking-tight">Permissions</span>
           </button>
+          <button
+            role="tab"
+            aria-selected={activeTab === 'widgets'}
+            className="flex-1 rounded-lg px-3 py-2 flex flex-col gap-0.5 text-left transition-colors cursor-pointer"
+            style={
+              activeTab === 'widgets'
+                ? { backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }
+                : { backgroundColor: 'transparent', color: 'var(--text)' }
+            }
+            onClick={() => setActiveTab('widgets')}
+          >
+            <span className="text-[10px] font-semibold uppercase tracking-widest opacity-80">Dashboard</span>
+            <span className="text-sm font-bold leading-tight tracking-tight">Widgets</span>
+          </button>
         </div>
       </div>
 
@@ -311,12 +377,18 @@ export function ControlPanelManagement() {
               <div className="flex items-center justify-between gap-2 mb-3">
                 <div>
                   <div className="text-[10px] font-semibold text-secondary uppercase tracking-widest">
-                    {activeTab === 'sidebar' ? 'Sidebar Menu Permissions' : 'Menu CRUD Permissions'}
+                    {activeTab === 'sidebar'
+                      ? 'Sidebar Menu Permissions'
+                      : activeTab === 'crud'
+                        ? 'Menu CRUD Permissions'
+                        : 'Dashboard Widget Visibility'}
                   </div>
                   <div className="text-[12px] text-secondary">
                     {activeTab === 'sidebar'
                       ? `Showing sidebar menus for ${selectedRole?.name || 'selected role'}`
-                      : `Configure CRUD modules for ${selectedRole?.name || 'selected role'}`}
+                      : activeTab === 'crud'
+                        ? `Configure CRUD modules for ${selectedRole?.name || 'selected role'}`
+                        : `Choose which dashboard cards ${selectedRole?.name || 'this role'} sees`}
                   </div>
                 </div>
                 <button
@@ -328,7 +400,13 @@ export function ControlPanelManagement() {
                     boxShadow:
                       '0 1px 2px rgba(0,0,0,0.12), 0 4px 14px color-mix(in srgb, var(--nav-active-bg) 45%, transparent)',
                   }}
-                  onClick={activeTab === 'sidebar' ? saveSidebarPermissions : saveCrudPermissions}
+                  onClick={
+                    activeTab === 'sidebar'
+                      ? saveSidebarPermissions
+                      : activeTab === 'crud'
+                        ? saveCrudPermissions
+                        : saveWidgetPermissions
+                  }
                   disabled={saving || loading}
                 >
                   <span
@@ -405,7 +483,7 @@ export function ControlPanelManagement() {
                       ))}
                     </div>
                   </motion.div>
-                ) : (
+                ) : activeTab === 'crud' ? (
                   <motion.div
                     key={`crud-${selectedRoleId}`}
                     initial={{ opacity: 0, x: 16 }}
@@ -497,6 +575,46 @@ export function ControlPanelManagement() {
                     })}
                     <p className="text-[11px] text-secondary pt-2 border-t mt-2" style={{ borderColor: 'var(--border-subtle)' }}>
                       Turning off a switch hides the matching Add, Edit, or Delete controls for this role in that module.
+                    </p>
+                  </motion.div>
+                ) : (
+                  <motion.div
+                    key={`widgets-${selectedRoleId}`}
+                    initial={{ opacity: 0, x: 16 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0, x: -16 }}
+                    transition={{ duration: 0.22, ease: 'easeOut' }}
+                    className="space-y-2"
+                  >
+                    <div
+                      className="grid grid-cols-[minmax(0,1fr)_3.25rem] items-center gap-x-3 gap-y-1 px-3 py-2 border rounded-lg text-[10px] font-semibold uppercase tracking-widest text-secondary"
+                      style={{ borderColor: 'var(--border-subtle)' }}
+                    >
+                      <span className="min-w-0">Dashboard Card</span>
+                      <span className="flex min-h-[1.75rem] items-center justify-center text-center leading-none">Visible</span>
+                    </div>
+                    {DASHBOARD_WIDGETS.map((item) => (
+                      <div
+                        key={item.key}
+                        className="grid grid-cols-[minmax(0,1fr)_3.25rem] items-center gap-x-3 gap-y-1 px-3 py-2.5 border rounded-lg transition-colors"
+                        style={{ borderColor: 'var(--border-subtle)' }}
+                      >
+                        <span className="min-w-0 text-[11px]" style={{ color: 'var(--text)' }}>
+                          {item.label}
+                        </span>
+                        <div className="flex min-h-[1.75rem] items-center justify-center">
+                          <PermissionToggle
+                            aria-label={`${item.label} visible`}
+                            checked={widgetPermissions[item.key] ?? true}
+                            onChange={(next) =>
+                              setWidgetPermissions((prev) => ({ ...prev, [item.key]: next }))
+                            }
+                          />
+                        </div>
+                      </div>
+                    ))}
+                    <p className="text-[11px] text-secondary pt-2 border-t mt-2" style={{ borderColor: 'var(--border-subtle)' }}>
+                      New cards default to visible until turned off here — this never affects the Administrator role.
                     </p>
                   </motion.div>
                 )}

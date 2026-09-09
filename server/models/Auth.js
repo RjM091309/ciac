@@ -130,7 +130,12 @@ async function loginViaDatabase(username, password, totpCode) {
         await User.setTotpSecret(id, encryptSecret(secret));
       }
       if (!code) {
-        return { success: false, enrollmentRequired: true, enrollment: await buildEnrollment(secret, label) };
+        return {
+          success: false,
+          enrollmentRequired: true,
+          enrollment: await buildEnrollment(secret, label),
+          message: "Scan the QR code and enter the 6-digit code to finish setup.",
+        };
       }
       if (!(await verifyToken(code, secret))) {
         return {

@@ -12,3 +12,6 @@ coverage/
 *serviceaccount*.json
 *firebase-adminsdk*.json
 *-adminsdk-*.json
+
+# Uploaded documentary requirements (BRM-04) — runtime data, not source
+server/uploads/

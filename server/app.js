@@ -62,6 +62,18 @@ app.use("/js", express.static(path.join(__dirname, "public", "js")));
 const pageRouter = require("./routes/routes");
 pageRouter(app);
 
+// Multer (file upload) errors — size limit, bad mimetype — reach here via
+// next(err) before any controller's own try/catch runs. Every other route
+// handles its own errors, so this only needs to cover upload failures.
+app.use((err, req, res, next) => {
+  if (!err) return next();
+  if (req.path.startsWith("/api/")) {
+    const status = err.name === "MulterError" || /unsupported file type/i.test(err.message || "") ? 400 : 500;
+    return res.status(status).json({ success: false, message: err.message || "Upload failed" });
+  }
+  return next(err);
+});
+
 const PORT = process.env.PORT || 3100;
 initializeDatabase()
   .then(async () => {

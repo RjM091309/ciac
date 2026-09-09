@@ -1,7 +1,10 @@
-import React from 'react';
-import { Building2, FileCheck, FileText, Inbox } from 'lucide-react';
+import React, { useState } from 'react';
+import { Building2, FileCheck, FileText, Inbox, Plus, RotateCcw, XCircle } from 'lucide-react';
+import { toast } from 'sonner';
 import { EmptyState } from '../ui/EmptyState';
 import { getStatusBadgeStyles } from './statusBadge';
+import { FileApplicationPanel } from './FileApplicationPanel';
+import { useControlPanelAccess } from '../../context/ControlPanelAccessContext';
 
 type DashboardApplicationRow = {
   id: number;
@@ -24,7 +27,15 @@ type ProponentInfo = {
 export type ProponentDashboardData = {
   proponent: ProponentInfo | null;
   applications: DashboardApplicationRow[];
-  stats: { total: number; pending: number; approved: number; requirementsTotal: number; requirementsVerified: number };
+  stats: {
+    total: number;
+    pending: number;
+    approved: number;
+    rejected?: number;
+    returned?: number;
+    requirementsTotal: number;
+    requirementsVerified: number;
+  };
 };
 
 function StatCard({ label, value, icon: Icon }: { label: string; value: string | number; icon: any }) {
@@ -56,10 +67,23 @@ function formatDate(value: string | null) {
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
-export function ProponentDashboard({ data }: { data: ProponentDashboardData | null }) {
+export function ProponentDashboard({
+  data,
+  onFiled,
+  widgetOverrides,
+}: {
+  data: ProponentDashboardData | null;
+  onFiled?: () => void;
+  /** Set only by PreviewDashboard: the real Proponent role's saved widget
+   * visibility, since the admin viewing this preview is exempt from Control
+   * Panel restrictions and would otherwise always see everything. */
+  widgetOverrides?: Record<string, boolean>;
+}) {
   const proponent = data?.proponent ?? null;
   const applications = data?.applications ?? [];
-  const stats = data?.stats ?? { total: 0, pending: 0, approved: 0, requirementsTotal: 0, requirementsVerified: 0 };
+  const stats = data?.stats ?? { total: 0, pending: 0, approved: 0, rejected: 0, returned: 0, requirementsTotal: 0, requirementsVerified: 0 };
+  const { canShowWidget: canShowWidgetForMe } = useControlPanelAccess();
+  const canShowWidget = (key: string) => (widgetOverrides ? widgetOverrides[key] ?? true : canShowWidgetForMe(key));
 
   if (!proponent) {
     return (
@@ -97,21 +121,29 @@ export function ProponentDashboard({ data }: { data: ProponentDashboardData | nu
         </div>
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
-        <StatCard label="Total Applications" value={stats.total} icon={FileText} />
-        <StatCard label="Pending" value={stats.pending} icon={Inbox} />
-        <StatCard label="Approved" value={stats.approved} icon={FileCheck} />
-        <StatCard
-          label="Requirements Verified"
-          value={`${stats.requirementsVerified}/${stats.requirementsTotal}`}
-          icon={FileCheck}
-        />
-      </div>
+      {canShowWidget('dashboard:stats') && (
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4">
+          <StatCard label="Total Applications" value={stats.total} icon={FileText} />
+          <StatCard label="Pending" value={stats.pending} icon={Inbox} />
+          <StatCard label="Approved" value={stats.approved} icon={FileCheck} />
+          <StatCard label="Rejected" value={stats.rejected ?? 0} icon={XCircle} />
+          <StatCard label="Returned" value={stats.returned ?? 0} icon={RotateCcw} />
+          <StatCard
+            label="Requirements Verified"
+            value={`${stats.requirementsVerified}/${stats.requirementsTotal}`}
+            icon={FileCheck}
+          />
+        </div>
+      )}
 
+      {canShowWidget('dashboard:table') && (
       <div className="glass-card p-4 sm:p-5 !border-transparent" style={{ backgroundColor: 'var(--surface)' }}>
-        <h4 className="text-sm font-bold mb-3" style={{ color: 'var(--text)' }}>
-          My Applications
-        </h4>
+        <div className="flex items-center justify-between gap-2 mb-3">
+          <h4 className="text-sm font-bold" style={{ color: 'var(--text)' }}>
+            My Applications
+          </h4>
+          <FileApplicationPanel onFiled={() => onFiled?.()} />
+        </div>
 
         {applications.length === 0 ? (
           <EmptyState
@@ -179,6 +211,7 @@ export function ProponentDashboard({ data }: { data: ProponentDashboardData | nu
           </div>
         )}
       </div>
+      )}
     </div>
   );
 }

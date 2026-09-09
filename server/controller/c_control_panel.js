@@ -104,3 +104,47 @@ exports.getMyMenuCrudPermissions = async (req, res) => {
     return res.status(500).json({ success: false, message: error.message || "Internal server error" });
   }
 };
+
+exports.getDashboardWidgetPermissions = async (req, res) => {
+  try {
+    const roleId = parseRoleId(req.params.roleId);
+    if (!roleId) return res.status(400).json({ success: false, message: "Invalid role id" });
+    const rows = await ControlPanelPermission.getDashboardWidgetPermissions(roleId);
+    return res.json({ success: true, data: rows });
+  } catch (error) {
+    console.error("Get dashboard widget permissions error:", error);
+    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+  }
+};
+
+exports.setDashboardWidgetPermissions = async (req, res) => {
+  try {
+    const roleId = parseRoleId(req.params.roleId);
+    if (!roleId) return res.status(400).json({ success: false, message: "Invalid role id" });
+    if (!(await Role.roleExists(roleId))) {
+      return res.status(404).json({ success: false, message: "Role not found" });
+    }
+    const permissions = Array.isArray(req.body?.permissions) ? req.body.permissions : [];
+    await ControlPanelPermission.setDashboardWidgetPermissions(roleId, permissions);
+    return res.json({ success: true });
+  } catch (error) {
+    console.error("Set dashboard widget permissions error:", error);
+    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+  }
+};
+
+exports.getMyDashboardWidgetPermissions = async (req, res) => {
+  try {
+    const roleName = req.user?.role;
+    if (isExemptRole(roleName)) {
+      return res.json({ success: true, fullAccess: true, data: [] });
+    }
+    const roleId = await Role.getActiveRoleIdByName(roleName);
+    if (!roleId) return res.json({ success: true, fullAccess: false, data: [] });
+    const rows = await ControlPanelPermission.getDashboardWidgetPermissions(roleId);
+    return res.json({ success: true, fullAccess: false, data: rows });
+  } catch (error) {
+    console.error("Get my dashboard widget permissions error:", error);
+    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+  }
+};

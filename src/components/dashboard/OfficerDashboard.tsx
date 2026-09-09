@@ -1,7 +1,8 @@
 import React from 'react';
-import { ClipboardList, FileCheck, FileText, Inbox } from 'lucide-react';
+import { AlertTriangle, ClipboardList, FileCheck, FileText, Inbox, RotateCcw, XCircle } from 'lucide-react';
 import { EmptyState } from '../ui/EmptyState';
 import { getStatusBadgeStyles } from './statusBadge';
+import { useControlPanelAccess } from '../../context/ControlPanelAccessContext';
 
 type DashboardApplicationRow = {
   id: number;
@@ -16,9 +17,26 @@ type DashboardApplicationRow = {
   requirements_verified: number;
 };
 
+type AttentionItem = {
+  application_id: number;
+  application_no: string;
+  proponent_name: string | null;
+  status: string;
+  days_waiting: number;
+};
+
 export type OfficerDashboardData = {
   applications: DashboardApplicationRow[];
-  stats: { total: number; pending: number; approved: number; requirementsTotal: number; requirementsVerified: number };
+  stats: {
+    total: number;
+    pending: number;
+    approved: number;
+    rejected?: number;
+    returned?: number;
+    requirementsTotal: number;
+    requirementsVerified: number;
+  };
+  attention?: AttentionItem[];
 };
 
 function StatCard({ label, value, icon: Icon }: { label: string; value: string | number; icon: any }) {
@@ -50,9 +68,21 @@ function formatDate(value: string | null) {
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
-export function OfficerDashboard({ data }: { data: OfficerDashboardData | null }) {
+export function OfficerDashboard({
+  data,
+  widgetOverrides,
+}: {
+  data: OfficerDashboardData | null;
+  /** Set only by PreviewDashboard: the real Officer role's saved widget
+   * visibility, since the admin viewing this preview is exempt from Control
+   * Panel restrictions and would otherwise always see everything. */
+  widgetOverrides?: Record<string, boolean>;
+}) {
   const applications = data?.applications ?? [];
-  const stats = data?.stats ?? { total: 0, pending: 0, approved: 0, requirementsTotal: 0, requirementsVerified: 0 };
+  const stats = data?.stats ?? { total: 0, pending: 0, approved: 0, rejected: 0, returned: 0, requirementsTotal: 0, requirementsVerified: 0 };
+  const attention = data?.attention ?? [];
+  const { canShowWidget: canShowWidgetForMe } = useControlPanelAccess();
+  const canShowWidget = (key: string) => (widgetOverrides ? widgetOverrides[key] ?? true : canShowWidgetForMe(key));
 
   return (
     <div className="space-y-4 sm:space-y-5">
@@ -77,17 +107,49 @@ export function OfficerDashboard({ data }: { data: OfficerDashboardData | null }
         </div>
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
-        <StatCard label="Total Assigned" value={stats.total} icon={FileText} />
-        <StatCard label="Pending" value={stats.pending} icon={Inbox} />
-        <StatCard label="Approved" value={stats.approved} icon={FileCheck} />
-        <StatCard
-          label="Requirements Verified"
-          value={`${stats.requirementsVerified}/${stats.requirementsTotal}`}
-          icon={FileCheck}
-        />
-      </div>
+      {canShowWidget('dashboard:stats') && (
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4">
+          <StatCard label="Total Assigned" value={stats.total} icon={FileText} />
+          <StatCard label="Pending" value={stats.pending} icon={Inbox} />
+          <StatCard label="Approved" value={stats.approved} icon={FileCheck} />
+          <StatCard label="Rejected" value={stats.rejected ?? 0} icon={XCircle} />
+          <StatCard label="Returned" value={stats.returned ?? 0} icon={RotateCcw} />
+          <StatCard
+            label="Requirements Verified"
+            value={`${stats.requirementsVerified}/${stats.requirementsTotal}`}
+            icon={FileCheck}
+          />
+        </div>
+      )}
 
+      {canShowWidget('dashboard:attention') && attention.length > 0 && (
+        <div className="glass-card p-4 sm:p-5 !border-transparent" style={{ backgroundColor: 'var(--surface)' }}>
+          <div className="flex items-center gap-2 mb-3">
+            <AlertTriangle size={15} className="text-amber-500" />
+            <h4 className="text-sm font-bold" style={{ color: 'var(--text)' }}>
+              Needs Your Attention
+            </h4>
+          </div>
+          <div className="space-y-1.5">
+            {attention.map((item) => (
+              <div
+                key={item.application_id}
+                className="flex items-center justify-between gap-3 rounded-lg border px-3 py-2 text-[11px]"
+                style={{ borderColor: 'var(--border-subtle)' }}
+              >
+                <span className="font-semibold truncate" style={{ color: 'var(--text)' }}>
+                  {item.application_no} — {item.proponent_name || 'Unknown'}
+                </span>
+                <span className="shrink-0 text-secondary">
+                  {item.status} · waiting {item.days_waiting}d
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {canShowWidget('dashboard:table') && (
       <div className="glass-card p-4 sm:p-5 !border-transparent" style={{ backgroundColor: 'var(--surface)' }}>
         <h4 className="text-sm font-bold mb-3" style={{ color: 'var(--text)' }}>
           Assigned to Me
@@ -160,6 +222,7 @@ export function OfficerDashboard({ data }: { data: OfficerDashboardData | null }
           </div>
         )}
       </div>
+      )}
     </div>
   );
 }

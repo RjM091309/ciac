@@ -16,6 +16,10 @@ module.exports = {
       script: 'npm',
       args: 'run dev',
       watch: true,
+      // Uploaded documents land under server/uploads — without this, every
+      // file a user uploads is itself a watched change and restarts the
+      // process mid-request.
+      ignore_watch: ['node_modules', 'uploads'],
       env: {
         NODE_ENV: 'development',
       },

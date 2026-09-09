@@ -1,17 +1,93 @@
 const Workflow = require("../models/ApplicationWorkflow");
 const Proponent = require("../models/Proponent");
+const Role = require("../models/Role");
+const ControlPanelPermission = require("../models/ControlPanelPermission");
 
-function summarize(applications) {
-  const total = applications.length;
-  const pending = applications.filter((a) => !["APPROVED", "REJECTED"].includes(String(a.status).toUpperCase())).length;
-  const approved = applications.filter((a) => String(a.status).toUpperCase() === "APPROVED").length;
-  const requirementsTotal = applications.reduce((sum, a) => sum + Number(a.requirements_total || 0), 0);
-  const requirementsVerified = applications.reduce((sum, a) => sum + Number(a.requirements_verified || 0), 0);
-  return { total, pending, approved, requirementsTotal, requirementsVerified };
+/** The admin previewing "what Officer/Proponent sees" is still an admin —
+ * fullAccess in ControlPanelAccessContext would otherwise ignore whatever
+ * widget visibility was configured for the previewed role. Fetching it here
+ * and shipping it with the preview payload is what makes the preview honest. */
+async function getWidgetVisibilityForRoleName(roleName) {
+  const roleId = await Role.getActiveRoleIdByName(roleName);
+  if (!roleId) return [];
+  return await ControlPanelPermission.getDashboardWidgetPermissions(roleId);
 }
 
-function monthKey(date) {
+function upper(v) {
+  return String(v || "").toUpperCase();
+}
+
+// Shared status breakdown used by every dashboard view (admin/officer/
+// proponent) so "pending / approved / rejected / returned" means the same
+// thing everywhere (DBM-03) — the officer/proponent views used to only
+// distinguish total/pending/approved, with no separate "returned" count.
+function summarize(applications) {
+  const total = applications.length;
+  const draft = applications.filter((a) => upper(a.status) === "DRAFT").length;
+  const approved = applications.filter((a) => upper(a.status) === "APPROVED").length;
+  const rejected = applications.filter((a) => upper(a.status) === "REJECTED").length;
+  const returned = applications.filter((a) => upper(a.status) === "RETURNED").length;
+  const pending = total - draft - approved - rejected - returned;
+  const requirementsTotal = applications.reduce((sum, a) => sum + Number(a.requirements_total || 0), 0);
+  const requirementsVerified = applications.reduce((sum, a) => sum + Number(a.requirements_verified || 0), 0);
+  return { total, draft, pending, approved, rejected, returned, requirementsTotal, requirementsVerified };
+}
+
+function periodKey(date, unit) {
+  if (unit === "day") {
+    return date.toISOString().slice(0, 10);
+  }
+  if (unit === "week") {
+    // ISO-ish week bucket: Monday-start week, keyed by that Monday's date.
+    const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+    const day = (d.getUTCDay() + 6) % 7; // 0 = Monday
+    d.setUTCDate(d.getUTCDate() - day);
+    return d.toISOString().slice(0, 10);
+  }
+  if (unit === "quarter") {
+    const q = Math.floor(date.getMonth() / 3) + 1;
+    return `${date.getFullYear()}-Q${q}`;
+  }
+  if (unit === "year") {
+    return String(date.getFullYear());
+  }
+  // month
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function periodLabel(date, unit) {
+  if (unit === "day") return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  if (unit === "week") return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  if (unit === "quarter") return `Q${Math.floor(date.getMonth() / 3) + 1} '${String(date.getFullYear()).slice(2)}`;
+  if (unit === "year") return String(date.getFullYear());
+  return date.toLocaleDateString("en-US", { month: "short" });
+}
+
+/** Builds `count` trailing buckets ending at "now", each a real count of
+ * applications created in that period — this is what backs DBM-04 (daily /
+ * weekly / monthly / quarterly / yearly reporting). */
+function bucketByPeriod(applications, unit, count) {
+  const now = new Date();
+  const buckets = [];
+  for (let i = count - 1; i >= 0; i -= 1) {
+    let d;
+    if (unit === "day") d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i);
+    else if (unit === "week") d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i * 7);
+    else if (unit === "quarter") d = new Date(now.getFullYear(), now.getMonth() - i * 3, 1);
+    else if (unit === "year") d = new Date(now.getFullYear() - i, 0, 1);
+    else d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    buckets.push({ key: periodKey(d, unit), label: periodLabel(d, unit), total: 0, approved: 0 });
+  }
+  const byKey = new Map(buckets.map((b) => [b.key, b]));
+  for (const a of applications) {
+    const created = a.created_at ? new Date(a.created_at) : null;
+    if (!created || Number.isNaN(created.getTime())) continue;
+    const bucket = byKey.get(periodKey(created, unit));
+    if (!bucket) continue;
+    bucket.total += 1;
+    if (upper(a.status) === "APPROVED") bucket.approved += 1;
+  }
+  return buckets.map(({ key, ...rest }) => rest);
 }
 
 // System-wide overview for the admin dashboard: real counts instead of mock data.
@@ -20,17 +96,7 @@ function summarizeAdmin(applications, proponents) {
   const newApplications = applications.filter((a) => !Number(a.is_renewal)).length;
   const renewalApplications = applications.filter((a) => Number(a.is_renewal)).length;
 
-  const statusBreakdown = { pending: 0, approved: 0, rejected: 0, returned: 0 };
-  for (const a of applications) {
-    const status = String(a.status || "").toUpperCase();
-    if (status === "APPROVED") statusBreakdown.approved += 1;
-    else if (status === "REJECTED") statusBreakdown.rejected += 1;
-    else if (status === "RETURNED") statusBreakdown.returned += 1;
-    else statusBreakdown.pending += 1;
-  }
-
-  const requirementsTotal = applications.reduce((sum, a) => sum + Number(a.requirements_total || 0), 0);
-  const requirementsVerified = applications.reduce((sum, a) => sum + Number(a.requirements_verified || 0), 0);
+  const statusBreakdown = summarize(applications);
 
   const now = new Date();
   const todayKey = now.toDateString();
@@ -38,26 +104,6 @@ function summarizeAdmin(applications, proponents) {
     const created = a.created_at ? new Date(a.created_at) : null;
     return created && !Number.isNaN(created.getTime()) && created.toDateString() === todayKey;
   }).length;
-
-  const months = [];
-  for (let i = 5; i >= 0; i -= 1) {
-    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-    months.push({
-      key: monthKey(d),
-      label: d.toLocaleDateString("en-US", { month: "short" }),
-      total: 0,
-      approved: 0,
-    });
-  }
-  const monthByKey = new Map(months.map((m) => [m.key, m]));
-  for (const a of applications) {
-    const created = a.created_at ? new Date(a.created_at) : null;
-    if (!created || Number.isNaN(created.getTime())) continue;
-    const bucket = monthByKey.get(monthKey(created));
-    if (!bucket) continue;
-    bucket.total += 1;
-    if (String(a.status || "").toUpperCase() === "APPROVED") bucket.approved += 1;
-  }
 
   return {
     totals: {
@@ -69,9 +115,34 @@ function summarizeAdmin(applications, proponents) {
       applicationsToday,
     },
     statusBreakdown,
-    requirements: { total: requirementsTotal, verified: requirementsVerified },
-    monthlyTrend: months.map(({ key, ...rest }) => rest),
+    requirements: { total: statusBreakdown.requirementsTotal, verified: statusBreakdown.requirementsVerified },
+    trends: {
+      daily: bucketByPeriod(applications, "day", 14).map((b, i, arr) => ({ ...b, label: i === arr.length - 1 ? "Today" : b.label })),
+      weekly: bucketByPeriod(applications, "week", 8),
+      monthly: bucketByPeriod(applications, "month", 6),
+      quarterly: bucketByPeriod(applications, "quarter", 4),
+      yearly: bucketByPeriod(applications, "year", 3),
+    },
+    // Kept for older callers of this endpoint's monthly-only shape.
+    monthlyTrend: bucketByPeriod(applications, "month", 6),
   };
+}
+
+/** Real "needs attention" list — replaces the old hardcoded Quick Tasks
+ * sample data (DBM-06). Oldest-first so the longest-waiting items surface. */
+function attentionQueue(applications, limit = 6) {
+  const now = Date.now();
+  return applications
+    .filter((a) => ["SUBMITTED", "UNDER_REVIEW", "RESUBMITTED"].includes(upper(a.status)))
+    .map((a) => ({
+      application_id: a.id,
+      application_no: a.application_no,
+      proponent_name: a.proponent_name,
+      status: a.status,
+      days_waiting: a.created_at ? Math.max(0, Math.round((now - new Date(a.created_at).getTime()) / (1000 * 60 * 60 * 24))) : 0,
+    }))
+    .sort((a, b) => b.days_waiting - a.days_waiting)
+    .slice(0, limit);
 }
 
 exports.getMyDashboard = async (req, res) => {
@@ -100,20 +171,26 @@ exports.getMyDashboard = async (req, res) => {
       return res.json({
         success: true,
         role: "officer",
-        data: { applications, stats: summarize(applications) },
+        data: { applications, stats: summarize(applications), attention: attentionQueue(applications) },
       });
     }
 
     // admin (or any other exempt role): real system-wide overview.
-    const [applications, proponents, categoryCompletion] = await Promise.all([
+    const [applications, proponents, categoryCompletion, turnaround] = await Promise.all([
       Workflow.listAllApplicationsWithProgress(),
       Proponent.listProponents(),
       Workflow.getRequirementCompletionByCategory(),
+      Workflow.getApplicationTurnaroundStats(),
     ]);
     return res.json({
       success: true,
       role,
-      data: { ...summarizeAdmin(applications, proponents), categoryCompletion },
+      data: {
+        ...summarizeAdmin(applications, proponents),
+        categoryCompletion,
+        turnaround,
+        attention: attentionQueue(applications),
+      },
     });
   } catch (error) {
     console.error("Get my dashboard error:", error);
@@ -129,20 +206,26 @@ exports.getPreview = async (req, res) => {
     const previewRole = String(req.params.role || "").toLowerCase();
 
     if (previewRole === "account-officer" || previewRole === "officer") {
-      const applications = await Workflow.listAllApplicationsWithProgress();
+      const [applications, widgetPermissions] = await Promise.all([
+        Workflow.listAllApplicationsWithProgress(),
+        getWidgetVisibilityForRoleName("officer"),
+      ]);
       return res.json({
         success: true,
         role: "officer",
-        data: { applications, stats: summarize(applications) },
+        widgetPermissions,
+        data: { applications, stats: summarize(applications), attention: attentionQueue(applications) },
       });
     }
 
     if (previewRole === "proponent") {
+      const widgetPermissions = await getWidgetVisibilityForRoleName("proponent");
       const proponentId = await Workflow.getMostActiveProponentId();
       if (!proponentId) {
         return res.json({
           success: true,
           role: "proponent",
+          widgetPermissions,
           data: { proponent: null, applications: [], stats: summarize([]) },
         });
       }
@@ -153,6 +236,7 @@ exports.getPreview = async (req, res) => {
       return res.json({
         success: true,
         role: "proponent",
+        widgetPermissions,
         data: { proponent, applications, stats: summarize(applications) },
       });
     }

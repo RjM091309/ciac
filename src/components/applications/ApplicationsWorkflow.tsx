@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
-import { CheckCircle2, Clock3, Eye, FileText, Loader2, Plus, Search, Upload, XCircle } from 'lucide-react';
+import { CheckCircle2, Clock3, Eye, FileText, History, Loader2, Plus, Search, Upload, XCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '../../lib/utils';
 import { SidePanel } from '../ui/SidePanel';
@@ -86,6 +86,10 @@ type StatusHistoryRow = {
 function api(path: string) {
   return path;
 }
+
+// Mirrors server/models/ApplicationWorkflow.js APPLICATION_STATUSES. DRAFT is
+// excluded here — staff move a draft forward via "Submit", not this dropdown.
+const STAFF_SETTABLE_STATUSES = ['SUBMITTED', 'UNDER_REVIEW', 'RESUBMITTED', 'RETURNED', 'REJECTED', 'APPROVED'];
 
 type ProgressSummary = {
   total: number;
@@ -269,8 +273,8 @@ export function ApplicationsWorkflow({
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [createForm, setCreateForm] = useState({
     proponent_id: '',
-    application_no: '',
     application_type: 'DIRECT_LEASE',
+    save_as_draft: false,
   });
 
   const [statusForm, setStatusForm] = useState({
@@ -278,14 +282,11 @@ export function ApplicationsWorkflow({
     remarks: '',
   });
 
-  const [documentForm, setDocumentForm] = useState({
+  const [documentForm, setDocumentForm] = useState<{ requirement_id: string; file: File | null }>({
     requirement_id: '',
-    file_name: '',
-    original_file_name: '',
-    storage_path: '',
-    content_type: 'application/pdf',
-    file_size_bytes: '245760',
+    file: null,
   });
+  const [uploading, setUploading] = useState(false);
 
   const applicationsEffective = baseData?.applications ?? applications;
   const proponentsEffective = baseData?.proponents ?? proponents;
@@ -293,9 +294,8 @@ export function ApplicationsWorkflow({
   const createFormCanSubmit = useMemo(() => {
     const proponentId = Number(createForm.proponent_id);
     if (!Number.isFinite(proponentId) || proponentId <= 0) return false;
-    if (!createForm.application_no.trim()) return false;
     return true;
-  }, [createForm.application_no, createForm.proponent_id]);
+  }, [createForm.proponent_id]);
 
   const contractFormCanSave = useMemo(() => {
     if (!contractForm.contract_no.trim() || !contractForm.issue_date) return false;
@@ -451,19 +451,21 @@ export function ApplicationsWorkflow({
   async function loadDetails(applicationId: number) {
     setDetailsLoading(true);
     try {
-      const [reqRes, docRes, contractRes] = await Promise.all([
+      const [reqRes, docRes, contractRes, historyRes] = await Promise.all([
         fetch(api(`/api/applications/${applicationId}/requirements`), { credentials: 'include' }),
         fetch(api(`/api/applications/${applicationId}/documents`), { credentials: 'include' }),
         fetch(api(`/api/contracts/application/${applicationId}`), { credentials: 'include' }),
+        fetch(api(`/api/applications/${applicationId}/status-history`), { credentials: 'include' }),
       ]);
-      const [reqJson, docJson, contractJson] = await Promise.all([
+      const [reqJson, docJson, contractJson, historyJson] = await Promise.all([
         reqRes.json(),
         docRes.json(),
         contractRes.json(),
+        historyRes.json(),
       ]);
       setRequirements(Array.isArray(reqJson?.data) ? reqJson.data : []);
       setDocuments(Array.isArray(docJson?.data) ? docJson.data : []);
-      setHistory([]); // History is not used in UI but kept for state shape if needed
+      setHistory(Array.isArray(historyJson?.data) ? historyJson.data : []);
       setSelectedContract(contractJson?.data || null);
     } catch (error: any) {
       toast.error(error?.message || 'Failed to load application details');
@@ -679,19 +681,8 @@ export function ApplicationsWorkflow({
   }
 
   function openDocumentEditor(row: AppRequirementRow, mode: 'insert' | 'update') {
-    const appId = selectedApp?.id || row.application_id || 0;
-    const existing = selectedDocByRequirement.get(Number(row.requirement_id));
     setDocumentEditorMode(mode);
-    setDocumentForm({
-      requirement_id: String(row.requirement_id),
-      file_name: existing?.file_name || `doc_${appId}_${row.requirement_id}.pdf`,
-      original_file_name: existing?.original_file_name || `Requirement_${row.requirement_id}.pdf`,
-      storage_path: existing?.file_name
-        ? `/uploads/applications/${appId}/${existing.file_name}`
-        : `/uploads/applications/${appId}/req_${row.requirement_id}.pdf`,
-      content_type: existing?.content_type || 'application/pdf',
-      file_size_bytes: String(existing?.file_size_bytes || 245760),
-    });
+    setDocumentForm({ requirement_id: String(row.requirement_id), file: null });
     setDocumentEditorOpen(true);
   }
 
@@ -717,11 +708,6 @@ export function ApplicationsWorkflow({
       return;
     }
 
-    if (!createForm.application_no.trim()) {
-      toast.error('Application no. is required');
-      return;
-    }
-
     setSaving(true);
     try {
       const res = await fetch(api('/api/applications'), {
@@ -730,19 +716,22 @@ export function ApplicationsWorkflow({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           proponent_id: proponentId,
-          application_no: createForm.application_no.trim(),
           application_type: createForm.application_type.trim() || 'DIRECT_LEASE',
           is_renewal: renewalMode ? 1 : 0,
-          status: 'SUBMITTED',
+          save_as_draft: createForm.save_as_draft,
         }),
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok || !json?.success) throw new Error(json?.message || 'Failed to create application');
 
-      toast.success('Application created. Requirements auto-generated.');
+      toast.success(
+        createForm.save_as_draft
+          ? `Draft saved as ${json?.data?.application_no}`
+          : `Application ${json?.data?.application_no} created. Requirements auto-generated.`
+      );
       requestNotificationsRefresh();
       setIsCreateOpen(false);
-      setCreateForm((p) => ({ ...p, application_no: '' }));
+      setCreateForm((p) => ({ ...p, save_as_draft: false }));
       await refreshBase({ showLoading: false });
       const createdId = Number(json?.data?.id || 0);
       if (createdId) setSelectedId(createdId);
@@ -753,43 +742,40 @@ export function ApplicationsWorkflow({
     }
   }
 
-  async function addSampleDocument() {
+  async function uploadDocument() {
     if (!selectedId) return;
     const requirementId = Number(documentForm.requirement_id);
     if (!Number.isFinite(requirementId)) {
       toast.error('Requirement is required');
       return;
     }
-    if (!documentForm.file_name.trim() || !documentForm.storage_path.trim()) {
-      toast.error('File name and storage path are required');
+    if (!documentForm.file) {
+      toast.error('Choose a file to upload');
       return;
     }
 
-    setSaving(true);
+    setUploading(true);
     try {
+      const form = new FormData();
+      form.append('application_id', String(selectedId));
+      form.append('requirement_id', String(requirementId));
+      form.append('file', documentForm.file);
+
       const res = await fetch(api('/api/applications/documents'), {
         method: 'POST',
         credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          application_id: selectedId,
-          requirement_id: requirementId,
-          file_name: documentForm.file_name.trim(),
-          original_file_name: documentForm.original_file_name.trim() || null,
-          storage_path: documentForm.storage_path.trim(),
-          content_type: documentForm.content_type.trim() || null,
-          file_size_bytes: Number(documentForm.file_size_bytes) || 0,
-        }),
+        body: form,
       });
       const json = await res.json().catch(() => ({}));
-      if (!res.ok || !json?.success) throw new Error(json?.message || 'Failed to add document');
-      toast.success('Document inserted');
+      if (!res.ok || !json?.success) throw new Error(json?.message || 'Failed to upload document');
+      toast.success('Document uploaded');
       requestNotificationsRefresh();
+      setDocumentEditorOpen(false);
       await loadDetails(selectedId);
     } catch (error: any) {
-      toast.error(error?.message || 'Failed to add document');
+      toast.error(error?.message || 'Failed to upload document');
     } finally {
-      setSaving(false);
+      setUploading(false);
     }
   }
 
@@ -846,6 +832,29 @@ export function ApplicationsWorkflow({
     }
   }
 
+  /** Moves a DRAFT to SUBMITTED or a RETURNED application to RESUBMITTED —
+   * the only transition available from a plain button, matching what the
+   * server allows via POST /:id/submit (BRM-06/BRM-07). */
+  async function submitApplication(applicationId: number) {
+    setSaving(true);
+    try {
+      const res = await fetch(api(`/api/applications/${applicationId}/submit`), {
+        method: 'PATCH',
+        credentials: 'include',
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json?.success) throw new Error(json?.message || 'Failed to submit application');
+      toast.success(`Application ${json?.data?.application_no || ''} submitted`);
+      requestNotificationsRefresh();
+      await refreshBase({ showLoading: false });
+      if (selectedId === applicationId) await loadDetails(applicationId);
+    } catch (error: any) {
+      toast.error(error?.message || 'Failed to submit application');
+    } finally {
+      setSaving(false);
+    }
+  }
+
   const detailsTitle = selectedApp?.proponent_name || (renewalMode ? 'Renewal Application' : 'New Application');
 
   return (
@@ -857,12 +866,7 @@ export function ApplicationsWorkflow({
         <button
           className="rounded-lg px-3 py-2 text-sm font-semibold inline-flex items-center gap-1.5 shadow-sm cursor-pointer"
           style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
-          onClick={() => {
-            const stamp = new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 14);
-            const prefix = renewalMode ? 'APP-REN' : 'APP-NEW';
-            setCreateForm((p) => ({ ...p, application_no: `${prefix}-${stamp}` }));
-            setIsCreateOpen(true);
-          }}
+          onClick={() => setIsCreateOpen(true)}
         >
           <Plus size={15} />
           New Application
@@ -1019,6 +1023,16 @@ export function ApplicationsWorkflow({
                             {contractLoading && contractApp?.id === row.id ? <Loader2 size={14} className="animate-spin" /> : <FileText size={14} />}
                             Contract
                           </button>
+                          {['DRAFT', 'RETURNED'].includes(toUpper(row.status)) ? (
+                            <button
+                              className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold"
+                              style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
+                              onClick={() => submitApplication(row.id)}
+                              disabled={saving}
+                            >
+                              {toUpper(row.status) === 'DRAFT' ? 'Submit' : 'Resubmit'}
+                            </button>
+                          ) : null}
                           <button
                             className="inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold"
                             style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'var(--control-bg)' }}
@@ -1343,6 +1357,37 @@ export function ApplicationsWorkflow({
                     />
                   </div>
 
+                  {/* BRM-10: the audit trail was already being fetched into
+                      `history` state but never rendered anywhere — this is
+                      the first place it's actually shown. */}
+                  <details className="shrink-0 rounded-xl border mt-3" style={{ borderColor: 'var(--border-subtle)' }}>
+                    <summary
+                      className="px-4 py-2.5 text-xs font-semibold cursor-pointer flex items-center gap-2 select-none"
+                      style={{ color: 'var(--text)' }}
+                    >
+                      <History size={13} />
+                      Status History
+                      <span className="text-secondary font-normal">({history.length})</span>
+                    </summary>
+                    <div className="px-4 pb-3 max-h-40 overflow-y-auto space-y-1.5">
+                      {history.length === 0 ? (
+                        <p className="text-[11px] text-secondary py-1">No status changes recorded yet.</p>
+                      ) : (
+                        history.map((h) => (
+                          <div key={h.id} className="flex items-center justify-between gap-3 text-[11px] py-1 border-b last:border-b-0" style={{ borderColor: 'var(--border-subtle)' }}>
+                            <span style={{ color: 'var(--text)' }}>
+                              {h.from_status ? `${h.from_status} → ${h.to_status}` : `Created as ${h.to_status}`}
+                              {h.remarks ? <span className="text-secondary"> — {h.remarks}</span> : null}
+                            </span>
+                            <span className="text-secondary shrink-0">
+                              {h.changed_at ? new Date(h.changed_at).toLocaleString() : '—'}
+                            </span>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </details>
+
                 </div>
                 </>
               )}
@@ -1388,29 +1433,32 @@ export function ApplicationsWorkflow({
               </button>
             </div>
             <div className="pt-3 grid grid-cols-1 gap-2.5">
-              <input
-                className="app-form-control"
-                value={documentForm.file_name}
-                onChange={(e) => setDocumentForm((p) => ({ ...p, file_name: e.target.value }))}
-                placeholder="File name"
-              />
-              <input
-                className="app-form-control"
-                value={documentForm.storage_path}
-                onChange={(e) => setDocumentForm((p) => ({ ...p, storage_path: e.target.value }))}
-                placeholder="Storage path"
-              />
-              <button
-                className={cn('rounded-lg px-3 py-2 text-sm font-semibold inline-flex items-center justify-center gap-1.5', saving && 'opacity-60 cursor-not-allowed')}
-                style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
-                disabled={saving}
-                onClick={async () => {
-                  await addSampleDocument();
-                  setDocumentEditorOpen(false);
-                }}
+              <label
+                className="app-form-control flex items-center gap-2 cursor-pointer"
+                style={{ color: documentForm.file ? 'var(--text)' : 'var(--text-muted)' }}
               >
-                <Upload size={14} />
-                {documentEditorMode === 'insert' ? 'Insert Document' : 'Update Document'}
+                <Upload size={14} className="shrink-0" />
+                <span className="truncate">{documentForm.file ? documentForm.file.name : 'Choose a file (PDF, Word, Excel, or image)...'}</span>
+                <input
+                  type="file"
+                  className="hidden"
+                  accept=".pdf,.doc,.docx,.xls,.xlsx,image/jpeg,image/png,image/webp"
+                  onChange={(e) => setDocumentForm((p) => ({ ...p, file: e.target.files?.[0] ?? null }))}
+                />
+              </label>
+              {documentForm.file ? (
+                <p className="text-[11px] text-secondary">
+                  {(documentForm.file.size / 1024).toFixed(0)} KB · {documentForm.file.type || 'unknown type'}
+                </p>
+              ) : null}
+              <button
+                className={cn('rounded-lg px-3 py-2 text-sm font-semibold inline-flex items-center justify-center gap-1.5', (uploading || !documentForm.file) && 'opacity-60 cursor-not-allowed')}
+                style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
+                disabled={uploading || !documentForm.file}
+                onClick={uploadDocument}
+              >
+                {uploading ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
+                {documentEditorMode === 'insert' ? 'Upload Document' : 'Replace Document'}
               </button>
             </div>
           </motion.div>
@@ -1454,11 +1502,22 @@ export function ApplicationsWorkflow({
               </button>
             </div>
             <div className="pt-3 grid grid-cols-1 gap-2.5">
-              <input
+              <select
                 className="app-form-control"
                 value={statusForm.to_status}
                 onChange={(e) => setStatusForm((p) => ({ ...p, to_status: e.target.value }))}
-                placeholder="UNDER_REVIEW"
+              >
+                {STAFF_SETTABLE_STATUSES.map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </select>
+              <input
+                className="app-form-control"
+                value={statusForm.remarks}
+                onChange={(e) => setStatusForm((p) => ({ ...p, remarks: e.target.value }))}
+                placeholder="Remarks (optional)"
               />
               <button
                 className={cn('rounded-lg px-3 py-2 text-sm font-semibold', saving && 'opacity-60 cursor-not-allowed')}
@@ -1585,11 +1644,12 @@ export function ApplicationsWorkflow({
       <SidePanel
         open={isCreateOpen}
         title={renewalMode ? 'New Renewal Application' : 'New Application'}
-        subtitle="Creates applications + auto application_requirements + status history"
+        subtitle="A reference number is generated automatically on save."
         onClose={() => setIsCreateOpen(false)}
         onSave={createApplication}
         saving={saving}
         saveDisabled={!createFormCanSubmit}
+        saveLabel={createForm.save_as_draft ? 'Save Draft' : 'Submit Application'}
       >
         <div className="grid grid-cols-1 gap-3">
           <label className="text-xs font-semibold uppercase tracking-wider text-secondary">Proponent</label>
@@ -1601,19 +1661,22 @@ export function ApplicationsWorkflow({
             isDisabled={saving}
           />
 
-          <label className="text-xs font-semibold uppercase tracking-wider text-secondary">Application No.</label>
-          <input
-            className="app-form-control"
-            value={createForm.application_no}
-            onChange={(e) => setCreateForm((p) => ({ ...p, application_no: e.target.value }))}
-          />
-
           <label className="text-xs font-semibold uppercase tracking-wider text-secondary">Application Type</label>
           <input
             className="app-form-control"
             value={createForm.application_type}
             onChange={(e) => setCreateForm((p) => ({ ...p, application_type: e.target.value }))}
           />
+
+          <label className="flex items-center gap-2 rounded-lg border px-3 py-2 text-xs cursor-pointer" style={{ borderColor: 'var(--input-border)' }}>
+            <input
+              type="checkbox"
+              className="cursor-pointer"
+              checked={createForm.save_as_draft}
+              onChange={(e) => setCreateForm((p) => ({ ...p, save_as_draft: e.target.checked }))}
+            />
+            <span style={{ color: 'var(--text)' }}>Save as draft — finish and submit later</span>
+          </label>
         </div>
       </SidePanel>
     </div>

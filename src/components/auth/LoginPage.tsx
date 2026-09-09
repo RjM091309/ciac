@@ -95,6 +95,10 @@ export function LoginPage(props: { backendUrl: string; onLoggedIn: (user: { id: 
     e.preventDefault();
     setMessage({ type: 'muted', text: '' });
     setSubmitting(true);
+    // Captured before state updates below: true only when the user was already
+    // being shown the code field (i.e. this submit is a retry), so a first-time
+    // transition into enroll/mfa isn't mistaken for a failed attempt.
+    const wasCodeStep = codeStep;
     try {
       const result = await loginRequest({
         backendUrl: backend,
@@ -113,7 +117,11 @@ export function LoginPage(props: { backendUrl: string; onLoggedIn: (user: { id: 
           setEnrollment(null);
           setCode('');
         }
-        setMessage({ type: 'error', text: result.message || 'Login failed.' });
+        const isStepPrompt = !wasCodeStep && (result.enrollmentRequired || result.mfaRequired);
+        setMessage({
+          type: isStepPrompt ? 'muted' : 'error',
+          text: result.message || 'Login failed.',
+        });
         return;
       }
 
