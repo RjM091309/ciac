@@ -84,6 +84,16 @@ function getNotificationTypeMeta(item: NotificationItem) {
         border: 'rgba(249,115,22,0.24)',
         unreadBg: 'rgba(249,115,22,0.08)',
       };
+    case 'approval':
+      return {
+        Icon: FileCheck,
+        label: getNotificationCategoryLabel(item.eventType || item.category),
+        color: '#0ea5e9',
+        iconBg: 'rgba(14,165,233,0.16)',
+        chipBg: 'rgba(14,165,233,0.12)',
+        border: 'rgba(14,165,233,0.24)',
+        unreadBg: 'rgba(14,165,233,0.08)',
+      };
     case 'contract':
       return {
         Icon: FileSignature,

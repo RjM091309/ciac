@@ -7,6 +7,7 @@ export type NotificationCategory =
   | 'inspection'
   | 'compliance'
   | 'assessment'
+  | 'approval'
   | 'contract';
 
 export interface NotificationItem {

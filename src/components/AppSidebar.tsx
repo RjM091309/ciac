@@ -11,6 +11,7 @@ import {
   Settings,
   ShieldCheck,
   Sparkles,
+  Stamp,
   Users,
 } from 'lucide-react';
 import { useControlPanelAccess } from '../context/ControlPanelAccessContext';
@@ -286,6 +287,24 @@ export function AppSidebar({
                   label="Evaluation Queue"
                   active={view === 'assessment:queue'}
                   onClick={() => onViewChange('assessment:queue')}
+                />}
+              </SidebarDropdown>
+            </div>
+          </SidebarGroup>
+
+          <SidebarGroup title="Approval & Issuance" collapsed={collapsed}>
+            <div className="flex flex-col gap-1.5">
+              <SidebarDropdown
+                icon={Stamp}
+                label="Approval"
+                collapsed={collapsed}
+                isOpen={openDropdownId === 'approval'}
+                onToggle={() => toggleDropdown('approval')}
+              >
+                {canView('approval:queue') && <SidebarSubItem
+                  label="Approval Queue"
+                  active={view === 'approval:queue'}
+                  onClick={() => onViewChange('approval:queue')}
                 />}
               </SidebarDropdown>
             </div>

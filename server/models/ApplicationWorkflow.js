@@ -26,6 +26,12 @@ const APPLICATION_STATUSES = [
   "RESUBMITTED",
   "RETURNED",
   "REJECTED",
+  // Assessment endorses an application to the Approval & Issuance module by
+  // moving it to FOR_APPROVAL; the approving hierarchy then settles it as
+  // APPROVED or DISAPPROVED. DISAPPROVED is kept distinct from REJECTED
+  // (a pre-assessment screening rejection) for reporting.
+  "FOR_APPROVAL",
+  "DISAPPROVED",
   "APPROVED",
 ];
 

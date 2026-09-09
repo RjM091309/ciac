@@ -122,6 +122,26 @@ export const LANDING_CONFIG: Record<AppView, LandingConfig> = {
       ],
     },
   },
+  'approval:queue': {
+    title: 'Approval & Issuance',
+    description: 'Route endorsed applications through a configurable multi-level approval hierarchy, record approve/return/disapprove decisions and electronic endorsements, and issue approval documents and contracts.',
+    badge: 'Approval',
+    icon: FileCheck,
+    isCrud: true,
+    stats: [
+      { label: 'In Progress', value: '—' },
+      { label: 'Awaiting Start', value: '—' },
+      { label: 'Issued', value: '—' },
+    ],
+    table: {
+      columns: ['Application', 'Proponent', 'Approval Status', 'Current Level', 'Issued'],
+      rows: [
+        ['APP-2026-00001', 'SkyPort Logistics Inc.', 'In Progress', 'Division Chief', '—'],
+        ['REN-2026-00007', 'Delta AeroTech', 'Approved', '—', 'Approval Order'],
+        ['APP-2026-00012', 'Metro Agro Trading', 'Awaiting Start', '—', '—'],
+      ],
+    },
+  },
   'verification:pending': {
     title: 'Pending Document Verification',
     description: 'Queue of SEC, DTI, BIR and permit documents awaiting admin verification.',

@@ -12,6 +12,7 @@ function mapNotificationRows(rows: any[], userRole: Role, userId?: number | null
       rawCategory === 'inspection' ||
       rawCategory === 'compliance' ||
       rawCategory === 'assessment' ||
+      rawCategory === 'approval' ||
       rawCategory === 'contract'
         ? rawCategory
         : 'application_status';
@@ -125,6 +126,8 @@ export function getNotificationCategoryLabel(value: string | undefined) {
       return 'Compliance';
     case 'assessment':
       return 'Assessment';
+    case 'approval':
+      return 'Approval';
     case 'contract':
       return 'Contract';
     default:

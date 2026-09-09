@@ -20,6 +20,7 @@ const RequirementsManagement = lazy(() => import('./components/applications/Requ
 const RequirementCategoriesManagement = lazy(() => import('./components/applications/RequirementCategories').then((m) => ({ default: m.RequirementCategoriesManagement })));
 const ApplicationsWorkflow = lazy(() => import('./components/applications/ApplicationsWorkflow').then((m) => ({ default: m.ApplicationsWorkflow })));
 const AssessmentEvaluation = lazy(() => import('./components/assessment/AssessmentEvaluation').then((m) => ({ default: m.AssessmentEvaluation })));
+const ApprovalIssuance = lazy(() => import('./components/approval/ApprovalIssuance').then((m) => ({ default: m.ApprovalIssuance })));
 const InspectionTypesManagement = lazy(() => import('./components/FileMaintenance/InspectionTypes').then((m) => ({ default: m.InspectionTypesManagement })));
 const ComplianceTypesManagement = lazy(() => import('./components/FileMaintenance/ComplianceTypes').then((m) => ({ default: m.ComplianceTypesManagement })));
 const MasterChecklist = lazy(() => import('./components/settings/MasterChecklist').then((m) => ({ default: m.MasterChecklist })));
@@ -51,6 +52,7 @@ const VIEW_TO_PATH: Record<AppView, string> = {
   'applications:projects': '/applications/projects',
   'applications:requirements': '/applications/requirements',
   'assessment:queue': '/assessment',
+  'approval:queue': '/approval',
   'verification:pending': '/verification/pending',
   'verification:audit': '/verification/audit',
   'directory:companies': '/directory/companies',
@@ -356,6 +358,8 @@ export default function App() {
                 <RequirementsManagement />
               ) : view === 'assessment:queue' ? (
                 <AssessmentEvaluation />
+              ) : view === 'approval:queue' ? (
+                <ApprovalIssuance />
               ) : view === 'settings:proponents' ? (
                 <ProponentsManagement />
               ) : view === 'settings:requirement-categories' ? (
@@ -496,6 +500,25 @@ const LANDING_CONFIG: Record<AppView, LandingConfig> = {
         ['APP-NEW-0001', 'SkyPort Logistics Inc.', 'In Review', 'AO Santos', '₱610,000'],
         ['APP-REN-0007', 'Delta AeroTech', 'For Recommendation', 'AO Cruz', '₱120,000'],
         ['APP-NEW-0012', 'Metro Agro Trading', 'Unassigned', '—', '—'],
+      ],
+    },
+  },
+  'approval:queue': {
+    title: 'Approval & Issuance',
+    description: 'Route endorsed applications through the approval hierarchy, record decisions, and issue approval documents and contracts.',
+    badge: 'Approval',
+    icon: FileCheck,
+    stats: [
+      { label: 'In Progress', value: '—' },
+      { label: 'Awaiting Start', value: '—' },
+      { label: 'Issued', value: '—' },
+    ],
+    table: {
+      columns: ['Application', 'Proponent', 'Approval Status', 'Current Level', 'Issued'],
+      rows: [
+        ['APP-2026-00001', 'SkyPort Logistics Inc.', 'In Progress', 'Division Chief', '—'],
+        ['REN-2026-00007', 'Delta AeroTech', 'Approved', '—', 'Approval Order'],
+        ['APP-2026-00012', 'Metro Agro Trading', 'Awaiting Start', '—', '—'],
       ],
     },
   },

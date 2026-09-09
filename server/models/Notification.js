@@ -30,6 +30,7 @@ function normalizeEventType(value) {
     raw === "inspection" ||
     raw === "compliance" ||
     raw === "assessment" ||
+    raw === "approval" ||
     raw === "contract"
   ) {
     return raw;
