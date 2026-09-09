@@ -1,12 +1,13 @@
 import React, { useEffect, useMemo, useState, Suspense, lazy } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { AppLayout, AppView } from './layout/AppLayout';
-import { SubHeader } from './components/SubHeader';
+import { SubHeader, type DashboardPreviewRole } from './components/SubHeader';
 import { FileCheck, FolderTree, ShieldCheck, Users, CalendarClock, Loader2 } from 'lucide-react';
 import { LoginPage } from './components/auth/LoginPage';
 import { Toaster } from 'sonner';
 
-const Dashboard = lazy(() => import('./components/dashboard/Dashboard').then((m) => ({ default: m.Dashboard })));
+const RoleDashboard = lazy(() => import('./components/dashboard/RoleDashboard').then((m) => ({ default: m.RoleDashboard })));
+const PreviewDashboard = lazy(() => import('./components/dashboard/PreviewDashboard').then((m) => ({ default: m.PreviewDashboard })));
 const UsersManagement = lazy(() => import('./components/settings/UsersManagement').then((m) => ({ default: m.UsersManagement })));
 const ControlPanelManagement = lazy(() => import('./components/settings/ControlPanelManagement').then((m) => ({ default: m.ControlPanelManagement })));
 const ProponentsManagement = lazy(() => import('./components/proponent/ProponentsManagement').then((m) => ({ default: m.ProponentsManagement })));
@@ -16,6 +17,7 @@ const ApplicationsWorkflow = lazy(() => import('./components/applications/Applic
 const AssessmentEvaluation = lazy(() => import('./components/assessment/AssessmentEvaluation').then((m) => ({ default: m.AssessmentEvaluation })));
 const InspectionTypesManagement = lazy(() => import('./components/FileMaintenance/InspectionTypes').then((m) => ({ default: m.InspectionTypesManagement })));
 const ComplianceTypesManagement = lazy(() => import('./components/FileMaintenance/ComplianceTypes').then((m) => ({ default: m.ComplianceTypesManagement })));
+const MasterChecklist = lazy(() => import('./components/settings/MasterChecklist').then((m) => ({ default: m.MasterChecklist })));
 
 // --- Types ---
 type Role = 'admin' | 'officer' | 'proponent';
@@ -250,7 +252,13 @@ export default function App() {
               </div>
             }>
               {view === 'dashboard' ? (
-                <Dashboard />
+                user?.role === 'admin' && dashboardPreviewRole === 'account-officer' ? (
+                  <PreviewDashboard role="account-officer" />
+                ) : user?.role === 'admin' && dashboardPreviewRole === 'proponent' ? (
+                  <PreviewDashboard role="proponent" />
+                ) : (
+                  <RoleDashboard />
+                )
               ) : view === 'settings:users' ? (
                 <UsersManagement />
               ) : view === 'applications:new' ? (
@@ -269,6 +277,8 @@ export default function App() {
                 <InspectionTypesManagement />
               ) : view === 'settings:compliance-types' ? (
                 <ComplianceTypesManagement />
+              ) : view === 'settings:checklist' ? (
+                <MasterChecklist />
               ) : view === 'settings:control-panel' ? (
                 <ControlPanelManagement />
               ) : (
