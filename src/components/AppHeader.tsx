@@ -126,8 +126,38 @@ export function AppHeader({
   navigate: (to: string, opts?: { replace?: boolean }) => void;
 }) {
   const { range, setRange } = useGlobalDate();
+  const [currentUser, setCurrentUser] = useState<{ username: string; role: string } | null>(null);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [notificationOpen, setNotificationOpen] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    const base = String(backendUrl || '').replace(/\/+$/, '');
+    (async () => {
+      try {
+        let res = await fetch(`${base}/api/auth/check`, { credentials: 'include' });
+        if (!res.ok) res = await fetch('/api/auth/check', { credentials: 'include' });
+        const json = await res.json().catch(() => ({} as any));
+        if (cancelled) return;
+        if (json?.authenticated && json?.user) {
+          setCurrentUser({
+            username: String(json.user.username || ''),
+            role: String(json.user.role || ''),
+          });
+        }
+      } catch {
+        /* leave as null */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [backendUrl]);
+
+  const displayName = currentUser?.username || '';
+  const avatarInitials = displayName
+    ? displayName.replace(/[^a-zA-Z0-9]/g, ' ').trim().split(/\s+/).slice(0, 2).map((s) => s[0]?.toUpperCase()).join('')
+    : '';
   const [notificationFilter, setNotificationFilter] = useState<NotificationFilter>('all');
   const notificationWrapRef = useRef<HTMLDivElement | null>(null);
   const latestLoadIdRef = useRef(0);
@@ -546,15 +576,22 @@ export function AppHeader({
             }}
           >
             <div
-              className="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0 text-[var(--foreground)]"
+              className="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0 text-[var(--foreground)] uppercase"
               style={{
                 backgroundColor: 'color-mix(in oklab, var(--control-bg) 55%, transparent)',
               }}
             >
-            
+              {avatarInitials || '?'}
             </div>
-            <span className="text-xs font-bold hidden sm:inline truncate max-w-[3.75rem] md:max-w-[5rem] lg:max-w-none">
-              3CORE
+            <span className="hidden sm:flex flex-col leading-tight min-w-0">
+              <span className="text-xs font-bold truncate max-w-[6rem] md:max-w-[8rem] lg:max-w-[12rem]">
+                {displayName || 'Not signed in'}
+              </span>
+              {currentUser?.role ? (
+                <span className="text-[9px] font-medium text-[var(--text-muted)] capitalize truncate">
+                  {currentUser.role}
+                </span>
+              ) : null}
             </span>
             <ChevronRight size={12} className="rotate-90 opacity-70 shrink-0 hidden sm:block" />
           </div>

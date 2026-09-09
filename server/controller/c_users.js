@@ -1,5 +1,8 @@
 const User = require("../models/User");
 const AuditLog = require("../models/AuditLog");
+const Proponent = require("../models/Proponent");
+const Notification = require("../models/Notification");
+const ActivityLog = require("../models/ActivityLog");
 const { validatePasswordStrength } = require("../lib/password");
 
 exports.list = async (req, res) => {
@@ -78,6 +81,20 @@ exports.update = async (req, res) => {
       details: { fields: Object.keys(req.body || {}) },
       ipAddress: req.ip,
     });
+
+    // Proponent-facing "Password changed" activity entry.
+    if (password !== undefined && String(password).trim() !== "") {
+      const prop = await Proponent.getProponentByUserId(id);
+      ActivityLog.record({
+        actorUserId: req.user?.id ?? null,
+        proponentId: prop?.id ?? null,
+        entityType: "USER",
+        entityId: id,
+        action: "PASSWORD_CHANGED",
+        ip: req.ip,
+      });
+    }
+
     return res.json({ success: true, data: row });
   } catch (error) {
     console.error("Update user error:", error);
@@ -194,6 +211,97 @@ exports.revokeSessions = async (req, res) => {
     return res.json({ success: true, data: row });
   } catch (error) {
     console.error("Revoke sessions error:", error);
+    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+  }
+};
+
+// --- Self-service registration review ---
+
+exports.approve = async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ success: false, message: "Invalid id" });
+
+    const user = await User.getUserById(id);
+    if (!user) return res.status(404).json({ success: false, message: "User not found" });
+    if (user.status === "ACTIVE") {
+      return res.status(400).json({ success: false, message: "This account is already active." });
+    }
+
+    const updated = await User.setUserStatus(id, "ACTIVE");
+    await Proponent.setActiveByUserId(id, 1, req.user?.id ?? null);
+
+    const approvedProponent = await Proponent.getProponentByUserId(id);
+    await AuditLog.record({
+      actorId: req.user?.id,
+      actorUsername: req.user?.username,
+      action: "USER_APPROVED",
+      entityType: "user",
+      entityId: id,
+      ipAddress: req.ip,
+    });
+    ActivityLog.record({
+      actorUserId: req.user?.id ?? null,
+      proponentId: approvedProponent?.id ?? null,
+      entityType: "USER",
+      entityId: id,
+      action: "ACCOUNT_APPROVED",
+      ip: req.ip,
+    });
+
+    try {
+      await Notification.createNotification({
+        userId: id,
+        subject: "Your CIAC account has been approved",
+        body: "Your registration was approved. You can now sign in to the proponent portal.",
+        createdBy: req.user?.id ?? null,
+        eventType: "application_status",
+      });
+    } catch (notifyError) {
+      console.error("Approve notification error:", notifyError);
+    }
+
+    return res.json({ success: true, data: updated });
+  } catch (error) {
+    console.error("Approve user error:", error);
+    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+  }
+};
+
+exports.reject = async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ success: false, message: "Invalid id" });
+
+    const note = String(req.body?.note ?? "").trim().slice(0, 500) || null;
+
+    const user = await User.getUserById(id);
+    if (!user) return res.status(404).json({ success: false, message: "User not found" });
+
+    const updated = await User.setUserStatus(id, "REJECTED", note);
+    await Proponent.setActiveByUserId(id, 0, req.user?.id ?? null);
+
+    await AuditLog.record({
+      actorId: req.user?.id,
+      actorUsername: req.user?.username,
+      action: "USER_REJECTED",
+      entityType: "user",
+      entityId: id,
+      details: note ? { note } : undefined,
+      ipAddress: req.ip,
+    });
+    ActivityLog.record({
+      actorUserId: req.user?.id ?? null,
+      entityType: "USER",
+      entityId: id,
+      action: "ACCOUNT_REJECTED",
+      meta: note ? { note } : null,
+      ip: req.ip,
+    });
+
+    return res.json({ success: true, data: updated });
+  } catch (error) {
+    console.error("Reject user error:", error);
     return res.status(500).json({ success: false, message: error.message || "Internal server error" });
   }
 };

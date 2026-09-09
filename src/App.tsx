@@ -8,6 +8,11 @@ import { Toaster } from 'sonner';
 
 const RoleDashboard = lazy(() => import('./components/dashboard/RoleDashboard').then((m) => ({ default: m.RoleDashboard })));
 const PreviewDashboard = lazy(() => import('./components/dashboard/PreviewDashboard').then((m) => ({ default: m.PreviewDashboard })));
+const ProponentProfile = lazy(() => import('./components/proponent/ProponentProfile').then((m) => ({ default: m.ProponentProfile })));
+const ProponentApplications = lazy(() => import('./components/proponent/ProponentApplications').then((m) => ({ default: m.ProponentApplications })));
+const ProponentContractsPermits = lazy(() => import('./components/proponent/ProponentContractsPermits').then((m) => ({ default: m.ProponentContractsPermits })));
+const ProponentActivity = lazy(() => import('./components/proponent/ProponentActivity').then((m) => ({ default: m.ProponentActivity })));
+const PermitsManagement = lazy(() => import('./components/compliance/PermitsManagement').then((m) => ({ default: m.PermitsManagement })));
 const UsersManagement = lazy(() => import('./components/settings/UsersManagement').then((m) => ({ default: m.UsersManagement })));
 const ControlPanelManagement = lazy(() => import('./components/settings/ControlPanelManagement').then((m) => ({ default: m.ControlPanelManagement })));
 const ProponentsManagement = lazy(() => import('./components/proponent/ProponentsManagement').then((m) => ({ default: m.ProponentsManagement })));
@@ -75,6 +80,53 @@ const PATH_TO_VIEW = Object.entries(VIEW_TO_PATH).reduce(
   {} as Record<string, AppView>
 );
 
+// --- Proponent self-service portal (separate from the permission-gated AppView set) ---
+type ProponentView = 'dashboard' | 'me:profile' | 'me:applications' | 'me:contracts-permits' | 'me:activity';
+
+const PROPONENT_VIEW_TO_PATH: Record<ProponentView, string> = {
+  dashboard: '/dashboard',
+  'me:profile': '/me/profile',
+  'me:applications': '/me/applications',
+  'me:contracts-permits': '/me/contracts-permits',
+  'me:activity': '/me/activity',
+};
+
+const PROPONENT_PATH_TO_VIEW: Record<string, ProponentView> = Object.entries(PROPONENT_VIEW_TO_PATH).reduce(
+  (acc, [view, routePath]) => {
+    acc[routePath] = view as ProponentView;
+    return acc;
+  },
+  {} as Record<string, ProponentView>
+);
+
+const PROPONENT_SUBHEADER: Record<ProponentView, { title: string; description: string; badge: string }> = {
+  dashboard: {
+    title: 'Dashboard',
+    description: 'Your lease applications and requirement status at a glance.',
+    badge: 'Overview',
+  },
+  'me:profile': {
+    title: 'My Business Profile',
+    description: 'Your registered business information and contact details on file with CIAC.',
+    badge: 'Profile',
+  },
+  'me:applications': {
+    title: 'My Applications',
+    description: 'Track the status, requirements, documents, and contract of each lease application.',
+    badge: 'Applications',
+  },
+  'me:contracts-permits': {
+    title: 'Contracts & Permits',
+    description: 'Your executed lease contracts and the permits on record with CIAC.',
+    badge: 'Compliance',
+  },
+  'me:activity': {
+    title: 'Activity History',
+    description: 'A record of sign-ins and changes to your account and business profile.',
+    badge: 'Activity',
+  },
+};
+
 // --- Main App ---
 
 export default function App() {
@@ -106,7 +158,10 @@ export default function App() {
   const [user, setUser] = useState<UserData | null>(null);
   const [authState, setAuthState] = useState<'authed' | 'guest'>('guest');
   const [view, setView] = useState<AppView>('dashboard');
+  const [proponentView, setProponentView] = useState<ProponentView>('dashboard');
   const [dashboardPreviewRole, setDashboardPreviewRole] = useState<DashboardPreviewRole>('admin');
+
+  const isProponent = user?.role === 'proponent';
 
   useEffect(() => {
     const onPop = () =>
@@ -120,6 +175,10 @@ export default function App() {
 
   useEffect(() => {
     // Keep URL and view in sync (minimal router)
+    if (isProponent) {
+      setProponentView(PROPONENT_PATH_TO_VIEW[path] || 'dashboard');
+      return;
+    }
     if (path === '/' || path === '') {
       setView('dashboard');
       return;
@@ -131,7 +190,7 @@ export default function App() {
     }
     // Fallback: unknown route -> dashboard
     setView('dashboard');
-  }, [path]);
+  }, [path, isProponent]);
 
   useEffect(() => {
     let cancelled = false;
@@ -172,9 +231,19 @@ export default function App() {
   }, [authState, navigate, path]);
 
   const handleViewChange = useMemo(() => {
-    return (nextView: AppView) => {
-      setView(nextView);
-      const targetPath = VIEW_TO_PATH[nextView] || '/dashboard';
+    return (nextView: string) => {
+      setView(nextView as AppView);
+      const targetPath = VIEW_TO_PATH[nextView as AppView] || '/dashboard';
+      if (targetPath !== path) {
+        navigate(targetPath);
+      }
+    };
+  }, [navigate, path]);
+
+  const handleProponentViewChange = useMemo(() => {
+    return (nextView: string) => {
+      setProponentView(nextView as ProponentView);
+      const targetPath = PROPONENT_VIEW_TO_PATH[nextView as ProponentView] || '/dashboard';
       if (targetPath !== path) {
         navigate(targetPath);
       }
@@ -198,8 +267,8 @@ export default function App() {
     <>
       <Toaster richColors position="top-right" />
       <AppLayout
-        view={view}
-        onViewChange={handleViewChange}
+        view={isProponent ? proponentView : view}
+        onViewChange={isProponent ? handleProponentViewChange : handleViewChange}
         navigate={navigate}
         userRole={user?.role || 'officer'}
         userId={user?.id ?? null}
@@ -226,7 +295,13 @@ export default function App() {
           }
         }}
       >
-        {view === 'dashboard' ? (
+        {isProponent ? (
+          <SubHeader
+            title={PROPONENT_SUBHEADER[proponentView].title}
+            description={PROPONENT_SUBHEADER[proponentView].description}
+            badge={PROPONENT_SUBHEADER[proponentView].badge}
+          />
+        ) : view === 'dashboard' ? (
           <SubHeader
             previewRole={dashboardPreviewRole}
             onPreviewRoleChange={user?.role === 'admin' ? setDashboardPreviewRole : undefined}
@@ -241,7 +316,7 @@ export default function App() {
 
         <AnimatePresence mode="wait" initial={false}>
           <motion.div
-            key={view === 'dashboard' ? `dashboard-${dashboardPreviewRole}` : view}
+            key={isProponent ? `me-${proponentView}` : view === 'dashboard' ? `dashboard-${dashboardPreviewRole}` : view}
             initial={{ opacity: 0, x: 24 }}
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, x: -24 }}
@@ -253,13 +328,23 @@ export default function App() {
                 <Loader2 className="h-8 w-8 animate-spin text-secondary opacity-50" />
               </div>
             }>
-              {view === 'dashboard' ? (
-                user?.role === 'admin' && dashboardPreviewRole === 'account-officer' ? (
-                  <PreviewDashboard role="account-officer" />
-                ) : user?.role === 'admin' && dashboardPreviewRole === 'proponent' ? (
-                  <PreviewDashboard role="proponent" />
+              {isProponent ? (
+                proponentView === 'me:profile' ? (
+                  <ProponentProfile />
+                ) : proponentView === 'me:applications' ? (
+                  <ProponentApplications locationSearch={locationSearch} navigate={navigate} />
+                ) : proponentView === 'me:contracts-permits' ? (
+                  <ProponentContractsPermits navigate={navigate} />
+                ) : proponentView === 'me:activity' ? (
+                  <ProponentActivity />
                 ) : (
                   <RoleDashboard />
+                )
+              ) : view === 'dashboard' ? (
+                dashboardPreviewRole === 'admin' ? (
+                  <RoleDashboard />
+                ) : (
+                  <PreviewDashboard role={dashboardPreviewRole} />
                 )
               ) : view === 'settings:users' ? (
                 <UsersManagement />
@@ -285,6 +370,8 @@ export default function App() {
                 <AuditLog />
               ) : view === 'settings:control-panel' ? (
                 <ControlPanelManagement />
+              ) : view === 'compliance:permits' ? (
+                <PermitsManagement />
               ) : (
                 <SectionLanding view={view} />
               )}

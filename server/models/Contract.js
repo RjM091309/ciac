@@ -107,6 +107,32 @@ async function getByApplicationId(applicationId) {
   return rows?.[0] || null;
 }
 
+async function listByProponentId(proponentId) {
+  await ensureSchema();
+  const rows = await selectData(
+    `
+    SELECT
+      c.id,
+      c.application_id,
+      c.contract_no,
+      c.issue_date,
+      c.effective_start,
+      c.effective_end,
+      c.document_id,
+      c.created_at,
+      c.updated_at,
+      a.application_no,
+      a.is_renewal
+    FROM dbo.contracts c
+    INNER JOIN dbo.applications a ON a.id = c.application_id
+    WHERE a.proponent_id = @param0
+    ORDER BY c.id DESC
+    `,
+    [toInt(proponentId)]
+  );
+  return rows;
+}
+
 async function createContract({
   application_id,
   contract_no,
@@ -193,6 +219,7 @@ module.exports = {
   ensureSchema,
   getById,
   getByApplicationId,
+  listByProponentId,
   createContract,
   updateContract,
 };

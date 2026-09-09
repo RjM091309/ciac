@@ -66,13 +66,20 @@ exports.create = async (req, res) => {
     if (!Number.isFinite(Number(proponent_id))) {
       return res.status(400).json({ success: false, message: "proponent_id is required" });
     }
-    if (!application_type || !String(application_type).trim()) {
+    const normalizedType = String(application_type || "").trim().toUpperCase();
+    if (!normalizedType) {
       return res.status(400).json({ success: false, message: "application_type is required" });
+    }
+    if (!Workflow.isValidApplicationType(normalizedType)) {
+      return res.status(400).json({
+        success: false,
+        message: `Invalid application type. Expected one of: ${Workflow.APPLICATION_TYPES.join(", ")}.`,
+      });
     }
 
     const row = await Workflow.createApplication({
       proponent_id,
-      application_type: String(application_type).trim(),
+      application_type: normalizedType,
       is_renewal: Number(is_renewal) ? 1 : 0,
       status: save_as_draft ? "DRAFT" : "SUBMITTED",
       submitted_at: submitted_at ?? null,
@@ -122,6 +129,55 @@ exports.submit = async (req, res) => {
   } catch (error) {
     console.error("Submit application error:", error);
     return res.status(400).json({ success: false, message: error.message || "Internal server error" });
+  }
+};
+
+/** Edit an unsubmitted (DRAFT) application — the caller's own, or any for
+ * staff. Only application_type / is_renewal, and only while DRAFT. */
+exports.updateDraft = async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ success: false, message: "Invalid id" });
+    const { application, forbidden } = await loadWithAccess(req, id);
+    if (forbidden) return res.status(403).json({ success: false, message: "Forbidden" });
+    if (!application) return res.status(404).json({ success: false, message: "Application not found" });
+
+    const { application_type, is_renewal } = req.body || {};
+    const row = await Workflow.updateDraftApplication(id, {
+      application_type,
+      is_renewal,
+      changed_by: req.user?.id ?? null,
+    });
+    return res.json({ success: true, data: row });
+  } catch (error) {
+    console.error("Update draft application error:", error);
+    return res.status(400).json({ success: false, message: error.message || "Internal server error" });
+  }
+};
+
+/** Delete an unsubmitted (DRAFT) application with no documents attached. */
+exports.remove = async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ success: false, message: "Invalid id" });
+    const { application, forbidden } = await loadWithAccess(req, id);
+    if (forbidden) return res.status(403).json({ success: false, message: "Forbidden" });
+    if (!application) return res.status(404).json({ success: false, message: "Application not found" });
+
+    const result = await Workflow.deleteDraftApplication(id);
+    if (!result.deleted) {
+      const messages = {
+        NOT_DRAFT: "Only draft applications can be deleted.",
+        HAS_DOCUMENTS: "Remove the uploaded documents before deleting this draft.",
+        NOT_FOUND: "Application not found.",
+      };
+      const code = result.reason === "NOT_FOUND" ? 404 : 409;
+      return res.status(code).json({ success: false, message: messages[result.reason] || "Cannot delete this application." });
+    }
+    return res.json({ success: true });
+  } catch (error) {
+    console.error("Delete application error:", error);
+    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
   }
 };
 

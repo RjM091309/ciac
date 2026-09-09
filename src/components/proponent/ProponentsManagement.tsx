@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Pencil, RotateCcw, Search, UserX } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { toast } from 'sonner';
+import { ProponentChangeRequests } from './ProponentChangeRequests';
 import { SidePanel } from '../ui/SidePanel';
 import { ConfirmModal } from '../ui/ConfirmModal';
 import { AppSelect } from '../ui/AppSelect';
@@ -51,6 +52,22 @@ export function ProponentsManagement() {
   const [searchQuery, setSearchQuery] = useState('');
   const [pageSize, setPageSize] = useState(20);
   const [page, setPage] = useState(1);
+  const [tab, setTab] = useState<'list' | 'requests'>('list');
+  const [pendingRequestCount, setPendingRequestCount] = useState(0);
+
+  const refreshPendingRequestCount = React.useCallback(async () => {
+    try {
+      const res = await fetch(api('/api/proponents/change-requests?status=PENDING'), { credentials: 'include' });
+      const json = await res.json().catch(() => ({}));
+      if (res.ok && Array.isArray(json.data)) setPendingRequestCount(json.data.length);
+    } catch {
+      /* non-critical */
+    }
+  }, []);
+
+  useEffect(() => {
+    refreshPendingRequestCount();
+  }, [refreshPendingRequestCount]);
 
   const { data: proponentsUsersData, isLoading, isRevalidating, refresh } = useSessionStorageCachedResource<ProponentsUsersData>({
     cacheKey: 'ciac.proponents_users.v1',
@@ -311,6 +328,45 @@ export function ProponentsManagement() {
         <StatCard label="Deactivated" value={String(stats.inactive)} />
       </div>
 
+      <div
+        className="inline-flex items-center gap-1 rounded-full p-1"
+        style={{ backgroundColor: 'color-mix(in oklab, var(--control-bg) 82%, transparent)' }}
+      >
+        {([
+          { id: 'list', label: 'Proponents' },
+          { id: 'requests', label: `Change Requests${pendingRequestCount ? ` (${pendingRequestCount})` : ''}` },
+        ] as const).map((t) => {
+          const active = tab === t.id;
+          return (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => setTab(t.id)}
+              className="rounded-full px-3 py-1.5 text-[11px] font-semibold cursor-pointer transition-colors"
+              style={{
+                backgroundColor: active ? 'var(--nav-active-bg)' : 'transparent',
+                color: active ? 'var(--nav-active-text)' : 'var(--text-muted)',
+              }}
+            >
+              {t.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {tab === 'requests' ? (
+        <div className="glass-card p-4 sm:p-5 !border-transparent" style={{ backgroundColor: 'var(--surface)' }}>
+          <h3 className="text-sm font-bold tracking-tight mb-3" style={{ color: 'var(--text)' }}>
+            Profile Change Requests
+          </h3>
+          <ProponentChangeRequests
+            onReviewed={() => {
+              void refresh({ showLoading: false });
+              void refreshPendingRequestCount();
+            }}
+          />
+        </div>
+      ) : (
       <div className="glass-card p-4 sm:p-5 !border-transparent" style={{ backgroundColor: 'var(--surface)' }}>
         <div className="flex items-center justify-between mb-3 gap-2">
           <h3 className="text-sm font-bold tracking-tight" style={{ color: 'var(--text)' }}>
@@ -469,6 +525,7 @@ export function ProponentsManagement() {
           </div>
         )}
       </div>
+      )}
 
       <SidePanel
         open={isCreateOpen}

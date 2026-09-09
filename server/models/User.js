@@ -3,6 +3,14 @@ const bcrypt = require("bcryptjs");
 
 let hasPhoneColumnCache = null;
 let hasTotpColumnsCache = null;
+let hasStatusColumnCache = null;
+
+const USER_STATUSES = ["PENDING", "ACTIVE", "REJECTED", "LOCKED", "SUSPENDED", "DEACTIVATED"];
+
+function normalizeStatus(value) {
+  const raw = String(value ?? "").trim().toUpperCase();
+  return USER_STATUSES.includes(raw) ? raw : "ACTIVE";
+}
 
 function toInt(v) {
   const n = Number(v);
@@ -39,6 +47,15 @@ async function hasTotpColumns() {
   );
   hasTotpColumnsCache = Number(rows?.[0]?.has_totp) === 1;
   return hasTotpColumnsCache;
+}
+
+async function hasStatusColumn() {
+  if (hasStatusColumnCache !== null) return hasStatusColumnCache;
+  const rows = await selectData(
+    `SELECT CAST(CASE WHEN COL_LENGTH('dbo.users', 'status') IS NULL THEN 0 ELSE 1 END AS INT) AS has_status`
+  );
+  hasStatusColumnCache = Number(rows?.[0]?.has_status) === 1;
+  return hasStatusColumnCache;
 }
 
 async function ensureSchema() {
@@ -94,14 +111,21 @@ async function ensureSchema() {
   `);
   hasTotpColumnsCache = null;
 
-  // Account status: richer than is_active — distinguishes an admin-imposed,
-  // easily-reversed SUSPENDED state from a longer-term DEACTIVATED one. Login
-  // and every existing is_active-gated query keep working unchanged since
-  // is_active stays the single source of truth for "can log in"; status is
-  // the display/audit label layered on top.
+  // Account status, richer than is_active:
+  //   PENDING     — registered, awaiting CIAC approval (is_active = 0)
+  //   ACTIVE      — approved / normal account (is_active = 1)
+  //   REJECTED    — registration declined (is_active = 0)
+  //   SUSPENDED   — admin-imposed, easily-reversed hold (is_active = 0)
+  //   DEACTIVATED — longer-term account closure (is_active = 0)
+  // is_active stays the single source of truth for "can log in"; status is the
+  // display/audit label layered on top. Existing rows default to ACTIVE.
   await updateSchema(`
     IF COL_LENGTH('dbo.users', 'status') IS NULL
       ALTER TABLE dbo.users ADD status NVARCHAR(20) NOT NULL CONSTRAINT DF_users_status DEFAULT ('ACTIVE');
+  `);
+  await updateSchema(`
+    IF COL_LENGTH('dbo.users', 'registration_note') IS NULL
+      ALTER TABLE dbo.users ADD registration_note NVARCHAR(500) NULL;
   `);
   // One-time backfill for rows that predate the status column — cheap no-op
   // once migrated, since deactivateUser/suspendUser set status explicitly.
@@ -129,6 +153,7 @@ async function ensureSchema() {
     IF COL_LENGTH('dbo.users', 'token_version') IS NULL
       ALTER TABLE dbo.users ADD token_version INT NOT NULL CONSTRAINT DF_users_token_version DEFAULT (0);
   `);
+  hasStatusColumnCache = null;
 
   // user_roles
   await updateSchema(`
@@ -177,6 +202,7 @@ async function listUserRolesMap() {
 async function listUsers() {
   const includePhone = await hasPhoneColumn();
   const includeTotp = await hasTotpColumns();
+  const includeStatus = await hasStatusColumn();
   const users = await selectData(
     `
     SELECT
@@ -185,10 +211,9 @@ async function listUsers() {
       u.email,
       ${includePhone ? "u.phone" : "NULL AS phone"},
       ${includeTotp ? "u.totp_enabled" : "CAST(0 AS BIT) AS totp_enabled"},
+      ${includeStatus ? "u.status, u.registration_note, u.locked_until" : "'ACTIVE' AS status, NULL AS registration_note, NULL AS locked_until"},
       u.full_name,
       u.is_active,
-      u.status,
-      u.locked_until,
       u.created_at,
       u.updated_at,
       u.password_hash
@@ -206,9 +231,10 @@ async function listUsers() {
     email: u.email ?? null,
     phone: u.phone ?? null,
     totp_enabled: Number(u.totp_enabled) ? 1 : 0,
+    status: normalizeStatus(u.status),
+    registration_note: u.registration_note ?? null,
     full_name: u.full_name ?? null,
     is_active: u.is_active,
-    status: u.status || (Number(u.is_active) ? "ACTIVE" : "DEACTIVATED"),
     is_locked: Boolean(u.locked_until && new Date(u.locked_until).getTime() > now),
     created_at: u.created_at ?? null,
     updated_at: u.updated_at ?? null,
@@ -219,6 +245,7 @@ async function listUsers() {
 async function getUserById(id) {
   const includePhone = await hasPhoneColumn();
   const includeTotp = await hasTotpColumns();
+  const includeStatus = await hasStatusColumn();
   const rows = await selectData(
     `
     SELECT TOP (1)
@@ -227,10 +254,9 @@ async function getUserById(id) {
       u.email,
       ${includePhone ? "u.phone" : "NULL AS phone"},
       ${includeTotp ? "u.totp_enabled" : "CAST(0 AS BIT) AS totp_enabled"},
+      ${includeStatus ? "u.status, u.registration_note, u.locked_until" : "'ACTIVE' AS status, NULL AS registration_note, NULL AS locked_until"},
       u.full_name,
       u.is_active,
-      u.status,
-      u.locked_until,
       u.created_at,
       u.updated_at
     FROM users u
@@ -258,9 +284,10 @@ async function getUserById(id) {
     email: user.email ?? null,
     phone: user.phone ?? null,
     totp_enabled: Number(user.totp_enabled) ? 1 : 0,
+    status: normalizeStatus(user.status),
+    registration_note: user.registration_note ?? null,
     full_name: user.full_name ?? null,
     is_active: user.is_active,
-    status: user.status || (Number(user.is_active) ? "ACTIVE" : "DEACTIVATED"),
     is_locked: Boolean(user.locked_until && new Date(user.locked_until).getTime() > Date.now()),
     created_at: user.created_at ?? null,
     updated_at: user.updated_at ?? null,
@@ -268,28 +295,36 @@ async function getUserById(id) {
   };
 }
 
-async function createUser({ username, email, phone, full_name, password, is_active = 1, role_id }) {
+async function createUser({ username, email, phone, full_name, password, is_active = 1, role_id, status = "ACTIVE" }) {
   const active = is_active ? 1 : 0;
   const roleId = toInt(role_id);
   const hashedPassword = await hashPasswordIfNeeded(password);
   const includePhone = await hasPhoneColumn();
-  const insertSql = includePhone
-    ? `
-    INSERT INTO users (username,email,phone,password_hash,full_name,is_active,created_at,updated_at)
-    OUTPUT INSERTED.id
-    VALUES (@param0,@param1,@param2,@param3,@param4,@param5,GETDATE(),NULL)
-    `
-    : `
-    INSERT INTO users (username,email,password_hash,full_name,is_active,created_at,updated_at)
-    OUTPUT INSERTED.id
-    VALUES (@param0,@param1,@param2,@param3,@param4,GETDATE(),NULL)
-    `;
-  const insertParams = includePhone
-    ? [username, email, phone, hashedPassword, full_name, active]
-    : [username, email, hashedPassword, full_name, active];
+  const includeStatus = await hasStatusColumn();
+  const statusValue = normalizeStatus(status);
+
+  const cols = ["username", "email"];
+  const vals = ["@param0", "@param1"];
+  const params = [username, email];
+  if (includePhone) {
+    cols.push("phone");
+    vals.push(`@param${params.length}`);
+    params.push(phone);
+  }
+  cols.push("password_hash", "full_name", "is_active");
+  vals.push(`@param${params.length}`, `@param${params.length + 1}`, `@param${params.length + 2}`);
+  params.push(hashedPassword, full_name, active);
+  if (includeStatus) {
+    cols.push("status");
+    vals.push(`@param${params.length}`);
+    params.push(statusValue);
+  }
+  cols.push("created_at", "updated_at");
+  vals.push("GETDATE()", "NULL");
+
   const result = await insertData(
-    insertSql,
-    insertParams
+    `INSERT INTO users (${cols.join(",")}) OUTPUT INSERTED.id VALUES (${vals.join(",")})`,
+    params
   );
 
   const newId = result?.recordset?.[0]?.id;
@@ -297,6 +332,52 @@ async function createUser({ username, email, phone, full_name, password, is_acti
     await setUserPrimaryRole(newId, roleId);
   }
   return await getUserById(newId);
+}
+
+/** Duplicate check for self-service registration. Returns a minimal row or null. */
+async function findByUsernameOrEmail(username, email) {
+  const uname = String(username ?? "").trim();
+  const mail = String(email ?? "").trim();
+  if (!uname && !mail) return null;
+  const rows = await selectData(
+    `
+    SELECT TOP (1) u.id, u.username, u.email
+    FROM users u
+    WHERE (@param0 <> '' AND u.username = @param0)
+       OR (@param1 <> '' AND u.email = @param1)
+    `,
+    [uname, mail]
+  );
+  return rows?.[0] || null;
+}
+
+/**
+ * Sets the account lifecycle status and keeps `is_active` in sync
+ * (ACTIVE -> 1, anything else -> 0). `note` is stored on REJECTED.
+ */
+async function setUserStatus(id, status, note = null) {
+  const nextStatus = normalizeStatus(status);
+  const active = nextStatus === "ACTIVE" ? 1 : 0;
+  const includeStatus = await hasStatusColumn();
+  if (includeStatus) {
+    await updateData(
+      `
+      UPDATE users
+      SET status = @param1,
+          is_active = @param2,
+          registration_note = @param3,
+          updated_at = GETDATE()
+      WHERE id = @param0
+      `,
+      [id, nextStatus, active, note ?? null]
+    );
+  } else {
+    await updateData(
+      `UPDATE users SET is_active = @param1, updated_at = GETDATE() WHERE id = @param0`,
+      [id, active]
+    );
+  }
+  return getUserById(id);
 }
 
 async function setUserPrimaryRole(userId, roleId) {
@@ -370,27 +451,32 @@ async function updateUser(id, { username, email, phone, full_name, password, is_
 }
 
 async function deactivateUser(id) {
-  await updateData(
-    `
-    UPDATE users
-    SET is_active = 0, status = 'DEACTIVATED', updated_at = GETDATE()
-    WHERE id = @param0
-    `,
-    [id]
-  );
+  if (await hasStatusColumn()) {
+    await setUserStatus(id, "DEACTIVATED");
+  } else {
+    await updateData(
+      `UPDATE users SET is_active = 0, updated_at = GETDATE() WHERE id = @param0`,
+      [id]
+    );
+  }
   await bumpTokenVersion(id);
   return await getUserById(id);
 }
 
 async function reactivateUser(id) {
-  await updateData(
-    `
-    UPDATE users
-    SET is_active = 1, status = 'ACTIVE', failed_login_attempts = 0, locked_until = NULL, updated_at = GETDATE()
-    WHERE id = @param0
-    `,
-    [id]
-  );
+  if (await hasStatusColumn()) {
+    await setUserStatus(id, "ACTIVE");
+    // Clear any failed-login lockout so a reactivated account can sign in.
+    await updateData(
+      `UPDATE users SET failed_login_attempts = 0, locked_until = NULL, updated_at = GETDATE() WHERE id = @param0`,
+      [id]
+    );
+  } else {
+    await updateData(
+      `UPDATE users SET is_active = 1, updated_at = GETDATE() WHERE id = @param0`,
+      [id]
+    );
+  }
   return await getUserById(id);
 }
 
@@ -541,6 +627,9 @@ module.exports = {
   reactivateUser,
   suspendUser,
   unsuspendUser,
+  findByUsernameOrEmail,
+  setUserStatus,
+  USER_STATUSES,
   getTotpRecord,
   setTotpSecret,
   enableTotp,

@@ -93,6 +93,15 @@ async function ensureSchema() {
       CREATE UNIQUE INDEX UX_roles_name ON dbo.roles(name);
     END
   `);
+
+  // Base role the proponent self-service portal depends on. Idempotent — safe on
+  // every boot. Control Panel gating and Role.getActiveRoleIdByName('proponent')
+  // both need this row to exist.
+  await updateSchema(`
+    IF NOT EXISTS (SELECT 1 FROM dbo.roles WHERE LOWER(name) = 'proponent')
+      INSERT INTO dbo.roles (name, description, is_active)
+      VALUES ('proponent', 'External proponent / locator self-service portal', 1);
+  `);
 }
 
 module.exports = {

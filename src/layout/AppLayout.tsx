@@ -2,6 +2,7 @@ import React, { useEffect, useLayoutEffect, useState, useMemo } from 'react';
 import { AppFooter } from '../components/AppFooter';
 import { AppHeader } from '../components/AppHeader';
 import { AppSidebar } from '../components/AppSidebar';
+import { ProponentSidebar } from '../components/proponent/ProponentSidebar';
 import { ControlPanelAccessProvider } from '../context/ControlPanelAccessContext';
 import { cn } from '../lib/utils';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
@@ -59,8 +60,8 @@ export function AppLayout({
   backendUrl,
   children,
 }: {
-  view: AppView;
-  onViewChange: (view: AppView) => void;
+  view: string;
+  onViewChange: (view: string) => void;
   navigate: (to: string, opts?: { replace?: boolean }) => void;
   onLogout: () => void;
   userRole: 'admin' | 'officer' | 'proponent';
@@ -191,6 +192,10 @@ export function AppLayout({
     [theme]
   );
 
+  // Proponents get a fixed self-service menu that doesn't depend on Control
+  // Panel permissions; every other role uses the permission-gated AppSidebar.
+  const SidebarComponent = userRole === 'proponent' ? ProponentSidebar : AppSidebar;
+
   return (
     <ThemeProvider theme={muiTheme}>
       <ControlPanelAccessProvider>
@@ -224,7 +229,7 @@ export function AppLayout({
                   willChange: 'transform',
                 }}
               >
-                <AppSidebar
+                <SidebarComponent
                   view={view}
                   onViewChange={(v) => {
                     onViewChange(v);
@@ -237,7 +242,7 @@ export function AppLayout({
               </div>
             </>
           ) : (
-            <AppSidebar
+            <SidebarComponent
               view={view}
               onViewChange={onViewChange}
               onLogout={onLogout}

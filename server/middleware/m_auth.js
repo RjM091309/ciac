@@ -2,6 +2,8 @@ const jwt = require("jsonwebtoken");
 const Role = require("../models/Role");
 const ControlPanelPermission = require("../models/ControlPanelPermission");
 const User = require("../models/User");
+const Proponent = require("../models/Proponent");
+const ApplicationWorkflow = require("../models/ApplicationWorkflow");
 
 function getJwtSecret() {
   const secret = process.env.JWT_SECRET;
@@ -112,11 +114,68 @@ function requireMenuAccess(menuKey, action = "view") {
   };
 }
 
+/**
+ * Guards a proponent self-service route. Requires an authenticated user whose
+ * effective role is 'proponent' AND who has a linked (active) proponent profile.
+ * On success attaches `req.proponent`. Admins/officers are intentionally NOT
+ * allowed through — these routes are strictly "my own record" endpoints.
+ */
+async function requireProponentSelf(req, res, next) {
+  if (!req.user) {
+    return res.status(401).json({ success: false, message: "Access token required" });
+  }
+  if (String(req.user.role || "").toLowerCase() !== "proponent") {
+    return res.status(403).json({ success: false, message: "Forbidden" });
+  }
+  try {
+    const proponent = await Proponent.getProponentByUserId(req.user.id);
+    if (!proponent) {
+      return res.status(404).json({
+        success: false,
+        code: "NO_PROPONENT_PROFILE",
+        message: "No proponent profile is linked to this account yet.",
+      });
+    }
+    req.proponent = proponent;
+    return next();
+  } catch (error) {
+    console.error("requireProponentSelf failed:", error);
+    return res.status(500).json({ success: false, message: "Internal server error" });
+  }
+}
+
+/**
+ * Runs after requireProponentSelf. Loads the application named by `:id` and
+ * 403s unless it belongs to the caller's proponent. Attaches `req.application`.
+ */
+async function requireOwnApplication(req, res, next) {
+  if (!req.proponent) {
+    return res.status(403).json({ success: false, message: "Forbidden" });
+  }
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id)) {
+    return res.status(400).json({ success: false, message: "Invalid application id" });
+  }
+  try {
+    const application = await ApplicationWorkflow.getApplicationById(id);
+    if (!application || Number(application.proponent_id) !== Number(req.proponent.id)) {
+      return res.status(404).json({ success: false, message: "Application not found" });
+    }
+    req.application = application;
+    return next();
+  } catch (error) {
+    console.error("requireOwnApplication failed:", error);
+    return res.status(500).json({ success: false, message: "Internal server error" });
+  }
+}
+
 module.exports = {
   attachUserFromJwt,
   isAuthenticated,
   authenticateToken,
   requireRole,
   requireMenuAccess,
+  requireProponentSelf,
+  requireOwnApplication,
 };
 

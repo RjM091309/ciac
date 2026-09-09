@@ -4,6 +4,10 @@ dist/
 coverage/
 .DS_Store
 *.log
+
+# Uploaded proponent documents (local disk storage)
+server/uploads/
+uploads/
 .env*
 !.env.example
 !server/.env.example

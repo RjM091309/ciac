@@ -40,6 +40,8 @@ module.exports = function pageRouter(app) {
   app.use("/api/dashboard", require("./r_dashboard"));
   app.use("/api/quick-tasks", require("./r_quick_tasks"));
   app.use("/api/audit-logs", require("./r_audit_logs"));
+  app.use("/api/documents", require("./r_documents"));
+  app.use("/api/permits", require("./r_permits"));
   app.use("/", router);
 };
 

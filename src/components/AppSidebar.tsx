@@ -173,8 +173,8 @@ export function AppSidebar({
   collapsed,
   variant = 'default',
 }: {
-  view: AppView;
-  onViewChange: (view: AppView) => void;
+  view: string;
+  onViewChange: (view: string) => void;
   onLogout: () => void;
   collapsed?: boolean;
   variant?: 'default' | 'drawer';

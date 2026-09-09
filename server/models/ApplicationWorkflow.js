@@ -36,8 +36,17 @@ const SUBMIT_TRANSITIONS = {
   RETURNED: "RESUBMITTED",
 };
 
+// Canonical lease-application types (BRM). Kept here so both the create path
+// and the draft-edit path validate against the same closed set instead of
+// accepting arbitrary free text.
+const APPLICATION_TYPES = ["DIRECT_LEASE", "WAREHOUSE_LEASE", "SUBLEASE"];
+
 function isValidStatus(status) {
   return APPLICATION_STATUSES.includes(String(status || "").toUpperCase());
+}
+
+function isValidApplicationType(type) {
+  return APPLICATION_TYPES.includes(String(type || "").trim().toUpperCase());
 }
 
 async function createStatusChangeNotifications({ application, toStatus, remarks, changedBy }) {
@@ -278,6 +287,7 @@ async function listApplications() {
       ) AS requirements_count
     FROM dbo.applications a
     LEFT JOIN dbo.proponents p ON p.id = a.proponent_id
+    WHERE a.status <> 'DRAFT'
     ORDER BY a.id DESC
   `);
   return rows;
@@ -457,6 +467,10 @@ async function createApplication({
   const renewalBit = toBit(is_renewal);
   const normalizedStatus = isValidStatus(status) ? String(status).toUpperCase() : "SUBMITTED";
   const isDraft = normalizedStatus === "DRAFT";
+  if (!isValidApplicationType(application_type)) {
+    throw new Error("Invalid application type.");
+  }
+  const normalizedType = String(application_type).trim().toUpperCase();
 
   const id = await runInTransaction(async (tx) => {
     // Reference numbers are always minted here, never accepted from the
@@ -475,7 +489,7 @@ async function createApplication({
       [
         proponentId,
         applicationNo,
-        String(application_type || "").trim(),
+        normalizedType,
         renewalBit,
         normalizedStatus,
         isDraft ? null : submitted_at || null,
@@ -530,13 +544,17 @@ async function createApplication({
   if (!id) return null;
 
   const application = await getApplicationById(id);
-  await createApplicationCreatedNotifications({
-    applicationId: id,
-    applicationNo: application?.application_no,
-    isRenewal: renewalBit,
-    status: normalizedStatus,
-    createdBy,
-  });
+  // A DRAFT is private to the proponent until submitted — don't fan a
+  // "created" notice out to staff. submitApplication() notifies on submit.
+  if (!isDraft) {
+    await createApplicationCreatedNotifications({
+      applicationId: id,
+      applicationNo: application?.application_no,
+      isRenewal: renewalBit,
+      status: normalizedStatus,
+      createdBy,
+    });
+  }
 
   return application;
 }
@@ -554,6 +572,30 @@ async function submitApplication(id, { changed_by }) {
   const toStatus = SUBMIT_TRANSITIONS[currentStatus];
   if (!toStatus) {
     throw new Error(`Cannot submit an application while it is ${currentStatus}`);
+  }
+
+  // BRM — validation of supporting documents: every mandatory requirement must
+  // have at least one uploaded document before the application can be
+  // (re)submitted. Staff moving the status by other paths are unaffected.
+  const missingRows = await selectData(
+    `
+    SELECT COUNT(1) AS n
+    FROM dbo.application_requirements ar
+    INNER JOIN dbo.requirements r ON r.id = ar.requirement_id
+    WHERE ar.application_id = @param0
+      AND r.is_mandatory = 1
+      AND NOT EXISTS (
+        SELECT 1 FROM dbo.documents d
+        WHERE d.application_id = ar.application_id AND d.requirement_id = ar.requirement_id
+      )
+    `,
+    [id]
+  );
+  const missing = Number(missingRows?.[0]?.n || 0);
+  if (missing > 0) {
+    throw new Error(
+      `Upload the required document${missing === 1 ? "" : "s"} for ${missing} mandatory requirement${missing === 1 ? "" : "s"} before submitting.`
+    );
   }
 
   const changedBy = toInt(changed_by);
@@ -583,6 +625,101 @@ async function submitApplication(id, { changed_by }) {
   await createStatusChangeNotifications({ application, toStatus, remarks: null, changedBy });
 
   return getApplicationById(id);
+}
+
+/** Edit a still-unsubmitted application. Only DRAFT is editable, and only the
+ * two fields a proponent sets at filing time: application_type and is_renewal.
+ * Flipping is_renewal rebuilds the requirement checklist for the other track,
+ * so it's refused once any document is attached (a doc would be orphaned). */
+async function updateDraftApplication(id, { application_type, is_renewal, changed_by }) {
+  await ensureSchema();
+  const application = await getApplicationById(id);
+  if (!application) return null;
+  if (String(application.status || "").toUpperCase() !== "DRAFT") {
+    throw new Error("Only draft applications can be edited.");
+  }
+
+  const nextType =
+    application_type === undefined || application_type === null
+      ? application.application_type
+      : String(application_type).trim().toUpperCase();
+  if (!isValidApplicationType(nextType)) {
+    throw new Error("Invalid application type.");
+  }
+
+  const currentRenewal = toBit(application.is_renewal);
+  const nextRenewal =
+    is_renewal === undefined || is_renewal === null ? currentRenewal : toBit(is_renewal);
+  const renewalChanged = nextRenewal !== currentRenewal;
+  const changedBy = toInt(changed_by);
+
+  if (renewalChanged) {
+    const docRows = await selectData(
+      `SELECT COUNT(1) AS n FROM dbo.documents WHERE application_id = @param0`,
+      [id]
+    );
+    if (Number(docRows?.[0]?.n || 0) > 0) {
+      throw new Error("Remove the uploaded documents before switching between New and Renewal.");
+    }
+  }
+
+  await runInTransaction(async (tx) => {
+    await tx.query(
+      `
+      UPDATE dbo.applications
+      SET application_type = @param1, is_renewal = @param2, updated_by = @param3, updated_at = SYSUTCDATETIME()
+      WHERE id = @param0
+      `,
+      [id, nextType, nextRenewal, changedBy]
+    );
+
+    if (renewalChanged) {
+      await tx.query(`DELETE FROM dbo.application_requirements WHERE application_id = @param0`, [id]);
+      await tx.query(
+        `
+        INSERT INTO dbo.application_requirements
+          (application_id, requirement_id, status, remarks, created_by, updated_by, created_at, updated_at)
+        SELECT @param0, r.id, 'PENDING', NULL, @param1, NULL, SYSUTCDATETIME(), NULL
+        FROM dbo.requirements r
+        WHERE r.is_active = 1
+          AND ((@param2 = 1 AND r.for_renewal = 1) OR (@param2 = 0 AND r.for_new = 1))
+        `,
+        [id, changedBy, nextRenewal]
+      );
+    }
+  });
+
+  return getApplicationById(id);
+}
+
+/** Hard-deletes a DRAFT application plus its checklist and history rows.
+ * Refuses once the application has left DRAFT or has documents attached.
+ * Returns { deleted: true } or { deleted: false, reason }. */
+async function deleteDraftApplication(id) {
+  await ensureSchema();
+  const application = await getApplicationById(id);
+  if (!application) return { deleted: false, reason: "NOT_FOUND" };
+  if (String(application.status || "").toUpperCase() !== "DRAFT") {
+    return { deleted: false, reason: "NOT_DRAFT" };
+  }
+  const docRows = await selectData(
+    `SELECT COUNT(1) AS n FROM dbo.documents WHERE application_id = @param0`,
+    [id]
+  );
+  if (Number(docRows?.[0]?.n || 0) > 0) {
+    return { deleted: false, reason: "HAS_DOCUMENTS" };
+  }
+
+  await runInTransaction(async (tx) => {
+    await tx.query(`DELETE FROM dbo.application_requirements WHERE application_id = @param0`, [id]);
+    await tx.query(`DELETE FROM dbo.application_status_history WHERE application_id = @param0`, [id]);
+    // notifications.application_id has no FK, but the "draft created" notice
+    // would otherwise dangle — clear it so it doesn't surface a dead link.
+    await tx.query(`DELETE FROM dbo.notifications WHERE application_id = @param0`, [id]);
+    await tx.query(`DELETE FROM dbo.applications WHERE id = @param0`, [id]);
+  });
+
+  return { deleted: true };
 }
 
 async function updateApplicationStatus(id, { to_status, remarks, changed_by }) {
@@ -782,11 +919,15 @@ async function getDocumentById(id) {
       d.original_file_name,
       d.storage_path,
       d.content_type,
-      d.file_size_bytes
+      d.file_size_bytes,
+      d.created_by,
+      d.created_at,
+      a.proponent_id
     FROM dbo.documents d
+    LEFT JOIN dbo.applications a ON a.id = d.application_id
     WHERE d.id = @param0
     `,
-    [id]
+    [toInt(id)]
   );
   return rows?.[0] || null;
 }
@@ -933,6 +1074,8 @@ async function listApplicationStatusHistory(applicationId) {
 
 module.exports = {
   APPLICATION_STATUSES,
+  APPLICATION_TYPES,
+  isValidApplicationType,
   ensureSchema,
   listApplications,
   listAllApplicationsWithProgress,
@@ -943,6 +1086,8 @@ module.exports = {
   getApplicationById,
   createApplication,
   submitApplication,
+  updateDraftApplication,
+  deleteDraftApplication,
   updateApplicationStatus,
   listApplicationRequirements,
   updateApplicationRequirementStatus,

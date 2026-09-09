@@ -241,6 +241,28 @@ async function reactivateProponent(id, updated_by) {
   return await getProponentById(id);
 }
 
+/**
+ * Flips is_active for the proponent row linked to a user. Used when an admin
+ * approves/rejects a self-service registration (the proponent row is created
+ * inactive alongside the PENDING user).
+ */
+async function setActiveByUserId(userId, active, updated_by) {
+  await ensureSchema();
+  const uid = toInt(userId);
+  if (!uid) return null;
+  await updateData(
+    `
+    UPDATE dbo.proponents
+    SET is_active = @param1,
+        updated_at = GETDATE(),
+        updated_by = @param2
+    WHERE user_id = @param0
+    `,
+    [uid, active ? 1 : 0, toInt(updated_by)]
+  );
+  return true;
+}
+
 async function getProponentByUserId(userId) {
   await ensureSchema();
   const rows = await selectData(
@@ -291,5 +313,6 @@ module.exports = {
   updateProponent,
   deactivateProponent,
   reactivateProponent,
+  setActiveByUserId,
 };
 

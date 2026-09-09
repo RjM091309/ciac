@@ -10,6 +10,7 @@ import { Skeleton, TableSkeleton } from '../ui/Skeleton';
 import { EmptyState } from '../ui/EmptyState';
 import { useSessionStorageCachedResource } from '../../hooks/useSessionStorageCachedResource';
 import { requestNotificationsRefresh } from '../../lib/notificationRefresh';
+import { APPLICATION_TYPES, applicationTypeLabel } from '../../lib/applicationTypes';
 import { DatePicker } from '../ui/DatePicker';
 import { TextField } from '@mui/material';
 
@@ -56,6 +57,7 @@ type DocumentRow = {
   requirement_id: number | null;
   file_name: string;
   original_file_name?: string | null;
+  storage_path?: string | null;
   content_type?: string | null;
   file_size_bytes?: number | null;
   requirement_code?: string | null;
@@ -1325,6 +1327,21 @@ export function ApplicationsWorkflow({
                                                     {docForPreview?.original_file_name || docForPreview?.file_name || 'Document preview'}
                                                   </span>
                                                 </div>
+                                                {docForPreview?.id ? (
+                                                  <a
+                                                    href={
+                                                      /^https?:\/\//i.test(docForPreview.storage_path || '')
+                                                        ? docForPreview.storage_path
+                                                        : `/api/documents/${docForPreview.id}/download`
+                                                    }
+                                                    target="_blank"
+                                                    rel="noreferrer"
+                                                    className="inline-flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-xs font-semibold text-slate-200"
+                                                    style={{ borderColor: 'var(--border-subtle)' }}
+                                                  >
+                                                    Download
+                                                  </a>
+                                                ) : null}
                                               </div>
                                               <div className="mt-4 text-center py-8 text-slate-400 text-xs">Preview placeholder for file rendering.</div>
                                             </div>
@@ -1662,11 +1679,17 @@ export function ApplicationsWorkflow({
           />
 
           <label className="text-xs font-semibold uppercase tracking-wider text-secondary">Application Type</label>
-          <input
+          <select
             className="app-form-control"
             value={createForm.application_type}
             onChange={(e) => setCreateForm((p) => ({ ...p, application_type: e.target.value }))}
-          />
+          >
+            {APPLICATION_TYPES.map((t) => (
+              <option key={t} value={t}>
+                {applicationTypeLabel(t)}
+              </option>
+            ))}
+          </select>
 
           <label className="flex items-center gap-2 rounded-lg border px-3 py-2 text-xs cursor-pointer" style={{ borderColor: 'var(--input-border)' }}>
             <input

@@ -18,9 +18,11 @@ function mapNotificationRows(rows: any[], userRole: Role, userId?: number | null
     const applicationId = Number(row?.application_id);
     const hasApplicationId = Number.isFinite(applicationId) && applicationId > 0;
     const targetPath = hasApplicationId
-      ? Number(row?.application_is_renewal) === 1
-        ? '/applications/renewals'
-        : '/applications/new'
+      ? userRole === 'proponent'
+        ? '/me/applications'
+        : Number(row?.application_is_renewal) === 1
+          ? '/applications/renewals'
+          : '/applications/new'
       : undefined;
     const isRead =
       statusNum === 2 || statusText === 'READ' || statusText === 'SEEN' || statusText === 'READ_BY_USER';

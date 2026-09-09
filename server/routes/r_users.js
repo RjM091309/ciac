@@ -15,6 +15,10 @@ router.patch("/:id/suspend", requireMenuAccess(MENU_KEY, "delete"), usersControl
 router.patch("/:id/unsuspend", requireMenuAccess(MENU_KEY, "edit"), usersController.unsuspend);
 router.post("/:id/revoke-sessions", requireMenuAccess(MENU_KEY, "edit"), usersController.revokeSessions);
 
+// Self-service registration review
+router.patch("/:id/approve", requireMenuAccess(MENU_KEY, "edit"), usersController.approve);
+router.patch("/:id/reject", requireMenuAccess(MENU_KEY, "edit"), usersController.reject);
+
 // Two-factor: users self-enroll on login; admins can only reset a lost authenticator.
 router.post("/:id/totp/reset", requireMenuAccess(MENU_KEY, "edit"), usersController.resetTotp);
 

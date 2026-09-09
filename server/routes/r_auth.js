@@ -13,4 +13,3 @@ router.get("/logout", (req, res) => {
 router.get("/check", authController.checkAuth);
 
 module.exports = router;
-

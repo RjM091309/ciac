@@ -21,6 +21,8 @@ router.get("/:id/status-history", requireRole("admin", "officer", "proponent"), 
 // staff can still file/upload on a proponent's behalf.
 router.post("/", requireRole("admin", "officer", "proponent"), controller.create);
 router.patch("/:id/submit", requireRole("admin", "officer", "proponent"), controller.submit);
+router.patch("/:id", requireRole("admin", "officer", "proponent"), controller.updateDraft);
+router.delete("/:id", requireRole("admin", "officer", "proponent"), controller.remove);
 router.post("/documents", requireRole("admin", "officer", "proponent"), upload.single("file"), controller.createDocument);
 router.get("/documents/:id/file", requireRole("admin", "officer", "proponent"), controller.downloadDocument);
 

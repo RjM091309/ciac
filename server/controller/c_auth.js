@@ -1,5 +1,6 @@
 const Auth = require("../models/Auth");
 const AuditLog = require("../models/AuditLog");
+const ActivityLog = require("../models/ActivityLog");
 
 exports.login = async (req, res) => {
   try {
@@ -45,6 +46,7 @@ exports.login = async (req, res) => {
       maxAge: 24 * 60 * 60 * 1000,
     });
 
+    // Security trail (append-only, admin-facing).
     await AuditLog.record({
       actorId: result.user?.id,
       actorUsername: result.user?.username,
@@ -52,6 +54,14 @@ exports.login = async (req, res) => {
       entityType: "user",
       entityId: result.user?.id,
       ipAddress: req.ip,
+    });
+    // Proponent-facing activity timeline ("Signed in" entries).
+    ActivityLog.record({
+      actorUserId: result.user?.id ?? null,
+      entityType: "AUTH",
+      action: "LOGIN",
+      meta: { role: result.user?.role ?? null },
+      ip: req.ip,
     });
 
     return res.json({ success: true, message: result.message, user: result.user });

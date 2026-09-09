@@ -67,7 +67,8 @@ async function loginViaDatabase(username, password, totpCode) {
 
   let row = activeRows?.[0];
 
-  // If not active, check if account exists but suspended/deactivated
+  // If not active, check if the account exists but is pending / rejected /
+  // suspended / deactivated, and return the matching message.
   if (!row) {
     const inactiveRows = await selectData(
       `
@@ -80,10 +81,23 @@ async function loginViaDatabase(username, password, totpCode) {
     );
     const inactive = inactiveRows?.[0];
     if (inactive) {
-      const status = String(inactive.status || "").toUpperCase();
-      const message =
-        status === "SUSPENDED" ? "Your account has been suspended. Contact the administrator." : "Your account has been deactivated. Contact the administrator.";
-      return { success: false, message };
+      const status = String(inactive.status || "ACTIVE").trim().toUpperCase();
+      if (status === "PENDING") {
+        return {
+          success: false,
+          message: "Your account is still awaiting approval by CIAC. You'll be able to sign in once it's activated.",
+        };
+      }
+      if (status === "REJECTED") {
+        return {
+          success: false,
+          message: "Your registration was not approved. Please contact CIAC for details.",
+        };
+      }
+      if (status === "SUSPENDED") {
+        return { success: false, message: "Your account has been suspended. Contact the administrator." };
+      }
+      return { success: false, message: "Your account has been deactivated. Contact the administrator." };
     }
     return { success: false, message: "User not found" };
   }
