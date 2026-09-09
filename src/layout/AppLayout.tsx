@@ -30,7 +30,8 @@ export type AppView =
   | 'settings:inspection-types'
   | 'settings:compliance-types'
   | 'settings:checklist'
-  | 'settings:control-panel';
+  | 'settings:control-panel'
+  | 'settings:audit-log';
 
 type Theme = 'light' | 'dark';
 type ThemeMode = 'system' | 'manual';

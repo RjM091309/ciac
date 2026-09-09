@@ -22,6 +22,16 @@ function normalizeString(v) {
   return String(v ?? "").trim();
 }
 
+// TOR: "account lockout after configurable failed login attempts".
+function getLockoutConfig() {
+  const maxAttempts = Number(process.env.LOGIN_MAX_ATTEMPTS);
+  const lockoutMinutes = Number(process.env.LOGIN_LOCKOUT_MINUTES);
+  return {
+    maxAttempts: Number.isFinite(maxAttempts) && maxAttempts > 0 ? maxAttempts : 5,
+    lockoutMinutes: Number.isFinite(lockoutMinutes) && lockoutMinutes > 0 ? lockoutMinutes : 15,
+  };
+}
+
 function pickPasswordField(row) {
   if (!row || typeof row !== "object") return null;
   const keys = Object.keys(row);
@@ -57,21 +67,40 @@ async function loginViaDatabase(username, password, totpCode) {
 
   let row = activeRows?.[0];
 
-  // If not active, check if account exists but locked/inactive
+  // If not active, check if account exists but suspended/deactivated
   if (!row) {
     const inactiveRows = await selectData(
       `
-        SELECT TOP (1) u.id, u.is_active
+        SELECT TOP (1) u.id, u.is_active, u.status
         FROM users u
         WHERE (u.username = @param0 OR u.email = @param0)
           AND u.is_active = 0
       `,
       [userKey]
     );
-    if (inactiveRows?.[0]) {
-      return { success: false, message: "Your account was locked." };
+    const inactive = inactiveRows?.[0];
+    if (inactive) {
+      const status = String(inactive.status || "").toUpperCase();
+      const message =
+        status === "SUSPENDED" ? "Your account has been suspended. Contact the administrator." : "Your account has been deactivated. Contact the administrator.";
+      return { success: false, message };
     }
     return { success: false, message: "User not found" };
+  }
+
+  const id = row.id ?? row.user_id ?? 0;
+
+  // Locked out from repeated failed attempts — reject before touching the
+  // password at all, so a locked account never leaks whether the *current*
+  // guess would have been right.
+  const lockedUntil = row.locked_until ? new Date(row.locked_until) : null;
+  if (lockedUntil && lockedUntil.getTime() > Date.now()) {
+    const minutesLeft = Math.max(1, Math.ceil((lockedUntil.getTime() - Date.now()) / 60000));
+    return {
+      success: false,
+      locked: true,
+      message: `Too many failed attempts. Try again in ${minutesLeft} minute${minutesLeft === 1 ? "" : "s"}.`,
+    };
   }
 
   const passField = pickPasswordField(row);
@@ -86,9 +115,23 @@ async function loginViaDatabase(username, password, totpCode) {
     };
   }
   const matches = await bcrypt.compare(pass, stored);
-  if (!matches) return { success: false, message: "Username and Password incorrect!" };
+  if (!matches) {
+    const { maxAttempts, lockoutMinutes } = getLockoutConfig();
+    await User.registerFailedLogin(id, maxAttempts, lockoutMinutes);
+    const attemptsSoFar = Number(row.failed_login_attempts || 0) + 1;
+    if (attemptsSoFar >= maxAttempts) {
+      return {
+        success: false,
+        locked: true,
+        message: `Too many failed attempts. Your account is locked for ${lockoutMinutes} minutes.`,
+      };
+    }
+    return { success: false, message: "Username and Password incorrect!" };
+  }
 
-  const id = row.id ?? row.user_id ?? 0;
+  // Password confirmed — the attack this throttles (guessing the password)
+  // is over regardless of whether TOTP succeeds next.
+  await User.resetFailedLogins(id);
   const effectiveRole = row.role_name || row.role || "user";
   const isAdmin = String(effectiveRole).toLowerCase() === "admin";
 
@@ -150,7 +193,8 @@ async function loginViaDatabase(username, password, totpCode) {
   }
 
   const user = { id, username: row.username || row.email || userKey, role: effectiveRole };
-  const token = jwt.sign(user, getJwtSecret(), { expiresIn: "24h" });
+  const tokenVersion = Number(row.token_version || 0);
+  const token = jwt.sign({ ...user, tv: tokenVersion }, getJwtSecret(), { expiresIn: "24h" });
   return { success: true, message: "Login successful", user, token };
 }
 

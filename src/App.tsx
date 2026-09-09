@@ -18,6 +18,7 @@ const AssessmentEvaluation = lazy(() => import('./components/assessment/Assessme
 const InspectionTypesManagement = lazy(() => import('./components/FileMaintenance/InspectionTypes').then((m) => ({ default: m.InspectionTypesManagement })));
 const ComplianceTypesManagement = lazy(() => import('./components/FileMaintenance/ComplianceTypes').then((m) => ({ default: m.ComplianceTypesManagement })));
 const MasterChecklist = lazy(() => import('./components/settings/MasterChecklist').then((m) => ({ default: m.MasterChecklist })));
+const AuditLog = lazy(() => import('./components/settings/AuditLog').then((m) => ({ default: m.AuditLog })));
 
 // --- Types ---
 type Role = 'admin' | 'officer' | 'proponent';
@@ -62,6 +63,7 @@ const VIEW_TO_PATH: Record<AppView, string> = {
   'settings:inspection-types': '/settings/inspection-types',
   'settings:compliance-types': '/settings/compliance-types',
   'settings:checklist': '/settings/checklist',
+  'settings:audit-log': '/settings/audit-log',
   'settings:control-panel': '/settings/control-panel',
 };
 
@@ -279,6 +281,8 @@ export default function App() {
                 <ComplianceTypesManagement />
               ) : view === 'settings:checklist' ? (
                 <MasterChecklist />
+              ) : view === 'settings:audit-log' ? (
+                <AuditLog />
               ) : view === 'settings:control-panel' ? (
                 <ControlPanelManagement />
               ) : (
@@ -730,6 +734,14 @@ const LANDING_CONFIG: Record<AppView, LandingConfig> = {
         ['Warehouse Only', 'Storage Lease', '8', '2', 'Feb 20, 2026'],
       ],
     },
+  },
+  'settings:audit-log': {
+    title: 'Audit Log',
+    description: 'Logins, account changes, and permission changes — for monitoring and compliance review.',
+    badge: 'Security',
+    icon: ShieldCheck,
+    stats: [],
+    table: { columns: [], rows: [] },
   },
   'settings:control-panel': {
     title: 'Control Panel',

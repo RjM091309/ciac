@@ -1,8 +1,31 @@
 const { selectData, insertData, updateData, updateSchema } = require("../config/database");
+const { encryptValue, decryptValue } = require("../lib/crypto");
 
 function toInt(v) {
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
+}
+
+const ENC_PREFIX = "enc:v1:";
+let tinMigrationRan = false;
+
+/** One-time, idempotent: encrypts any TIN values written before this column
+ * became encrypted-at-rest. decryptValue already tolerates plaintext rows
+ * (returns them as-is), so this only matters for actually protecting
+ * existing data, not for correctness of reads. */
+async function migrateLegacyPlaintextTin() {
+  if (tinMigrationRan) return;
+  tinMigrationRan = true;
+  try {
+    const rows = await selectData(
+      `SELECT id, tin FROM dbo.proponents WHERE tin IS NOT NULL AND tin <> '' AND tin NOT LIKE '${ENC_PREFIX}%'`
+    );
+    for (const row of rows) {
+      await updateData(`UPDATE dbo.proponents SET tin = @param1 WHERE id = @param0`, [row.id, encryptValue(row.tin)]);
+    }
+  } catch (error) {
+    console.error("TIN encryption migration failed:", error);
+  }
 }
 
 async function ensureSchema() {
@@ -29,6 +52,16 @@ async function ensureSchema() {
       CREATE INDEX IX_proponents_business_name ON dbo.proponents(business_name);
     END
   `);
+  // AES-256-GCM ciphertext (iv + tag + data, base64) plus the "enc:v1:"
+  // prefix comfortably exceeds the original plaintext-only NVARCHAR(50).
+  await updateSchema(`
+    IF EXISTS (
+      SELECT 1 FROM sys.columns
+      WHERE object_id = OBJECT_ID('dbo.proponents') AND name = 'tin' AND max_length < 510
+    )
+      ALTER TABLE dbo.proponents ALTER COLUMN tin NVARCHAR(255) NULL;
+  `);
+  await migrateLegacyPlaintextTin();
 }
 
 async function listProponents() {
@@ -58,7 +91,7 @@ async function listProponents() {
     user_id: p.user_id ?? null,
     business_name: p.business_name,
     registration_no: p.registration_no ?? null,
-    tin: p.tin ?? null,
+    tin: p.tin ? decryptValue(p.tin) : null,
     address: p.address ?? null,
     contact_no: p.contact_no ?? null,
     created_by: p.created_by ?? null,
@@ -99,7 +132,7 @@ async function getProponentById(id) {
     user_id: p.user_id ?? null,
     business_name: p.business_name,
     registration_no: p.registration_no ?? null,
-    tin: p.tin ?? null,
+    tin: p.tin ? decryptValue(p.tin) : null,
     address: p.address ?? null,
     contact_no: p.contact_no ?? null,
     created_by: p.created_by ?? null,
@@ -133,7 +166,7 @@ async function createProponent({
     VALUES
       (@param0,@param1,@param2,@param3,@param4,@param5,@param6,NULL,GETDATE(),NULL,@param7)
     `,
-    [userId, business_name, registration_no, tin, address, contact_no, createdBy, active]
+    [userId, business_name, registration_no, encryptValue(tin), address, contact_no, createdBy, active]
   );
 
   const newId = result?.recordset?.[0]?.id;
@@ -155,7 +188,7 @@ async function updateProponent(
   if (user_id !== undefined) pushSet("user_id = ?", toInt(user_id));
   if (business_name !== undefined) pushSet("business_name = ?", business_name);
   if (registration_no !== undefined) pushSet("registration_no = ?", registration_no);
-  if (tin !== undefined) pushSet("tin = ?", tin);
+  if (tin !== undefined) pushSet("tin = ?", encryptValue(tin));
   if (address !== undefined) pushSet("address = ?", address);
   if (contact_no !== undefined) pushSet("contact_no = ?", contact_no);
   if (is_active !== undefined) pushSet("is_active = ?", is_active ? 1 : 0);
@@ -238,7 +271,7 @@ async function getProponentByUserId(userId) {
     user_id: p.user_id ?? null,
     business_name: p.business_name,
     registration_no: p.registration_no ?? null,
-    tin: p.tin ?? null,
+    tin: p.tin ? decryptValue(p.tin) : null,
     address: p.address ?? null,
     contact_no: p.contact_no ?? null,
     created_by: p.created_by ?? null,

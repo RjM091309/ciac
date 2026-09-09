@@ -450,6 +450,14 @@ export const LANDING_CONFIG: Record<AppView, LandingConfig> = {
       ],
     },
   },
+  'settings:audit-log': {
+    title: 'Audit Log',
+    description: 'Logins, account changes, and permission changes — for monitoring and compliance review.',
+    badge: 'Security',
+    icon: FileCheck,
+    stats: [],
+    table: { columns: [], rows: [] },
+  },
   'settings:control-panel': {
     title: 'Control Panel',
     description: 'Configure role-based access to sidebar menus and CRUD-capable modules.',

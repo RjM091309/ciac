@@ -5,6 +5,7 @@ const cors = require("cors");
 require("dotenv").config({ path: path.join(__dirname, ".env"), override: true });
 
 const { attachUserFromJwt } = require("./middleware/m_auth");
+const { csrfGuard } = require("./middleware/m_csrf");
 const { initializeDatabase } = require("./config/database");
 const Role = require("./models/Role");
 const User = require("./models/User");
@@ -48,6 +49,10 @@ app.use(
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
+
+// CSRF: reject state-changing /api requests whose Origin isn't one CORS
+// already trusts (see server/middleware/m_csrf.js).
+app.use(csrfGuard(allowedOrigins));
 
 // Attach req.user if JWT cookie is present
 app.use(attachUserFromJwt);

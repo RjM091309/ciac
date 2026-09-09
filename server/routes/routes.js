@@ -39,6 +39,7 @@ module.exports = function pageRouter(app) {
   app.use("/api/control-panel", require("./r_control_panel"));
   app.use("/api/dashboard", require("./r_dashboard"));
   app.use("/api/quick-tasks", require("./r_quick_tasks"));
+  app.use("/api/audit-logs", require("./r_audit_logs"));
   app.use("/", router);
 };
 

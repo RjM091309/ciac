@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Pencil, RotateCcw, Search, ShieldCheck, ShieldOff, Smartphone, UserX } from 'lucide-react';
+import { Ban, LogOut, Pencil, RotateCcw, Search, ShieldCheck, ShieldOff, Smartphone, UserX } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { toast } from 'sonner';
 import { SidePanel } from '../ui/SidePanel';
@@ -9,6 +9,8 @@ import { DataTableControls } from '../ui/DataTableControls';
 import { Skeleton, TableSkeleton } from '../ui/Skeleton';
 import { EmptyState } from '../ui/EmptyState';
 import { useSessionStorageCachedResource } from '../../hooks/useSessionStorageCachedResource';
+import { RolesPanel } from './RolesPanel';
+import { validatePassword } from '../../lib/passwordPolicy';
 
 type Role = {
   id: number;
@@ -17,12 +19,16 @@ type Role = {
   is_active?: number;
 };
 
+type AccountStatus = 'ACTIVE' | 'SUSPENDED' | 'DEACTIVATED';
+
 type UserRow = {
   id: number;
   username: string;
   email: string | null;
   full_name: string | null;
   is_active: number;
+  status?: AccountStatus;
+  is_locked?: boolean;
   totp_enabled?: number;
   created_at?: string | null;
   updated_at?: string | null;
@@ -45,6 +51,8 @@ export function UsersManagement() {
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [confirmDeactivateId, setConfirmDeactivateId] = useState<number | null>(null);
   const [confirmReactivateId, setConfirmReactivateId] = useState<number | null>(null);
+  const [confirmSuspendId, setConfirmSuspendId] = useState<number | null>(null);
+  const [confirmRevokeId, setConfirmRevokeId] = useState<number | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [pageSize, setPageSize] = useState(20);
   const [page, setPage] = useState(1);
@@ -94,8 +102,9 @@ export function UsersManagement() {
 
   const stats = useMemo(() => {
     const active = userRows.filter((u) => u.is_active === 1).length;
+    const suspended = userRows.filter((u) => u.status === 'SUSPENDED').length;
     const inactive = userRows.filter((u) => u.is_active === 0).length;
-    return { active, inactive, total: userRows.length };
+    return { active, suspended, inactive, total: userRows.length };
   }, [userRows]);
 
   const filteredUsers = useMemo(() => {
@@ -103,7 +112,7 @@ export function UsersManagement() {
     if (!q) return userRows;
     return userRows.filter((u) => {
       const roleStr = u.roles?.length ? u.roles.map((r) => r.name).join(', ') : '';
-      const statusStr = u.is_active === 1 ? 'active' : 'inactive';
+      const statusStr = u.status === 'SUSPENDED' ? 'suspended' : u.is_active === 1 ? 'active' : 'deactivated inactive';
       return (
         (u.username || '').toLowerCase().includes(q) ||
         (u.full_name || '').toLowerCase().includes(q) ||
@@ -145,6 +154,11 @@ export function UsersManagement() {
     () => roles.map((r) => ({ value: String(r.id), label: r.name })),
     [roles]
   );
+  const passwordError = useMemo(
+    () => (form.password.trim() ? validatePassword(form.password.trim()) : null),
+    [form.password]
+  );
+
   const canSubmit = useMemo(() => {
     const username = form.username.trim();
     const email = form.email.trim();
@@ -154,6 +168,7 @@ export function UsersManagement() {
 
     if (!username) return false;
     if (!email) return false;
+    if (password && passwordError) return false;
 
     if (!editing) {
       // For create mode, require required fields and at least one input activity.
@@ -174,7 +189,7 @@ export function UsersManagement() {
       Boolean(password);
 
     return hasChanged;
-  }, [editing, form.email, form.full_name, form.password, form.role_id, form.username, roles]);
+  }, [editing, form.email, form.full_name, form.password, form.role_id, form.username, roles, passwordError]);
 
   useEffect(() => {
     setPage(1);
@@ -289,11 +304,72 @@ export function UsersManagement() {
     }
   }
 
+  /** Distinct from deactivate: an easily-reversed hold, not a long-term
+   * closure — both still block login (same status pill treats them
+   * differently). */
+  async function suspend(id: number) {
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await fetch(api(`/api/users/${id}/suspend`), { method: 'PATCH', credentials: 'include' });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.message || 'Suspend failed');
+      await refresh({ showLoading: false });
+      toast.success('User suspended');
+      setConfirmSuspendId(null);
+    } catch (e: any) {
+      const message = e?.message || 'Suspend failed';
+      setError(message);
+      toast.error(message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function unsuspend(id: number) {
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await fetch(api(`/api/users/${id}/unsuspend`), { method: 'PATCH', credentials: 'include' });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.message || 'Unsuspend failed');
+      await refresh({ showLoading: false });
+      toast.success('User reinstated');
+    } catch (e: any) {
+      const message = e?.message || 'Unsuspend failed';
+      setError(message);
+      toast.error(message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  /** Forces re-login everywhere without waiting for the JWT's 24h expiry —
+   * e.g. after a suspected compromise. */
+  async function revokeSessions(id: number) {
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await fetch(api(`/api/users/${id}/revoke-sessions`), { method: 'POST', credentials: 'include' });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.message || 'Failed to revoke sessions');
+      toast.success('Active sessions revoked — user must log in again');
+      setConfirmRevokeId(null);
+    } catch (e: any) {
+      const message = e?.message || 'Failed to revoke sessions';
+      setError(message);
+      toast.error(message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
     <div className="space-y-4 sm:space-y-5">
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4 mt-3">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 mt-3">
         <StatCard label="Active Users" value={String(stats.active)} />
         <StatCard label="Total Users" value={String(stats.total)} />
+        <StatCard label="Suspended" value={String(stats.suspended)} />
         <StatCard label="Deactivated" value={String(stats.inactive)} />
       </div>
 
@@ -305,13 +381,16 @@ export function UsersManagement() {
           <h3 className="text-sm font-bold tracking-tight" style={{ color: 'var(--text)' }}>
             User Management List
           </h3>
-          <button
-            className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-semibold shadow-sm cursor-pointer"
-            style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
-            onClick={openCreate}
-          >
-            + New Record
-          </button>
+          <div className="flex items-center gap-2">
+            <RolesPanel onChanged={() => refresh({ showLoading: false })} />
+            <button
+              className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-semibold shadow-sm cursor-pointer"
+              style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
+              onClick={openCreate}
+            >
+              + New Record
+            </button>
+          </div>
         </div>
 
         {error && (
@@ -409,16 +488,27 @@ export function UsersManagement() {
                       <span
                         className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold"
                         style={
-                          u.is_active === 1
-                            ? { backgroundColor: 'rgba(34,197,94,.14)', color: 'rgba(34,197,94,.95)' }
-                            : { backgroundColor: 'rgba(148,163,184,.14)', color: 'rgba(148,163,184,.95)' }
+                          u.status === 'SUSPENDED'
+                            ? { backgroundColor: 'rgba(245,158,11,.14)', color: 'rgba(245,158,11,.95)' }
+                            : u.is_active === 1
+                              ? { backgroundColor: 'rgba(34,197,94,.14)', color: 'rgba(34,197,94,.95)' }
+                              : { backgroundColor: 'rgba(148,163,184,.14)', color: 'rgba(148,163,184,.95)' }
                         }
                       >
-                        {u.is_active === 1 ? 'Active' : 'Inactive'}
+                        {u.status === 'SUSPENDED' ? 'Suspended' : u.is_active === 1 ? 'Active' : 'Deactivated'}
                       </span>
+                      {u.is_locked && (
+                        <span
+                          className="ml-1.5 inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold"
+                          style={{ backgroundColor: 'rgba(239,68,68,.14)', color: 'rgba(239,68,68,.95)' }}
+                          title="Locked out from repeated failed login attempts"
+                        >
+                          Locked
+                        </span>
+                      )}
                     </td>
                     <td className="px-3 py-2 pr-2">
-                      <div className="flex items-center justify-end gap-2">
+                      <div className="flex items-center justify-end gap-1.5">
                         <button
                           className={cn(
                             'inline-flex items-center justify-center rounded-md p-1.5 text-secondary',
@@ -432,17 +522,56 @@ export function UsersManagement() {
                           <Pencil size={14} />
                         </button>
                         {u.is_active === 1 ? (
+                          <>
+                            <button
+                              className={cn(
+                                'inline-flex items-center justify-center rounded-md p-1.5 text-secondary',
+                                saving ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
+                              )}
+                              onClick={() => setConfirmSuspendId(u.id)}
+                              disabled={saving}
+                              aria-label={`Suspend ${u.username}`}
+                              title="Suspend (temporary hold)"
+                            >
+                              <Ban size={14} />
+                            </button>
+                            <button
+                              className={cn(
+                                'inline-flex items-center justify-center rounded-md p-1.5 text-secondary',
+                                saving ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
+                              )}
+                              onClick={() => setConfirmDeactivateId(u.id)}
+                              disabled={saving}
+                              aria-label={`Deactivate ${u.username}`}
+                              title="Deactivate"
+                            >
+                              <UserX size={14} />
+                            </button>
+                            <button
+                              className={cn(
+                                'inline-flex items-center justify-center rounded-md p-1.5 text-secondary',
+                                saving ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
+                              )}
+                              onClick={() => setConfirmRevokeId(u.id)}
+                              disabled={saving}
+                              aria-label={`Revoke sessions for ${u.username}`}
+                              title="Revoke active sessions"
+                            >
+                              <LogOut size={14} />
+                            </button>
+                          </>
+                        ) : u.status === 'SUSPENDED' ? (
                           <button
                             className={cn(
                               'inline-flex items-center justify-center rounded-md p-1.5 text-secondary',
                               saving ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
                             )}
-                            onClick={() => setConfirmDeactivateId(u.id)}
+                            onClick={() => void unsuspend(u.id)}
                             disabled={saving}
-                            aria-label={`Deactivate ${u.username}`}
-                            title="Deactivate"
+                            aria-label={`Reinstate ${u.username}`}
+                            title="Lift suspension"
                           >
-                            <UserX size={14} />
+                            <RotateCcw size={14} />
                           </button>
                         ) : (
                           <button
@@ -531,11 +660,18 @@ export function UsersManagement() {
           <Field label={editing ? 'Password (leave blank to keep)' : 'Password'}>
             <input
               className="w-full rounded-md px-3 py-2 text-sm border focus:outline-none focus:border-[var(--nav-active-bg)]"
-              style={{ borderColor: 'var(--input-border)', color: 'var(--text)', backgroundColor: 'var(--input-bg)' }}
+              style={{
+                borderColor: passwordError ? '#f87171' : 'var(--input-border)',
+                color: 'var(--text)',
+                backgroundColor: 'var(--input-bg)',
+              }}
               type="password"
               value={form.password}
               onChange={(e) => setForm((p) => ({ ...p, password: e.target.value }))}
             />
+            <p className="text-[10px] mt-1" style={{ color: passwordError ? '#f87171' : 'var(--text-muted)' }}>
+              {passwordError || 'At least 8 characters, with a letter and a number.'}
+            </p>
           </Field>
         </div>
 
@@ -577,6 +713,32 @@ export function UsersManagement() {
           if (confirmReactivateId !== null) {
             void reactivate(confirmReactivateId);
           }
+        }}
+      />
+
+      <ConfirmModal
+        open={confirmSuspendId !== null}
+        title="Suspend user?"
+        description="A temporary hold — easier to lift than a deactivation. The user can't log in, and any active session ends immediately."
+        confirmText="Suspend"
+        danger
+        loading={saving}
+        onCancel={() => setConfirmSuspendId(null)}
+        onConfirm={() => {
+          if (confirmSuspendId !== null) void suspend(confirmSuspendId);
+        }}
+      />
+
+      <ConfirmModal
+        open={confirmRevokeId !== null}
+        title="Revoke active sessions?"
+        description="Ends this user's current login everywhere immediately, without waiting for it to expire on its own. They'll need to sign in again."
+        confirmText="Revoke"
+        danger
+        loading={saving}
+        onCancel={() => setConfirmRevokeId(null)}
+        onConfirm={() => {
+          if (confirmRevokeId !== null) void revokeSessions(confirmRevokeId);
         }}
       />
     </div>

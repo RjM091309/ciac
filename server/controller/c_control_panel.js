@@ -1,5 +1,6 @@
 const ControlPanelPermission = require("../models/ControlPanelPermission");
 const Role = require("../models/Role");
+const AuditLog = require("../models/AuditLog");
 
 function parseRoleId(v) {
   const id = Number(v);
@@ -29,6 +30,14 @@ exports.setSidebarPermissions = async (req, res) => {
 
     const permissions = Array.isArray(req.body?.permissions) ? req.body.permissions : [];
     await ControlPanelPermission.setSidebarPermissions(roleId, permissions);
+    await AuditLog.record({
+      actorId: req.user?.id,
+      actorUsername: req.user?.username,
+      action: "PERMISSIONS_CHANGED",
+      entityType: "role_sidebar_menu",
+      entityId: roleId,
+      ipAddress: req.ip,
+    });
     return res.json({ success: true });
   } catch (error) {
     console.error("Set sidebar permissions error:", error);
@@ -59,6 +68,14 @@ exports.setMenuCrudPermissions = async (req, res) => {
 
     const permissions = Array.isArray(req.body?.permissions) ? req.body.permissions : [];
     await ControlPanelPermission.setMenuCrudPermissions(roleId, permissions);
+    await AuditLog.record({
+      actorId: req.user?.id,
+      actorUsername: req.user?.username,
+      action: "PERMISSIONS_CHANGED",
+      entityType: "role_menu_crud",
+      entityId: roleId,
+      ipAddress: req.ip,
+    });
     return res.json({ success: true });
   } catch (error) {
     console.error("Set menu CRUD permissions error:", error);
@@ -126,6 +143,14 @@ exports.setDashboardWidgetPermissions = async (req, res) => {
     }
     const permissions = Array.isArray(req.body?.permissions) ? req.body.permissions : [];
     await ControlPanelPermission.setDashboardWidgetPermissions(roleId, permissions);
+    await AuditLog.record({
+      actorId: req.user?.id,
+      actorUsername: req.user?.username,
+      action: "PERMISSIONS_CHANGED",
+      entityType: "role_dashboard_widgets",
+      entityId: roleId,
+      ipAddress: req.ip,
+    });
     return res.json({ success: true });
   } catch (error) {
     console.error("Set dashboard widget permissions error:", error);

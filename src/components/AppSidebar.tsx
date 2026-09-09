@@ -430,6 +430,11 @@ export function AppSidebar({
                   active={view === 'settings:control-panel'}
                   onClick={() => onViewChange('settings:control-panel')}
                 />}
+                {canView('settings:audit-log') && <SidebarSubItem
+                  label="Audit Log"
+                  active={view === 'settings:audit-log'}
+                  onClick={() => onViewChange('settings:audit-log')}
+                />}
               </SidebarDropdown>
               <SidebarDropdown
                 icon={FileCheck}

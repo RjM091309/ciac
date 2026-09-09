@@ -1,6 +1,7 @@
 const jwt = require("jsonwebtoken");
 const Role = require("../models/Role");
 const ControlPanelPermission = require("../models/ControlPanelPermission");
+const User = require("../models/User");
 
 function getJwtSecret() {
   const secret = process.env.JWT_SECRET;
@@ -8,7 +9,14 @@ function getJwtSecret() {
   return secret;
 }
 
-function attachUserFromJwt(req, res, next) {
+/** Session invalidation for an otherwise-stateless JWT: a deactivation,
+ * suspension, password reset, or explicit "revoke sessions" bumps
+ * token_version in the DB (see User.js), which this rejects on the very
+ * next request even though the JWT itself is still validly signed and
+ * unexpired. Fails OPEN on a DB error — a per-request availability check
+ * must not turn a database hiccup into a site-wide logout; the JWT's own
+ * signature/expiry still gate access in that case. */
+async function attachUserFromJwt(req, res, next) {
   const token = req.cookies?.jwt;
   if (!token) return next();
 
@@ -20,6 +28,17 @@ function attachUserFromJwt(req, res, next) {
       role: decoded.role,
     };
     res.locals.user = req.user;
+
+    try {
+      const check = await User.getSessionCheck(decoded.id);
+      if (check && (!check.isActive || check.tokenVersion !== Number(decoded.tv || 0))) {
+        req.user = undefined;
+        res.locals.user = undefined;
+        res.clearCookie("jwt");
+      }
+    } catch {
+      // DB unreachable — fall back to trusting the JWT alone this request.
+    }
   } catch {
     res.clearCookie("jwt");
   }
