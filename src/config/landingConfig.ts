@@ -294,6 +294,26 @@ export const LANDING_CONFIG: Record<AppView, LandingConfig> = {
       ],
     },
   },
+  'compliance:inspections': {
+    title: 'Compliance & Inspection',
+    description: 'Schedule and assign inspections per type, record findings, recommendations and corrective actions, upload reports, and monitor locator compliance status.',
+    badge: 'Compliance',
+    icon: ShieldCheck,
+    isCrud: true,
+    stats: [
+      { label: 'Scheduled', value: '—' },
+      { label: 'Open Findings', value: '—' },
+      { label: 'Overdue Actions', value: '—', hint: 'Corrective actions past due date' },
+    ],
+    table: {
+      columns: ['Inspection', 'Proponent', 'Type', 'Status', 'Result'],
+      rows: [
+        ['Annual Safety Audit', 'SkyPort Logistics Inc.', 'Safety', 'In Progress', '—'],
+        ['Engineering Check', 'Delta AeroTech', 'Engineering', 'Completed', 'Passed w/ Findings'],
+        ['Performance Commitment', 'Metro Agro Trading', 'Perf. Commitment', 'Scheduled', '—'],
+      ],
+    },
+  },
   'operations:flowcharts': {
     title: 'Production Flowcharts',
     description: 'Uploaded production and process flow diagrams for proponents.',

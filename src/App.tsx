@@ -21,6 +21,7 @@ const RequirementCategoriesManagement = lazy(() => import('./components/applicat
 const ApplicationsWorkflow = lazy(() => import('./components/applications/ApplicationsWorkflow').then((m) => ({ default: m.ApplicationsWorkflow })));
 const AssessmentEvaluation = lazy(() => import('./components/assessment/AssessmentEvaluation').then((m) => ({ default: m.AssessmentEvaluation })));
 const ApprovalIssuance = lazy(() => import('./components/approval/ApprovalIssuance').then((m) => ({ default: m.ApprovalIssuance })));
+const ComplianceInspections = lazy(() => import('./components/compliance/ComplianceInspections').then((m) => ({ default: m.ComplianceInspections })));
 const InspectionTypesManagement = lazy(() => import('./components/FileMaintenance/InspectionTypes').then((m) => ({ default: m.InspectionTypesManagement })));
 const ComplianceTypesManagement = lazy(() => import('./components/FileMaintenance/ComplianceTypes').then((m) => ({ default: m.ComplianceTypesManagement })));
 const MasterChecklist = lazy(() => import('./components/settings/MasterChecklist').then((m) => ({ default: m.MasterChecklist })));
@@ -61,6 +62,7 @@ const VIEW_TO_PATH: Record<AppView, string> = {
   'compliance:permits': '/compliance/permits',
   'compliance:bir': '/compliance/bir',
   'compliance:expiry': '/compliance/expiry',
+  'compliance:inspections': '/compliance/inspections',
   'operations:flowcharts': '/operations/flowcharts',
   'operations:brochures': '/operations/brochures',
   'operations:gad': '/operations/gad',
@@ -360,6 +362,8 @@ export default function App() {
                 <AssessmentEvaluation />
               ) : view === 'approval:queue' ? (
                 <ApprovalIssuance />
+              ) : view === 'compliance:inspections' ? (
+                <ComplianceInspections />
               ) : view === 'settings:proponents' ? (
                 <ProponentsManagement />
               ) : view === 'settings:requirement-categories' ? (
@@ -674,6 +678,25 @@ const LANDING_CONFIG: Record<AppView, LandingConfig> = {
       ],
     },
   },
+  'compliance:inspections': {
+    title: 'Compliance & Inspection',
+    description: 'Schedule inspections, record findings and corrective actions, and monitor locator compliance.',
+    badge: 'Compliance',
+    icon: ShieldCheck,
+    stats: [
+      { label: 'Scheduled', value: '—' },
+      { label: 'Open Findings', value: '—' },
+      { label: 'Overdue Actions', value: '—' },
+    ],
+    table: {
+      columns: ['Inspection', 'Proponent', 'Type', 'Status', 'Result'],
+      rows: [
+        ['Annual Safety Audit', 'SkyPort Logistics Inc.', 'Safety', 'In Progress', '—'],
+        ['Engineering Check', 'Delta AeroTech', 'Engineering', 'Completed', 'Passed w/ Findings'],
+        ['Performance Commitment', 'Metro Agro Trading', 'Perf. Commitment', 'Scheduled', '—'],
+      ],
+    },
+  },
   'operations:flowcharts': {
     title: 'Production Flowcharts',
     description: 'Uploaded production and process flow diagrams for proponents.',
@@ -889,10 +912,10 @@ function SectionLanding({ view }: { view: AppView }) {
               {config.stats.map((stat) => (
                 <div
                   key={stat.label}
-                  className="rounded-xl px-3 py-3 border flex flex-col gap-1"
+                  className="rounded-xl px-3 py-3 border flex flex-col gap-1 shadow-sm"
                   style={{
-                    backgroundColor: 'var(--control-bg)',
-                    borderColor: 'var(--border-subtle)',
+                    backgroundColor: 'var(--surface)',
+                    borderColor: 'var(--border)',
                   }}
                 >
                   <span className="text-[10px] font-semibold text-secondary uppercase tracking-widest">
@@ -940,7 +963,7 @@ function SectionLanding({ view }: { view: AppView }) {
                     <th
                       key={col}
                       className="px-3 py-2 font-semibold text-[10px] uppercase tracking-widest text-secondary border-b"
-                      style={{ borderColor: 'var(--border-subtle)' }}
+                      style={{ borderColor: 'var(--border)' }}
                     >
                       {col}
                     </th>
@@ -949,7 +972,7 @@ function SectionLanding({ view }: { view: AppView }) {
               </thead>
               <tbody>
                 {config.table.rows.map((row, idx) => (
-                  <tr key={idx} className="border-b last:border-b-0" style={{ borderColor: 'var(--border-subtle)' }}>
+                  <tr key={idx} className="border-b last:border-b-0" style={{ borderColor: 'var(--border)' }}>
                     {row.map((cell, i) => (
                       <td key={i} className="px-3 py-2 text-[11px] text-secondary">
                         {cell}

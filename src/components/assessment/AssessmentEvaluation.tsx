@@ -341,7 +341,10 @@ export function AssessmentEvaluation() {
       </div>
 
       {/* Queue table */}
-      <div className="rounded-xl border overflow-hidden" style={{ borderColor: 'var(--border-subtle)' }}>
+      <div
+        className="rounded-xl border overflow-hidden shadow-sm"
+        style={{ borderColor: 'var(--border)', backgroundColor: 'var(--surface)' }}
+      >
         {loading ? (
           <div className="p-4">
             <TableSkeleton rows={6} />
@@ -356,7 +359,7 @@ export function AssessmentEvaluation() {
           <div className="overflow-x-auto">
             <table className="w-full text-left text-[13px]">
               <thead>
-                <tr className="text-[11px] uppercase tracking-wide text-secondary" style={{ backgroundColor: 'color-mix(in oklab, var(--control-bg) 55%, transparent)' }}>
+                <tr className="text-[11px] uppercase tracking-wide text-secondary" style={{ backgroundColor: 'var(--control-bg)' }}>
                   <th className="px-3 py-2.5 font-semibold">Application</th>
                   <th className="px-3 py-2.5 font-semibold">Proponent</th>
                   <th className="px-3 py-2.5 font-semibold">Stage</th>
@@ -372,7 +375,7 @@ export function AssessmentEvaluation() {
                   <tr
                     key={r.application_id}
                     className="border-t cursor-pointer hover:bg-[var(--selected-bg)] transition-colors"
-                    style={{ borderColor: 'var(--border-subtle)' }}
+                    style={{ borderColor: 'var(--border)' }}
                     onClick={() => setSelectedId(r.application_id)}
                   >
                     <td className="px-3 py-2.5">
@@ -457,8 +460,8 @@ function StatTile({
 }) {
   return (
     <div
-      className="rounded-xl border px-3 py-2.5"
-      style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'color-mix(in oklab, var(--control-bg) 45%, transparent)' }}
+      className="rounded-xl border px-3 py-2.5 shadow-sm"
+      style={{ borderColor: 'var(--border)', backgroundColor: 'var(--surface)' }}
     >
       <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-secondary">
         <Icon size={12} style={{ color: tone }} /> {label}
@@ -545,13 +548,13 @@ function AssessmentDetail({
       />
       <motion.div
         className="relative z-10 h-full w-full max-w-3xl border-l shadow-2xl flex flex-col"
-        style={{ backgroundColor: 'var(--surface)', borderColor: 'var(--border-subtle)' }}
+        style={{ backgroundColor: 'var(--surface)', borderColor: 'var(--border)' }}
         initial={{ x: '100%' }}
         animate={{ x: 0 }}
         exit={{ x: '100%' }}
         transition={{ duration: 0.28, ease: [0.16, 1, 0.3, 1] }}
       >
-        <div className="px-4 py-3 border-b flex items-start justify-between gap-3" style={{ borderColor: 'var(--border-subtle)' }}>
+        <div className="px-4 py-3 border-b flex items-start justify-between gap-3" style={{ borderColor: 'var(--border)' }}>
           <div>
             <div className="text-sm font-bold" style={{ color: 'var(--text)' }}>
               {a ? a.application_no : 'Assessment'}
@@ -564,7 +567,7 @@ function AssessmentDetail({
             {a ? <Badge label={STAGE_LABELS[a.stage] || a.stage} styles={stageBadge(a.stage)} /> : null}
             <button
               className="rounded-lg p-1 border"
-              style={{ borderColor: 'var(--border-subtle)', color: 'var(--text-muted)' }}
+              style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}
               onClick={onClose}
             >
               <X size={16} />
@@ -572,7 +575,7 @@ function AssessmentDetail({
           </div>
         </div>
 
-        <div className="px-4 pt-2 border-b flex gap-1 overflow-x-auto" style={{ borderColor: 'var(--border-subtle)' }}>
+        <div className="px-4 pt-2 border-b flex gap-1 overflow-x-auto" style={{ borderColor: 'var(--border)' }}>
           {TABS.map((t) => (
             <button
               key={t}
@@ -648,7 +651,7 @@ function OverviewTab({
         <InfoCell label="Recommendation" value={a.recommendation || '—'} />
       </div>
 
-      <div className="rounded-xl border p-3" style={{ borderColor: 'var(--border-subtle)' }}>
+      <div className="rounded-xl border p-3" style={{ borderColor: 'var(--border)' }}>
         <div className="text-[11px] font-bold uppercase tracking-wide text-secondary mb-2">Assign evaluator</div>
         <div className="flex flex-col sm:flex-row gap-2 sm:items-end">
           <div className="flex-1">
@@ -680,7 +683,7 @@ function OverviewTab({
         </div>
       </div>
 
-      <div className="rounded-xl border p-3 flex flex-wrap gap-2" style={{ borderColor: 'var(--border-subtle)' }}>
+      <div className="rounded-xl border p-3 flex flex-wrap gap-2" style={{ borderColor: 'var(--border)' }}>
         <div className="w-full text-[11px] font-bold uppercase tracking-wide text-secondary mb-1">Move stage</div>
         {['ASSIGNED', 'IN_REVIEW', 'FOR_RECOMMENDATION'].map((s) => (
           <button
@@ -689,7 +692,7 @@ function OverviewTab({
               'rounded-lg px-3 py-1.5 text-[12px] font-semibold border disabled:opacity-40',
               a.stage === s && 'ring-1 ring-[var(--text)]'
             )}
-            style={{ borderColor: 'var(--border-subtle)', color: 'var(--text)' }}
+            style={{ borderColor: 'var(--border)', color: 'var(--text)' }}
             disabled={busy || !perms.canEdit || a.stage === s}
             onClick={() =>
               run(
@@ -708,7 +711,7 @@ function OverviewTab({
         {(a.stage === 'COMPLETED' || a.stage === 'RETURNED') && isAdminReopen ? (
           <button
             className="rounded-lg px-3 py-1.5 text-[12px] font-semibold border disabled:opacity-40"
-            style={{ borderColor: 'var(--border-subtle)', color: 'var(--text)' }}
+            style={{ borderColor: 'var(--border)', color: 'var(--text)' }}
             disabled={busy}
             onClick={() =>
               run(
@@ -727,7 +730,7 @@ function OverviewTab({
 
 function InfoCell({ label, value }: { label: string; value: React.ReactNode }) {
   return (
-    <div className="rounded-lg border px-2.5 py-1.5" style={{ borderColor: 'var(--border-subtle)' }}>
+    <div className="rounded-lg border px-2.5 py-1.5" style={{ borderColor: 'var(--border)' }}>
       <div className="text-[10px] uppercase tracking-wide text-secondary">{label}</div>
       <div className="font-semibold text-[13px]">{value}</div>
     </div>
@@ -767,7 +770,7 @@ function ComplianceTab({
           description="This application has no requirement checklist yet."
         />
       ) : (
-        <div className="rounded-xl border divide-y" style={{ borderColor: 'var(--border-subtle)' }}>
+        <div className="rounded-xl border divide-y" style={{ borderColor: 'var(--border)' }}>
           {data.requirements.map((r) => (
             <div key={r.id} className="p-2.5 flex items-center justify-between gap-2">
               <div className="min-w-0">
@@ -792,7 +795,7 @@ function ComplianceTab({
                   <>
                     <button
                       className="rounded px-2 py-1 text-[11px] border disabled:opacity-40"
-                      style={{ borderColor: 'var(--border-subtle)' }}
+                      style={{ borderColor: 'var(--border)' }}
                       disabled={busy || r.status === 'VERIFIED'}
                       onClick={() => setReq(r.id, 'VERIFIED')}
                     >
@@ -800,7 +803,7 @@ function ComplianceTab({
                     </button>
                     <button
                       className="rounded px-2 py-1 text-[11px] border disabled:opacity-40"
-                      style={{ borderColor: 'var(--border-subtle)' }}
+                      style={{ borderColor: 'var(--border)' }}
                       disabled={busy || r.status === 'REJECTED'}
                       onClick={() => setReq(r.id, 'REJECTED')}
                     >
@@ -866,7 +869,7 @@ function ChargesTab({
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="rounded-xl border" style={{ borderColor: 'var(--border-subtle)' }}>
+      <div className="rounded-xl border" style={{ borderColor: 'var(--border)' }}>
         <table className="w-full text-left text-[12px]">
           <thead>
             <tr className="text-[10px] uppercase tracking-wide text-secondary">
@@ -887,7 +890,7 @@ function ChargesTab({
               </tr>
             ) : (
               data.charges.map((c) => (
-                <tr key={c.id} className="border-t" style={{ borderColor: 'var(--border-subtle)' }}>
+                <tr key={c.id} className="border-t" style={{ borderColor: 'var(--border)' }}>
                   <td className="px-2.5 py-2">{c.charge_type.replace('_', ' ')}</td>
                   <td className="px-2.5 py-2">
                     {c.description}
@@ -917,7 +920,7 @@ function ChargesTab({
             )}
           </tbody>
           <tfoot>
-            <tr className="border-t" style={{ borderColor: 'var(--border-subtle)' }}>
+            <tr className="border-t" style={{ borderColor: 'var(--border)' }}>
               <td colSpan={4} className="px-2.5 py-2 text-right text-[11px] uppercase tracking-wide text-secondary">
                 Total assessed
               </td>
@@ -929,7 +932,7 @@ function ChargesTab({
       </div>
 
       {perms.canAdd ? (
-        <div className="rounded-xl border p-3 flex flex-col gap-2" style={{ borderColor: 'var(--border-subtle)' }}>
+        <div className="rounded-xl border p-3 flex flex-col gap-2" style={{ borderColor: 'var(--border)' }}>
           <div className="text-[11px] font-bold uppercase tracking-wide text-secondary flex items-center gap-1.5">
             <Coins size={12} /> Add charge
           </div>
@@ -1054,7 +1057,7 @@ function FindingsTab({
       ) : (
         <div className="flex flex-col gap-2">
           {data.findings.map((f) => (
-            <div key={f.id} className="rounded-xl border p-2.5" style={{ borderColor: 'var(--border-subtle)' }}>
+            <div key={f.id} className="rounded-xl border p-2.5" style={{ borderColor: 'var(--border)' }}>
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-1.5 flex-wrap">
                   <Badge label={f.finding_type} styles={findingBadge(f.finding_type)} />
@@ -1075,7 +1078,7 @@ function FindingsTab({
                   {perms.canEdit && f.status === 'OPEN' ? (
                     <button
                       className="rounded px-2 py-0.5 text-[11px] border disabled:opacity-40"
-                      style={{ borderColor: 'var(--border-subtle)' }}
+                      style={{ borderColor: 'var(--border)' }}
                       disabled={busy}
                       onClick={() =>
                         run(
@@ -1111,7 +1114,7 @@ function FindingsTab({
       )}
 
       {perms.canAdd ? (
-        <div className="rounded-xl border p-3 flex flex-col gap-2" style={{ borderColor: 'var(--border-subtle)' }}>
+        <div className="rounded-xl border p-3 flex flex-col gap-2" style={{ borderColor: 'var(--border)' }}>
           <div className="text-[11px] font-bold uppercase tracking-wide text-secondary">Add finding</div>
           <div className="grid grid-cols-3 gap-2">
             <Field label="Type">
@@ -1185,7 +1188,7 @@ function RecommendationTab({
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="rounded-xl border p-3 text-[12px]" style={{ borderColor: 'var(--border-subtle)' }}>
+      <div className="rounded-xl border p-3 text-[12px]" style={{ borderColor: 'var(--border)' }}>
         <div className="flex justify-between">
           <span className="text-secondary">Charges assessed</span>
           <span className="font-semibold">{peso(a.charges_total)}</span>
@@ -1205,7 +1208,7 @@ function RecommendationTab({
       </div>
 
       {a.recommendation ? (
-        <div className="rounded-lg border px-3 py-2 text-[12px]" style={{ borderColor: 'var(--border-subtle)' }}>
+        <div className="rounded-lg border px-3 py-2 text-[12px]" style={{ borderColor: 'var(--border)' }}>
           Current recommendation: <span className="font-bold">{a.recommendation}</span>
         </div>
       ) : null}
@@ -1222,7 +1225,7 @@ function RecommendationTab({
               'rounded-xl border p-2.5 flex gap-2 cursor-pointer',
               rec === o.v && 'ring-1 ring-[var(--text)]'
             )}
-            style={{ borderColor: 'var(--border-subtle)' }}
+            style={{ borderColor: 'var(--border)' }}
           >
             <input type="radio" name="rec" checked={rec === o.v} onChange={() => setRec(o.v)} className="mt-0.5" />
             <div>
@@ -1277,7 +1280,7 @@ function ActivityTab({ data }: { data: DetailPayload }) {
   return (
     <ol className="flex flex-col gap-2">
       {data.activity.map((act) => (
-        <li key={act.id} className="rounded-lg border px-3 py-2 text-[12px]" style={{ borderColor: 'var(--border-subtle)' }}>
+        <li key={act.id} className="rounded-lg border px-3 py-2 text-[12px]" style={{ borderColor: 'var(--border)' }}>
           <div className="flex justify-between">
             <span className="font-semibold">{act.action.replace(/_/g, ' ')}</span>
             <span className="text-secondary">{fmtDate(act.created_at)}</span>

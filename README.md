@@ -1,5 +1,13 @@
 # CIAC System - developed by 3CORE
 
+## Docs
+
+- **[System Guide](docs/SYSTEM-GUIDE.md)** — all 11 BRIDGE modules, who owns what
+  (RJ / AXL / RAYNAN / ROMAR), workflows, build status, screens, API, and conventions.
+  Start here.
+- [Process Track deep-dive](docs/PROCESS-MODULES.md) — Assessment & Evaluation +
+  Compliance & Inspection (Modules 4 & 10) in full detail.
+
 ## Two-factor login (Google Authenticator / TOTP)
 
 Non-admin users sign in with username + password **and** a 6-digit code from an

@@ -23,6 +23,7 @@ export type AppView =
   | 'compliance:permits'
   | 'compliance:bir'
   | 'compliance:expiry'
+  | 'compliance:inspections'
   | 'operations:flowcharts'
   | 'operations:brochures'
   | 'operations:gad'

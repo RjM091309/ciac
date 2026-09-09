@@ -336,6 +336,19 @@ export function AppSidebar({
           <SidebarGroup title="Compliance & Permits" collapsed={collapsed}>
             <div className="flex flex-col gap-1.5">
               <SidebarDropdown
+                icon={ClipboardCheck}
+                label="Compliance & Inspection"
+                collapsed={collapsed}
+                isOpen={openDropdownId === 'compliance-inspection'}
+                onToggle={() => toggleDropdown('compliance-inspection')}
+              >
+                {canView('compliance:inspections') && <SidebarSubItem
+                  label="Inspections & Monitoring"
+                  active={view === 'compliance:inspections'}
+                  onClick={() => onViewChange('compliance:inspections')}
+                />}
+              </SidebarDropdown>
+              <SidebarDropdown
                 icon={ShieldCheck}
                 label="CDC/CIAC Permits"
                 collapsed={collapsed}
