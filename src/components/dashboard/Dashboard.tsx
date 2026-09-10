@@ -50,7 +50,7 @@ export type AdminDashboardData = {
     avgOpenAgeDays: number | null;
     oldestOpenDays: number | null;
   };
-  attention?: { application_id: number; application_no: string; proponent_name: string | null; status: string; days_waiting: number }[];
+  attention?: { application_id: number; application_no: string; proponent_name: string | null; status: string; is_renewal?: boolean; days_waiting: number }[];
 };
 
 type QuickTask = { id: number; title: string; is_done: boolean; created_at: string };
@@ -294,15 +294,33 @@ const MetricCard = ({
   icon: Icon,
   trend,
   trendValue,
+  onClick,
 }: {
   title: string;
   value: string | number;
   icon: any;
   trend?: 'up' | 'down';
   trendValue?: string;
+  onClick?: () => void;
 }) => (
   <div
-    className="glass-card p-3 sm:p-3.5 flex flex-col min-h-[100px] sm:h-31 transition-colors group !border-transparent"
+    role={onClick ? 'button' : undefined}
+    tabIndex={onClick ? 0 : undefined}
+    onClick={onClick}
+    onKeyDown={
+      onClick
+        ? (e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              onClick();
+            }
+          }
+        : undefined
+    }
+    className={cn(
+      'glass-card p-3 sm:p-3.5 flex flex-col min-h-[100px] sm:h-31 transition-colors group !border-transparent',
+      onClick && 'cursor-pointer hover:brightness-110 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--nav-active-bg)]'
+    )}
     style={{
       backgroundColor: 'var(--surface)',
     }}
@@ -328,6 +346,7 @@ const MetricCard = ({
       <button
         type="button"
         aria-label="More options"
+        onClick={(e) => e.stopPropagation()}
         className="p-2 -m-1 rounded-full transition-colors shrink-0 touch-target min-h-[44px] min-w-[44px] sm:min-h-0 sm:min-w-0 sm:p-1 flex items-center justify-center"
         style={{
           color: 'var(--text-muted)',
@@ -356,7 +375,9 @@ const MetricCard = ({
   </div>
 );
 
-export function Dashboard({ data }: { data: AdminDashboardData | null }) {
+type Navigate = (to: string, opts?: { replace?: boolean }) => void;
+
+export function Dashboard({ data, navigate }: { data: AdminDashboardData | null; navigate?: Navigate }) {
   const [currentTime, setCurrentTime] = useState(new Date());
 
   useEffect(() => {
@@ -437,7 +458,7 @@ export function Dashboard({ data }: { data: AdminDashboardData | null }) {
                     Lease Application Center
                   </h3>
                   <p className="mt-1.5 sm:mt-2 text-xs md:text-sm text-secondary flex items-center gap-2 flex-wrap">
-                    Monitor requirement completion and permit status for every proponent.
+                    Monitor requirement completion and permit status for every locator.
                     <Rocket className="w-4 h-4 shrink-0" />
                   </p>
                 </div>
@@ -479,7 +500,7 @@ export function Dashboard({ data }: { data: AdminDashboardData | null }) {
                 </div>
 
                 <div className="md:mt-4 space-y-0.5 md:space-y-1">
-                  <p className="text-xs sm:text-sm font-medium text-secondary">CIAC Lease Desk</p>
+                  <p className="text-xs sm:text-sm font-medium text-secondary">3Core Lease Desk</p>
                   <p className="text-xs font-semibold text-secondary">Application Monitoring</p>
                   <p className="text-[10px] sm:text-xs text-secondary">
                     {currentTime.toLocaleDateString('en-US', {
@@ -502,6 +523,7 @@ export function Dashboard({ data }: { data: AdminDashboardData | null }) {
             icon={FileText}
             trend="up"
             trendValue={`${totals.newApplications} new · ${totals.renewalApplications} renewal`}
+            onClick={navigate ? () => navigate('/applications/new') : undefined}
           />
           <MetricCard
             title="Registered Businesses"
@@ -509,6 +531,7 @@ export function Dashboard({ data }: { data: AdminDashboardData | null }) {
             icon={Building2}
             trend="up"
             trendValue={`${totals.totalBusinesses} on record`}
+            onClick={navigate ? () => navigate('/settings/proponents') : undefined}
           />
           <MetricCard
             title="Pending Review"
@@ -516,11 +539,13 @@ export function Dashboard({ data }: { data: AdminDashboardData | null }) {
             icon={Clock}
             trend={statusBreakdown.pending > 0 ? 'down' : 'up'}
             trendValue={`${statusBreakdown.approved} approved`}
+            onClick={navigate ? () => navigate('/assessment') : undefined}
           />
           <MetricCard
             title="Rejected / Returned"
             value={rejectedReturned}
             icon={XCircle}
+            onClick={navigate ? () => navigate('/approval') : undefined}
             trend={rejectedReturned > 0 ? 'down' : 'up'}
             trendValue={`${statusBreakdown.rejected} rejected, ${statusBreakdown.returned} returned`}
           />
@@ -584,7 +609,26 @@ export function Dashboard({ data }: { data: AdminDashboardData | null }) {
                   topCategories.map((cat, i) => {
                     const style = CATEGORY_ICON_COLORS[i % CATEGORY_ICON_COLORS.length];
                     return (
-                      <div key={cat.category_name} className="flex items-center justify-between gap-3 group min-w-0">
+                      <div
+                        key={cat.category_name}
+                        role={navigate ? 'button' : undefined}
+                        tabIndex={navigate ? 0 : undefined}
+                        onClick={navigate ? () => navigate('/applications/requirements') : undefined}
+                        onKeyDown={
+                          navigate
+                            ? (e) => {
+                                if (e.key === 'Enter' || e.key === ' ') {
+                                  e.preventDefault();
+                                  navigate('/applications/requirements');
+                                }
+                              }
+                            : undefined
+                        }
+                        className={cn(
+                          'flex items-center justify-between gap-3 group min-w-0 -mx-2 px-2 py-1 rounded-lg transition-colors',
+                          navigate && 'cursor-pointer hover:bg-[var(--surface-hover)]'
+                        )}
+                      >
                         <div className="flex items-center gap-3 min-w-0 flex-1">
                           <div className={cn('p-2 rounded-full shrink-0 transition-colors', style.bgColor)}>
                             <CircleDot size={16} className={style.color} />
@@ -636,7 +680,27 @@ export function Dashboard({ data }: { data: AdminDashboardData | null }) {
               {attention.map((item) => (
                 <div
                   key={item.application_id}
-                  className="flex items-center justify-between gap-2 p-2.5 rounded-xl min-w-0"
+                  role={navigate ? 'button' : undefined}
+                  tabIndex={navigate ? 0 : undefined}
+                  onClick={
+                    navigate
+                      ? () => navigate(`/applications/${item.is_renewal ? 'renewals' : 'new'}?applicationId=${item.application_id}`)
+                      : undefined
+                  }
+                  onKeyDown={
+                    navigate
+                      ? (e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            navigate(`/applications/${item.is_renewal ? 'renewals' : 'new'}?applicationId=${item.application_id}`);
+                          }
+                        }
+                      : undefined
+                  }
+                  className={cn(
+                    'flex items-center justify-between gap-2 p-2.5 rounded-xl min-w-0 transition-colors',
+                    navigate && 'cursor-pointer hover:brightness-110'
+                  )}
                   style={{
                     backgroundColor: 'color-mix(in oklab, var(--surface-hover) 70%, transparent)',
                     border: '1px solid var(--border-subtle)',

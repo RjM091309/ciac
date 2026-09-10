@@ -706,7 +706,7 @@ export function ApplicationsWorkflow({
   async function createApplication() {
     const proponentId = Number(createForm.proponent_id);
     if (!Number.isFinite(proponentId)) {
-      toast.error('Proponent is required');
+      toast.error('Locator is required');
       return;
     }
 
@@ -863,7 +863,7 @@ export function ApplicationsWorkflow({
     <div className="space-y-4 sm:space-y-5">
       <div className="flex items-center justify-between gap-2">
         <h3 className="text-base sm:text-lg font-bold tracking-tight" style={{ color: 'var(--text)' }}>
-          {renewalMode ? 'Renewal Applications Directory' : 'Proponents Directory'}
+          {renewalMode ? 'Renewal Applications Directory' : 'Locators Directory'}
         </h3>
         <button
           className="rounded-lg px-3 py-2 text-sm font-semibold inline-flex items-center gap-1.5 shadow-sm cursor-pointer"
@@ -923,7 +923,7 @@ export function ApplicationsWorkflow({
             <table className="min-w-full text-left text-xs">
               <thead>
                 <tr style={{ borderBottom: '1px solid var(--border-subtle)' }}>
-                  <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary">Company / Proponent</th>
+                  <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary">Company / Locator</th>
                   <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary">Application Type</th>
                   <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary">Progress</th>
                   <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary">Status</th>
@@ -1669,12 +1669,12 @@ export function ApplicationsWorkflow({
         saveLabel={createForm.save_as_draft ? 'Save Draft' : 'Submit Application'}
       >
         <div className="grid grid-cols-1 gap-3">
-          <label className="text-xs font-semibold uppercase tracking-wider text-secondary">Proponent</label>
+          <label className="text-xs font-semibold uppercase tracking-wider text-secondary">Locator</label>
           <AppSelect
             options={proponentSelectOptions}
             value={createForm.proponent_id}
             onChange={(value) => setCreateForm((p) => ({ ...p, proponent_id: value }))}
-            placeholder="Select proponent..."
+            placeholder="Select locator..."
             isDisabled={saving}
           />
 

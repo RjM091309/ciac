@@ -17,7 +17,7 @@ export function SubHeader({ title, description, badge, previewRole, onPreviewRol
   const roles = [
     { id: 'admin', label: 'Administrator', icon: ShieldCheck },
     { id: 'account-officer', label: 'Account Officer', icon: UserCog },
-    { id: 'proponent', label: 'Proponent', icon: User },
+    { id: 'proponent', label: 'Locator', icon: User },
   ] as const;
 
   const [shimmerRole, setShimmerRole] = useState<(typeof roles)[number]['id'] | null>(null);

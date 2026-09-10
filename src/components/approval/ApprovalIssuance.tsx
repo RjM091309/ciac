@@ -333,7 +333,7 @@ export function ApprovalIssuance() {
           <input
             className={cn(inputCls, 'w-full')}
             style={inputStyle}
-            placeholder="Search application / proponent…"
+            placeholder="Search application / locator…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
@@ -378,7 +378,7 @@ export function ApprovalIssuance() {
                   style={{ backgroundColor: 'color-mix(in oklab, var(--control-bg) 55%, transparent)' }}
                 >
                   <th className="px-3 py-2.5 font-semibold">Application</th>
-                  <th className="px-3 py-2.5 font-semibold">Proponent</th>
+                  <th className="px-3 py-2.5 font-semibold">Locator</th>
                   <th className="px-3 py-2.5 font-semibold">Approval Status</th>
                   <th className="px-3 py-2.5 font-semibold">Current Level</th>
                   <th className="px-3 py-2.5 font-semibold text-right">Progress</th>
@@ -861,7 +861,7 @@ function ChainTab({
               disabled={busy}
               onClick={() => act('RETURN')}
             >
-              <RotateCcw size={13} className="inline mr-1" /> Return to proponent
+              <RotateCcw size={13} className="inline mr-1" /> Return to locator
             </button>
             <button
               className="rounded-lg px-3 py-1.5 text-[12px] font-semibold disabled:opacity-50"
@@ -1294,7 +1294,7 @@ function printApprovalDocument(data: DetailPayload) {
     <h1>APPROVAL ORDER</h1>
     <div class="sub">Clark International Airport Corporation — BRIDGE System</div>
     <div class="kv"><b>Application No.:</b> ${escapeHtml(a.application_no)}</div>
-    <div class="kv"><b>Proponent:</b> ${escapeHtml(a.proponent_name || '—')}</div>
+    <div class="kv"><b>Locator:</b> ${escapeHtml(a.proponent_name || '—')}</div>
     <div class="kv"><b>Type:</b> ${a.is_renewal ? 'Renewal' : 'New'} — ${escapeHtml(a.application_type)}</div>
     <div class="kv"><b>Assessed charges:</b> ${peso(a.charges_total)}</div>
     <div class="kv"><b>Approval status:</b> ${escapeHtml(APPROVAL_STATUS_LABELS[a.approval_status] || a.approval_status)}</div>

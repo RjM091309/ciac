@@ -89,8 +89,8 @@ export function ProponentDashboard({
     return (
       <div className="glass-card p-4 sm:p-5 !border-transparent" style={{ backgroundColor: 'var(--surface)' }}>
         <EmptyState
-          title="No proponent profile linked"
-          description="Your account isn't linked to a proponent/company profile yet. Please contact CIAC to have your account linked."
+          title="No locator profile linked"
+          description="Your account isn't linked to a locator/company profile yet. Please contact CIAC to have your account linked."
         />
       </div>
     );

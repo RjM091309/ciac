@@ -315,7 +315,7 @@ export function AssessmentEvaluation() {
           <input
             className={cn(inputCls, 'w-full pl-8')}
             style={inputStyle}
-            placeholder="Search application / proponent…"
+            placeholder="Search application / locator…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
@@ -361,7 +361,7 @@ export function AssessmentEvaluation() {
               <thead>
                 <tr className="text-[11px] uppercase tracking-wide text-secondary" style={{ backgroundColor: 'var(--control-bg)' }}>
                   <th className="px-3 py-2.5 font-semibold">Application</th>
-                  <th className="px-3 py-2.5 font-semibold">Proponent</th>
+                  <th className="px-3 py-2.5 font-semibold">Locator</th>
                   <th className="px-3 py-2.5 font-semibold">Stage</th>
                   <th className="px-3 py-2.5 font-semibold">Evaluator</th>
                   <th className="px-3 py-2.5 font-semibold">Compliance</th>
@@ -1216,7 +1216,7 @@ function RecommendationTab({
       <div className="flex flex-col gap-2">
         {[
           { v: 'ENDORSE', label: 'Endorse to Approval', hint: 'Application moves to FOR_APPROVAL.' },
-          { v: 'RETURN', label: 'Return to Proponent', hint: 'Application status becomes RETURNED; proponent is notified.' },
+          { v: 'RETURN', label: 'Return to Locator', hint: 'Application status becomes RETURNED; locator is notified.' },
           { v: 'DISAPPROVE', label: 'Recommend Disapproval', hint: 'Application status becomes DISAPPROVED.' },
         ].map((o) => (
           <label

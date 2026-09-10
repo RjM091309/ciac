@@ -142,7 +142,7 @@ export function ProponentProfile() {
       <div className="glass-card p-4 sm:p-5 !border-transparent" style={{ backgroundColor: 'var(--surface)' }}>
         <EmptyState
           title="No business profile linked"
-          description="Your account isn't linked to a proponent/company profile yet. Please contact CIAC to have your account linked."
+          description="Your account isn't linked to a locator/company profile yet. Please contact CIAC to have your account linked."
         />
       </div>
     );

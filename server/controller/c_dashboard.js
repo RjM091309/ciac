@@ -139,6 +139,7 @@ function attentionQueue(applications, limit = 6) {
       application_no: a.application_no,
       proponent_name: a.proponent_name,
       status: a.status,
+      is_renewal: Boolean(Number(a.is_renewal)),
       days_waiting: a.created_at ? Math.max(0, Math.round((now - new Date(a.created_at).getTime()) / (1000 * 60 * 60 * 24))) : 0,
     }))
     .sort((a, b) => b.days_waiting - a.days_waiting)

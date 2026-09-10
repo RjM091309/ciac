@@ -265,7 +265,7 @@ export function ProponentsManagement() {
       setIsCreateOpen(false);
       setError(null);
       await refresh({ showLoading: false });
-      toast.success(editing ? 'Proponent updated successfully' : 'Proponent created successfully');
+      toast.success(editing ? 'Locator updated successfully' : 'Locator created successfully');
     } catch (e: any) {
       const message = e?.message || 'Save failed';
       setError(message);
@@ -287,7 +287,7 @@ export function ProponentsManagement() {
       if (!res.ok) throw new Error(json?.message || 'Deactivate failed');
       setError(null);
       await refresh({ showLoading: false });
-      toast.success('Proponent deactivated successfully');
+      toast.success('Locator deactivated successfully');
       setConfirmDeactivateId(null);
     } catch (e: any) {
       const message = e?.message || 'Deactivate failed';
@@ -310,7 +310,7 @@ export function ProponentsManagement() {
       if (!res.ok) throw new Error(json?.message || 'Reactivate failed');
       setError(null);
       await refresh({ showLoading: false });
-      toast.success('Proponent reactivated successfully');
+      toast.success('Locator reactivated successfully');
     } catch (e: any) {
       const message = e?.message || 'Reactivate failed';
       setError(message);
@@ -323,8 +323,8 @@ export function ProponentsManagement() {
   return (
     <div className="space-y-4 sm:space-y-5">
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4 mt-3">
-        <StatCard label="Active Proponents" value={String(stats.active)} />
-        <StatCard label="Total Proponents" value={String(stats.total)} />
+        <StatCard label="Active Locators" value={String(stats.active)} />
+        <StatCard label="Total Locators" value={String(stats.total)} />
         <StatCard label="Deactivated" value={String(stats.inactive)} />
       </div>
 
@@ -333,7 +333,7 @@ export function ProponentsManagement() {
         style={{ backgroundColor: 'color-mix(in oklab, var(--control-bg) 82%, transparent)' }}
       >
         {([
-          { id: 'list', label: 'Proponents' },
+          { id: 'list', label: 'Locators' },
           { id: 'requests', label: `Change Requests${pendingRequestCount ? ` (${pendingRequestCount})` : ''}` },
         ] as const).map((t) => {
           const active = tab === t.id;
@@ -370,7 +370,7 @@ export function ProponentsManagement() {
       <div className="glass-card p-4 sm:p-5 !border-transparent" style={{ backgroundColor: 'var(--surface)' }}>
         <div className="flex items-center justify-between mb-3 gap-2">
           <h3 className="text-sm font-bold tracking-tight" style={{ color: 'var(--text)' }}>
-            Proponent Management List
+            Locator Management List
           </h3>
           <button
             className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-semibold shadow-sm cursor-pointer"
@@ -398,7 +398,7 @@ export function ProponentsManagement() {
             />
             <input
               type="text"
-              placeholder="Search proponents..."
+              placeholder="Search locators..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="h-9 rounded-full pl-9 pr-3 text-xs w-full focus:outline-none focus:ring-1 focus:ring-[var(--border)] text-[var(--text)] placeholder:text-[var(--text-muted)] transition-all"
@@ -415,11 +415,11 @@ export function ProponentsManagement() {
           </div>
         ) : filteredProponents.length === 0 ? (
           <EmptyState
-            title="No proponents found"
+            title="No locators found"
             description={
               searchQuery 
                 ? 'Try adjusting your search filters.' 
-                : 'There are no proponents to show here yet. Create a new proponent to get started.'
+                : 'There are no locators to show here yet. Create a new locator to get started.'
             }
             action={
               !searchQuery ? (
@@ -428,7 +428,7 @@ export function ProponentsManagement() {
                   style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
                   onClick={openCreate}
                 >
-                  Create Proponent
+                  Create Locator
                 </button>
               ) : undefined
             }
@@ -529,8 +529,8 @@ export function ProponentsManagement() {
 
       <SidePanel
         open={isCreateOpen}
-        title={editing ? 'Edit Proponent' : 'New Proponent'}
-        subtitle="Proponents master table"
+        title={editing ? 'Edit Locator' : 'New Locator'}
+        subtitle="Locators master table"
         onClose={() => setIsCreateOpen(false)}
         onSave={save}
         saving={saving}
@@ -587,8 +587,8 @@ export function ProponentsManagement() {
 
       <ConfirmModal
         open={confirmDeactivateId !== null}
-        title="Deactivate proponent?"
-        description="This proponent will be marked inactive. You can re-activate later."
+        title="Deactivate locator?"
+        description="This locator will be marked inactive. You can re-activate later."
         confirmText="Deactivate"
         danger
         loading={saving}
@@ -602,8 +602,8 @@ export function ProponentsManagement() {
 
       <ConfirmModal
         open={confirmReactivateId !== null}
-        title="Reactivate proponent?"
-        description="This proponent will be marked active again and can be used in transactions."
+        title="Reactivate locator?"
+        description="This locator will be marked active again and can be used in transactions."
         confirmText="Reactivate"
         loading={saving}
         onCancel={() => setConfirmReactivateId(null)}

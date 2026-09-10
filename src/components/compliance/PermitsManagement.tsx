@@ -136,7 +136,7 @@ export function PermitsManagement() {
 
   async function save() {
     if (!form.proponent_id) {
-      toast.error('Proponent is required');
+      toast.error('Locator is required');
       return;
     }
     if (!form.permit_no.trim()) {
@@ -224,7 +224,7 @@ export function PermitsManagement() {
             <table className="min-w-full text-left text-xs">
               <thead>
                 <tr>
-                  {['Proponent', 'Type', 'Permit No.', 'Authority', 'Expiry', 'Status', 'Actions'].map((c) => (
+                  {['Locator', 'Type', 'Permit No.', 'Authority', 'Expiry', 'Status', 'Actions'].map((c) => (
                     <th key={c} className={cn('px-3 py-2 font-semibold text-[10px] uppercase tracking-widest text-secondary border-b', c === 'Actions' && 'text-right pr-2')} style={{ borderColor: 'var(--border-subtle)' }}>
                       {c}
                     </th>
@@ -275,8 +275,8 @@ export function PermitsManagement() {
         saveDisabled={!form.proponent_id || !form.permit_no.trim()}
       >
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <FieldLabel label="Proponent">
-            <AppSelect options={proponentOptions} value={form.proponent_id} onChange={(v) => setForm((p) => ({ ...p, proponent_id: v }))} placeholder="Select proponent..." isDisabled={saving} />
+          <FieldLabel label="Locator">
+            <AppSelect options={proponentOptions} value={form.proponent_id} onChange={(v) => setForm((p) => ({ ...p, proponent_id: v }))} placeholder="Select locator..." isDisabled={saving} />
           </FieldLabel>
           <FieldLabel label="Application (optional)">
             <AppSelect options={applicationOptions} value={form.application_id} onChange={(v) => setForm((p) => ({ ...p, application_id: v }))} placeholder="Link to application..." isClearable isDisabled={saving} />
@@ -321,7 +321,7 @@ export function PermitsManagement() {
       <ConfirmModal
         open={confirmDeleteId !== null}
         title="Remove permit?"
-        description="This permit will no longer be visible to the proponent."
+        description="This permit will no longer be visible to the locator."
         confirmText="Remove"
         danger
         loading={saving}

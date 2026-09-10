@@ -342,13 +342,13 @@ export default function App() {
                 ) : proponentView === 'me:activity' ? (
                   <ProponentActivity />
                 ) : (
-                  <RoleDashboard />
+                  <RoleDashboard navigate={navigate} />
                 )
               ) : view === 'dashboard' ? (
                 dashboardPreviewRole === 'admin' ? (
-                  <RoleDashboard />
+                  <RoleDashboard navigate={navigate} />
                 ) : (
-                  <PreviewDashboard role={dashboardPreviewRole} />
+                  <PreviewDashboard role={dashboardPreviewRole} navigate={navigate} />
                 )
               ) : view === 'settings:users' ? (
                 <UsersManagement />
@@ -423,7 +423,7 @@ const LANDING_CONFIG: Record<AppView, LandingConfig> = {
       { label: 'For Board Evaluation', value: '3' },
     ],
     table: {
-      columns: ['Proponent', 'Project', 'Submitted', 'Missing Docs', 'Status'],
+      columns: ['Locator', 'Project', 'Submitted', 'Missing Docs', 'Status'],
       rows: [
         ['SkyPort Logistics Inc.', 'Cargo Hub Expansion', 'Mar 10, 2026', 'AFS, Bank Cert', 'Pending Verification'],
         ['GreenFuel Terminals Corp.', 'Fuel Depot Lease', 'Mar 09, 2026', 'Board Resolution', 'For Evaluation'],
@@ -442,7 +442,7 @@ const LANDING_CONFIG: Record<AppView, LandingConfig> = {
       { label: 'With Pending Requirements', value: '4' },
     ],
     table: {
-      columns: ['Proponent', 'Lease No.', 'Expiry', 'Days Left', 'Renewal Status'],
+      columns: ['Locator', 'Lease No.', 'Expiry', 'Days Left', 'Renewal Status'],
       rows: [
         ['NorthGate Foods Corp.', 'DL-2020-018', 'Jun 15, 2026', '95', 'For LOI Submission'],
         ['Delta AeroTech', 'DL-2019-004', 'May 30, 2026', '79', 'Docs Under Review'],
@@ -458,10 +458,10 @@ const LANDING_CONFIG: Record<AppView, LandingConfig> = {
     stats: [
       { label: 'Projects Under Evaluation', value: '9' },
       { label: 'Average Evaluation Age', value: '18 days' },
-      { label: 'Technical Clarifications', value: '5', hint: 'Awaiting proponent reply' },
+      { label: 'Technical Clarifications', value: '5', hint: 'Awaiting locator reply' },
     ],
     table: {
-      columns: ['Project', 'Proponent', 'Evaluator', 'Stage', 'Last Action'],
+      columns: ['Project', 'Locator', 'Evaluator', 'Stage', 'Last Action'],
       rows: [
         ['Cold Chain Facility', 'HarborFresh Cold Storage', 'Engr. Santos', 'Technical Review', 'Requested load profile'],
         ['Fuel Depot Expansion', 'GreenFuel Terminals Corp.', 'Engr. Cruz', 'For Board', 'Endorsed to CIAC Board'],
@@ -499,7 +499,7 @@ const LANDING_CONFIG: Record<AppView, LandingConfig> = {
       { label: 'Overdue', value: '—' },
     ],
     table: {
-      columns: ['Application', 'Proponent', 'Stage', 'Evaluator', 'Charges'],
+      columns: ['Application', 'Locator', 'Stage', 'Evaluator', 'Charges'],
       rows: [
         ['APP-NEW-0001', 'SkyPort Logistics Inc.', 'In Review', 'AO Santos', '₱610,000'],
         ['APP-REN-0007', 'Delta AeroTech', 'For Recommendation', 'AO Cruz', '₱120,000'],
@@ -518,7 +518,7 @@ const LANDING_CONFIG: Record<AppView, LandingConfig> = {
       { label: 'Issued', value: '—' },
     ],
     table: {
-      columns: ['Application', 'Proponent', 'Approval Status', 'Current Level', 'Issued'],
+      columns: ['Application', 'Locator', 'Approval Status', 'Current Level', 'Issued'],
       rows: [
         ['APP-2026-00001', 'SkyPort Logistics Inc.', 'In Progress', 'Division Chief', '—'],
         ['REN-2026-00007', 'Delta AeroTech', 'Approved', '—', 'Approval Order'],
@@ -537,7 +537,7 @@ const LANDING_CONFIG: Record<AppView, LandingConfig> = {
       { label: 'Assigned to You', value: '11' },
     ],
     table: {
-      columns: ['Document', 'Type', 'Proponent', 'Uploaded', 'Assigned To'],
+      columns: ['Document', 'Type', 'Locator', 'Uploaded', 'Assigned To'],
       rows: [
         ['SEC Registration 2026-0310', 'SEC', 'SkyPort Logistics Inc.', 'Mar 10, 2026', 'You'],
         ['BIR 2303-2026-019', 'BIR COR', 'NorthGate Foods Corp.', 'Mar 09, 2026', 'Admin D. Ramos'],
@@ -556,7 +556,7 @@ const LANDING_CONFIG: Record<AppView, LandingConfig> = {
       { label: 'Average Verification Time', value: '2h 18m' },
     ],
     table: {
-      columns: ['Date & Time', 'Action', 'Document', 'Proponent', 'By'],
+      columns: ['Date & Time', 'Action', 'Document', 'Locator', 'By'],
       rows: [
         ['Mar 11, 2026 15:42', 'Approved', 'BIR Tax Clearance 24-019', 'GreenFuel Terminals Corp.', 'Admin J. Cruz'],
         ['Mar 11, 2026 10:05', 'Rejected', 'SEC AOI Scan', 'Atlas Aero Parts', 'Admin Demo'],
@@ -565,12 +565,12 @@ const LANDING_CONFIG: Record<AppView, LandingConfig> = {
     },
   },
   'directory:companies': {
-    title: 'Proponent Directory',
-    description: 'Master list of all registered proponents and active locators.',
+    title: 'Locator Directory',
+    description: 'Master list of all registered and active locators.',
     badge: 'CRM',
     icon: Users,
     stats: [
-      { label: 'Total Proponents', value: '142' },
+      { label: 'Total Locators', value: '142' },
       { label: 'Active Leases', value: '87' },
       { label: 'Prospects', value: '24' },
     ],
@@ -632,7 +632,7 @@ const LANDING_CONFIG: Record<AppView, LandingConfig> = {
       { label: 'Expired', value: '2', hint: 'Requires urgent follow-up' },
     ],
     table: {
-      columns: ['Proponent', 'Permit Type', 'Permit No.', 'Expiry', 'Status'],
+      columns: ['Locator', 'Permit Type', 'Permit No.', 'Expiry', 'Status'],
       rows: [
         ['HarborFresh Cold Storage', 'Occupancy', 'OCC-24-019', 'Mar 31, 2026', 'Expiring'],
         ['GreenFuel Terminals Corp.', 'Fire Safety', 'FSIC-26-088', 'Apr 12, 2026', 'Valid'],
@@ -651,7 +651,7 @@ const LANDING_CONFIG: Record<AppView, LandingConfig> = {
       { label: 'For BIR Update', value: '5' },
     ],
     table: {
-      columns: ['Proponent', 'Document', 'Reference No.', 'Validity', 'Status'],
+      columns: ['Locator', 'Document', 'Reference No.', 'Validity', 'Status'],
       rows: [
         ['SkyPort Logistics Inc.', 'BIR Tax Clearance', 'TC-26-045', 'Dec 31, 2026', 'Valid'],
         ['Metro Agro Trading', 'BIR 2303 COR', 'COR-24-993', 'N/A', 'Verified'],
@@ -661,7 +661,7 @@ const LANDING_CONFIG: Record<AppView, LandingConfig> = {
   },
   'compliance:expiry': {
     title: 'Expiry Calendar',
-    description: 'Calendar view of all upcoming permit expirations across proponents.',
+    description: 'Calendar view of all upcoming permit expirations across locators.',
     badge: 'Calendar',
     icon: CalendarClock,
     stats: [
@@ -670,7 +670,7 @@ const LANDING_CONFIG: Record<AppView, LandingConfig> = {
       { label: 'Overdue', value: '3' },
     ],
     table: {
-      columns: ['Date', 'Proponent', 'Permit', 'Type', 'Days Left'],
+      columns: ['Date', 'Locator', 'Permit', 'Type', 'Days Left'],
       rows: [
         ['Mar 18, 2026', 'HarborFresh Cold Storage', 'Occupancy Permit', 'CDC', '6'],
         ['Mar 22, 2026', 'Delta AeroTech', 'Fire Safety Inspection', 'CDC', '10'],
@@ -689,7 +689,7 @@ const LANDING_CONFIG: Record<AppView, LandingConfig> = {
       { label: 'Overdue Actions', value: '—' },
     ],
     table: {
-      columns: ['Inspection', 'Proponent', 'Type', 'Status', 'Result'],
+      columns: ['Inspection', 'Locator', 'Type', 'Status', 'Result'],
       rows: [
         ['Annual Safety Audit', 'SkyPort Logistics Inc.', 'Safety', 'In Progress', '—'],
         ['Engineering Check', 'Delta AeroTech', 'Engineering', 'Completed', 'Passed w/ Findings'],
@@ -699,7 +699,7 @@ const LANDING_CONFIG: Record<AppView, LandingConfig> = {
   },
   'operations:flowcharts': {
     title: 'Production Flowcharts',
-    description: 'Uploaded production and process flow diagrams for proponents.',
+    description: 'Uploaded production and process flow diagrams for locators.',
     badge: 'Operations',
     icon: FolderTree,
     stats: [
@@ -708,7 +708,7 @@ const LANDING_CONFIG: Record<AppView, LandingConfig> = {
       { label: 'For Update Request', value: '4' },
     ],
     table: {
-      columns: ['Proponent', 'Process', 'Version', 'Status', 'Last Review'],
+      columns: ['Locator', 'Process', 'Version', 'Status', 'Last Review'],
       rows: [
         ['NorthGate Foods Corp.', 'Frozen Goods Processing', 'v1.4', 'Approved', 'Feb 18, 2026'],
         ['Metro Agro Trading', 'Grain Milling', 'v0.9', 'For HSE Review', 'Mar 02, 2026'],
@@ -718,7 +718,7 @@ const LANDING_CONFIG: Record<AppView, LandingConfig> = {
   },
   'operations:brochures': {
     title: 'Brochures & Marketing',
-    description: 'Digital library of brochures and marketing materials for proponents.',
+    description: 'Digital library of brochures and marketing materials for locators.',
     badge: 'Marketing',
     icon: FolderTree,
     stats: [
@@ -727,7 +727,7 @@ const LANDING_CONFIG: Record<AppView, LandingConfig> = {
       { label: 'Pending Review', value: '7' },
     ],
     table: {
-      columns: ['Proponent', 'Material', 'Version', 'Status', 'Last Updated'],
+      columns: ['Locator', 'Material', 'Version', 'Status', 'Last Updated'],
       rows: [
         ['SkyPort Logistics Inc.', 'Corporate Profile 2026', 'v2', 'Approved', 'Mar 01, 2026'],
         ['Delta AeroTech', 'Hangar Services Flyer', 'v1', 'For Branding Review', 'Mar 07, 2026'],
@@ -746,7 +746,7 @@ const LANDING_CONFIG: Record<AppView, LandingConfig> = {
       { label: 'With Submitted Reports', value: '9' },
     ],
     table: {
-      columns: ['Program', 'Proponent', 'Coverage', 'Status', 'Next Milestone'],
+      columns: ['Program', 'Locator', 'Coverage', 'Status', 'Next Milestone'],
       rows: [
         ['Women in Logistics Training', 'SkyPort Logistics Inc.', 'Q1 2026', 'Ongoing', 'Final training batch'],
         ['Safe Workplace Campaign', 'GreenFuel Terminals Corp.', '2025–2026', 'Ongoing', 'Survey rollout'],
@@ -774,12 +774,12 @@ const LANDING_CONFIG: Record<AppView, LandingConfig> = {
     },
   },
   'settings:proponents': {
-    title: 'Proponent Management',
-    description: 'Manage registered proponent business profiles and their status.',
+    title: 'Locator Management',
+    description: 'Manage registered locator business profiles and their status.',
     badge: 'Directory',
     icon: Users,
     stats: [
-      { label: 'Total Proponents', value: '—' },
+      { label: 'Total Locators', value: '—' },
       { label: 'Active', value: '—' },
       { label: 'Deactivated', value: '—' },
     ],
@@ -795,7 +795,7 @@ const LANDING_CONFIG: Record<AppView, LandingConfig> = {
   'settings:requirement-categories': {
     title: 'Requirement Categories',
     description: 'Manage requirement categories used in checklists and document grouping.',
-    badge: 'Proponent',
+    badge: 'Locator',
     icon: FileCheck,
     stats: [
       { label: 'Total Categories', value: '—' },

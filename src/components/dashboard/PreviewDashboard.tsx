@@ -4,6 +4,7 @@ import { OfficerDashboard, type OfficerDashboardData } from './OfficerDashboard'
 import { ProponentDashboard, type ProponentDashboardData } from './ProponentDashboard';
 
 type PreviewRole = 'account-officer' | 'proponent';
+type Navigate = (to: string, opts?: { replace?: boolean }) => void;
 
 type PreviewState =
   | { status: 'loading' }
@@ -25,7 +26,7 @@ function toWidgetOverrides(rows: any): Record<string, boolean> {
  * previewed role's actual widget visibility is fetched separately and forced
  * onto the child dashboard via `widgetOverrides` — otherwise the preview would
  * always show every widget regardless of what was configured for that role. */
-export function PreviewDashboard({ role }: { role: PreviewRole }) {
+export function PreviewDashboard({ role, navigate }: { role: PreviewRole; navigate: Navigate }) {
   const [state, setState] = useState<PreviewState>({ status: 'loading' });
 
   useEffect(() => {
@@ -60,7 +61,7 @@ export function PreviewDashboard({ role }: { role: PreviewRole }) {
     );
   }
 
-  if (state.status === 'officer') return <OfficerDashboard data={state.data} widgetOverrides={state.widgetOverrides} />;
+  if (state.status === 'officer') return <OfficerDashboard data={state.data} widgetOverrides={state.widgetOverrides} navigate={navigate} />;
   if (state.status === 'proponent') return <ProponentDashboard data={state.data} widgetOverrides={state.widgetOverrides} />;
 
   return (
