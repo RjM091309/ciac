@@ -15,6 +15,7 @@ const ProponentContractsPermits = lazy(() => import('./components/proponent/Prop
 const ProponentActivity = lazy(() => import('./components/proponent/ProponentActivity').then((m) => ({ default: m.ProponentActivity })));
 const PermitsManagement = lazy(() => import('./components/compliance/PermitsManagement').then((m) => ({ default: m.PermitsManagement })));
 const UsersManagement = lazy(() => import('./components/settings/UsersManagement').then((m) => ({ default: m.UsersManagement })));
+const LocatorUsersManagement = lazy(() => import('./components/settings/LocatorUsersManagement').then((m) => ({ default: m.LocatorUsersManagement })));
 const ControlPanelManagement = lazy(() => import('./components/settings/ControlPanelManagement').then((m) => ({ default: m.ControlPanelManagement })));
 const ProponentsManagement = lazy(() => import('./components/proponent/ProponentsManagement').then((m) => ({ default: m.ProponentsManagement })));
 const RequirementsManagement = lazy(() => import('./components/applications/Requirements').then((m) => ({ default: m.RequirementsManagement })));
@@ -67,6 +68,7 @@ const VIEW_TO_PATH: Record<AppView, string> = {
   'operations:brochures': '/operations/brochures',
   'operations:gad': '/operations/gad',
   'settings:users': '/settings/users',
+  'settings:locator-users': '/settings/locator-users',
   'settings:proponents': '/settings/proponents',
   'settings:requirement-categories': '/settings/requirement-categories',
   'settings:inspection-types': '/settings/inspection-types',
@@ -390,6 +392,8 @@ export default function App() {
                 )
               ) : view === 'settings:users' ? (
                 <UsersManagement />
+              ) : view === 'settings:locator-users' ? (
+                <LocatorUsersManagement />
               ) : view === 'applications:new' ? (
                 <ApplicationsWorkflow renewalMode={false} locationSearch={locationSearch} navigate={navigate} />
               ) : view === 'applications:renewals' ? (
@@ -806,6 +810,24 @@ const LANDING_CONFIG: Record<AppView, LandingConfig> = {
         ['Admin Demo', 'admin@bizreg.com', 'System Admin', 'Mar 11, 2026 09:18', 'Active'],
         ['Joan Cruz', 'j.cruz@ciac.gov', 'Verifier', 'Mar 10, 2026 16:02', 'Active'],
         ['Leo Dizon', 'l.dizon@ciac.gov', 'Account Officer', 'Mar 05, 2026 11:22', 'Active'],
+      ],
+    },
+  },
+  'settings:locator-users': {
+    title: 'Locator Accounts',
+    description: 'Manage login accounts for registered locators, kept separate from staff accounts.',
+    badge: 'System',
+    icon: Users,
+    stats: [
+      { label: 'Active Accounts', value: '—' },
+      { label: 'Total Accounts', value: '—' },
+      { label: 'Deactivated', value: '—' },
+    ],
+    table: {
+      columns: ['Username', 'Full Name', 'Email', '2FA', 'Status'],
+      rows: [
+        ['jdelacruz', 'Juan Dela Cruz', 'j.delacruz@skyport.com', 'On', 'Active'],
+        ['mreyes', 'Maria Reyes', 'm.reyes@greenfuel.com', 'On', 'Active'],
       ],
     },
   },

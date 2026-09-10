@@ -4,14 +4,11 @@ import { cn } from '../../lib/utils';
 import { toast } from 'sonner';
 import { SidePanel } from '../ui/SidePanel';
 import { ConfirmModal } from '../ui/ConfirmModal';
-import { AppSelect } from '../ui/AppSelect';
 import { DataTableControls } from '../ui/DataTableControls';
 import { Skeleton, TableSkeleton } from '../ui/Skeleton';
 import { EmptyState } from '../ui/EmptyState';
 import { useSessionStorageCachedResource } from '../../hooks/useSessionStorageCachedResource';
-import { RolesPanel } from './RolesPanel';
 import { validatePassword } from '../../lib/passwordPolicy';
-import { roleDisplayName } from '../../lib/roleDisplay';
 
 type Role = {
   id: number;
@@ -45,14 +42,14 @@ function api(path: string) {
   return path;
 }
 
-// Locator accounts get their own page (LocatorUsersManagement) with its own
-// table — this page is for staff (Admin/Officer/other) accounts only, so
-// Locator-role users and the Locator role option are filtered out here.
+// This page is the Locator counterpart to UsersManagement — same `users`
+// table and API, filtered to the Locator role only so locator accounts don't
+// mix with staff accounts in the same list.
 function isLocatorRoleName(name: string) {
   return String(name || '').trim().toUpperCase() === 'PROPONENT';
 }
 
-export function UsersManagement() {
+export function LocatorUsersManagement() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<UserRow | null>(null);
@@ -67,7 +64,7 @@ export function UsersManagement() {
 
   const { data: usersRoles, isLoading, isRevalidating, refresh } = useSessionStorageCachedResource<UsersRolesData>({
     cacheKey: 'ciac.users_roles.v1',
-    ttlMs: 5 * 60 * 1000, // 5 minutes
+    ttlMs: 5 * 60 * 1000, // 5 minutes — shares the cache key with UsersManagement since it's the same underlying data
     fetcher: async () => {
       setError(null);
       const [uRes, rRes] = await Promise.all([
@@ -97,17 +94,18 @@ export function UsersManagement() {
     },
   });
 
-  const userRows = (Array.isArray(usersRoles?.users) ? usersRoles.users : []).filter(
-    (u) => !(u.roles || []).some((r) => isLocatorRoleName(r.name))
+  const allRoles = usersRoles?.roles ?? [];
+  const locatorRole = useMemo(() => allRoles.find((r) => isLocatorRoleName(r.name)) || null, [allRoles]);
+
+  const userRows = (Array.isArray(usersRoles?.users) ? usersRoles.users : []).filter((u) =>
+    (u.roles || []).some((r) => isLocatorRoleName(r.name))
   );
-  const roles = (usersRoles?.roles ?? []).filter((r) => !isLocatorRoleName(r.name));
 
   const [form, setForm] = useState({
     username: '',
     email: '',
     full_name: '',
     password: '',
-    role_id: '',
   });
 
   const stats = useMemo(() => {
@@ -121,13 +119,11 @@ export function UsersManagement() {
     const q = searchQuery.trim().toLowerCase();
     if (!q) return userRows;
     return userRows.filter((u) => {
-      const roleStr = u.roles?.length ? u.roles.map((r) => roleDisplayName(r.name)).join(', ') : '';
       const statusStr = u.status === 'SUSPENDED' ? 'suspended' : u.is_active === 1 ? 'active' : 'deactivated inactive';
       return (
         (u.username || '').toLowerCase().includes(q) ||
         (u.full_name || '').toLowerCase().includes(q) ||
         (u.email || '').toLowerCase().includes(q) ||
-        roleStr.toLowerCase().includes(q) ||
         statusStr.includes(q)
       );
     });
@@ -160,10 +156,6 @@ export function UsersManagement() {
     return Array.from({ length: end - adjustedStart + 1 }, (_, i) => adjustedStart + i);
   }, [page, totalPages]);
 
-  const roleOptions = useMemo(
-    () => roles.map((r) => ({ value: String(r.id), label: roleDisplayName(r.name) })),
-    [roles]
-  );
   const passwordError = useMemo(
     () => (form.password.trim() ? validatePassword(form.password.trim()) : null),
     [form.password]
@@ -174,32 +166,26 @@ export function UsersManagement() {
     const email = form.email.trim();
     const fullName = form.full_name.trim();
     const password = form.password.trim();
-    const roleId = form.role_id;
 
     if (!username) return false;
     if (!email) return false;
     if (password && passwordError) return false;
+    if (!locatorRole) return false;
 
     if (!editing) {
-      // For create mode, require required fields and at least one input activity.
-      const hasAnyInput = Boolean(username || email || fullName || password || roleId);
+      const hasAnyInput = Boolean(username || email || fullName || password);
       return hasAnyInput && Boolean(password);
     }
 
     const originalUsername = (editing.username || '').trim();
     const originalEmail = (editing.email || '').trim();
     const originalFullName = (editing.full_name || '').trim();
-    const originalRoleId = editing.roles?.[0]?.id ? String(editing.roles[0].id) : roles[0]?.id ? String(roles[0].id) : '';
 
     const hasChanged =
-      username !== originalUsername ||
-      email !== originalEmail ||
-      fullName !== originalFullName ||
-      roleId !== originalRoleId ||
-      Boolean(password);
+      username !== originalUsername || email !== originalEmail || fullName !== originalFullName || Boolean(password);
 
     return hasChanged;
-  }, [editing, form.email, form.full_name, form.password, form.role_id, form.username, roles, passwordError]);
+  }, [editing, form.email, form.full_name, form.password, form.username, locatorRole, passwordError]);
 
   useEffect(() => {
     setPage(1);
@@ -211,13 +197,7 @@ export function UsersManagement() {
 
   function openCreate() {
     setEditing(null);
-    setForm({
-      username: '',
-      email: '',
-      full_name: '',
-      password: '',
-      role_id: roles[0]?.id ? String(roles[0].id) : '',
-    });
+    setForm({ username: '', email: '', full_name: '', password: '' });
     setIsCreateOpen(true);
   }
 
@@ -229,11 +209,14 @@ export function UsersManagement() {
       email: u.email || '',
       full_name: u.full_name || '',
       password: '',
-      role_id: u.roles?.[0]?.id ? String(u.roles[0].id) : roles[0]?.id ? String(roles[0].id) : '',
     });
   }
 
   async function save() {
+    if (!locatorRole) {
+      toast.error('No Locator role found — set it up in Manage Roles first.');
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
@@ -241,7 +224,7 @@ export function UsersManagement() {
         username: form.username.trim(),
         email: form.email.trim(),
         full_name: form.full_name.trim() || null,
-        role_id: form.role_id ? Number(form.role_id) : null,
+        role_id: locatorRole.id,
       };
       if (form.password.trim()) payload.password = form.password;
 
@@ -260,7 +243,7 @@ export function UsersManagement() {
 
       setIsCreateOpen(false);
       await refresh({ showLoading: false });
-      toast.success(editing ? 'User updated successfully' : 'User created successfully');
+      toast.success(editing ? 'Locator account updated successfully' : 'Locator account created successfully');
     } catch (e: any) {
       const message = e?.message || 'Save failed';
       setError(message);
@@ -281,7 +264,7 @@ export function UsersManagement() {
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json?.message || 'Deactivate failed');
       await refresh({ showLoading: false });
-      toast.success('User deactivated successfully');
+      toast.success('Locator account deactivated successfully');
       setConfirmDeactivateId(null);
     } catch (e: any) {
       const message = e?.message || 'Deactivate failed';
@@ -303,7 +286,7 @@ export function UsersManagement() {
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json?.message || 'Reactivate failed');
       await refresh({ showLoading: false });
-      toast.success('User reactivated successfully');
+      toast.success('Locator account reactivated successfully');
       setConfirmReactivateId(null);
     } catch (e: any) {
       const message = e?.message || 'Reactivate failed';
@@ -314,9 +297,6 @@ export function UsersManagement() {
     }
   }
 
-  /** Distinct from deactivate: an easily-reversed hold, not a long-term
-   * closure — both still block login (same status pill treats them
-   * differently). */
   async function suspend(id: number) {
     setSaving(true);
     setError(null);
@@ -325,7 +305,7 @@ export function UsersManagement() {
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json?.message || 'Suspend failed');
       await refresh({ showLoading: false });
-      toast.success('User suspended');
+      toast.success('Locator account suspended');
       setConfirmSuspendId(null);
     } catch (e: any) {
       const message = e?.message || 'Suspend failed';
@@ -344,7 +324,7 @@ export function UsersManagement() {
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json?.message || 'Unsuspend failed');
       await refresh({ showLoading: false });
-      toast.success('User reinstated');
+      toast.success('Locator account reinstated');
     } catch (e: any) {
       const message = e?.message || 'Unsuspend failed';
       setError(message);
@@ -354,8 +334,6 @@ export function UsersManagement() {
     }
   }
 
-  /** Forces re-login everywhere without waiting for the JWT's 24h expiry —
-   * e.g. after a suspected compromise. */
   async function revokeSessions(id: number) {
     setSaving(true);
     setError(null);
@@ -363,7 +341,7 @@ export function UsersManagement() {
       const res = await fetch(api(`/api/users/${id}/revoke-sessions`), { method: 'POST', credentials: 'include' });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json?.message || 'Failed to revoke sessions');
-      toast.success('Active sessions revoked — user must log in again');
+      toast.success('Active sessions revoked — the locator must log in again');
       setConfirmRevokeId(null);
     } catch (e: any) {
       const message = e?.message || 'Failed to revoke sessions';
@@ -377,8 +355,8 @@ export function UsersManagement() {
   return (
     <div className="space-y-4 sm:space-y-5">
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 mt-3">
-        <StatCard label="Active Users" value={String(stats.active)} />
-        <StatCard label="Total Users" value={String(stats.total)} />
+        <StatCard label="Active Accounts" value={String(stats.active)} />
+        <StatCard label="Total Accounts" value={String(stats.total)} />
         <StatCard label="Suspended" value={String(stats.suspended)} />
         <StatCard label="Deactivated" value={String(stats.inactive)} />
       </div>
@@ -389,18 +367,17 @@ export function UsersManagement() {
       >
         <div className="flex items-center justify-between mb-3 gap-2">
           <h3 className="text-sm font-bold tracking-tight" style={{ color: 'var(--text)' }}>
-            User Management List
+            Locator Account List
           </h3>
-          <div className="flex items-center gap-2">
-            <RolesPanel onChanged={() => refresh({ showLoading: false })} />
-            <button
-              className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-semibold shadow-sm cursor-pointer"
-              style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
-              onClick={openCreate}
-            >
-              + New Record
-            </button>
-          </div>
+          <button
+            className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-semibold shadow-sm cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+            style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
+            onClick={openCreate}
+            disabled={!locatorRole}
+            title={locatorRole ? undefined : 'No Locator role found — set it up in Manage Roles first.'}
+          >
+            + New Record
+          </button>
         </div>
 
         {error && (
@@ -417,7 +394,7 @@ export function UsersManagement() {
             />
             <input
               type="text"
-              placeholder="Search users..."
+              placeholder="Search locator accounts..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="h-9 rounded-full pl-9 pr-3 text-xs w-full focus:outline-none focus:ring-1 focus:ring-[var(--border)] text-[var(--text)] placeholder:text-[var(--text-muted)] transition-all"
@@ -430,24 +407,25 @@ export function UsersManagement() {
 
         {isLoading ? (
           <div className="py-2">
-            <TableSkeleton columns={6} rows={5} />
+            <TableSkeleton columns={5} rows={5} />
           </div>
         ) : filteredUsers.length === 0 ? (
           <EmptyState
-            title="No users found"
+            title="No locator accounts found"
             description={
-              searchQuery 
-                ? 'Try adjusting your search filters.' 
-                : 'There are no users to show here yet. Create a new user to get started.'
+              searchQuery
+                ? 'Try adjusting your search filters.'
+                : 'There are no locator accounts to show here yet. Create one to get started.'
             }
             action={
               !searchQuery ? (
                 <button
-                  className="rounded-lg px-4 py-2 text-sm font-semibold shadow-sm transition-colors"
+                  className="rounded-lg px-4 py-2 text-sm font-semibold shadow-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                   style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
                   onClick={openCreate}
+                  disabled={!locatorRole}
                 >
-                  Create User
+                  Create Locator Account
                 </button>
               ) : undefined
             }
@@ -457,7 +435,7 @@ export function UsersManagement() {
             <table className="min-w-full text-left text-xs">
               <thead>
                 <tr>
-                  {['Username', 'Full Name', 'Email', 'Role', '2FA', 'Status', 'Actions'].map((col) => (
+                  {['Username', 'Full Name', 'Email', '2FA', 'Status', 'Actions'].map((col) => (
                     <th
                       key={col}
                       className={cn(
@@ -479,9 +457,6 @@ export function UsersManagement() {
                     </td>
                     <td className="px-3 py-2 text-[11px] text-secondary">{u.full_name || '-'}</td>
                     <td className="px-3 py-2 text-[11px] text-secondary">{u.email || '-'}</td>
-                    <td className="px-3 py-2 text-[11px] text-secondary">
-                      {u.roles && u.roles.length ? u.roles.map((r) => roleDisplayName(r.name)).join(', ') : '-'}
-                    </td>
                     <td className="px-3 py-2 text-[11px]">
                       {u.totp_enabled === 1 ? (
                         <span
@@ -623,8 +598,8 @@ export function UsersManagement() {
 
       <SidePanel
         open={isCreateOpen}
-        title={editing ? 'Edit User' : 'New User'}
-        subtitle="Users table + role mapping"
+        title={editing ? 'Edit Locator Account' : 'New Locator Account'}
+        subtitle="Users table, locked to the Locator role"
         onClose={() => setIsCreateOpen(false)}
         onSave={save}
         saving={saving}
@@ -637,16 +612,6 @@ export function UsersManagement() {
               style={{ borderColor: 'var(--input-border)', color: 'var(--text)', backgroundColor: 'var(--input-bg)' }}
               value={form.username}
               onChange={(e) => setForm((p) => ({ ...p, username: e.target.value }))}
-            />
-          </Field>
-          <Field label="Role">
-            <AppSelect
-              options={roleOptions}
-              value={form.role_id}
-              onChange={(value) => setForm((p) => ({ ...p, role_id: value }))}
-              placeholder="Select role..."
-              isClearable
-              isDisabled={saving}
             />
           </Field>
           <Field label="Full name">
@@ -686,21 +651,18 @@ export function UsersManagement() {
         </div>
 
         {editing ? (
-          <TotpSection
-            user={editing}
-            onChanged={() => refresh({ showLoading: false })}
-          />
+          <TotpSection user={editing} onChanged={() => refresh({ showLoading: false })} />
         ) : (
           <p className="mt-4 text-[11px] text-secondary">
-            Save the user first, then reopen to set up their Google Authenticator.
+            Save the account first, then reopen to set up their Google Authenticator.
           </p>
         )}
       </SidePanel>
 
       <ConfirmModal
         open={confirmDeactivateId !== null}
-        title="Deactivate user?"
-        description="This user will no longer be able to access the system unless reactivated."
+        title="Deactivate this locator account?"
+        description="This locator will no longer be able to access the portal unless reactivated."
         confirmText="Deactivate"
         danger
         loading={saving}
@@ -714,8 +676,8 @@ export function UsersManagement() {
 
       <ConfirmModal
         open={confirmReactivateId !== null}
-        title="Reactivate user?"
-        description="This user will regain access to the system."
+        title="Reactivate this locator account?"
+        description="This locator will regain access to the portal."
         confirmText="Reactivate"
         loading={saving}
         onCancel={() => setConfirmReactivateId(null)}
@@ -728,8 +690,8 @@ export function UsersManagement() {
 
       <ConfirmModal
         open={confirmSuspendId !== null}
-        title="Suspend user?"
-        description="A temporary hold — easier to lift than a deactivation. The user can't log in, and any active session ends immediately."
+        title="Suspend this locator account?"
+        description="A temporary hold — easier to lift than a deactivation. The locator can't log in, and any active session ends immediately."
         confirmText="Suspend"
         danger
         loading={saving}
@@ -742,7 +704,7 @@ export function UsersManagement() {
       <ConfirmModal
         open={confirmRevokeId !== null}
         title="Revoke active sessions?"
-        description="Ends this user's current login everywhere immediately, without waiting for it to expire on its own. They'll need to sign in again."
+        description="Ends this locator's current login everywhere immediately, without waiting for it to expire on its own. They'll need to sign in again."
         confirmText="Revoke"
         danger
         loading={saving}
@@ -785,8 +747,6 @@ function TotpSection({ user, onChanged }: { user: UserRow; onChanged: () => void
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
 
-  const isAdmin = (user.roles || []).some((r) => String(r.name).toLowerCase() === 'admin');
-
   useEffect(() => {
     setEnabled(user.totp_enabled === 1);
     setConfirming(false);
@@ -803,7 +763,7 @@ function TotpSection({ user, onChanged }: { user: UserRow; onChanged: () => void
       if (!res.ok) throw new Error(json?.message || 'Failed to reset authenticator');
       setEnabled(false);
       setConfirming(false);
-      toast.success('Authenticator reset — the user sets it up again on next login');
+      toast.success('Authenticator reset — the locator sets it up again on next login');
       onChanged();
     } catch (e: any) {
       toast.error(e?.message || 'Failed to reset authenticator');
@@ -833,14 +793,14 @@ function TotpSection({ user, onChanged }: { user: UserRow; onChanged: () => void
           }
         >
           {enabled ? <ShieldCheck size={11} /> : <ShieldOff size={11} />}
-          {enabled ? 'Enrolled' : isAdmin ? 'Not required' : 'Not enrolled'}
+          {enabled ? 'Enrolled' : 'Not enrolled'}
         </span>
       </div>
 
       {enabled ? (
         <div className="space-y-2">
           <p className="text-[11px] text-secondary">
-            This user set up their authenticator and is asked for a 6-digit code at every login. Reset it if they
+            This locator set up their authenticator and is asked for a 6-digit code at every login. Reset it if they
             lost their device — they will be walked through setup again on their next login.
           </p>
           {confirming ? (
@@ -876,16 +836,11 @@ function TotpSection({ user, onChanged }: { user: UserRow; onChanged: () => void
             </button>
           )}
         </div>
-      ) : isAdmin ? (
-        <p className="text-[11px] text-secondary">
-          Admins are exempt from mandatory two-factor — this user signs in with a password only.
-        </p>
       ) : (
         <p className="text-[11px] text-secondary">
-          This user will set up their authenticator app themselves the next time they log in. Nothing to do here.
+          This locator will set up their authenticator app themselves the next time they log in. Nothing to do here.
         </p>
       )}
     </div>
   );
 }
-

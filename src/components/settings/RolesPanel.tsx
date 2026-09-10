@@ -3,11 +3,20 @@ import { Pencil, Plus, RotateCcw, Settings2, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { SidePanel } from '../ui/SidePanel';
 import { ConfirmModal } from '../ui/ConfirmModal';
+import { roleDisplayName } from '../../lib/roleDisplay';
 
 type Role = { id: number; name: string; description: string | null; is_active: number | boolean };
 
 function api(path: string) {
   return path;
+}
+
+// Matched literally (lowercased) throughout login/permission/routing logic —
+// renaming or retiring one silently breaks every user on that role, not just
+// its label. Mirrors the same guard in server/controller/c_roles.js.
+const SYSTEM_ROLE_NAMES = ['ADMIN', 'OFFICER', 'PROPONENT'];
+function isSystemRoleName(name: string) {
+  return SYSTEM_ROLE_NAMES.includes(name.trim().toUpperCase());
 }
 
 /** Role CRUD (TOR: "user role management") — roles previously could only be
@@ -56,13 +65,17 @@ export function RolesPanel({ onChanged }: { onChanged: () => void }) {
       toast.error('Role name is required');
       return;
     }
+    const isLockedName = Boolean(editing && isSystemRoleName(editing.name));
     setSaving(true);
     try {
       const res = await fetch(api(editing ? `/api/roles/${editing.id}` : '/api/roles'), {
         method: editing ? 'PUT' : 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ name, description: form.description.trim() || null }),
+        // Built-in roles: never send `name` at all — it's disabled in the UI
+        // but its *displayed* value is the "Locator" cosmetic override, not
+        // the real stored name, so sending it back would try to rename it.
+        body: JSON.stringify(isLockedName ? { description: form.description.trim() || null } : { name, description: form.description.trim() || null }),
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json?.message || 'Failed to save role');
@@ -136,12 +149,18 @@ export function RolesPanel({ onChanged }: { onChanged: () => void }) {
             <div className="space-y-1">
               <div className="text-[11px] font-semibold text-secondary uppercase tracking-widest">Role name</div>
               <input
-                className="w-full rounded-md px-3 py-2 text-sm border focus:outline-none focus:border-[var(--nav-active-bg)]"
+                className="w-full rounded-md px-3 py-2 text-sm border focus:outline-none focus:border-[var(--nav-active-bg)] disabled:opacity-60 disabled:cursor-not-allowed"
                 style={{ borderColor: 'var(--input-border)', color: 'var(--text)', backgroundColor: 'var(--input-bg)' }}
-                value={form.name}
+                value={editing && isSystemRoleName(editing.name) ? roleDisplayName(form.name) : form.name}
                 onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))}
                 placeholder="e.g. Account Officer"
+                disabled={Boolean(editing && isSystemRoleName(editing.name))}
               />
+              {editing && isSystemRoleName(editing.name) && (
+                <p className="text-[10px] text-secondary">
+                  Built-in role name — the system matches on it directly, so it can't be renamed. Only the description can change.
+                </p>
+              )}
             </div>
             <div className="space-y-1">
               <div className="text-[11px] font-semibold text-secondary uppercase tracking-widest">Description</div>
@@ -179,7 +198,7 @@ export function RolesPanel({ onChanged }: { onChanged: () => void }) {
                   >
                     <div className="min-w-0">
                       <div className="text-xs font-semibold truncate" style={{ color: 'var(--text)' }}>
-                        {role.name} {!active && <span className="text-secondary font-normal">(retired)</span>}
+                        {roleDisplayName(role.name)} {!active && <span className="text-secondary font-normal">(retired)</span>}
                       </div>
                       {role.description && <div className="text-[11px] text-secondary truncate">{role.description}</div>}
                     </div>
@@ -192,6 +211,7 @@ export function RolesPanel({ onChanged }: { onChanged: () => void }) {
                         <Pencil size={13} />
                       </button>
                       {active ? (
+                        !isSystemRoleName(role.name) && (
                         <button
                           className="p-1.5 rounded-md text-secondary hover:text-rose-500 cursor-pointer"
                           onClick={() => setConfirmRetireId(role.id)}
@@ -199,6 +219,7 @@ export function RolesPanel({ onChanged }: { onChanged: () => void }) {
                         >
                           <Trash2 size={13} />
                         </button>
+                        )
                       ) : (
                         <button
                           className="p-1.5 rounded-md text-secondary hover:text-emerald-500 cursor-pointer"

@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import { Skeleton, TableSkeleton } from '../ui/Skeleton';
 import { EmptyState } from '../ui/EmptyState';
 import { LANDING_CONFIG } from '../../config/landingConfig';
+import { roleDisplayName } from '../../lib/roleDisplay';
 
 type Role = {
   id: number;
@@ -360,7 +361,7 @@ export function ControlPanelManagement() {
                           : { backgroundColor: 'transparent', color: 'var(--text)' }
                       }
                     >
-                      <div className="font-semibold leading-tight">{role.name}</div>
+                      <div className="font-semibold leading-tight">{roleDisplayName(role.name)}</div>
                       <div
                         className="text-[10px] opacity-70 leading-tight whitespace-nowrap overflow-hidden text-ellipsis"
                         title={role.description || `ID ${role.id}`}
@@ -385,10 +386,10 @@ export function ControlPanelManagement() {
                   </div>
                   <div className="text-[12px] text-secondary">
                     {activeTab === 'sidebar'
-                      ? `Showing sidebar menus for ${selectedRole?.name || 'selected role'}`
+                      ? `Showing sidebar menus for ${selectedRole ? roleDisplayName(selectedRole.name) : 'selected role'}`
                       : activeTab === 'crud'
-                        ? `Configure CRUD modules for ${selectedRole?.name || 'selected role'}`
-                        : `Choose which dashboard cards ${selectedRole?.name || 'this role'} sees`}
+                        ? `Configure CRUD modules for ${selectedRole ? roleDisplayName(selectedRole.name) : 'selected role'}`
+                        : `Choose which dashboard cards ${selectedRole ? roleDisplayName(selectedRole.name) : 'this role'} sees`}
                   </div>
                 </div>
                 <button

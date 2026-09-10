@@ -391,6 +391,25 @@ export const LANDING_CONFIG: Record<AppView, LandingConfig> = {
       ],
     },
   },
+  'settings:locator-users': {
+    title: 'Locator Accounts',
+    description: 'Manage login accounts for registered locators, kept separate from staff accounts.',
+    badge: 'System',
+    icon: Users,
+    isCrud: true,
+    stats: [
+      { label: 'Active Accounts', value: '—' },
+      { label: 'Total Accounts', value: '—' },
+      { label: 'Deactivated', value: '—' },
+    ],
+    table: {
+      columns: ['Username', 'Full Name', 'Email', '2FA', 'Status'],
+      rows: [
+        ['jdelacruz', 'Juan Dela Cruz', 'j.delacruz@skyport.com', 'On', 'Active'],
+        ['mreyes', 'Maria Reyes', 'm.reyes@greenfuel.com', 'On', 'Active'],
+      ],
+    },
+  },
   'settings:proponents': {
     title: 'Locator Management',
     description: 'Manage registered locator business profiles and their status.',

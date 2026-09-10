@@ -28,6 +28,7 @@ export type AppView =
   | 'operations:brochures'
   | 'operations:gad'
   | 'settings:users'
+  | 'settings:locator-users'
   | 'settings:proponents'
   | 'settings:requirement-categories'
   | 'settings:inspection-types'
