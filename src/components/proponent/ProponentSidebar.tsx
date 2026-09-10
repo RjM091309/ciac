@@ -83,6 +83,10 @@ export function ProponentSidebar({
   onLogout: () => void;
   collapsed?: boolean;
   variant?: 'default' | 'drawer';
+  /** Unused here — accepted so AppLayout can render AppSidebar/ProponentSidebar
+   * interchangeably through one `SidebarComponent` variable during the
+   * admin's dashboard-role preview. */
+  permissionOverride?: Record<string, boolean> | null;
 }) {
   const isDrawer = variant === 'drawer';
 

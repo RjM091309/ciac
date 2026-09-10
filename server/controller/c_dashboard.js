@@ -13,6 +13,15 @@ async function getWidgetVisibilityForRoleName(roleName) {
   return await ControlPanelPermission.getDashboardWidgetPermissions(roleId);
 }
 
+/** Lets the admin's dashboard-preview switcher also swap the sidebar to
+ * what that role actually sees (Control Panel's sidebar menu permissions),
+ * instead of leaving the admin's own full sidebar showing underneath. */
+async function getSidebarVisibilityForRoleName(roleName) {
+  const roleId = await Role.getActiveRoleIdByName(roleName);
+  if (!roleId) return [];
+  return await ControlPanelPermission.getSidebarPermissions(roleId);
+}
+
 function upper(v) {
   return String(v || "").toUpperCase();
 }
@@ -207,14 +216,16 @@ exports.getPreview = async (req, res) => {
     const previewRole = String(req.params.role || "").toLowerCase();
 
     if (previewRole === "account-officer" || previewRole === "officer") {
-      const [applications, widgetPermissions] = await Promise.all([
+      const [applications, widgetPermissions, sidebarPermissions] = await Promise.all([
         Workflow.listAllApplicationsWithProgress(),
         getWidgetVisibilityForRoleName("officer"),
+        getSidebarVisibilityForRoleName("officer"),
       ]);
       return res.json({
         success: true,
         role: "officer",
         widgetPermissions,
+        sidebarPermissions,
         data: { applications, stats: summarize(applications), attention: attentionQueue(applications) },
       });
     }
