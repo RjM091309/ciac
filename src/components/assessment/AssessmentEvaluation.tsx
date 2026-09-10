@@ -323,7 +323,7 @@ export function AssessmentEvaluation() {
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search application / proponent..."
+              placeholder="Search application / locator..."
               className="h-9 rounded-full pl-9 pr-3 text-xs w-full focus:outline-none focus:ring-1 focus:ring-[var(--border)] text-[var(--text)] placeholder:text-[var(--text-muted)] transition-all"
               style={{ backgroundColor: 'color-mix(in oklab, var(--control-bg) 70%, transparent)' }}
             />
@@ -364,7 +364,7 @@ export function AssessmentEvaluation() {
               <thead>
                 <tr style={{ borderBottom: '1px solid var(--border-subtle)' }}>
                   <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary">Application</th>
-                  <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary">Proponent</th>
+                  <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary">Locator</th>
                   <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary">Stage</th>
                   <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary">Evaluator</th>
                   <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary">Compliance</th>
@@ -1215,7 +1215,7 @@ function RecommendationTab({
       <div className="flex flex-col gap-2">
         {[
           { v: 'ENDORSE', label: 'Endorse to Approval', hint: 'Application moves to FOR_APPROVAL.' },
-          { v: 'RETURN', label: 'Return to Proponent', hint: 'Application status becomes RETURNED; proponent is notified.' },
+          { v: 'RETURN', label: 'Return to Locator', hint: 'Application status becomes RETURNED; locator is notified.' },
           { v: 'DISAPPROVE', label: 'Recommend Disapproval', hint: 'Application status becomes DISAPPROVED.' },
         ].map((o) => (
           <label

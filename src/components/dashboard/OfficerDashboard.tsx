@@ -3,6 +3,7 @@ import { AlertTriangle, ClipboardList, FileCheck, FileText, Inbox, RotateCcw, XC
 import { EmptyState } from '../ui/EmptyState';
 import { getStatusBadgeStyles } from './statusBadge';
 import { useControlPanelAccess } from '../../context/ControlPanelAccessContext';
+import { cn } from '../../lib/utils';
 
 type DashboardApplicationRow = {
   id: number;
@@ -22,8 +23,11 @@ type AttentionItem = {
   application_no: string;
   proponent_name: string | null;
   status: string;
+  is_renewal?: boolean;
   days_waiting: number;
 };
+
+type Navigate = (to: string, opts?: { replace?: boolean }) => void;
 
 export type OfficerDashboardData = {
   applications: DashboardApplicationRow[];
@@ -71,12 +75,14 @@ function formatDate(value: string | null) {
 export function OfficerDashboard({
   data,
   widgetOverrides,
+  navigate,
 }: {
   data: OfficerDashboardData | null;
   /** Set only by PreviewDashboard: the real Officer role's saved widget
    * visibility, since the admin viewing this preview is exempt from Control
    * Panel restrictions and would otherwise always see everything. */
   widgetOverrides?: Record<string, boolean>;
+  navigate?: Navigate;
 }) {
   const applications = data?.applications ?? [];
   const stats = data?.stats ?? { total: 0, pending: 0, approved: 0, rejected: 0, returned: 0, requirementsTotal: 0, requirementsVerified: 0 };
@@ -134,7 +140,27 @@ export function OfficerDashboard({
             {attention.map((item) => (
               <div
                 key={item.application_id}
-                className="flex items-center justify-between gap-3 rounded-lg border px-3 py-2 text-[11px]"
+                role={navigate ? 'button' : undefined}
+                tabIndex={navigate ? 0 : undefined}
+                onClick={
+                  navigate
+                    ? () => navigate(`/applications/${item.is_renewal ? 'renewals' : 'new'}?applicationId=${item.application_id}`)
+                    : undefined
+                }
+                onKeyDown={
+                  navigate
+                    ? (e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          navigate(`/applications/${item.is_renewal ? 'renewals' : 'new'}?applicationId=${item.application_id}`);
+                        }
+                      }
+                    : undefined
+                }
+                className={cn(
+                  'flex items-center justify-between gap-3 rounded-lg border px-3 py-2 text-[11px] transition-colors',
+                  navigate && 'cursor-pointer hover:bg-[var(--surface-hover)]'
+                )}
                 style={{ borderColor: 'var(--border-subtle)' }}
               >
                 <span className="font-semibold truncate" style={{ color: 'var(--text)' }}>
@@ -165,7 +191,7 @@ export function OfficerDashboard({
             <table className="min-w-full text-left text-xs">
               <thead>
                 <tr>
-                  {['Application No.', 'Proponent', 'Type', 'Status', 'Requirements', 'Submitted'].map((col) => (
+                  {['Application No.', 'Locator', 'Type', 'Status', 'Requirements', 'Submitted'].map((col) => (
                     <th
                       key={col}
                       className="px-3 py-2 font-semibold text-[10px] uppercase tracking-widest text-secondary border-b"
@@ -183,7 +209,19 @@ export function OfficerDashboard({
                   const verified = Number(app.requirements_verified || 0);
                   const pct = total > 0 ? Math.round((verified / total) * 100) : 0;
                   return (
-                    <tr key={app.id} className="border-b last:border-b-0" style={{ borderColor: 'var(--border-subtle)' }}>
+                    <tr
+                      key={app.id}
+                      onClick={
+                        navigate
+                          ? () => navigate(`/applications/${Number(app.is_renewal) ? 'renewals' : 'new'}?applicationId=${app.id}`)
+                          : undefined
+                      }
+                      className={cn(
+                        'border-b last:border-b-0 transition-colors',
+                        navigate && 'cursor-pointer hover:bg-[var(--surface-hover)]'
+                      )}
+                      style={{ borderColor: 'var(--border-subtle)' }}
+                    >
                       <td className="px-3 py-2 text-[11px] font-semibold" style={{ color: 'var(--text)' }}>
                         {app.application_no}
                       </td>

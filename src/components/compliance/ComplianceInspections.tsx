@@ -361,7 +361,7 @@ export function ComplianceInspections() {
             <input
               className={cn(inputCls, 'w-full sm:w-64')}
               style={inputStyle}
-              placeholder="Search inspection / proponent…"
+              placeholder="Search inspection / locator…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
@@ -408,7 +408,7 @@ export function ComplianceInspections() {
                       style={{ backgroundColor: 'var(--control-bg)' }}
                     >
                       <th className="px-3 py-2.5 font-semibold">Inspection</th>
-                      <th className="px-3 py-2.5 font-semibold">Proponent</th>
+                      <th className="px-3 py-2.5 font-semibold">Locator</th>
                       <th className="px-3 py-2.5 font-semibold">Type</th>
                       <th className="px-3 py-2.5 font-semibold">Inspector</th>
                       <th className="px-3 py-2.5 font-semibold">Scheduled</th>
@@ -1362,10 +1362,10 @@ function NewInspection({
             <X size={16} />
           </button>
         </div>
-        <Field label="Proponent">
+        <Field label="Locator">
           <AppSelect
             compact
-            placeholder="Select proponent…"
+            placeholder="Select locator…"
             value={form.proponent_id}
             onChange={(v) => setForm((f) => ({ ...f, proponent_id: v }))}
             options={meta.proponents.map((p) => ({ value: String(p.id), label: p.business_name }))}

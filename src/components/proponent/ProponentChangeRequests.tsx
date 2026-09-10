@@ -84,7 +84,7 @@ export function ProponentChangeRequests({ onReviewed }: { onReviewed?: () => voi
     return (
       <EmptyState
         title="No pending change requests"
-        description="Profile edit requests submitted by proponents will show up here for review."
+        description="Profile edit requests submitted by locators will show up here for review."
       />
     );
   }
@@ -102,10 +102,10 @@ export function ProponentChangeRequests({ onReviewed }: { onReviewed?: () => voi
             <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 mb-3">
               <div className="min-w-0">
                 <h4 className="text-sm font-bold" style={{ color: 'var(--text)' }}>
-                  {req.business_name || `Proponent #${req.proponent_id}`}
+                  {req.business_name || `Locator #${req.proponent_id}`}
                 </h4>
                 <p className="text-[11px] text-secondary">
-                  Requested by {req.requested_by_username || 'proponent'} · {formatDateTime(req.created_at)}
+                  Requested by {req.requested_by_username || 'locator'} · {formatDateTime(req.created_at)}
                 </p>
               </div>
               <div className="flex items-center gap-2 shrink-0">

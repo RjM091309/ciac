@@ -4,6 +4,8 @@ import { Dashboard, type AdminDashboardData } from './Dashboard';
 import { OfficerDashboard, type OfficerDashboardData } from './OfficerDashboard';
 import { ProponentDashboard, type ProponentDashboardData } from './ProponentDashboard';
 
+type Navigate = (to: string, opts?: { replace?: boolean }) => void;
+
 type DashboardState =
   | { status: 'loading' }
   | { status: 'admin'; data: AdminDashboardData | null }
@@ -14,7 +16,7 @@ type DashboardState =
 // live without the user having to manually reload the page.
 const POLL_INTERVAL_MS = 30_000;
 
-export function RoleDashboard() {
+export function RoleDashboard({ navigate }: { navigate: Navigate }) {
   const [state, setState] = useState<DashboardState>({ status: 'loading' });
   const firstLoad = useRef(true);
 
@@ -53,7 +55,7 @@ export function RoleDashboard() {
     );
   }
 
-  if (state.status === 'officer') return <OfficerDashboard data={state.data} />;
+  if (state.status === 'officer') return <OfficerDashboard data={state.data} navigate={navigate} />;
   if (state.status === 'proponent') return <ProponentDashboard data={state.data} onFiled={load} />;
-  return <Dashboard data={state.data} />;
+  return <Dashboard data={state.data} navigate={navigate} />;
 }

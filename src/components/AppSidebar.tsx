@@ -255,7 +255,7 @@ export function AppSidebar({
                 />}
 
                  {canView('settings:proponents') && <SidebarSubItem
-                  label="Proponent"
+                  label="Locator"
                   active={view === 'settings:proponents'}
                   onClick={() => onViewChange('settings:proponents')}
                 />}
