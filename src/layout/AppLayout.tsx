@@ -32,7 +32,6 @@ export type AppView =
   | 'settings:requirement-categories'
   | 'settings:inspection-types'
   | 'settings:compliance-types'
-  | 'settings:checklist'
   | 'settings:control-panel'
   | 'settings:audit-log';
 

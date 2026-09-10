@@ -331,6 +331,39 @@ select.input-field:-webkit-autofill:focus {
   background: #3f3f46;
 }
 
+/*
+ * Sidebar scroll: no reserved gutter (scrollbar only shows when content
+ * overflows), transparent track, and a translucent "ash" thumb that only
+ * becomes visible while the pointer is over the sidebar.
+ */
+.sidebar-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+  transition: scrollbar-color 160ms ease-out;
+}
+.sidebar-scroll:hover,
+.sidebar-scroll:focus-within {
+  scrollbar-color: color-mix(in oklab, var(--foreground) 22%, transparent) transparent;
+}
+.sidebar-scroll::-webkit-scrollbar {
+  width: 8px;
+}
+.sidebar-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.sidebar-scroll::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 9999px;
+  transition: background-color 160ms ease-out;
+}
+.sidebar-scroll:hover::-webkit-scrollbar-thumb,
+.sidebar-scroll:focus-within::-webkit-scrollbar-thumb {
+  background: color-mix(in oklab, var(--foreground) 20%, transparent);
+}
+.sidebar-scroll::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in oklab, var(--foreground) 34%, transparent);
+}
+
 /* Hide scrollbar for role pills / horizontal scroll on mobile */
 .scrollbar-hide {
   -ms-overflow-style: none;

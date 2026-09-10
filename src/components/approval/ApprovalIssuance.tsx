@@ -10,6 +10,7 @@ import {
   Plus,
   Printer,
   RotateCcw,
+  Search,
   Send,
   Stamp,
   Trash2,
@@ -23,6 +24,7 @@ import { DataTableControls } from '../ui/DataTableControls';
 import { EmptyState } from '../ui/EmptyState';
 import { TableSkeleton } from '../ui/Skeleton';
 import { useControlPanelAccess } from '../../context/ControlPanelAccessContext';
+import { useSessionStorageCachedResource } from '../../hooks/useSessionStorageCachedResource';
 import { requestNotificationsRefresh } from '../../lib/notificationRefresh';
 
 const MENU_KEY = 'approval:queue';
@@ -254,11 +256,6 @@ export function ApprovalIssuance() {
   const canEdit = fullAccess || perm.can_edit;
   const canDelete = fullAccess || perm.can_delete;
 
-  const [rows, setRows] = useState<ApprovalRow[]>([]);
-  const [summary, setSummary] = useState<Summary | null>(null);
-  const [approvers, setApprovers] = useState<Approver[]>([]);
-  const [loading, setLoading] = useState(true);
-
   const [statusFilter, setStatusFilter] = useState('');
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
@@ -266,36 +263,47 @@ export function ApprovalIssuance() {
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [setupOpen, setSetupOpen] = useState(false);
 
-  const loadList = useCallback(async () => {
-    const params = new URLSearchParams();
-    if (statusFilter) params.set('status', statusFilter);
-    if (search.trim()) params.set('search', search.trim());
-    const [listJson, summaryJson] = await Promise.all([
-      apiFetch(`/api/approvals?${params.toString()}`),
-      apiFetch('/api/approvals/summary'),
-    ]);
-    setRows(listJson.data || []);
-    setSummary(summaryJson.data || null);
-  }, [statusFilter, search]);
+  // One cached fetch of the whole queue + summary + approvers, then filter
+  // client-side. Revisits paint instantly from sessionStorage while revalidating,
+  // and typing in the search box no longer round-trips to the server.
+  const { data, isLoading, isRevalidating, refresh } = useSessionStorageCachedResource<{
+    rows: ApprovalRow[];
+    summary: Summary | null;
+    approvers: Approver[];
+  }>({
+    cacheKey: 'ciac.approvals_queue.v1',
+    ttlMs: 5 * 60 * 1000,
+    fetcher: async () => {
+      const [listJson, summaryJson, apJson] = await Promise.all([
+        apiFetch('/api/approvals'),
+        apiFetch('/api/approvals/summary'),
+        apiFetch('/api/approvals/approvers'),
+      ]);
+      return {
+        rows: listJson.data || [],
+        summary: summaryJson.data || null,
+        approvers: apJson.data || [],
+      };
+    },
+    onError: (err) => toast.error(err instanceof Error ? err.message : 'Failed to load approvals'),
+  });
 
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    (async () => {
-      try {
-        const apJson = await apiFetch('/api/approvals/approvers');
-        if (!cancelled) setApprovers(apJson.data || []);
-        await loadList();
-      } catch (err) {
-        if (!cancelled) toast.error((err as Error).message);
-      } finally {
-        if (!cancelled) setLoading(false);
+  const allRows = data?.rows ?? [];
+  const summary = data?.summary ?? null;
+  const approvers = data?.approvers ?? [];
+  const loading = isLoading;
+
+  const rows = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    return allRows.filter((r) => {
+      if (statusFilter && (r.approval_status || 'PENDING') !== statusFilter) return false;
+      if (term) {
+        const hay = `${r.application_no ?? ''} ${r.proponent_name ?? ''}`.toLowerCase();
+        if (!hay.includes(term)) return false;
       }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [loadList]);
+      return true;
+    });
+  }, [allRows, statusFilter, search]);
 
   useEffect(() => {
     setPage(1);
@@ -305,63 +313,69 @@ export function ApprovalIssuance() {
 
   const refreshAfterMutation = useCallback(async () => {
     try {
-      await loadList();
+      await refresh({ showLoading: false });
       requestNotificationsRefresh();
     } catch (err) {
       toast.error((err as Error).message);
     }
-  }, [loadList]);
+  }, [refresh]);
 
   return (
-    <div className="flex flex-col gap-4">
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
-        <StatTile icon={Stamp} label="Total" value={summary?.total ?? '—'} />
-        <StatTile icon={Clock3} label="Awaiting Start" value={summary?.awaiting_start ?? '—'} tone="#94a3b8" />
-        <StatTile icon={Send} label="In Progress" value={summary?.in_progress ?? '—'} tone="#3b82f6" />
-        <StatTile icon={CheckCircle2} label="Approved" value={summary?.approved ?? '—'} tone="#10b981" />
-        <StatTile icon={FileSignature} label="Issued Docs" value={summary?.issued ?? '—'} tone="#0ea5e9" />
-        <StatTile
-          icon={AlertTriangle}
-          label="Avg Days"
-          value={summary?.avg_days_to_decide ?? '—'}
-          tone="#f59e0b"
-        />
+    <div className="space-y-4 sm:space-y-5">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4 mt-3">
+        <StatTile label="Total" value={summary?.total ?? '—'} />
+        <StatTile label="Awaiting Start" value={summary?.awaiting_start ?? '—'} tone="#94a3b8" />
+        <StatTile label="In Progress" value={summary?.in_progress ?? '—'} tone="#3b82f6" />
+        <StatTile label="Approved" value={summary?.approved ?? '—'} tone="#10b981" />
+        <StatTile label="Issued Docs" value={summary?.issued ?? '—'} tone="#0ea5e9" />
+        <StatTile label="Avg Days" value={summary?.avg_days_to_decide ?? '—'} tone="#f59e0b" />
       </div>
 
-      <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
-        <div className="relative group w-full sm:w-64">
-          <input
-            className={cn(inputCls, 'w-full')}
-            style={inputStyle}
-            placeholder="Search application / proponent…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-        </div>
-        <div className="w-full sm:w-52">
-          <AppSelect
-            compact
-            placeholder="All statuses"
-            value={statusFilter}
-            onChange={setStatusFilter}
-            options={APPROVAL_STATUS_ORDER.map((s) => ({ value: s, label: APPROVAL_STATUS_LABELS[s] }))}
-          />
-        </div>
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="text-base sm:text-lg font-bold tracking-tight" style={{ color: 'var(--text)' }}>
+          Approval Queue
+        </h3>
         {canEdit ? (
           <button
-            className="rounded-lg px-3 py-1.5 text-[12px] font-semibold border sm:ml-auto"
-            style={{ borderColor: 'var(--border-subtle)', color: 'var(--text)' }}
+            className="rounded-lg px-3 py-2 text-sm font-semibold inline-flex items-center gap-1.5 shadow-sm cursor-pointer"
+            style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
             onClick={() => setSetupOpen(true)}
           >
+            <Stamp size={15} />
             Workflow Setup
           </button>
         ) : null}
       </div>
 
-      <div className="rounded-xl border overflow-hidden" style={{ borderColor: 'var(--border-subtle)' }}>
+      <div className="glass-card p-4 sm:p-5 !border-transparent overflow-hidden" style={{ backgroundColor: 'var(--surface)' }}>
+        <div className="flex flex-col sm:flex-row sm:items-center gap-2 mb-3">
+          <div className="relative group w-full sm:w-72">
+            <Search
+              size={14}
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)] group-focus-within:text-[var(--text)] transition-colors pointer-events-none"
+            />
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search application / proponent..."
+              className="h-9 rounded-full pl-9 pr-3 text-xs w-full focus:outline-none focus:ring-1 focus:ring-[var(--border)] text-[var(--text)] placeholder:text-[var(--text-muted)] transition-all"
+              style={{ backgroundColor: 'color-mix(in oklab, var(--control-bg) 70%, transparent)' }}
+            />
+          </div>
+          <div className="w-full sm:w-48">
+            <AppSelect
+              compact
+              placeholder="All statuses"
+              value={statusFilter}
+              onChange={setStatusFilter}
+              options={APPROVAL_STATUS_ORDER.map((s) => ({ value: s, label: APPROVAL_STATUS_LABELS[s] }))}
+            />
+          </div>
+        </div>
+
         {loading ? (
-          <div className="p-4">
-            <TableSkeleton rows={6} />
+          <div className="py-2">
+            <TableSkeleton columns={7} rows={6} />
           </div>
         ) : rows.length === 0 ? (
           <EmptyState
@@ -371,43 +385,40 @@ export function ApprovalIssuance() {
           />
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-[13px]">
+            <table className="min-w-full text-left text-xs">
               <thead>
-                <tr
-                  className="text-[11px] uppercase tracking-wide text-secondary"
-                  style={{ backgroundColor: 'color-mix(in oklab, var(--control-bg) 55%, transparent)' }}
-                >
-                  <th className="px-3 py-2.5 font-semibold">Application</th>
-                  <th className="px-3 py-2.5 font-semibold">Proponent</th>
-                  <th className="px-3 py-2.5 font-semibold">Approval Status</th>
-                  <th className="px-3 py-2.5 font-semibold">Current Level</th>
-                  <th className="px-3 py-2.5 font-semibold text-right">Progress</th>
-                  <th className="px-3 py-2.5 font-semibold text-right">Issued</th>
-                  <th className="px-3 py-2.5 font-semibold text-right">Days</th>
+                <tr style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+                  <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary">Application</th>
+                  <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary">Proponent</th>
+                  <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary">Approval Status</th>
+                  <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary">Current Level</th>
+                  <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary text-right">Progress</th>
+                  <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary text-right">Issued</th>
+                  <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary text-right">Days</th>
                 </tr>
               </thead>
               <tbody>
                 {pg.pageItems.map((r) => (
                   <tr
                     key={r.application_id}
-                    className="border-t cursor-pointer hover:bg-[var(--selected-bg)] transition-colors"
-                    style={{ borderColor: 'var(--border-subtle)' }}
+                    className="cursor-pointer hover:bg-[var(--selected-bg)] transition-colors"
+                    style={{ borderTop: '1px solid var(--border-subtle)' }}
                     onClick={() => setSelectedId(r.application_id)}
                   >
                     <td className="px-3 py-2.5">
-                      <div className="font-semibold">{r.application_no}</div>
+                      <div className="font-semibold" style={{ color: 'var(--text)' }}>{r.application_no}</div>
                       <div className="text-[11px] text-secondary">
                         {r.is_renewal ? 'Renewal' : 'New'} · {r.application_type}
                       </div>
                     </td>
-                    <td className="px-3 py-2.5">{r.proponent_name || '—'}</td>
+                    <td className="px-3 py-2.5 text-[11px] text-secondary">{r.proponent_name || '—'}</td>
                     <td className="px-3 py-2.5">
                       <Badge
                         label={APPROVAL_STATUS_LABELS[r.approval_status] || r.approval_status}
                         styles={statusBadge(r.approval_status)}
                       />
                     </td>
-                    <td className="px-3 py-2.5 text-[12px]">
+                    <td className="px-3 py-2.5 text-[11px] text-secondary">
                       {r.approval_status === 'IN_PROGRESS'
                         ? r.current_level_name || `Level ${r.current_level_no ?? '—'}`
                         : '—'}
@@ -417,13 +428,13 @@ export function ApprovalIssuance() {
                         </div>
                       ) : null}
                     </td>
-                    <td className="px-3 py-2.5 text-right text-[12px] tabular-nums">
+                    <td className="px-3 py-2.5 text-right text-[11px] text-secondary tabular-nums">
                       {r.total_steps ? `${r.approved_steps}/${r.total_steps}` : '—'}
                     </td>
-                    <td className="px-3 py-2.5 text-right text-[12px] tabular-nums">{r.issuance_count || '—'}</td>
-                    <td className="px-3 py-2.5 text-right tabular-nums">
+                    <td className="px-3 py-2.5 text-right text-[11px] text-secondary tabular-nums">{r.issuance_count || '—'}</td>
+                    <td className="px-3 py-2.5 text-right text-[11px] tabular-nums">
                       {r.days_in_approval == null ? (
-                        '—'
+                        <span className="text-secondary">—</span>
                       ) : (
                         <span style={{ color: r.days_in_approval > 7 ? '#ef4444' : undefined }}>
                           {r.days_in_approval}
@@ -447,7 +458,7 @@ export function ApprovalIssuance() {
           pageSizeOptions={[10, 20, 50, 100]}
           onPageSizeChange={setPageSize}
           onPageChange={setPage}
-          loading={loading}
+          loading={loading || isRevalidating}
         />
       </div>
 
@@ -470,27 +481,23 @@ export function ApprovalIssuance() {
 }
 
 function StatTile({
-  icon: Icon,
   label,
   value,
   tone,
 }: {
-  icon: any;
   label: string;
   value: React.ReactNode;
   tone?: string;
 }) {
   return (
     <div
-      className="rounded-xl border px-3 py-2.5"
-      style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'color-mix(in oklab, var(--control-bg) 45%, transparent)' }}
+      className="rounded-xl px-3 py-3 flex flex-col gap-1 shadow-sm"
+      style={{ backgroundColor: 'color-mix(in oklab, var(--surface) 94%, white 6%)' }}
     >
-      <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-secondary">
-        <Icon size={12} style={{ color: tone }} /> {label}
-      </div>
-      <div className="text-lg font-bold mt-0.5" style={{ color: tone }}>
+      <span className="text-[10px] font-semibold text-secondary uppercase tracking-widest">{label}</span>
+      <span className="text-base sm:text-lg font-bold leading-tight" style={{ color: tone || 'var(--text)' }}>
         {value}
-      </div>
+      </span>
     </div>
   );
 }

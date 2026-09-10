@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Pencil, RotateCcw, Search, UserX } from 'lucide-react';
+import { Pencil, Plus, RotateCcw, Search, UserX } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { toast } from 'sonner';
 import { ProponentChangeRequests } from './ProponentChangeRequests';
@@ -367,20 +367,22 @@ export function ProponentsManagement() {
           />
         </div>
       ) : (
-      <div className="glass-card p-4 sm:p-5 !border-transparent" style={{ backgroundColor: 'var(--surface)' }}>
-        <div className="flex items-center justify-between mb-3 gap-2">
-          <h3 className="text-sm font-bold tracking-tight" style={{ color: 'var(--text)' }}>
-            Proponent Management List
-          </h3>
-          <button
-            className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-semibold shadow-sm cursor-pointer"
-            style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
-            onClick={openCreate}
-          >
-            + New Record
-          </button>
-        </div>
+      <>
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="text-base sm:text-lg font-bold tracking-tight" style={{ color: 'var(--text)' }}>
+          Proponent Management List
+        </h3>
+        <button
+          className="rounded-lg px-3 py-2 text-sm font-semibold inline-flex items-center gap-1.5 shadow-sm cursor-pointer"
+          style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
+          onClick={openCreate}
+        >
+          <Plus size={15} />
+          New Proponent
+        </button>
+      </div>
 
+      <div className="glass-card p-4 sm:p-5 !border-transparent overflow-hidden" style={{ backgroundColor: 'var(--surface)' }}>
         {error && (
           <div
             className="mb-3 rounded-lg border px-3 py-2 text-xs"
@@ -437,15 +439,14 @@ export function ProponentsManagement() {
           <div className="overflow-x-auto">
             <table className="min-w-full text-left text-xs">
               <thead>
-                <tr>
+                <tr style={{ borderBottom: '1px solid var(--border-subtle)' }}>
                   {['Business Name', 'TIN', 'Registration No.', 'Contact No.', 'Status', 'Actions'].map((col) => (
                     <th
                       key={col}
                       className={cn(
-                        'px-3 py-2 font-semibold text-[10px] uppercase tracking-widest text-secondary border-b',
+                        'px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary',
                         col === 'Actions' && 'text-right pr-2',
                       )}
-                      style={{ borderColor: 'var(--border-subtle)' }}
                     >
                       {col}
                     </th>
@@ -454,7 +455,7 @@ export function ProponentsManagement() {
               </thead>
               <tbody>
                 {pagedProponents.map((p) => (
-                  <tr key={p.id} className="border-b last:border-b-0" style={{ borderColor: 'var(--border-subtle)' }}>
+                  <tr key={p.id} style={{ borderTop: '1px solid var(--border-subtle)' }}>
                     <td className="px-3 py-2 text-[11px]" style={{ color: 'var(--text)' }}>
                       {p.business_name}
                     </td>
@@ -525,6 +526,7 @@ export function ProponentsManagement() {
           </div>
         )}
       </div>
+      </>
       )}
 
       <SidePanel

@@ -471,25 +471,6 @@ export const LANDING_CONFIG: Record<AppView, LandingConfig> = {
       ],
     },
   },
-  'settings:checklist': {
-    title: 'Master Checklist',
-    description: 'Add, edit, and organize required/optional documents per application type.',
-    badge: 'Configuration',
-    icon: FileCheck,
-    stats: [
-      { label: 'Checklist Templates', value: '5' },
-      { label: 'Last Updated By', value: 'Admin Demo' },
-      { label: 'Pending Change Requests', value: '2' },
-    ],
-    table: {
-      columns: ['Template', 'Application Type', 'Required Docs', 'Optional Docs', 'Last Updated'],
-      rows: [
-        ['Direct Lease – New', 'New Locator', '14', '3', 'Mar 09, 2026'],
-        ['Direct Lease – Renewal', 'Existing Locator', '10', '4', 'Mar 02, 2026'],
-        ['Warehouse Only', 'Storage Lease', '8', '2', 'Feb 20, 2026'],
-      ],
-    },
-  },
   'settings:audit-log': {
     title: 'Audit Log',
     description: 'Logins, account changes, and permission changes — for monitoring and compliance review.',

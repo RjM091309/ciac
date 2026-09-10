@@ -35,7 +35,20 @@ function pick(value, allowed, fallback = null) {
   return allowed.includes(v) ? v : fallback;
 }
 
+// DDL is idempotent but MSSQL still parses/compiles the whole batch each call.
+// Run it once per process instead of on every model method.
+let schemaReadyPromise = null;
 async function ensureSchema() {
+  if (!schemaReadyPromise) {
+    schemaReadyPromise = ensureSchemaImpl().catch((err) => {
+      schemaReadyPromise = null;
+      throw err;
+    });
+  }
+  return schemaReadyPromise;
+}
+
+async function ensureSchemaImpl() {
   await updateSchema(`
     IF OBJECT_ID('dbo.approval_levels', 'U') IS NULL
     BEGIN

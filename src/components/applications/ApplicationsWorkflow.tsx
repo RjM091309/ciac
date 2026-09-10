@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
-import { CheckCircle2, Clock3, Eye, FileText, History, Loader2, Plus, Search, Upload, XCircle } from 'lucide-react';
+import { CheckCircle2, Clock3, Eye, FileText, History, Loader2, Plus, RefreshCw, Search, Upload, XCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '../../lib/utils';
 import { SidePanel } from '../ui/SidePanel';
@@ -876,7 +876,6 @@ export function ApplicationsWorkflow({
       </div>
 
       <div className="glass-card p-4 sm:p-5 !border-transparent overflow-hidden" style={{ backgroundColor: 'var(--surface)' }}>
-        <div className="text-xs text-secondary mb-3">Applications ({filteredApps.length})</div>
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-3">
           <div className="relative group w-full sm:w-72">
             <Search
@@ -1008,40 +1007,46 @@ export function ApplicationsWorkflow({
                       <td className="px-3 py-2.5 text-right">
                         <div className="inline-flex items-center gap-1.5">
                           <button
-                            className="inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold"
+                            className="inline-flex items-center justify-center rounded-lg border h-8 w-8 text-xs font-semibold"
                             style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'var(--control-bg)' }}
                             onClick={() => openDetails(row.id)}
                             disabled={saving}
+                            title="View Compliance"
+                            aria-label="View Compliance"
                           >
                             {detailsLoading && selectedId === row.id ? <Loader2 size={14} className="animate-spin" /> : <Eye size={14} />}
-                            View Compliance
                           </button>
                           <button
-                            className="inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold"
+                            className="inline-flex items-center justify-center rounded-lg border h-8 w-8 text-xs font-semibold"
                             style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'var(--control-bg)' }}
                             onClick={() => openContractEditor(row)}
                             disabled={saving || contractOpen}
+                            title="Contract"
+                            aria-label="Contract"
                           >
                             {contractLoading && contractApp?.id === row.id ? <Loader2 size={14} className="animate-spin" /> : <FileText size={14} />}
-                            Contract
                           </button>
                           {['DRAFT', 'RETURNED'].includes(toUpper(row.status)) ? (
                             <button
-                              className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold"
+                              className="inline-flex items-center justify-center rounded-lg h-8 w-8 text-xs font-semibold"
                               style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
                               onClick={() => submitApplication(row.id)}
                               disabled={saving}
+                              title={toUpper(row.status) === 'DRAFT' ? 'Submit' : 'Resubmit'}
+                              aria-label={toUpper(row.status) === 'DRAFT' ? 'Submit' : 'Resubmit'}
                             >
-                              {toUpper(row.status) === 'DRAFT' ? 'Submit' : 'Resubmit'}
+                              <Upload size={14} />
                             </button>
                           ) : null}
                           <button
-                            className="inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold"
+                            className="inline-flex items-center justify-center rounded-lg border h-8 w-8 text-xs font-semibold"
                             style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'var(--control-bg)' }}
                             onClick={() => openStatusEditor(row.id, row.status)}
                             disabled={saving}
+                            title="Update Status"
+                            aria-label="Update Status"
                           >
-                            Update Status
+                            <RefreshCw size={14} />
                           </button>
                         </div>
                       </td>

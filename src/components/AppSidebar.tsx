@@ -214,7 +214,7 @@ export function AppSidebar({
             '0 8px 20px rgba(0,0,0,0.18), 0 0 0 1px color-mix(in oklab, var(--border-subtle) 70%, transparent)',
         }}
       >
-        <nav className={cn('flex-1 px-3 py-5 flex flex-col items-stretch', isDrawer && 'min-h-0 overflow-y-auto')}>
+        <nav className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden sidebar-scroll px-3 py-5 flex flex-col items-stretch">
           <SidebarGroup title="Overview" collapsed={collapsed}>
             <div className="flex flex-col gap-1.5">
               {canView('dashboard') && (
@@ -360,11 +360,6 @@ export function AppSidebar({
                   active={view === 'compliance:permits'}
                   onClick={() => onViewChange('compliance:permits')}
                 />}
-                {canView('compliance:permits') && <SidebarSubItem
-                  label="Authority to Operate"
-                  active={view === 'compliance:permits'}
-                  onClick={() => onViewChange('compliance:permits')}
-                />}
               </SidebarDropdown>
               <SidebarDropdown
                 icon={FileCheck}
@@ -375,21 +370,6 @@ export function AppSidebar({
               >
                 {canView('compliance:bir') && <SidebarSubItem
                   label="BIR Tax Clearance"
-                  active={view === 'compliance:bir'}
-                  onClick={() => onViewChange('compliance:bir')}
-                />}
-                {canView('compliance:bir') && <SidebarSubItem
-                  label="Certificate of Registration"
-                  active={view === 'compliance:bir'}
-                  onClick={() => onViewChange('compliance:bir')}
-                />}
-                {canView('compliance:bir') && <SidebarSubItem
-                  label="Receipts / Invoices / ATP"
-                  active={view === 'compliance:bir'}
-                  onClick={() => onViewChange('compliance:bir')}
-                />}
-                {canView('compliance:bir') && <SidebarSubItem
-                  label="POS / CRM Permit"
                   active={view === 'compliance:bir'}
                   onClick={() => onViewChange('compliance:bir')}
                 />}
@@ -451,11 +431,6 @@ export function AppSidebar({
                   label="User Management"
                   active={view === 'settings:users'}
                   onClick={() => onViewChange('settings:users')}
-                />}
-                {canView('settings:checklist') && <SidebarSubItem
-                  label="Master Checklist"
-                  active={view === 'settings:checklist'}
-                  onClick={() => onViewChange('settings:checklist')}
                 />}
                 {canView('settings:control-panel') && <SidebarSubItem
                   label="Control Panel"

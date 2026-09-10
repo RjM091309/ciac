@@ -21,6 +21,7 @@ import { DataTableControls } from '../ui/DataTableControls';
 import { EmptyState } from '../ui/EmptyState';
 import { TableSkeleton } from '../ui/Skeleton';
 import { useControlPanelAccess } from '../../context/ControlPanelAccessContext';
+import { useSessionStorageCachedResource } from '../../hooks/useSessionStorageCachedResource';
 import { requestNotificationsRefresh } from '../../lib/notificationRefresh';
 
 const MENU_KEY = 'assessment:queue';
@@ -223,11 +224,6 @@ export function AssessmentEvaluation() {
   const canEdit = fullAccess || perm.can_edit;
   const canDelete = fullAccess || perm.can_delete;
 
-  const [rows, setRows] = useState<AssessmentRow[]>([]);
-  const [summary, setSummary] = useState<Summary | null>(null);
-  const [evaluators, setEvaluators] = useState<Evaluator[]>([]);
-  const [loading, setLoading] = useState(true);
-
   const [stageFilter, setStageFilter] = useState('');
   const [evaluatorFilter, setEvaluatorFilter] = useState('');
   const [search, setSearch] = useState('');
@@ -236,42 +232,53 @@ export function AssessmentEvaluation() {
 
   const [selectedId, setSelectedId] = useState<number | null>(null);
 
+  // One cached fetch of the whole queue + summary + evaluators, then filter
+  // client-side. Revisits paint instantly from sessionStorage while revalidating,
+  // and typing in the search box no longer round-trips to the server.
+  const { data, isLoading, isRevalidating, refresh } = useSessionStorageCachedResource<{
+    rows: AssessmentRow[];
+    summary: Summary | null;
+    evaluators: Evaluator[];
+  }>({
+    cacheKey: 'ciac.assessments_queue.v1',
+    ttlMs: 5 * 60 * 1000,
+    fetcher: async () => {
+      const [listJson, summaryJson, evJson] = await Promise.all([
+        apiFetch('/api/assessments'),
+        apiFetch('/api/assessments/summary'),
+        apiFetch('/api/assessments/evaluators'),
+      ]);
+      return {
+        rows: listJson.data || [],
+        summary: summaryJson.data || null,
+        evaluators: evJson.data || [],
+      };
+    },
+    onError: (err) => toast.error(err instanceof Error ? err.message : 'Failed to load assessments'),
+  });
+
+  const allRows = data?.rows ?? [];
+  const summary = data?.summary ?? null;
+  const evaluators = data?.evaluators ?? [];
+  const loading = isLoading;
+
   const evaluatorOptions = useMemo(
     () => evaluators.map((e) => ({ value: String(e.id), label: e.full_name || e.username })),
     [evaluators]
   );
 
-  const loadList = useCallback(async () => {
-    const params = new URLSearchParams();
-    if (stageFilter) params.set('stage', stageFilter);
-    if (evaluatorFilter) params.set('evaluatorId', evaluatorFilter);
-    if (search.trim()) params.set('search', search.trim());
-    const [listJson, summaryJson] = await Promise.all([
-      apiFetch(`/api/assessments?${params.toString()}`),
-      apiFetch('/api/assessments/summary'),
-    ]);
-    setRows(listJson.data || []);
-    setSummary(summaryJson.data || null);
-  }, [stageFilter, evaluatorFilter, search]);
-
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    (async () => {
-      try {
-        const evJson = await apiFetch('/api/assessments/evaluators');
-        if (!cancelled) setEvaluators(evJson.data || []);
-        await loadList();
-      } catch (err) {
-        if (!cancelled) toast.error((err as Error).message);
-      } finally {
-        if (!cancelled) setLoading(false);
+  const rows = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    return allRows.filter((r) => {
+      if (stageFilter && (r.stage || 'UNASSIGNED') !== stageFilter) return false;
+      if (evaluatorFilter && String(r.assigned_evaluator_id ?? '') !== evaluatorFilter) return false;
+      if (term) {
+        const hay = `${r.application_no ?? ''} ${r.proponent_name ?? ''}`.toLowerCase();
+        if (!hay.includes(term)) return false;
       }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [loadList]);
+      return true;
+    });
+  }, [allRows, stageFilter, evaluatorFilter, search]);
 
   useEffect(() => {
     setPage(1);
@@ -281,73 +288,69 @@ export function AssessmentEvaluation() {
 
   const refreshAfterMutation = useCallback(async () => {
     try {
-      await loadList();
+      await refresh({ showLoading: false });
       requestNotificationsRefresh();
     } catch (err) {
       toast.error((err as Error).message);
     }
-  }, [loadList]);
+  }, [refresh]);
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="space-y-4 sm:space-y-5">
       {/* Monitoring stat bar */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
-        <StatTile icon={ClipboardCheck} label="Total" value={summary?.total ?? '—'} />
-        <StatTile icon={Clock3} label="Unassigned" value={summary?.by_stage?.UNASSIGNED ?? '—'} tone="#94a3b8" />
-        <StatTile icon={UserCheck} label="Active" value={summary?.active ?? '—'} tone="#3b82f6" />
-        <StatTile icon={AlertTriangle} label="Overdue" value={summary?.overdue ?? '—'} tone="#ef4444" />
-        <StatTile icon={ClipboardCheck} label="Completed" value={summary?.by_stage?.COMPLETED ?? '—'} tone="#10b981" />
-        <StatTile
-          icon={RotateCcw}
-          label="Returned"
-          value={summary?.by_stage?.RETURNED ?? '—'}
-          tone="#f59e0b"
-        />
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4 mt-3">
+        <StatTile label="Total" value={summary?.total ?? '—'} />
+        <StatTile label="Unassigned" value={summary?.by_stage?.UNASSIGNED ?? '—'} tone="#94a3b8" />
+        <StatTile label="Active" value={summary?.active ?? '—'} tone="#3b82f6" />
+        <StatTile label="Overdue" value={summary?.overdue ?? '—'} tone="#ef4444" />
+        <StatTile label="Completed" value={summary?.by_stage?.COMPLETED ?? '—'} tone="#10b981" />
+        <StatTile label="Returned" value={summary?.by_stage?.RETURNED ?? '—'} tone="#f59e0b" />
       </div>
 
-      {/* Filters */}
-      <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
-        <div className="relative group w-full sm:w-64">
-          <Search
-            className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)] pointer-events-none"
-            size={14}
-          />
-          <input
-            className={cn(inputCls, 'w-full pl-8')}
-            style={inputStyle}
-            placeholder="Search application / proponent…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-        </div>
-        <div className="w-full sm:w-52">
-          <AppSelect
-            compact
-            placeholder="All stages"
-            value={stageFilter}
-            onChange={setStageFilter}
-            options={STAGE_ORDER.map((s) => ({ value: s, label: STAGE_LABELS[s] }))}
-          />
-        </div>
-        <div className="w-full sm:w-52">
-          <AppSelect
-            compact
-            placeholder="All evaluators"
-            value={evaluatorFilter}
-            onChange={setEvaluatorFilter}
-            options={evaluatorOptions}
-          />
-        </div>
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="text-base sm:text-lg font-bold tracking-tight" style={{ color: 'var(--text)' }}>
+          Evaluation Queue
+        </h3>
       </div>
 
-      {/* Queue table */}
-      <div
-        className="rounded-xl border overflow-hidden shadow-sm"
-        style={{ borderColor: 'var(--border)', backgroundColor: 'var(--surface)' }}
-      >
+      <div className="glass-card p-4 sm:p-5 !border-transparent overflow-hidden" style={{ backgroundColor: 'var(--surface)' }}>
+        <div className="flex flex-col sm:flex-row sm:items-center gap-2 mb-3">
+          <div className="relative group w-full sm:w-72">
+            <Search
+              size={14}
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)] group-focus-within:text-[var(--text)] transition-colors pointer-events-none"
+            />
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search application / proponent..."
+              className="h-9 rounded-full pl-9 pr-3 text-xs w-full focus:outline-none focus:ring-1 focus:ring-[var(--border)] text-[var(--text)] placeholder:text-[var(--text-muted)] transition-all"
+              style={{ backgroundColor: 'color-mix(in oklab, var(--control-bg) 70%, transparent)' }}
+            />
+          </div>
+          <div className="w-full sm:w-48">
+            <AppSelect
+              compact
+              placeholder="All stages"
+              value={stageFilter}
+              onChange={setStageFilter}
+              options={STAGE_ORDER.map((s) => ({ value: s, label: STAGE_LABELS[s] }))}
+            />
+          </div>
+          <div className="w-full sm:w-48">
+            <AppSelect
+              compact
+              placeholder="All evaluators"
+              value={evaluatorFilter}
+              onChange={setEvaluatorFilter}
+              options={evaluatorOptions}
+            />
+          </div>
+        </div>
+
         {loading ? (
-          <div className="p-4">
-            <TableSkeleton rows={6} />
+          <div className="py-2">
+            <TableSkeleton columns={8} rows={6} />
           </div>
         ) : rows.length === 0 ? (
           <EmptyState
@@ -357,54 +360,54 @@ export function AssessmentEvaluation() {
           />
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-[13px]">
+            <table className="min-w-full text-left text-xs">
               <thead>
-                <tr className="text-[11px] uppercase tracking-wide text-secondary" style={{ backgroundColor: 'var(--control-bg)' }}>
-                  <th className="px-3 py-2.5 font-semibold">Application</th>
-                  <th className="px-3 py-2.5 font-semibold">Proponent</th>
-                  <th className="px-3 py-2.5 font-semibold">Stage</th>
-                  <th className="px-3 py-2.5 font-semibold">Evaluator</th>
-                  <th className="px-3 py-2.5 font-semibold">Compliance</th>
-                  <th className="px-3 py-2.5 font-semibold">Findings</th>
-                  <th className="px-3 py-2.5 font-semibold text-right">Charges</th>
-                  <th className="px-3 py-2.5 font-semibold text-right">Days</th>
+                <tr style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+                  <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary">Application</th>
+                  <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary">Proponent</th>
+                  <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary">Stage</th>
+                  <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary">Evaluator</th>
+                  <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary">Compliance</th>
+                  <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary">Findings</th>
+                  <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary text-right">Charges</th>
+                  <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary text-right">Days</th>
                 </tr>
               </thead>
               <tbody>
                 {pg.pageItems.map((r) => (
                   <tr
                     key={r.application_id}
-                    className="border-t cursor-pointer hover:bg-[var(--selected-bg)] transition-colors"
-                    style={{ borderColor: 'var(--border)' }}
+                    className="cursor-pointer hover:bg-[var(--selected-bg)] transition-colors"
+                    style={{ borderTop: '1px solid var(--border-subtle)' }}
                     onClick={() => setSelectedId(r.application_id)}
                   >
                     <td className="px-3 py-2.5">
-                      <div className="font-semibold">{r.application_no}</div>
+                      <div className="font-semibold" style={{ color: 'var(--text)' }}>{r.application_no}</div>
                       <div className="text-[11px] text-secondary">
                         {r.is_renewal ? 'Renewal' : 'New'} · {r.application_type}
                       </div>
                     </td>
-                    <td className="px-3 py-2.5">{r.proponent_name || '—'}</td>
+                    <td className="px-3 py-2.5 text-[11px] text-secondary">{r.proponent_name || '—'}</td>
                     <td className="px-3 py-2.5">
                       <Badge label={STAGE_LABELS[r.stage] || r.stage} styles={stageBadge(r.stage)} />
                     </td>
-                    <td className="px-3 py-2.5 text-[12px]">{r.evaluator_name || r.evaluator_username || '—'}</td>
-                    <td className="px-3 py-2.5 text-[12px]">
+                    <td className="px-3 py-2.5 text-[11px] text-secondary">{r.evaluator_name || r.evaluator_username || '—'}</td>
+                    <td className="px-3 py-2.5 text-[11px] text-secondary">
                       {r.requirements_verified}/{r.requirements_total} verified
                     </td>
-                    <td className="px-3 py-2.5 text-[12px]">
+                    <td className="px-3 py-2.5 text-[11px]">
                       {r.open_findings > 0 ? (
                         <span style={{ color: '#ef4444' }}>{r.open_findings} open</span>
                       ) : (
                         <span className="text-secondary">{r.total_findings || 0}</span>
                       )}
                     </td>
-                    <td className="px-3 py-2.5 text-right tabular-nums">
+                    <td className="px-3 py-2.5 text-right text-[11px] text-secondary tabular-nums">
                       {r.charges_total ? peso(r.charges_total) : '—'}
                     </td>
-                    <td className="px-3 py-2.5 text-right tabular-nums">
+                    <td className="px-3 py-2.5 text-right text-[11px] tabular-nums">
                       {r.days_in_assessment == null ? (
-                        '—'
+                        <span className="text-secondary">—</span>
                       ) : (
                         <span style={{ color: r.days_in_assessment > 5 ? '#ef4444' : undefined }}>
                           {r.days_in_assessment}
@@ -428,7 +431,7 @@ export function AssessmentEvaluation() {
           pageSizeOptions={[10, 20, 50, 100]}
           onPageSizeChange={setPageSize}
           onPageChange={setPage}
-          loading={loading}
+          loading={loading || isRevalidating}
         />
       </div>
 
@@ -448,27 +451,23 @@ export function AssessmentEvaluation() {
 }
 
 function StatTile({
-  icon: Icon,
   label,
   value,
   tone,
 }: {
-  icon: any;
   label: string;
   value: React.ReactNode;
   tone?: string;
 }) {
   return (
     <div
-      className="rounded-xl border px-3 py-2.5 shadow-sm"
-      style={{ borderColor: 'var(--border)', backgroundColor: 'var(--surface)' }}
+      className="rounded-xl px-3 py-3 flex flex-col gap-1 shadow-sm"
+      style={{ backgroundColor: 'color-mix(in oklab, var(--surface) 94%, white 6%)' }}
     >
-      <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-secondary">
-        <Icon size={12} style={{ color: tone }} /> {label}
-      </div>
-      <div className="text-lg font-bold mt-0.5" style={{ color: tone }}>
+      <span className="text-[10px] font-semibold text-secondary uppercase tracking-widest">{label}</span>
+      <span className="text-base sm:text-lg font-bold leading-tight" style={{ color: tone || 'var(--text)' }}>
         {value}
-      </div>
+      </span>
     </div>
   );
 }

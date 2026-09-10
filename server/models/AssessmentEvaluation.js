@@ -43,7 +43,20 @@ function pick(value, allowed, fallback = null) {
   return allowed.includes(v) ? v : fallback;
 }
 
+// Schema DDL is idempotent but not free to parse/compile on MSSQL. Run it once
+// per process instead of on every model call (each page load hit this 3+ times).
+let schemaReadyPromise = null;
 async function ensureSchema() {
+  if (!schemaReadyPromise) {
+    schemaReadyPromise = ensureSchemaImpl().catch((err) => {
+      schemaReadyPromise = null; // let the next call retry if the DDL failed
+      throw err;
+    });
+  }
+  return schemaReadyPromise;
+}
+
+async function ensureSchemaImpl() {
   await updateSchema(`
     IF OBJECT_ID('dbo.application_assessments', 'U') IS NULL
     BEGIN

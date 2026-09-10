@@ -2,8 +2,9 @@ import React, { useEffect, useMemo, useState, Suspense, lazy } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { AppLayout, AppView } from './layout/AppLayout';
 import { SubHeader, type DashboardPreviewRole } from './components/SubHeader';
-import { FileCheck, FolderTree, ShieldCheck, Users, CalendarClock, Loader2 } from 'lucide-react';
+import { FileCheck, FolderTree, ShieldCheck, Users, CalendarClock, Loader2, Search } from 'lucide-react';
 import { LoginPage } from './components/auth/LoginPage';
+import { DataTableControls } from './components/ui/DataTableControls';
 import { Toaster } from 'sonner';
 
 const RoleDashboard = lazy(() => import('./components/dashboard/RoleDashboard').then((m) => ({ default: m.RoleDashboard })));
@@ -24,7 +25,6 @@ const ApprovalIssuance = lazy(() => import('./components/approval/ApprovalIssuan
 const ComplianceInspections = lazy(() => import('./components/compliance/ComplianceInspections').then((m) => ({ default: m.ComplianceInspections })));
 const InspectionTypesManagement = lazy(() => import('./components/FileMaintenance/InspectionTypes').then((m) => ({ default: m.InspectionTypesManagement })));
 const ComplianceTypesManagement = lazy(() => import('./components/FileMaintenance/ComplianceTypes').then((m) => ({ default: m.ComplianceTypesManagement })));
-const MasterChecklist = lazy(() => import('./components/settings/MasterChecklist').then((m) => ({ default: m.MasterChecklist })));
 const AuditLog = lazy(() => import('./components/settings/AuditLog').then((m) => ({ default: m.AuditLog })));
 
 // --- Types ---
@@ -71,7 +71,6 @@ const VIEW_TO_PATH: Record<AppView, string> = {
   'settings:requirement-categories': '/settings/requirement-categories',
   'settings:inspection-types': '/settings/inspection-types',
   'settings:compliance-types': '/settings/compliance-types',
-  'settings:checklist': '/settings/checklist',
   'settings:audit-log': '/settings/audit-log',
   'settings:control-panel': '/settings/control-panel',
 };
@@ -372,8 +371,6 @@ export default function App() {
                 <InspectionTypesManagement />
               ) : view === 'settings:compliance-types' ? (
                 <ComplianceTypesManagement />
-              ) : view === 'settings:checklist' ? (
-                <MasterChecklist />
               ) : view === 'settings:audit-log' ? (
                 <AuditLog />
               ) : view === 'settings:control-panel' ? (
@@ -849,25 +846,6 @@ const LANDING_CONFIG: Record<AppView, LandingConfig> = {
       ],
     },
   },
-  'settings:checklist': {
-    title: 'Master Checklist',
-    description: 'Add, edit, and organize required/optional documents per application type.',
-    badge: 'Configuration',
-    icon: FileCheck,
-    stats: [
-      { label: 'Checklist Templates', value: '5' },
-      { label: 'Last Updated By', value: 'Admin Demo' },
-      { label: 'Pending Change Requests', value: '2' },
-    ],
-    table: {
-      columns: ['Template', 'Application Type', 'Required Docs', 'Optional Docs', 'Last Updated'],
-      rows: [
-        ['Direct Lease – New', 'New Locator', '14', '3', 'Mar 09, 2026'],
-        ['Direct Lease – Renewal', 'Existing Locator', '10', '4', 'Mar 02, 2026'],
-        ['Warehouse Only', 'Storage Lease', '8', '2', 'Feb 20, 2026'],
-      ],
-    },
-  },
   'settings:audit-log': {
     title: 'Audit Log',
     description: 'Logins, account changes, and permission changes — for monitoring and compliance review.',
@@ -899,92 +877,132 @@ const LANDING_CONFIG: Record<AppView, LandingConfig> = {
 
 function SectionLanding({ view }: { view: AppView }) {
   const config = LANDING_CONFIG[view];
+  const [query, setQuery] = useState('');
+  const [pageSize, setPageSize] = useState(5);
+  const [page, setPage] = useState(1);
+
+  const q = query.trim().toLowerCase();
+  const allRows = config && view !== 'dashboard' ? config.table.rows : [];
+  const filteredRows = useMemo(
+    () =>
+      q
+        ? allRows.filter((row) => row.some((cell) => String(cell).toLowerCase().includes(q)))
+        : allRows,
+    [allRows, q]
+  );
+
+  const totalPages = Math.max(1, Math.ceil(filteredRows.length / Math.max(1, pageSize)));
+  const safePage = Math.min(Math.max(1, page), totalPages);
+  const pagedRows = filteredRows.slice((safePage - 1) * pageSize, (safePage - 1) * pageSize + pageSize);
+  const showingFrom = filteredRows.length === 0 ? 0 : (safePage - 1) * pageSize + 1;
+  const showingTo = Math.min(filteredRows.length, safePage * pageSize);
+  const visiblePageNumbers = useMemo(() => {
+    const start = Math.max(1, safePage - 1);
+    const end = Math.min(totalPages, start + 2);
+    const adjustedStart = Math.max(1, end - 2);
+    return Array.from({ length: end - adjustedStart + 1 }, (_, i) => adjustedStart + i);
+  }, [safePage, totalPages]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [query, pageSize]);
 
   if (!config || view === 'dashboard') return null;
 
-  const Icon = config.icon;
-
   return (
-    <>
-      <div className="space-y-4 sm:space-y-5">
-        {config.stats.length > 0 && (
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4 mt-3">
-              {config.stats.map((stat) => (
-                <div
-                  key={stat.label}
-                  className="rounded-xl px-3 py-3 border flex flex-col gap-1 shadow-sm"
-                  style={{
-                    backgroundColor: 'var(--surface)',
-                    borderColor: 'var(--border)',
-                  }}
-                >
-                  <span className="text-[10px] font-semibold text-secondary uppercase tracking-widest">
-                    {stat.label}
-                  </span>
-                  <span
-                    className="text-base sm:text-lg font-bold leading-tight"
-                    style={{ color: 'var(--text)' }}
-                  >
-                    {stat.value}
-                  </span>
-                  {stat.hint && <span className="text-[10px] text-secondary">{stat.hint}</span>}
-                </div>
-              ))}
+    <div className="space-y-4 sm:space-y-5">
+      {config.stats.length > 0 && (
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4 mt-3">
+          {config.stats.map((stat) => (
+            <div
+              key={stat.label}
+              className="rounded-xl px-3 py-3 flex flex-col gap-1 shadow-sm"
+              style={{ backgroundColor: 'color-mix(in oklab, var(--surface) 94%, white 6%)' }}
+            >
+              <span className="text-[10px] font-semibold text-secondary uppercase tracking-widest">
+                {stat.label}
+              </span>
+              <span
+                className="text-base sm:text-lg font-bold leading-tight"
+                style={{ color: 'var(--text)' }}
+              >
+                {stat.value}
+              </span>
+              {stat.hint && <span className="text-[10px] text-secondary">{stat.hint}</span>}
             </div>
-          )}
+          ))}
+        </div>
+      )}
 
-        <div
-          className="glass-card p-4 sm:p-5 !border-transparent"
-          style={{ backgroundColor: 'var(--surface)' }}
-        >
-          <div className="flex items-center justify-between mb-3 gap-2">
-            <h3
-              className="text-sm font-bold tracking-tight"
-              style={{ color: 'var(--text)' }}
-            >
-              {config.title} List
-            </h3>
-            <button
-              className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-semibold shadow-sm cursor-pointer"
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="text-base sm:text-lg font-bold tracking-tight" style={{ color: 'var(--text)' }}>
+          {config.title} List
+        </h3>
+      </div>
+
+      <div
+        className="glass-card p-4 sm:p-5 !border-transparent overflow-hidden"
+        style={{ backgroundColor: 'var(--surface)' }}
+      >
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-3">
+          <div className="relative group w-full sm:w-72">
+            <Search
+              size={14}
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)] group-focus-within:text-[var(--text)] transition-colors pointer-events-none"
+            />
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search records..."
+              className="h-9 rounded-full pl-9 pr-3 text-xs w-full focus:outline-none focus:ring-1 focus:ring-[var(--border)] text-[var(--text)] placeholder:text-[var(--text-muted)] transition-all"
               style={{
-                backgroundColor: 'var(--nav-active-bg)',
-                color: 'var(--nav-active-text)',
+                backgroundColor: 'color-mix(in oklab, var(--control-bg) 70%, transparent)',
               }}
-            >
-              + New Record
-            </button>
-          </div>
-
-          <div className="overflow-x-auto">
-            <table className="min-w-full text-left text-xs">
-              <thead>
-                <tr>
-                  {config.table.columns.map((col) => (
-                    <th
-                      key={col}
-                      className="px-3 py-2 font-semibold text-[10px] uppercase tracking-widest text-secondary border-b"
-                      style={{ borderColor: 'var(--border)' }}
-                    >
-                      {col}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {config.table.rows.map((row, idx) => (
-                  <tr key={idx} className="border-b last:border-b-0" style={{ borderColor: 'var(--border)' }}>
-                    {row.map((cell, i) => (
-                      <td key={i} className="px-3 py-2 text-[11px] text-secondary">
-                        {cell}
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            />
           </div>
         </div>
+
+        <div className="overflow-x-auto">
+          <table className="min-w-full text-left text-xs">
+            <thead>
+              <tr style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+                {config.table.columns.map((col) => (
+                  <th
+                    key={col}
+                    className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary"
+                  >
+                    {col}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {pagedRows.map((row, idx) => (
+                <tr key={idx} style={{ borderTop: '1px solid var(--border-subtle)' }}>
+                  {row.map((cell, i) => (
+                    <td key={i} className="px-3 py-2.5 text-[11px] text-secondary">
+                      {cell}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <DataTableControls
+          page={safePage}
+          totalPages={totalPages}
+          totalItems={filteredRows.length}
+          showingFrom={showingFrom}
+          showingTo={showingTo}
+          visiblePageNumbers={visiblePageNumbers}
+          pageSize={pageSize}
+          pageSizeOptions={[5, 20, 50, 100, 200]}
+          onPageSizeChange={setPageSize}
+          onPageChange={setPage}
+        />
       </div>
-    </>
+    </div>
   );
 }

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Pencil, RotateCcw, Search, UserX } from 'lucide-react';
+import { Pencil, Plus, RotateCcw, Search, UserX } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { toast } from 'sonner';
 import { SidePanel } from '../ui/SidePanel';
@@ -314,25 +314,43 @@ export function RequirementsManagement() {
         <StatCard label="Deactivated" value={String(stats.inactive)} />
       </div>
 
-      <div className="glass-card p-4 sm:p-5 !border-transparent" style={{ backgroundColor: 'var(--surface)' }}>
-        <div className="flex items-center justify-between mb-3 gap-2">
-          <h3 className="text-sm font-bold tracking-tight" style={{ color: 'var(--text)' }}>
-            Requirements List
-          </h3>
-          <button
-            className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-semibold shadow-sm cursor-pointer"
-            style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
-            onClick={openCreate}
-          >
-            + New Record
-          </button>
-        </div>
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="text-base sm:text-lg font-bold tracking-tight" style={{ color: 'var(--text)' }}>
+          Requirements List
+        </h3>
+        <button
+          className="rounded-lg px-3 py-2 text-sm font-semibold inline-flex items-center gap-1.5 shadow-sm cursor-pointer"
+          style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
+          onClick={openCreate}
+        >
+          <Plus size={15} />
+          New Requirement
+        </button>
+      </div>
 
+      <div className="glass-card p-4 sm:p-5 !border-transparent overflow-hidden" style={{ backgroundColor: 'var(--surface)' }}>
         {error && (
           <div className="mb-3 rounded-lg border px-3 py-2 text-xs" style={{ borderColor: 'var(--border-subtle)', color: '#fca5a5' }}>
             {error}
           </div>
         )}
+
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-3">
+          <div className="relative group w-full sm:w-72">
+            <Search
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)] group-focus-within:text-[var(--text)] transition-colors pointer-events-none"
+              size={14}
+            />
+            <input
+              type="text"
+              placeholder="Search requirements..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="h-9 rounded-full pl-9 pr-3 text-xs w-full focus:outline-none focus:ring-1 focus:ring-[var(--border)] text-[var(--text)] placeholder:text-[var(--text-muted)] transition-all"
+              style={{ backgroundColor: 'color-mix(in oklab, var(--control-bg) 70%, transparent)' }}
+            />
+          </div>
+        </div>
 
         {isLoading ? (
           <div className="py-2">
@@ -342,8 +360,8 @@ export function RequirementsManagement() {
           <EmptyState
             title="No requirements found"
             description={
-              searchQuery 
-                ? 'Try adjusting your search filters.' 
+              searchQuery
+                ? 'Try adjusting your search filters.'
                 : 'There are no requirements to show here yet. Create a new requirement to get started.'
             }
             action={
@@ -360,33 +378,16 @@ export function RequirementsManagement() {
           />
         ) : (
           <div className="overflow-x-auto">
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-3">
-              <div className="relative group w-full sm:w-72">
-                <Search
-                  className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)] group-focus-within:text-[var(--text)] transition-colors pointer-events-none"
-                  size={14}
-                />
-                <input
-                  type="text"
-                  placeholder="Search requirements..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="h-9 rounded-full pl-9 pr-3 text-xs w-full focus:outline-none focus:ring-1 focus:ring-[var(--border)] text-[var(--text)] placeholder:text-[var(--text-muted)] transition-all"
-                  style={{ backgroundColor: 'color-mix(in oklab, var(--control-bg) 70%, transparent)' }}
-                />
-              </div>
-            </div>
             <table className="min-w-full text-left text-xs">
               <thead>
-                <tr>
+                <tr style={{ borderBottom: '1px solid var(--border-subtle)' }}>
                   {['Code', 'Name', 'Category', 'Flags', 'Status', 'Actions'].map((col) => (
                     <th
                       key={col}
                       className={cn(
-                        'px-3 py-2 font-semibold text-[10px] uppercase tracking-widest text-secondary border-b',
+                        'px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary',
                         col === 'Actions' && 'text-right pr-2'
                       )}
-                      style={{ borderColor: 'var(--border-subtle)' }}
                     >
                       {col}
                     </th>
@@ -395,7 +396,7 @@ export function RequirementsManagement() {
               </thead>
               <tbody>
                 {pagedItems.map((item) => (
-                  <tr key={item.id} className="border-b last:border-b-0" style={{ borderColor: 'var(--border-subtle)' }}>
+                  <tr key={item.id} style={{ borderTop: '1px solid var(--border-subtle)' }}>
                     <td className="px-3 py-2 text-[11px]" style={{ color: 'var(--text)' }}>{item.code}</td>
                     <td className="px-3 py-2 text-[11px]" style={{ color: 'var(--text)' }}>{item.name}</td>
                     <td className="px-3 py-2 text-[11px] text-secondary">{item.category_name || '-'}</td>
