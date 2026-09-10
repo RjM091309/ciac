@@ -163,6 +163,35 @@ export default function App() {
   const [view, setView] = useState<AppView>('dashboard');
   const [proponentView, setProponentView] = useState<ProponentView>('dashboard');
   const [dashboardPreviewRole, setDashboardPreviewRole] = useState<DashboardPreviewRole>('admin');
+  // While the admin is previewing "Account Officer", the sidebar itself
+  // swaps to that role's actual saved Control Panel sidebar permissions —
+  // otherwise the admin's own full sidebar keeps showing underneath the
+  // preview, which is what made the preview feel fake.
+  const [previewSidebarPermissions, setPreviewSidebarPermissions] = useState<Record<string, boolean> | null>(null);
+
+  useEffect(() => {
+    if (dashboardPreviewRole !== 'account-officer') {
+      setPreviewSidebarPermissions(null);
+      return;
+    }
+    let cancelled = false;
+    fetch('/api/dashboard/preview/account-officer', { credentials: 'include' })
+      .then((res) => res.json())
+      .then((json) => {
+        if (cancelled) return;
+        const map: Record<string, boolean> = {};
+        (json?.sidebarPermissions || []).forEach((row: any) => {
+          map[String(row.menu_key)] = Number(row.is_enabled) === 1 || row.is_enabled === true;
+        });
+        setPreviewSidebarPermissions(map);
+      })
+      .catch(() => {
+        if (!cancelled) setPreviewSidebarPermissions({});
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [dashboardPreviewRole]);
 
   const isProponent = user?.role === 'proponent';
 
@@ -274,6 +303,16 @@ export default function App() {
         onViewChange={isProponent ? handleProponentViewChange : handleViewChange}
         navigate={navigate}
         userRole={user?.role || 'officer'}
+        sidebarRoleOverride={
+          isProponent
+            ? undefined
+            : dashboardPreviewRole === 'proponent'
+              ? 'proponent'
+              : dashboardPreviewRole === 'account-officer'
+                ? 'officer'
+                : undefined
+        }
+        sidebarPermissionOverride={dashboardPreviewRole === 'account-officer' ? previewSidebarPermissions : null}
         userId={user?.id ?? null}
         backendUrl={backendUrl}
         onLogout={async () => {

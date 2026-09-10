@@ -57,6 +57,8 @@ export function AppLayout({
   navigate,
   onLogout,
   userRole,
+  sidebarRoleOverride,
+  sidebarPermissionOverride,
   userId,
   backendUrl,
   children,
@@ -66,6 +68,13 @@ export function AppLayout({
   navigate: (to: string, opts?: { replace?: boolean }) => void;
   onLogout: () => void;
   userRole: 'admin' | 'officer' | 'proponent';
+  /** Admin-only dashboard preview: swaps which sidebar renders (e.g. to
+   * ProponentSidebar) without changing the real, logged-in `userRole`. */
+  sidebarRoleOverride?: 'admin' | 'officer' | 'proponent';
+  /** Paired with sidebarRoleOverride === 'officer': the previewed role's
+   * actual saved sidebar menu permissions, so AppSidebar shows what that
+   * role really sees instead of the admin's own full access. */
+  sidebarPermissionOverride?: Record<string, boolean> | null;
   userId?: number | null;
   backendUrl: string;
   children: React.ReactNode;
@@ -195,7 +204,8 @@ export function AppLayout({
 
   // Proponents get a fixed self-service menu that doesn't depend on Control
   // Panel permissions; every other role uses the permission-gated AppSidebar.
-  const SidebarComponent = userRole === 'proponent' ? ProponentSidebar : AppSidebar;
+  const effectiveSidebarRole = sidebarRoleOverride ?? userRole;
+  const SidebarComponent = effectiveSidebarRole === 'proponent' ? ProponentSidebar : AppSidebar;
 
   return (
     <ThemeProvider theme={muiTheme}>
@@ -239,6 +249,7 @@ export function AppLayout({
                   onLogout={onLogout}
                   collapsed={false}
                   variant="drawer"
+                  permissionOverride={sidebarPermissionOverride}
                 />
               </div>
             </>
@@ -248,6 +259,7 @@ export function AppLayout({
               onViewChange={onViewChange}
               onLogout={onLogout}
               collapsed={sidebarCollapsed}
+              permissionOverride={sidebarPermissionOverride}
             />
           )}
 
