@@ -19,6 +19,26 @@ async function getActiveRoleIdByName(roleName) {
   return Number.isFinite(id) ? id : null;
 }
 
+/** Whether a user holds a given role via user_roles — distinct from that
+ * user's single JWT `role` claim, which only carries the *effective* role
+ * chosen at login (admin, when a multi-role account holds it). Used to let a
+ * multi-role account (e.g. admin also holding Locator, for the dashboard
+ * preview) through a role-specific self-service gate even though their JWT's
+ * primary role is 'admin'. */
+async function userHasRoleName(userId, roleName) {
+  if (!userId || !roleName) return false;
+  const rows = await selectData(
+    `
+      SELECT TOP (1) ur.user_id
+      FROM user_roles ur
+      INNER JOIN roles r ON r.id = ur.role_id
+      WHERE ur.user_id = @param0 AND LOWER(r.name) = LOWER(@param1) AND r.is_active = 1
+    `,
+    [userId, roleName]
+  );
+  return rows.length > 0;
+}
+
 async function roleExists(roleId) {
   const rows = await selectData(
     `SELECT TOP (1) id FROM roles WHERE id = @param0 AND is_active = 1`,
@@ -107,6 +127,7 @@ async function ensureSchema() {
 module.exports = {
   listRoles,
   getActiveRoleIdByName,
+  userHasRoleName,
   roleExists,
   ensureSchema,
   getRoleById,

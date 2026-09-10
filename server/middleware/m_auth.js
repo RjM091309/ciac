@@ -115,16 +115,24 @@ function requireMenuAccess(menuKey, action = "view") {
 }
 
 /**
- * Guards a proponent self-service route. Requires an authenticated user whose
- * effective role is 'proponent' AND who has a linked (active) proponent profile.
- * On success attaches `req.proponent`. Admins/officers are intentionally NOT
- * allowed through — these routes are strictly "my own record" endpoints.
+ * Guards a proponent self-service route. Requires an authenticated user who
+ * holds the 'proponent' role AND has a linked (active) proponent profile. On
+ * success attaches `req.proponent`. Checks the JWT's primary role first
+ * (covers every real single-role Locator account without an extra query);
+ * a multi-role account whose primary/effective role is something else —
+ * currently just admin, which also holds Locator so it can preview the
+ * portal with its own real, editable data instead of a read-only mock —
+ * falls through to a user_roles lookup before being rejected. Officers are
+ * still NOT allowed through: these routes are strictly "my own record"
+ * endpoints, and Officer never holds the Locator role.
  */
 async function requireProponentSelf(req, res, next) {
   if (!req.user) {
     return res.status(401).json({ success: false, message: "Access token required" });
   }
-  if (String(req.user.role || "").toLowerCase() !== "proponent") {
+  const isProponent =
+    String(req.user.role || "").toLowerCase() === "proponent" || (await Role.userHasRoleName(req.user.id, "proponent"));
+  if (!isProponent) {
     return res.status(403).json({ success: false, message: "Forbidden" });
   }
   try {

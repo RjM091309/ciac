@@ -2,6 +2,9 @@ const Workflow = require("../models/ApplicationWorkflow");
 const Proponent = require("../models/Proponent");
 const Role = require("../models/Role");
 const ControlPanelPermission = require("../models/ControlPanelPermission");
+const Contract = require("../models/Contract");
+const Permit = require("../models/Permit");
+const ActivityLog = require("../models/ActivityLog");
 
 /** The admin previewing "what Officer/Proponent sees" is still an admin —
  * fullAccess in ControlPanelAccessContext would otherwise ignore whatever
@@ -231,24 +234,30 @@ exports.getPreview = async (req, res) => {
     }
 
     if (previewRole === "proponent") {
-      const widgetPermissions = await getWidgetVisibilityForRoleName("proponent");
-      const proponentId = await Workflow.getMostActiveProponentId();
-      if (!proponentId) {
+      const [widgetPermissions, sidebarPermissions] = await Promise.all([
+        getWidgetVisibilityForRoleName("proponent"),
+        getSidebarVisibilityForRoleName("proponent"),
+      ]);
+      // The admin's own linked business profile, not a random real locator's
+      // — the preview shows the admin's own data (the admin account holds
+      // the Locator role too, same as it already holds Officer), never
+      // another user's private records under an unlabeled "preview".
+      const proponent = await Proponent.getProponentByUserId(req.user.id);
+      if (!proponent) {
         return res.json({
           success: true,
           role: "proponent",
           widgetPermissions,
+          sidebarPermissions,
           data: { proponent: null, applications: [], stats: summarize([]) },
         });
       }
-      const [proponent, applications] = await Promise.all([
-        Proponent.getProponentById(proponentId),
-        Workflow.listApplicationsForProponent(proponentId),
-      ]);
+      const applications = await Workflow.listApplicationsForProponent(proponent.id);
       return res.json({
         success: true,
         role: "proponent",
         widgetPermissions,
+        sidebarPermissions,
         data: { proponent, applications, stats: summarize(applications) },
       });
     }
@@ -256,6 +265,39 @@ exports.getPreview = async (req, res) => {
     return res.status(400).json({ success: false, message: "Unknown preview role" });
   } catch (error) {
     console.error("Get dashboard preview error:", error);
+    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+  }
+};
+
+// Admin-only "preview what the Locator portal's non-Dashboard pages look
+// like" — the admin's own linked business profile (see getPreview above),
+// covering the four ProponentSidebar sections the Dashboard preview alone
+// doesn't reach: applications, business profile, contracts & permits, and
+// activity history.
+exports.getProponentPreviewDetail = async (req, res) => {
+  try {
+    const proponent = await Proponent.getProponentByUserId(req.user.id);
+    if (!proponent) {
+      return res.json({
+        success: true,
+        data: { proponent: null, applications: [], contracts: [], permits: [], activity: [] },
+      });
+    }
+
+    const proponentId = proponent.id;
+    const [applications, contracts, permits, activity] = await Promise.all([
+      Workflow.listApplicationsForProponent(proponentId),
+      Contract.listByProponentId(proponentId),
+      Permit.listByProponent(proponentId),
+      ActivityLog.listForProponent(proponentId, proponent.user_id ?? null, { limit: 30 }),
+    ]);
+
+    return res.json({
+      success: true,
+      data: { proponent, applications, contracts, permits, activity },
+    });
+  } catch (error) {
+    console.error("Get proponent preview detail error:", error);
     return res.status(500).json({ success: false, message: error.message || "Internal server error" });
   }
 };

@@ -36,6 +36,18 @@ const DASHBOARD_WIDGETS: MenuItem[] = [
   { key: 'dashboard:table', label: 'Applications Table' },
 ];
 
+// The Locator portal's fixed self-service menu (ProponentSidebar) — separate
+// from sidebarMenuItems above since it isn't one of the admin/officer AppView
+// pages LANDING_CONFIG describes. Reuses the same role_sidebar_menu_permissions
+// table/keys, but defaults to visible (fail-open) when unset, unlike the
+// fail-closed sidebarMenuItems above — see ProponentSidebar's canView.
+const PROPONENT_MENU_ITEMS: MenuItem[] = [
+  { key: 'me:applications', label: 'My Applications' },
+  { key: 'me:contracts-permits', label: 'Contracts & Permits' },
+  { key: 'me:profile', label: 'My Business Profile' },
+  { key: 'me:activity', label: 'Activity History' },
+];
+
 /** Fixed widths so CRUD header labels line up with toggle columns. */
 const CRUD_TOGGLE_COLS_CLASS =
   'grid grid-cols-[minmax(0,1fr)_3.25rem_3.25rem_3.25rem] items-center gap-x-3';
@@ -121,6 +133,7 @@ export function ControlPanelManagement() {
     () => roles.find((r) => String(r.id) === selectedRoleId) || null,
     [roles, selectedRoleId]
   );
+  const isLocatorRoleSelected = String(selectedRole?.name || '').trim().toUpperCase() === 'PROPONENT';
 
   async function loadRoles() {
     setLoading(true);
@@ -204,10 +217,22 @@ export function ControlPanelManagement() {
     if (!selectedRoleId) return;
     setSaving(true);
     try {
-      const payload = sidebarMenuItems.map((item) => ({
-        menu_key: item.key,
-        is_enabled: Boolean(sidebarPermissions[item.key]),
-      }));
+      const payload = [
+        ...sidebarMenuItems.map((item) => ({
+          menu_key: item.key,
+          is_enabled: Boolean(sidebarPermissions[item.key]),
+        })),
+        // Only part of this role's saved set when it's the Locator role being
+        // edited — otherwise saving another role's sidebar would silently
+        // wipe the Locator portal menu rows (this save replaces the full set
+        // for the role, not just the keys shown on screen).
+        ...(isLocatorRoleSelected
+          ? PROPONENT_MENU_ITEMS.map((item) => ({
+              menu_key: item.key,
+              is_enabled: sidebarPermissions[item.key] ?? true,
+            }))
+          : []),
+      ];
       const res = await fetch(api(`/api/control-panel/sidebar-menu/${selectedRoleId}`), {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -483,6 +508,52 @@ export function ControlPanelManagement() {
                         </div>
                       ))}
                     </div>
+
+                    {isLocatorRoleSelected && (
+                      <div
+                        className="space-y-2 rounded-xl border p-2"
+                        style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'var(--control-bg)' }}
+                      >
+                        <div className="px-1 text-[10px] font-semibold uppercase tracking-widest text-secondary">
+                          Locator Portal Menu
+                        </div>
+                        <p className="px-1 text-[11px] text-secondary">
+                          The Locator's own self-service menu (Dashboard is always shown and isn't listed here).
+                        </p>
+                        <div
+                          className="grid grid-cols-[minmax(0,1fr)_3.25rem] items-center gap-x-3 gap-y-1 px-3 py-2 border rounded-lg text-[10px] font-semibold uppercase tracking-widest text-secondary"
+                          style={{ borderColor: 'var(--border-subtle)' }}
+                        >
+                          <span className="min-w-0">Menu Item</span>
+                          <span className="flex min-h-[1.75rem] items-center justify-center text-center leading-none">
+                            Visible
+                          </span>
+                        </div>
+                        {PROPONENT_MENU_ITEMS.map((item) => (
+                          <div
+                            key={item.key}
+                            className="grid grid-cols-[minmax(0,1fr)_3.25rem] items-center gap-x-3 gap-y-1 px-3 py-2.5 border rounded-lg transition-colors"
+                            style={{ borderColor: 'var(--border-subtle)' }}
+                          >
+                            <span className="min-w-0 text-[11px]" style={{ color: 'var(--text)' }}>
+                              {item.label}
+                            </span>
+                            <div className="flex min-h-[1.75rem] items-center justify-center">
+                              <PermissionToggle
+                                aria-label={`${item.label} sidebar visible`}
+                                checked={sidebarPermissions[item.key] ?? true}
+                                onChange={(next) =>
+                                  setSidebarPermissions((prev) => ({
+                                    ...prev,
+                                    [item.key]: next,
+                                  }))
+                                }
+                              />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </motion.div>
                 ) : activeTab === 'crud' ? (
                   <motion.div

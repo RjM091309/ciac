@@ -239,13 +239,7 @@ function ApplicationsList({ navigate }: { navigate: Navigate }) {
   }
 
   const header = (
-    <div className="flex items-center justify-between gap-3 mb-4">
-      <div>
-        <h3 className="text-lg font-bold tracking-tight" style={{ color: 'var(--text)' }}>
-          My Applications
-        </h3>
-        <p className="text-xs text-secondary">File a new lease application or track an existing one.</p>
-      </div>
+    <div className="flex items-center justify-end gap-3 mb-4">
       <button
         className={PRIMARY_BTN}
         style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}

@@ -165,19 +165,26 @@ export default function App() {
   const [view, setView] = useState<AppView>('dashboard');
   const [proponentView, setProponentView] = useState<ProponentView>('dashboard');
   const [dashboardPreviewRole, setDashboardPreviewRole] = useState<DashboardPreviewRole>('admin');
-  // While the admin is previewing "Account Officer", the sidebar itself
-  // swaps to that role's actual saved Control Panel sidebar permissions —
-  // otherwise the admin's own full sidebar keeps showing underneath the
-  // preview, which is what made the preview feel fake.
+  // While the admin is previewing "Account Officer" or "Locator", the sidebar
+  // itself swaps to that role's actual saved Control Panel sidebar
+  // permissions — otherwise the admin's own full sidebar keeps showing
+  // underneath the preview, which is what made the preview feel fake.
   const [previewSidebarPermissions, setPreviewSidebarPermissions] = useState<Record<string, boolean> | null>(null);
+  // The Locator preview's sidebar clicks stay local to this sub-view instead
+  // of driving the admin's own `view`/URL — those self-service screens are
+  // scoped to a real locator's own record server-side, so there's no route
+  // for an admin session to land on; see the preview placeholder below.
+  const [previewProponentView, setPreviewProponentView] = useState<ProponentView>('dashboard');
 
   useEffect(() => {
-    if (dashboardPreviewRole !== 'account-officer') {
+    setPreviewProponentView('dashboard');
+    if (dashboardPreviewRole !== 'account-officer' && dashboardPreviewRole !== 'proponent') {
       setPreviewSidebarPermissions(null);
       return;
     }
     let cancelled = false;
-    fetch('/api/dashboard/preview/account-officer', { credentials: 'include' })
+    const previewRoleParam = dashboardPreviewRole === 'account-officer' ? 'account-officer' : 'proponent';
+    fetch(`/api/dashboard/preview/${previewRoleParam}`, { credentials: 'include' })
       .then((res) => res.json())
       .then((json) => {
         if (cancelled) return;
@@ -301,8 +308,20 @@ export default function App() {
     <>
       <Toaster richColors position="top-right" />
       <AppLayout
-        view={isProponent ? proponentView : view}
-        onViewChange={isProponent ? handleProponentViewChange : handleViewChange}
+        view={
+          isProponent
+            ? proponentView
+            : dashboardPreviewRole === 'proponent'
+              ? previewProponentView
+              : view
+        }
+        onViewChange={
+          isProponent
+            ? handleProponentViewChange
+            : dashboardPreviewRole === 'proponent'
+              ? (v: string) => setPreviewProponentView(v as ProponentView)
+              : handleViewChange
+        }
         navigate={navigate}
         userRole={user?.role || 'officer'}
         sidebarRoleOverride={
@@ -314,7 +333,11 @@ export default function App() {
                 ? 'officer'
                 : undefined
         }
-        sidebarPermissionOverride={dashboardPreviewRole === 'account-officer' ? previewSidebarPermissions : null}
+        sidebarPermissionOverride={
+          dashboardPreviewRole === 'account-officer' || dashboardPreviewRole === 'proponent'
+            ? previewSidebarPermissions
+            : null
+        }
         userId={user?.id ?? null}
         backendUrl={backendUrl}
         onLogout={async () => {
@@ -360,7 +383,13 @@ export default function App() {
 
         <AnimatePresence mode="wait" initial={false}>
           <motion.div
-            key={isProponent ? `me-${proponentView}` : view === 'dashboard' ? `dashboard-${dashboardPreviewRole}` : view}
+            key={
+              isProponent
+                ? `me-${proponentView}`
+                : view === 'dashboard'
+                  ? `dashboard-${dashboardPreviewRole}-${dashboardPreviewRole === 'proponent' ? previewProponentView : ''}`
+                  : view
+            }
             initial={{ opacity: 0, x: 24 }}
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, x: -24 }}
@@ -387,6 +416,14 @@ export default function App() {
               ) : view === 'dashboard' ? (
                 dashboardPreviewRole === 'admin' ? (
                   <RoleDashboard navigate={navigate} />
+                ) : dashboardPreviewRole === 'proponent' && previewProponentView === 'me:profile' ? (
+                  <ProponentProfile />
+                ) : dashboardPreviewRole === 'proponent' && previewProponentView === 'me:applications' ? (
+                  <ProponentApplications locationSearch={locationSearch} navigate={navigate} />
+                ) : dashboardPreviewRole === 'proponent' && previewProponentView === 'me:contracts-permits' ? (
+                  <ProponentContractsPermits navigate={navigate} />
+                ) : dashboardPreviewRole === 'proponent' && previewProponentView === 'me:activity' ? (
+                  <ProponentActivity />
                 ) : (
                   <PreviewDashboard role={dashboardPreviewRole} navigate={navigate} />
                 )
