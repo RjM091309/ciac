@@ -153,6 +153,14 @@ async function ensureSchema() {
     IF COL_LENGTH('dbo.users', 'token_version') IS NULL
       ALTER TABLE dbo.users ADD token_version INT NOT NULL CONSTRAINT DF_users_token_version DEFAULT (0);
   `);
+
+  // Set by an admin-triggered password reset; checked at login (Auth.js) to
+  // force the user onto a new password before a session is issued, instead
+  // of leaving them on the emailed temp password indefinitely.
+  await updateSchema(`
+    IF COL_LENGTH('dbo.users', 'must_change_password') IS NULL
+      ALTER TABLE dbo.users ADD must_change_password BIT NOT NULL CONSTRAINT DF_users_must_change_password DEFAULT (0);
+  `);
   hasStatusColumnCache = null;
 
   // user_roles
@@ -617,6 +625,41 @@ async function getSessionCheck(userId) {
   return { isActive: Number(row.is_active) === 1, tokenVersion: Number(row.token_version || 0) };
 }
 
+/** Admin-triggered reset: sets a new (temp) password, flags the account so
+ * Auth.js forces a change before the next login completes, and bumps
+ * token_version so any session still open on the old password is cut off. */
+/** Flags a freshly-created account (given an auto-generated password instead
+ * of an admin-chosen one) so Auth.js forces the owner onto their own
+ * password on first login, same as a mid-life admin reset. */
+async function setMustChangePassword(userId, value) {
+  await updateData(`UPDATE users SET must_change_password = @param1 WHERE id = @param0`, [userId, value ? 1 : 0]);
+}
+
+async function adminResetPassword(userId, plainPassword) {
+  await updateData(
+    `
+      UPDATE users
+      SET password_hash = @param1, must_change_password = 1, token_version = token_version + 1, updated_at = GETDATE()
+      WHERE id = @param0
+    `,
+    [userId, await hashPasswordIfNeeded(plainPassword)]
+  );
+  return getUserById(userId);
+}
+
+/** Completes the forced-change flow started by adminResetPassword — called
+ * from Auth.js once the user supplies a new password at login. */
+async function setPasswordAndClearMustChange(userId, plainPassword) {
+  await updateData(
+    `
+      UPDATE users
+      SET password_hash = @param1, must_change_password = 0, updated_at = GETDATE()
+      WHERE id = @param0
+    `,
+    [userId, await hashPasswordIfNeeded(plainPassword)]
+  );
+}
+
 module.exports = {
   ensureSchema,
   listUsers,
@@ -640,5 +683,8 @@ module.exports = {
   bumpTokenVersion,
   revokeSessions,
   getSessionCheck,
+  adminResetPassword,
+  setPasswordAndClearMustChange,
+  setMustChangePassword,
 };
 

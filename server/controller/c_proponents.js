@@ -35,6 +35,63 @@ exports.getMine = async (req, res) => {
   }
 };
 
+// Cheap check the frontend runs right after login (real proponent only) to
+// decide whether to show the first-run business profile setup wizard instead
+// of the normal portal.
+exports.getMySetupStatus = async (req, res) => {
+  try {
+    const existing = await Proponent.getProponentByUserId(req.user.id);
+    return res.json({ success: true, setupComplete: Boolean(existing) });
+  } catch (error) {
+    console.error("Get proponent setup status error:", error);
+    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+  }
+};
+
+// Proponent self-service, first login only: declares their own business
+// profile directly (no approval needed — there's nothing to approve against
+// yet). Guarded by requireProponentRole rather than requireProponentSelf,
+// since that would 404 before a profile exists. Once a profile exists,
+// further edits go through updateMine's change-request flow instead.
+exports.setupMine = async (req, res) => {
+  try {
+    const existing = await Proponent.getProponentByUserId(req.user.id);
+    if (existing) {
+      return res.status(409).json({
+        success: false,
+        code: "ALREADY_SET_UP",
+        message: "Your business profile is already set up. Request changes from your profile page instead.",
+      });
+    }
+
+    const { business_name, registration_no, tin, address, contact_no } = req.body || {};
+    if (!String(business_name || "").trim()) {
+      return res.status(400).json({ success: false, message: "Business name is required." });
+    }
+
+    const row = await Proponent.createProponent({
+      user_id: req.user.id,
+      business_name: String(business_name).trim(),
+      registration_no: registration_no ? String(registration_no).trim() : null,
+      tin: tin ? String(tin).trim() : null,
+      address: address ? String(address).trim() : null,
+      contact_no: contact_no ? String(contact_no).trim() : null,
+      created_by: req.user.id,
+    });
+
+    ActivityLog.recordFromReq(req, {
+      entityType: "PROPONENT",
+      entityId: row.id,
+      action: "PROFILE_SETUP_COMPLETED",
+    });
+
+    return res.status(201).json({ success: true, data: row });
+  } catch (error) {
+    console.error("Setup my proponent profile error:", error);
+    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+  }
+};
+
 // Proponent self-service: submits a change request instead of writing the
 // profile directly. Rejected if a request is already pending or nothing changed.
 exports.updateMine = async (req, res) => {

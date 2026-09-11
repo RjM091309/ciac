@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
-import { ArrowRight, Copy, Eye, EyeOff, Moon, ShieldCheck, Smartphone, Sun } from 'lucide-react';
+import { ArrowRight, Copy, Eye, EyeOff, KeyRound, Moon, ShieldCheck, Smartphone, Sun } from 'lucide-react';
+import { validatePassword } from '../../lib/passwordPolicy';
 
 type Enrollment = { otpauthUrl: string; secret: string; qrDataUrl: string };
 
@@ -11,6 +12,7 @@ type LoginResult = {
   mfaRequired?: boolean;
   enrollmentRequired?: boolean;
   enrollment?: Enrollment;
+  mustChangePassword?: boolean;
 };
 
 type ThemeMode = 'light' | 'dark';
@@ -24,8 +26,9 @@ async function loginRequest(args: {
   username: string;
   password: string;
   token?: string;
+  newPassword?: string;
 }): Promise<LoginResult> {
-  const { backendUrl, username, password, token } = args;
+  const { backendUrl, username, password, token, newPassword } = args;
   const res = await fetch(`${normalizeBaseUrl(backendUrl)}/api/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -34,6 +37,7 @@ async function loginRequest(args: {
       username,
       password,
       ...(token ? { token } : {}),
+      ...(newPassword ? { newPassword } : {}),
     }),
   });
 
@@ -49,6 +53,7 @@ async function loginRequest(args: {
     mfaRequired: Boolean(json?.mfaRequired),
     enrollmentRequired: Boolean(json?.enrollmentRequired),
     enrollment: json?.enrollment,
+    mustChangePassword: Boolean(json?.mustChangePassword),
   };
 }
 
@@ -62,7 +67,11 @@ export function LoginPage(props: { backendUrl: string; onLoggedIn: (user: { id: 
   const [code, setCode] = useState('');
   const [mfaRequired, setMfaRequired] = useState(false);
   const [enrollment, setEnrollment] = useState<Enrollment | null>(null);
+  const [mustChangePassword, setMustChangePassword] = useState(false);
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmNewPassword, setConfirmNewPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [showNewPassword, setShowNewPassword] = useState(false);
   const [theme, setTheme] = useState<ThemeMode>(() => {
     if (typeof window === 'undefined') return 'dark';
     const stored = window.localStorage.getItem('theme');
@@ -75,8 +84,17 @@ export function LoginPage(props: { backendUrl: string; onLoggedIn: (user: { id: 
     text: '',
   });
 
-  const step: 'credentials' | 'enroll' | 'mfa' = enrollment ? 'enroll' : mfaRequired ? 'mfa' : 'credentials';
+  const step: 'credentials' | 'enroll' | 'mfa' | 'forceChangePassword' = mustChangePassword
+    ? 'forceChangePassword'
+    : enrollment
+      ? 'enroll'
+      : mfaRequired
+        ? 'mfa'
+        : 'credentials';
   const codeStep = step === 'enroll' || step === 'mfa';
+  const newPasswordError = newPassword ? validatePassword(newPassword) : null;
+  const canSubmitNewPassword =
+    Boolean(newPassword) && !newPasswordError && newPassword === confirmNewPassword;
 
   React.useEffect(() => {
     if (theme === 'dark') document.documentElement.classList.add('dark');
@@ -87,37 +105,60 @@ export function LoginPage(props: { backendUrl: string; onLoggedIn: (user: { id: 
   function resetToCredentials() {
     setMfaRequired(false);
     setEnrollment(null);
+    setMustChangePassword(false);
+    setNewPassword('');
+    setConfirmNewPassword('');
     setCode('');
     setMessage({ type: 'muted', text: '' });
   }
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (step === 'forceChangePassword' && !canSubmitNewPassword) return;
     setMessage({ type: 'muted', text: '' });
     setSubmitting(true);
     // Captured before state updates below: true only when the user was already
-    // being shown the code field (i.e. this submit is a retry), so a first-time
-    // transition into enroll/mfa isn't mistaken for a failed attempt.
+    // being shown the code field or force-change form (i.e. this submit is a
+    // retry), so a first-time transition into enroll/mfa/forceChangePassword
+    // isn't mistaken for a failed attempt.
     const wasCodeStep = codeStep;
+    const wasForceChangeStep = step === 'forceChangePassword';
     try {
       const result = await loginRequest({
         backendUrl: backend,
         username: username.trim(),
         password,
         token: codeStep ? code.replace(/\D/g, '') : undefined,
+        newPassword: step === 'forceChangePassword' ? newPassword : undefined,
       });
 
       if (!result.ok) {
-        if (result.enrollmentRequired && result.enrollment) {
+        // The force-change request just replaced this account's real
+        // password in the DB with `newPassword` — if it wasn't rejected for
+        // a password reason, every request from here on (the TOTP code
+        // included) must authenticate with that new password, not the old
+        // temp one still sitting in `password` state.
+        if (wasForceChangeStep && !result.mustChangePassword) {
+          setPassword(newPassword);
+        }
+        if (result.mustChangePassword) {
+          setMustChangePassword(true);
+          setMfaRequired(false);
+          setEnrollment(null);
+          setCode('');
+        } else if (result.enrollmentRequired && result.enrollment) {
           setEnrollment(result.enrollment);
           setMfaRequired(false);
+          setMustChangePassword(false);
           setCode('');
         } else if (result.mfaRequired) {
           setMfaRequired(true);
           setEnrollment(null);
+          setMustChangePassword(false);
           setCode('');
         }
-        const isStepPrompt = !wasCodeStep && (result.enrollmentRequired || result.mfaRequired);
+        const isStepPrompt =
+          !wasCodeStep && !wasForceChangeStep && (result.enrollmentRequired || result.mfaRequired || result.mustChangePassword);
         setMessage({
           type: isStepPrompt ? 'muted' : 'error',
           text: result.message || 'Login failed.',
@@ -249,12 +290,14 @@ export function LoginPage(props: { backendUrl: string; onLoggedIn: (user: { id: 
         >
           <div className="mb-7 sm:mb-10">
             <h2 className="text-3xl sm:text-4xl font-bold tracking-tight mb-2 sm:mb-3">
-              {step === 'enroll' ? 'Set up two-factor' : 'Sign in'}
+              {step === 'enroll' ? 'Set up two-factor' : step === 'forceChangePassword' ? 'Set a new password' : 'Sign in'}
             </h2>
             <p className="text-secondary">
               {step === 'enroll'
                 ? 'Add this account to your authenticator app to finish signing in.'
-                : 'Welcome back to your workspace.'}
+                : step === 'forceChangePassword'
+                  ? 'Your password was reset by an administrator. Choose a new one to continue.'
+                  : 'Welcome back to your workspace.'}
             </p>
           </div>
 
@@ -278,7 +321,7 @@ export function LoginPage(props: { backendUrl: string; onLoggedIn: (user: { id: 
                     }}
                     className="input-field w-full px-4 sm:px-5 py-3.5 sm:py-4 text-sm focus:border-primary transition-all duration-300"
                     required
-                    disabled={mfaRequired}
+                    disabled={mfaRequired || mustChangePassword}
                   />
                 </div>
 
@@ -307,7 +350,7 @@ export function LoginPage(props: { backendUrl: string; onLoggedIn: (user: { id: 
                       }}
                       className="input-field w-full px-4 sm:px-5 py-3.5 sm:py-4 pr-12 sm:pr-14 text-sm focus:border-primary transition-all duration-300"
                       required
-                      disabled={mfaRequired}
+                      disabled={mfaRequired || mustChangePassword}
                     />
                     <button
                       type="button"
@@ -412,9 +455,80 @@ export function LoginPage(props: { backendUrl: string; onLoggedIn: (user: { id: 
               ) : null}
             </AnimatePresence>
 
+            <AnimatePresence>
+              {step === 'forceChangePassword' ? (
+                <motion.div
+                  key="force-change-password"
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                  transition={{ duration: 0.18, ease: 'easeOut' }}
+                  className="space-y-4"
+                >
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between ml-1">
+                      <label className="text-xs font-bold uppercase tracking-widest text-secondary" htmlFor="new-password">
+                        New password
+                      </label>
+                      <button
+                        type="button"
+                        className="text-xs font-medium text-secondary hover:text-primary transition-colors cursor-pointer"
+                        onClick={resetToCredentials}
+                      >
+                        Start over
+                      </button>
+                    </div>
+                    <div className="relative">
+                      <input
+                        id="new-password"
+                        type={showNewPassword ? 'text' : 'password'}
+                        placeholder="••••••••"
+                        value={newPassword}
+                        onChange={(e) => setNewPassword(e.target.value)}
+                        className="input-field w-full px-4 sm:px-5 py-3.5 sm:py-4 pr-12 sm:pr-14 text-sm focus:border-primary transition-all duration-300"
+                        required
+                        autoFocus
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowNewPassword((p) => !p)}
+                        className="absolute right-2.5 sm:right-4 top-1/2 -translate-y-1/2 text-secondary hover:text-primary transition-colors p-2 cursor-pointer min-h-[40px] min-w-[40px] flex items-center justify-center"
+                        aria-label={showNewPassword ? 'Hide password' : 'Show password'}
+                      >
+                        {showNewPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                      </button>
+                    </div>
+                    <p className="text-[11px] ml-1" style={{ color: newPasswordError ? 'var(--errorColor)' : 'var(--text-secondary)' }}>
+                      {newPasswordError || 'At least 8 characters, with a letter and a number.'}
+                    </p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold uppercase tracking-widest text-secondary ml-1" htmlFor="confirm-new-password">
+                      Confirm new password
+                    </label>
+                    <input
+                      id="confirm-new-password"
+                      type={showNewPassword ? 'text' : 'password'}
+                      placeholder="••••••••"
+                      value={confirmNewPassword}
+                      onChange={(e) => setConfirmNewPassword(e.target.value)}
+                      className="input-field w-full px-4 sm:px-5 py-3.5 sm:py-4 text-sm focus:border-primary transition-all duration-300"
+                      required
+                    />
+                    {confirmNewPassword && confirmNewPassword !== newPassword ? (
+                      <p className="text-[11px] ml-1" style={{ color: 'var(--errorColor)' }}>
+                        Passwords don't match.
+                      </p>
+                    ) : null}
+                  </div>
+                </motion.div>
+              ) : null}
+            </AnimatePresence>
+
             <button
               type="submit"
-              disabled={submitting}
+              disabled={submitting || (step === 'forceChangePassword' && !canSubmitNewPassword)}
               className="w-full font-bold py-3.5 sm:py-4 rounded-xl hover:scale-[1.02] active:scale-[0.98] transition-all flex items-center justify-center gap-3 disabled:opacity-70 disabled:cursor-not-allowed shadow-xl min-h-[48px]"
               style={{
                 backgroundColor: 'var(--nav-active-bg)',
@@ -441,6 +555,11 @@ export function LoginPage(props: { backendUrl: string; onLoggedIn: (user: { id: 
                     <>
                       Verify &amp; continue
                       <ArrowRight size={18} />
+                    </>
+                  ) : step === 'forceChangePassword' ? (
+                    <>
+                      <KeyRound size={18} />
+                      Set password &amp; continue
                     </>
                   ) : (
                     <>

@@ -4,6 +4,7 @@ import { AppLayout, AppView } from './layout/AppLayout';
 import { SubHeader, type DashboardPreviewRole } from './components/SubHeader';
 import { FileCheck, FolderTree, ShieldCheck, Users, CalendarClock, Loader2, Search } from 'lucide-react';
 import { LoginPage } from './components/auth/LoginPage';
+import { LocatorProfileSetup } from './components/proponent/LocatorProfileSetup';
 import { DataTableControls } from './components/ui/DataTableControls';
 import { Toaster } from 'sonner';
 
@@ -112,7 +113,7 @@ const PROPONENT_SUBHEADER: Record<ProponentView, { title: string; description: s
   },
   'me:profile': {
     title: 'My Business Profile',
-    description: 'Your registered business information and contact details on file with CIAC.',
+    description: 'Your registered business information and contact details on file with 3CORE.',
     badge: 'Profile',
   },
   'me:applications': {
@@ -122,7 +123,7 @@ const PROPONENT_SUBHEADER: Record<ProponentView, { title: string; description: s
   },
   'me:contracts-permits': {
     title: 'Contracts & Permits',
-    description: 'Your executed lease contracts and the permits on record with CIAC.',
+    description: 'Your executed lease contracts and the permits on record with 3CORE.',
     badge: 'Compliance',
   },
   'me:activity': {
@@ -203,6 +204,49 @@ export default function App() {
   }, [dashboardPreviewRole]);
 
   const isProponent = user?.role === 'proponent';
+
+  // First-login gate: a real Locator with no business profile yet sees only
+  // the setup wizard (LocatorProfileSetup) instead of the portal, until they
+  // declare their own business info — an officer/admin only ever creates the
+  // login account, not the business record, so nobody else fills this in for
+  // them. `null` = not applicable / not checked yet; checked once per login.
+  const [proponentSetupComplete, setProponentSetupComplete] = useState<boolean | null>(null);
+
+  function skipKey(userId: number) {
+    return `ciac.locatorSetupSkipped.${userId}`;
+  }
+
+  useEffect(() => {
+    if (!isProponent || !user?.id) {
+      setProponentSetupComplete(null);
+      return;
+    }
+    // "Skip for now" is a per-browser dismissal (no backend flag) — a fresh
+    // browser/device still gets prompted once, which is fine for a one-time
+    // "fill this in later" nudge rather than a hard gate.
+    try {
+      if (window.localStorage.getItem(skipKey(user.id)) === '1') {
+        setProponentSetupComplete(true);
+        return;
+      }
+    } catch {
+      // localStorage unavailable — fall through to the real check
+    }
+    let cancelled = false;
+    setProponentSetupComplete(null);
+    fetch('/api/proponents/me/setup-status', { credentials: 'include' })
+      .then((res) => res.json())
+      .then((json) => {
+        if (cancelled) return;
+        setProponentSetupComplete(json?.success ? Boolean(json.setupComplete) : true);
+      })
+      .catch(() => {
+        if (!cancelled) setProponentSetupComplete(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isProponent, user?.id]);
 
   useEffect(() => {
     const onPop = () =>
@@ -299,6 +343,32 @@ export default function App() {
           setUser({ id: u.id, username: u.username, role: normalizeRole(u.role) });
           setAuthState('authed');
           navigate('/dashboard');
+        }}
+      />
+    );
+  }
+
+  if (isProponent && proponentSetupComplete === null) {
+    return (
+      <div className="flex h-screen w-screen items-center justify-center" style={{ backgroundColor: 'var(--background)' }}>
+        <Loader2 className="h-8 w-8 animate-spin text-secondary opacity-50" />
+      </div>
+    );
+  }
+
+  if (isProponent && proponentSetupComplete === false) {
+    return (
+      <LocatorProfileSetup
+        onComplete={() => setProponentSetupComplete(true)}
+        onSkip={() => {
+          if (user?.id) {
+            try {
+              window.localStorage.setItem(skipKey(user.id), '1');
+            } catch {
+              // ignore — worst case, they're prompted again next login
+            }
+          }
+          setProponentSetupComplete(true);
         }}
       />
     );

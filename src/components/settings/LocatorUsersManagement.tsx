@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Ban, LogOut, Pencil, RotateCcw, Search, ShieldCheck, ShieldOff, Smartphone, UserX } from 'lucide-react';
+import { Ban, KeyRound, LogOut, Pencil, RotateCcw, Search, ShieldCheck, ShieldOff, Smartphone, UserX } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { toast } from 'sonner';
 import { SidePanel } from '../ui/SidePanel';
@@ -8,7 +8,6 @@ import { DataTableControls } from '../ui/DataTableControls';
 import { Skeleton, TableSkeleton } from '../ui/Skeleton';
 import { EmptyState } from '../ui/EmptyState';
 import { useSessionStorageCachedResource } from '../../hooks/useSessionStorageCachedResource';
-import { validatePassword } from '../../lib/passwordPolicy';
 
 type Role = {
   id: number;
@@ -58,6 +57,7 @@ export function LocatorUsersManagement() {
   const [confirmReactivateId, setConfirmReactivateId] = useState<number | null>(null);
   const [confirmSuspendId, setConfirmSuspendId] = useState<number | null>(null);
   const [confirmRevokeId, setConfirmRevokeId] = useState<number | null>(null);
+  const [confirmResetPasswordId, setConfirmResetPasswordId] = useState<number | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [pageSize, setPageSize] = useState(20);
   const [page, setPage] = useState(1);
@@ -105,7 +105,6 @@ export function LocatorUsersManagement() {
     username: '',
     email: '',
     full_name: '',
-    password: '',
   });
 
   const stats = useMemo(() => {
@@ -156,36 +155,25 @@ export function LocatorUsersManagement() {
     return Array.from({ length: end - adjustedStart + 1 }, (_, i) => adjustedStart + i);
   }, [page, totalPages]);
 
-  const passwordError = useMemo(
-    () => (form.password.trim() ? validatePassword(form.password.trim()) : null),
-    [form.password]
-  );
-
   const canSubmit = useMemo(() => {
     const username = form.username.trim();
     const email = form.email.trim();
     const fullName = form.full_name.trim();
-    const password = form.password.trim();
 
     if (!username) return false;
     if (!email) return false;
-    if (password && passwordError) return false;
     if (!locatorRole) return false;
 
     if (!editing) {
-      const hasAnyInput = Boolean(username || email || fullName || password);
-      return hasAnyInput && Boolean(password);
+      return Boolean(username && email);
     }
 
     const originalUsername = (editing.username || '').trim();
     const originalEmail = (editing.email || '').trim();
     const originalFullName = (editing.full_name || '').trim();
 
-    const hasChanged =
-      username !== originalUsername || email !== originalEmail || fullName !== originalFullName || Boolean(password);
-
-    return hasChanged;
-  }, [editing, form.email, form.full_name, form.password, form.username, locatorRole, passwordError]);
+    return username !== originalUsername || email !== originalEmail || fullName !== originalFullName;
+  }, [editing, form.email, form.full_name, form.username, locatorRole]);
 
   useEffect(() => {
     setPage(1);
@@ -197,7 +185,7 @@ export function LocatorUsersManagement() {
 
   function openCreate() {
     setEditing(null);
-    setForm({ username: '', email: '', full_name: '', password: '' });
+    setForm({ username: '', email: '', full_name: '' });
     setIsCreateOpen(true);
   }
 
@@ -208,7 +196,6 @@ export function LocatorUsersManagement() {
       username: u.username || '',
       email: u.email || '',
       full_name: u.full_name || '',
-      password: '',
     });
   }
 
@@ -226,11 +213,11 @@ export function LocatorUsersManagement() {
         full_name: form.full_name.trim() || null,
         role_id: locatorRole.id,
       };
-      if (form.password.trim()) payload.password = form.password;
+      // No password field on this form: the backend generates one and emails
+      // it when none is supplied, same as an admin-triggered reset.
 
       if (!payload.username) throw new Error('Username is required');
       if (!payload.email) throw new Error('Email is required');
-      if (!editing && !payload.password) throw new Error('Password is required');
 
       const res = await fetch(api(editing ? `/api/users/${editing.id}` : '/api/users'), {
         method: editing ? 'PUT' : 'POST',
@@ -243,7 +230,15 @@ export function LocatorUsersManagement() {
 
       setIsCreateOpen(false);
       await refresh({ showLoading: false });
-      toast.success(editing ? 'Locator account updated successfully' : 'Locator account created successfully');
+      if (!editing) {
+        if (json.emailSent) {
+          toast.success(json.message || 'Locator account created — a temporary password was emailed.');
+        } else {
+          toast.warning(json.message || 'Locator account created, but the email could not be sent.');
+        }
+      } else {
+        toast.success('Locator account updated successfully');
+      }
     } catch (e: any) {
       const message = e?.message || 'Save failed';
       setError(message);
@@ -345,6 +340,30 @@ export function LocatorUsersManagement() {
       setConfirmRevokeId(null);
     } catch (e: any) {
       const message = e?.message || 'Failed to revoke sessions';
+      setError(message);
+      toast.error(message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  /** Generates a temp password server-side, emails it, and forces the
+   * locator to set their own password on next login. */
+  async function resetPassword(id: number) {
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await fetch(api(`/api/users/${id}/reset-password`), { method: 'POST', credentials: 'include' });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.message || 'Failed to reset password');
+      if (json.emailSent) {
+        toast.success(json.message || 'Password reset — a new temporary password was emailed.');
+      } else {
+        toast.warning(json.message || 'Password reset, but the email could not be sent.');
+      }
+      setConfirmResetPasswordId(null);
+    } catch (e: any) {
+      const message = e?.message || 'Failed to reset password';
       setError(message);
       toast.error(message);
     } finally {
@@ -506,6 +525,18 @@ export function LocatorUsersManagement() {
                         >
                           <Pencil size={14} />
                         </button>
+                        <button
+                          className={cn(
+                            'inline-flex items-center justify-center rounded-md p-1.5 text-secondary',
+                            saving ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
+                          )}
+                          onClick={() => setConfirmResetPasswordId(u.id)}
+                          disabled={saving}
+                          aria-label={`Reset password for ${u.username}`}
+                          title="Reset password (emails a new temporary password)"
+                        >
+                          <KeyRound size={14} />
+                        </button>
                         {u.is_active === 1 ? (
                           <>
                             <button
@@ -632,29 +663,14 @@ export function LocatorUsersManagement() {
               onChange={(e) => setForm((p) => ({ ...p, email: e.target.value }))}
             />
           </Field>
-          <Field label={editing ? 'Password (leave blank to keep)' : 'Password'}>
-            <input
-              className="w-full rounded-md px-3 py-2 text-sm border focus:outline-none focus:border-[var(--nav-active-bg)]"
-              style={{
-                borderColor: passwordError ? '#f87171' : 'var(--input-border)',
-                color: 'var(--text)',
-                backgroundColor: 'var(--input-bg)',
-              }}
-              type="password"
-              value={form.password}
-              onChange={(e) => setForm((p) => ({ ...p, password: e.target.value }))}
-            />
-            <p className="text-[10px] mt-1" style={{ color: passwordError ? '#f87171' : 'var(--text-muted)' }}>
-              {passwordError || 'At least 8 characters, with a letter and a number.'}
-            </p>
-          </Field>
         </div>
 
         {editing ? (
           <TotpSection user={editing} onChanged={() => refresh({ showLoading: false })} />
         ) : (
           <p className="mt-4 text-[11px] text-secondary">
-            Save the account first, then reopen to set up their Google Authenticator.
+            A temporary password will be generated and emailed to the locator on save — they'll set their own on
+            first login. Reopen this account afterward to set up their Google Authenticator.
           </p>
         )}
       </SidePanel>
@@ -711,6 +727,19 @@ export function LocatorUsersManagement() {
         onCancel={() => setConfirmRevokeId(null)}
         onConfirm={() => {
           if (confirmRevokeId !== null) void revokeSessions(confirmRevokeId);
+        }}
+      />
+
+      <ConfirmModal
+        open={confirmResetPasswordId !== null}
+        title="Reset this locator's password?"
+        description="A new temporary password is generated and emailed to the locator. They'll be required to set their own password the next time they sign in."
+        confirmText="Reset & Email"
+        danger
+        loading={saving}
+        onCancel={() => setConfirmResetPasswordId(null)}
+        onConfirm={() => {
+          if (confirmResetPasswordId !== null) void resetPassword(confirmResetPasswordId);
         }}
       />
     </div>

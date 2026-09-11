@@ -300,7 +300,7 @@ export function AppSidebar({
     canView('applications:new') && { key: 'applications:new', label: 'New Applications', active: view === 'applications:new', onClick: () => onViewChange('applications:new') },
     canView('applications:renewals') && { key: 'applications:renewals', label: 'Renewal Tracking', active: view === 'applications:renewals', onClick: () => onViewChange('applications:renewals') },
     canView('applications:projects') && { key: 'applications:projects', label: 'Project Evaluations', active: view === 'applications:projects', onClick: () => onViewChange('applications:projects') },
-    canView('settings:proponents') && { key: 'settings:proponents', label: 'Locator', active: view === 'settings:proponents', onClick: () => onViewChange('settings:proponents') },
+    canView('settings:proponents') && { key: 'settings:proponents', label: 'Locator Management', active: view === 'settings:proponents', onClick: () => onViewChange('settings:proponents') },
     canView('applications:requirements') && { key: 'applications:requirements', label: 'Requirements', active: view === 'applications:requirements', onClick: () => onViewChange('applications:requirements') },
     canView('settings:requirement-categories') && { key: 'settings:requirement-categories', label: 'Requirement Categories', active: view === 'settings:requirement-categories', onClick: () => onViewChange('settings:requirement-categories') },
   ].filter(Boolean) as SidebarLeaf[];

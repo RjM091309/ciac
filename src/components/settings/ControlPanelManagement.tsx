@@ -47,6 +47,7 @@ const PROPONENT_MENU_ITEMS: MenuItem[] = [
   { key: 'me:profile', label: 'My Business Profile' },
   { key: 'me:activity', label: 'Activity History' },
 ];
+const PROPONENT_MENU_KEYS = new Set(PROPONENT_MENU_ITEMS.map((item) => item.key));
 
 /** Fixed widths so CRUD header labels line up with toggle columns. */
 const CRUD_TOGGLE_COLS_CLASS =
@@ -113,13 +114,6 @@ export function ControlPanelManagement() {
     () => Object.entries(LANDING_CONFIG).map(([key, cfg]) => ({ key, label: cfg.title })),
     []
   );
-  const sidebarMenuColumns = useMemo(
-    () => [
-      { offset: 0, items: sidebarMenuItems.slice(0, 10) },
-      { offset: 10, items: sidebarMenuItems.slice(10) },
-    ],
-    [sidebarMenuItems]
-  );
 
   const crudMenuItems: MenuItem[] = useMemo(
     () =>
@@ -134,6 +128,21 @@ export function ControlPanelManagement() {
     [roles, selectedRoleId]
   );
   const isLocatorRoleSelected = String(selectedRole?.name || '').trim().toUpperCase() === 'PROPONENT';
+
+  // The Locator role's own menu items ride along in the same "Sidebar Menu
+  // Permissions" card/columns as everything else — a separate box just for
+  // one role read as a stray, disconnected section. Split into 3 evenly-sized
+  // columns (instead of a fixed 10/rest split) so a short remainder column
+  // doesn't end up mostly empty next to a full one.
+  const sidebarMenuColumns = useMemo(() => {
+    const items = isLocatorRoleSelected ? [...sidebarMenuItems, ...PROPONENT_MENU_ITEMS] : sidebarMenuItems;
+    const perColumn = Math.ceil(items.length / 3) || 1;
+    return [
+      { offset: 0, items: items.slice(0, perColumn) },
+      { offset: perColumn, items: items.slice(perColumn, perColumn * 2) },
+      { offset: perColumn * 2, items: items.slice(perColumn * 2) },
+    ];
+  }, [sidebarMenuItems, isLocatorRoleSelected]);
 
   async function loadRoles() {
     setLoading(true);
@@ -461,99 +470,59 @@ export function ControlPanelManagement() {
                     transition={{ duration: 0.22, ease: 'easeOut' }}
                     className="space-y-2"
                   >
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-                      {sidebarMenuColumns
-                        .filter((c) => c.items.length > 0)
-                        .map((column, columnIndex) => (
-                        <div
-                          key={`sidebar-column-${column.offset}`}
-                          className="space-y-2 rounded-xl border p-2"
-                          style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'var(--control-bg)' }}
-                        >
-                          <div className="px-1 text-[10px] font-semibold uppercase tracking-widest text-secondary">
-                            {`Menu Items ${column.offset + 1}-${column.offset + column.items.length}`}
-                          </div>
-                          <div
-                            className="grid grid-cols-[minmax(0,1fr)_3.25rem] items-center gap-x-3 gap-y-1 px-3 py-2 border rounded-lg text-[10px] font-semibold uppercase tracking-widest text-secondary"
-                            style={{ borderColor: 'var(--border-subtle)' }}
-                          >
-                            <span className="min-w-0">Menu Item</span>
-                            <span className="flex min-h-[1.75rem] items-center justify-center text-center leading-none">
-                              Visible
-                            </span>
-                          </div>
-                          {column.items.map((item) => (
-                            <div
-                              key={item.key}
-                              className="grid grid-cols-[minmax(0,1fr)_3.25rem] items-center gap-x-3 gap-y-1 px-3 py-2.5 border rounded-lg transition-colors"
-                              style={{ borderColor: 'var(--border-subtle)' }}
-                            >
-                              <span className="min-w-0 text-[11px]" style={{ color: 'var(--text)' }}>
-                                {item.label}
-                              </span>
-                              <div className="flex min-h-[1.75rem] items-center justify-center">
-                                <PermissionToggle
-                                  aria-label={`${item.label} sidebar visible`}
-                                  checked={Boolean(sidebarPermissions[item.key])}
-                                  onChange={(next) =>
-                                    setSidebarPermissions((prev) => ({
-                                      ...prev,
-                                      [item.key]: next,
-                                    }))
-                                  }
-                                />
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      ))}
-                    </div>
-
-                    {isLocatorRoleSelected && (
+                    <div
+                      className="space-y-2 rounded-xl border p-2"
+                      style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'var(--control-bg)' }}
+                    >
                       <div
-                        className="space-y-2 rounded-xl border p-2"
-                        style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'var(--control-bg)' }}
+                        className="grid grid-cols-[minmax(0,1fr)_3.25rem] items-center gap-x-3 gap-y-1 px-3 py-2 border rounded-lg text-[10px] font-semibold uppercase tracking-widest text-secondary"
+                        style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'var(--surface)' }}
                       >
-                        <div className="px-1 text-[10px] font-semibold uppercase tracking-widest text-secondary">
-                          Locator Portal Menu
-                        </div>
-                        <p className="px-1 text-[11px] text-secondary">
-                          The Locator's own self-service menu (Dashboard is always shown and isn't listed here).
-                        </p>
-                        <div
-                          className="grid grid-cols-[minmax(0,1fr)_3.25rem] items-center gap-x-3 gap-y-1 px-3 py-2 border rounded-lg text-[10px] font-semibold uppercase tracking-widest text-secondary"
-                          style={{ borderColor: 'var(--border-subtle)' }}
-                        >
-                          <span className="min-w-0">Menu Item</span>
-                          <span className="flex min-h-[1.75rem] items-center justify-center text-center leading-none">
-                            Visible
-                          </span>
-                        </div>
-                        {PROPONENT_MENU_ITEMS.map((item) => (
-                          <div
-                            key={item.key}
-                            className="grid grid-cols-[minmax(0,1fr)_3.25rem] items-center gap-x-3 gap-y-1 px-3 py-2.5 border rounded-lg transition-colors"
-                            style={{ borderColor: 'var(--border-subtle)' }}
-                          >
-                            <span className="min-w-0 text-[11px]" style={{ color: 'var(--text)' }}>
-                              {item.label}
-                            </span>
-                            <div className="flex min-h-[1.75rem] items-center justify-center">
-                              <PermissionToggle
-                                aria-label={`${item.label} sidebar visible`}
-                                checked={sidebarPermissions[item.key] ?? true}
-                                onChange={(next) =>
-                                  setSidebarPermissions((prev) => ({
-                                    ...prev,
-                                    [item.key]: next,
-                                  }))
-                                }
-                              />
-                            </div>
+                        <span className="min-w-0">Menu Item</span>
+                        <span className="flex min-h-[1.75rem] items-center justify-center text-center leading-none">
+                          Visible
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+                        {sidebarMenuColumns
+                          .filter((c) => c.items.length > 0)
+                          .map((column) => (
+                          <div key={`sidebar-column-${column.offset}`} className="space-y-2">
+                            {column.items.map((item) => {
+                              const enabled = PROPONENT_MENU_KEYS.has(item.key)
+                                ? sidebarPermissions[item.key] ?? true
+                                : Boolean(sidebarPermissions[item.key]);
+                              return (
+                              <div
+                                key={item.key}
+                                className="grid grid-cols-[minmax(0,1fr)_3.25rem] items-center gap-x-3 gap-y-1 px-3 py-2.5 border rounded-lg transition-colors"
+                                style={{
+                                  borderColor: 'var(--border-subtle)',
+                                  backgroundColor: enabled ? 'var(--surface)' : 'transparent',
+                                }}
+                              >
+                                <span className="min-w-0 text-[11px]" style={{ color: 'var(--text)' }}>
+                                  {item.label}
+                                </span>
+                                <div className="flex min-h-[1.75rem] items-center justify-center">
+                                  <PermissionToggle
+                                    aria-label={`${item.label} sidebar visible`}
+                                    checked={enabled}
+                                    onChange={(next) =>
+                                      setSidebarPermissions((prev) => ({
+                                        ...prev,
+                                        [item.key]: next,
+                                      }))
+                                    }
+                                  />
+                                </div>
+                              </div>
+                              );
+                            })}
                           </div>
                         ))}
                       </div>
-                    )}
+                    </div>
                   </motion.div>
                 ) : activeTab === 'crud' ? (
                   <motion.div

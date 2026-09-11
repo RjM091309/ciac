@@ -115,6 +115,24 @@ function requireMenuAccess(menuKey, action = "view") {
 }
 
 /**
+ * Role-only half of requireProponentSelf's check, exported separately for the
+ * one self-service route that must work BEFORE a proponent profile exists —
+ * first-login business profile setup. Everything else should use
+ * requireProponentSelf instead, which also attaches req.proponent.
+ */
+async function requireProponentRole(req, res, next) {
+  if (!req.user) {
+    return res.status(401).json({ success: false, message: "Access token required" });
+  }
+  const isProponent =
+    String(req.user.role || "").toLowerCase() === "proponent" || (await Role.userHasRoleName(req.user.id, "proponent"));
+  if (!isProponent) {
+    return res.status(403).json({ success: false, message: "Forbidden" });
+  }
+  return next();
+}
+
+/**
  * Guards a proponent self-service route. Requires an authenticated user who
  * holds the 'proponent' role AND has a linked (active) proponent profile. On
  * success attaches `req.proponent`. Checks the JWT's primary role first
@@ -183,6 +201,7 @@ module.exports = {
   authenticateToken,
   requireRole,
   requireMenuAccess,
+  requireProponentRole,
   requireProponentSelf,
   requireOwnApplication,
 };

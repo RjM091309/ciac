@@ -3,6 +3,7 @@ const bcrypt = require("bcryptjs");
 const { selectData } = require("../config/database");
 const User = require("./User");
 const { decryptSecret, encryptSecret, newSecret, buildEnrollment, verifyToken } = require("../lib/totp");
+const { validatePasswordStrength } = require("../lib/password");
 
 function getJwtSecret() {
   const secret = process.env.JWT_SECRET;
@@ -42,7 +43,7 @@ function pickPasswordField(row) {
   return actualKey || null;
 }
 
-async function loginViaDatabase(username, password, totpCode) {
+async function loginViaDatabase(username, password, totpCode, newPassword) {
   const userKey = normalizeString(username);
   const pass = String(password ?? "");
 
@@ -149,6 +150,26 @@ async function loginViaDatabase(username, password, totpCode) {
   const effectiveRole = row.role_name || row.role || "user";
   const isAdmin = String(effectiveRole).toLowerCase() === "admin";
 
+  // An admin-triggered reset (User.adminResetPassword) sets this so the
+  // emailed temp password can't just be reused indefinitely — the user must
+  // set their own password, right after proving they know the temp one,
+  // before a session is issued. Checked ahead of TOTP: no point asking for a
+  // 6-digit code tied to a password that's about to be replaced anyway.
+  if (Number(row.must_change_password) === 1) {
+    if (!newPassword) {
+      return {
+        success: false,
+        mustChangePassword: true,
+        message: "Your password was reset by an administrator. Set a new password to continue.",
+      };
+    }
+    const passwordError = validatePasswordStrength(newPassword);
+    if (passwordError) {
+      return { success: false, mustChangePassword: true, message: passwordError };
+    }
+    await User.setPasswordAndClearMustChange(id, newPassword);
+  }
+
   // --- Two-factor (Google Authenticator / TOTP) ---
   // Non-admin users must have an authenticator; they self-enroll on login (the QR
   // is only issued once the password checks out). Admins are exempt from forced
@@ -212,10 +233,10 @@ async function loginViaDatabase(username, password, totpCode) {
   return { success: true, message: "Login successful", user, token };
 }
 
-async function login(username, password, totpCode) {
+async function login(username, password, totpCode, newPassword) {
   // Prefer DB if configured; fallback to demo creds
   try {
-    return await loginViaDatabase(username, password, totpCode);
+    return await loginViaDatabase(username, password, totpCode, newPassword);
   } catch (err) {
     // Only fallback if DB isn't configured; otherwise surface the real issue.
     const msg = err && typeof err === "object" && "message" in err ? String(err.message) : "";

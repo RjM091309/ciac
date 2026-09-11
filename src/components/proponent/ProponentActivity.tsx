@@ -15,7 +15,7 @@ type ActivityRow = {
 const ACTION_META: Record<string, { label: string; icon: any; color: string }> = {
   LOGIN: { label: 'Signed in', icon: LogIn, color: '#6366f1' },
   REGISTERED: { label: 'Submitted registration', icon: UserPlus, color: '#3b82f6' },
-  ACCOUNT_APPROVED: { label: 'Account approved by CIAC', icon: ShieldCheck, color: '#10b981' },
+  ACCOUNT_APPROVED: { label: 'Account approved by 3CORE', icon: ShieldCheck, color: '#10b981' },
   ACCOUNT_REJECTED: { label: 'Registration declined', icon: ShieldCheck, color: '#ef4444' },
   PASSWORD_CHANGED: { label: 'Password changed', icon: KeyRound, color: '#f59e0b' },
   PROFILE_CHANGE_REQUESTED: { label: 'Profile change requested', icon: PencilLine, color: '#f59e0b' },

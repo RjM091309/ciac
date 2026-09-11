@@ -4,7 +4,7 @@ const ActivityLog = require("../models/ActivityLog");
 
 exports.login = async (req, res) => {
   try {
-    const { username, password, token } = req.body || {};
+    const { username, password, token, newPassword } = req.body || {};
 
     if (!username) {
       return res.status(400).json({ success: false, message: "Username is required" });
@@ -14,13 +14,13 @@ exports.login = async (req, res) => {
       return res.status(400).json({ success: false, message: "Password is required" });
     }
 
-    const result = await Auth.login(username, password, token);
+    const result = await Auth.login(username, password, token, newPassword);
 
     if (!result.success) {
       // Don't log the routine "here's your QR code" / "enter your 6-digit
-      // code" first prompts as failures — only genuine wrong-password,
-      // wrong-code, or locked-account attempts.
-      const isInitialPrompt = (result.mfaRequired || result.enrollmentRequired) && !token;
+      // code" / "set a new password" first prompts as failures — only
+      // genuine wrong-password, wrong-code, or locked-account attempts.
+      const isInitialPrompt = (result.mfaRequired || result.enrollmentRequired || result.mustChangePassword) && !token && !newPassword;
       if (!isInitialPrompt) {
         await AuditLog.record({
           actorUsername: username,
@@ -35,6 +35,7 @@ exports.login = async (req, res) => {
         message: result.message,
         mfaRequired: Boolean(result.mfaRequired),
         enrollmentRequired: Boolean(result.enrollmentRequired),
+        mustChangePassword: Boolean(result.mustChangePassword),
         ...(result.enrollment ? { enrollment: result.enrollment } : {}),
       });
     }

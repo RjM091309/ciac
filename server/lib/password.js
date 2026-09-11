@@ -18,4 +18,22 @@ function validatePasswordStrength(password) {
   return null;
 }
 
-module.exports = { validatePasswordStrength, MIN_LENGTH };
+const crypto = require("crypto");
+
+// Excludes visually-ambiguous characters (0/O, 1/l/I) since this is meant to
+// be read off an email and retyped once. crypto.randomBytes, not Math.random
+// — it's mailed to the user, so it needs to be unguessable, not just unique.
+const TEMP_PASSWORD_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
+
+/** Admin "reset password" temp password — always satisfies
+ * validatePasswordStrength (12 chars drawn from letters+digits). */
+function generateTempPassword(length = 12) {
+  const bytes = crypto.randomBytes(length);
+  let out = "";
+  for (let i = 0; i < length; i += 1) {
+    out += TEMP_PASSWORD_ALPHABET[bytes[i] % TEMP_PASSWORD_ALPHABET.length];
+  }
+  return out;
+}
+
+module.exports = { validatePasswordStrength, MIN_LENGTH, generateTempPassword };

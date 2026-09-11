@@ -14,6 +14,7 @@ router.patch("/:id/reactivate", requireMenuAccess(MENU_KEY, "edit"), usersContro
 router.patch("/:id/suspend", requireMenuAccess(MENU_KEY, "delete"), usersController.suspend);
 router.patch("/:id/unsuspend", requireMenuAccess(MENU_KEY, "edit"), usersController.unsuspend);
 router.post("/:id/revoke-sessions", requireMenuAccess(MENU_KEY, "edit"), usersController.revokeSessions);
+router.post("/:id/reset-password", requireMenuAccess(MENU_KEY, "edit"), usersController.resetPassword);
 
 // Self-service registration review
 router.patch("/:id/approve", requireMenuAccess(MENU_KEY, "edit"), usersController.approve);
