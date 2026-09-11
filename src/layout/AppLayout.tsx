@@ -15,8 +15,6 @@ export type AppView =
   | 'applications:requirements'
   | 'assessment:queue'
   | 'approval:queue'
-  | 'verification:pending'
-  | 'verification:audit'
   | 'directory:companies'
   | 'directory:officers'
   | 'directory:site-plans'

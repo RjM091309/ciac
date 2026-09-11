@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Loader2, ScrollText, ShieldCheck } from 'lucide-react';
 import { EmptyState } from '../ui/EmptyState';
+import { clearLocatorSetupSkipAndReload } from '../../lib/locatorSetup';
 
 type Navigate = (to: string, opts?: { replace?: boolean }) => void;
 
@@ -101,9 +102,24 @@ export function ProponentContractsPermits({ navigate }: { navigate: Navigate }) 
   }
 
   if (error) {
+    const noProfile = /no proponent profile/i.test(error);
     return (
       <div className="glass-card p-4 sm:p-5 !border-transparent" style={{ backgroundColor: 'var(--surface)' }}>
-        <EmptyState title="Couldn't load contracts & permits" description={error} />
+        <EmptyState
+          title="Couldn't load contracts & permits"
+          description={noProfile ? "You skipped the business profile setup — finish it to unlock the rest of the portal." : error}
+          action={
+            noProfile ? (
+              <button
+                className="rounded-lg px-4 py-2 text-sm font-semibold shadow-sm transition-colors cursor-pointer"
+                style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
+                onClick={clearLocatorSetupSkipAndReload}
+              >
+                Complete your business profile
+              </button>
+            ) : undefined
+          }
+        />
       </div>
     );
   }

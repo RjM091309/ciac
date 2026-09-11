@@ -50,14 +50,17 @@ exports.uploadMyApplicationDocument = async (req, res) => {
       return res.status(400).json({ success: false, message: "No file was uploaded." });
     }
 
-    let requirementId = Number(req.body?.requirement_id);
+    const requirementId = Number(req.body?.requirement_id);
     if (!Number.isFinite(requirementId) || requirementId <= 0) {
-      requirementId = null;
-    } else {
-      // Guard: the requirement must belong to this application's checklist.
-      const reqs = await Workflow.listApplicationRequirements(req.application.id);
-      const match = reqs.find((r) => Number(r.requirement_id) === requirementId);
-      if (!match) requirementId = null;
+      if (req.file?.path) fs.unlink(req.file.path, () => {});
+      return res.status(400).json({ success: false, message: "Select which requirement this document is for." });
+    }
+    // Guard: the requirement must belong to this application's checklist.
+    const reqs = await Workflow.listApplicationRequirements(req.application.id);
+    const match = reqs.find((r) => Number(r.requirement_id) === requirementId);
+    if (!match) {
+      if (req.file?.path) fs.unlink(req.file.path, () => {});
+      return res.status(400).json({ success: false, message: "That requirement doesn't belong to this application." });
     }
 
     const document = await Workflow.createDocument({

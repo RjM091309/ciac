@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { motion } from 'motion/react';
 import { ArrowRight, Building2, ShieldCheck } from 'lucide-react';
 import { toast } from 'sonner';
+import { AddressAutocomplete } from '../ui/AddressAutocomplete';
 
 type FormState = {
   business_name: string;
@@ -149,12 +150,12 @@ export function LocatorProfileSetup({ onComplete, onSkip }: { onComplete: () => 
             </div>
 
             <Field label="Business address">
-              <input
+              <AddressAutocomplete
                 value={form.address}
-                onChange={(e) => setForm((p) => ({ ...p, address: e.target.value }))}
+                onChange={(address) => setForm((p) => ({ ...p, address }))}
                 className="w-full rounded-md px-3 py-2.5 text-sm border focus:outline-none focus:border-[var(--nav-active-bg)]"
                 style={{ borderColor: 'var(--input-border)', color: 'var(--text)', backgroundColor: 'var(--input-bg)' }}
-                placeholder="Street, city, province"
+                placeholder="Start typing to search, or type the full address"
               />
             </Field>
 

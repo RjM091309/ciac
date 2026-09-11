@@ -3,9 +3,11 @@ import { ArrowLeft, ClipboardList, Download, FileText, History, Loader2, Pencil,
 import { toast } from 'sonner';
 import { EmptyState } from '../ui/EmptyState';
 import { SidePanel } from '../ui/SidePanel';
+import { AppSelect } from '../ui/AppSelect';
 import { ConfirmModal } from '../ui/ConfirmModal';
 import { getStatusBadgeStyles } from '../dashboard/statusBadge';
 import { APPLICATION_TYPES, applicationTypeLabel } from '../../lib/applicationTypes';
+import { clearLocatorSetupSkipAndReload } from '../../lib/locatorSetup';
 
 type Navigate = (to: string, opts?: { replace?: boolean }) => void;
 
@@ -232,7 +234,15 @@ function ApplicationsList({ navigate }: { navigate: Navigate }) {
       if (id) navigate(`/me/applications?applicationId=${id}`);
       else load();
     } catch (e: any) {
-      toast.error(e?.message || 'Failed to create application');
+      const message = e?.message || 'Failed to create application';
+      if (/complete your business profile/i.test(message)) {
+        toast.error(message, {
+          action: { label: 'Complete profile', onClick: clearLocatorSetupSkipAndReload },
+          duration: 10000,
+        });
+      } else {
+        toast.error(message);
+      }
     } finally {
       setSaving(false);
     }
@@ -260,7 +270,25 @@ function ApplicationsList({ navigate }: { navigate: Navigate }) {
         </div>
       ) : error ? (
         <div className="glass-card p-4 sm:p-5 !border-transparent" style={{ backgroundColor: 'var(--surface)' }}>
-          <EmptyState title="Couldn't load your applications" description={error} />
+          <EmptyState
+            title="Couldn't load your applications"
+            description={
+              /no proponent profile/i.test(error)
+                ? "You skipped the business profile setup — finish it to unlock the rest of the portal."
+                : error
+            }
+            action={
+              /no proponent profile/i.test(error) ? (
+                <button
+                  className="rounded-lg px-4 py-2 text-sm font-semibold shadow-sm transition-colors cursor-pointer"
+                  style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
+                  onClick={clearLocatorSetupSkipAndReload}
+                >
+                  Complete your business profile
+                </button>
+              ) : undefined
+            }
+          />
         </div>
       ) : rows.length === 0 ? (
         <div className="glass-card p-4 sm:p-5 !border-transparent" style={{ backgroundColor: 'var(--surface)' }}>
@@ -417,24 +445,52 @@ function ApplicationDetail({ applicationId, navigate }: { applicationId: number;
     load();
   }, [load]);
 
-  const reloadDocuments = useCallback(async () => {
+  // After an upload, the requirement it's attached to (and the application's
+  // overall progress count on the Overview tab) can change status server-side
+  // too — refetch all three in place instead of just documents, so the page
+  // reflects it immediately without the user needing to hit refresh, and
+  // without the full-page `load()` spinner (no setLoading(true) here).
+  const reloadAfterUpload = useCallback(async () => {
     try {
-      const res = await fetch(`/api/proponents/me/applications/${applicationId}/documents`, { credentials: 'include' });
-      const json = await res.json().catch(() => ({}));
-      if (res.ok && Array.isArray(json.data)) {
-        setData((prev) => (prev ? { ...prev, documents: json.data } : prev));
-      }
+      const base = `/api/proponents/me/applications/${applicationId}`;
+      const [aRes, rRes, dRes] = await Promise.all([
+        fetch(base, { credentials: 'include' }),
+        fetch(`${base}/requirements`, { credentials: 'include' }),
+        fetch(`${base}/documents`, { credentials: 'include' }),
+      ]);
+      const [aJson, rJson, dJson] = await Promise.all([aRes.json().catch(() => ({})), rRes.json().catch(() => ({})), dRes.json().catch(() => ({}))]);
+      setData((prev) =>
+        prev
+          ? {
+              ...prev,
+              application: aRes.ok ? aJson.data : prev.application,
+              requirements: rRes.ok && Array.isArray(rJson.data) ? rJson.data : prev.requirements,
+              documents: dRes.ok && Array.isArray(dJson.data) ? dJson.data : prev.documents,
+            }
+          : prev
+      );
     } catch {
       /* non-critical */
     }
   }, [applicationId]);
 
   async function uploadDoc(file: File) {
+    if (!uploadRequirementId) {
+      toast.error('Select which requirement this document is for first.');
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      return;
+    }
+    if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
+      toast.error('Only PDF files are allowed.');
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      return;
+    }
     setUploading(true);
-    try {
-      const fd = new FormData();
-      fd.append('file', file);
-      if (uploadRequirementId) fd.append('requirement_id', uploadRequirementId);
+    const fd = new FormData();
+    fd.append('file', file);
+    fd.append('requirement_id', uploadRequirementId);
+
+    async function attempt() {
       const res = await fetch(`/api/proponents/me/applications/${applicationId}/documents`, {
         method: 'POST',
         credentials: 'include',
@@ -442,12 +498,30 @@ function ApplicationDetail({ applicationId, navigate }: { applicationId: number;
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json?.message || 'Upload failed');
+    }
+
+    try {
+      try {
+        await attempt();
+      } catch (e: any) {
+        // A raw "Failed to fetch" means the request never got a response
+        // (dropped connection, dev-server reload mid-upload) rather than a
+        // real rejection from the server — worth one silent retry before
+        // bothering the user with it.
+        if (e?.message !== 'Failed to fetch') throw e;
+        await new Promise((r) => setTimeout(r, 1200));
+        await attempt();
+      }
       toast.success('Document uploaded.');
       setUploadRequirementId('');
       if (fileInputRef.current) fileInputRef.current.value = '';
-      await reloadDocuments();
+      await reloadAfterUpload();
     } catch (e: any) {
-      toast.error(e?.message || 'Upload failed');
+      const message =
+        e?.message === 'Failed to fetch'
+          ? "Couldn't reach the server — check your connection and try again."
+          : e?.message || 'Upload failed';
+      toast.error(message);
     } finally {
       setUploading(false);
     }
@@ -705,28 +779,25 @@ function ApplicationDetail({ applicationId, navigate }: { applicationId: number;
           >
             <div className="flex-1 space-y-1.5">
               <label className="text-[10px] font-semibold uppercase tracking-widest text-secondary">
-                Attach to requirement (optional)
+                Attach to requirement
               </label>
-              <select
+              <AppSelect
+                options={requirements.map((r) => ({
+                  value: String(r.requirement_id),
+                  label: `${r.requirement_code ? `${r.requirement_code} — ` : ''}${r.requirement_name || 'Requirement'}`,
+                }))}
                 value={uploadRequirementId}
-                onChange={(e) => setUploadRequirementId(e.target.value)}
-                disabled={uploading}
-                className="w-full rounded-md px-3 py-2 text-sm border focus:outline-none"
-                style={{ borderColor: 'var(--input-border)', color: 'var(--text)', backgroundColor: 'var(--input-bg)' }}
-              >
-                <option value="">— No specific requirement —</option>
-                {requirements.map((r) => (
-                  <option key={r.id} value={String(r.requirement_id)}>
-                    {r.requirement_code ? `${r.requirement_code} — ` : ''}{r.requirement_name || 'Requirement'}
-                  </option>
-                ))}
-              </select>
+                onChange={setUploadRequirementId}
+                placeholder="Select a requirement…"
+                isDisabled={uploading}
+                isClearable
+              />
             </div>
             <div>
               <input
                 ref={fileInputRef}
                 type="file"
-                accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"
+                accept=".pdf,application/pdf"
                 className="hidden"
                 onChange={(e) => {
                   const f = e.target.files?.[0];
@@ -734,9 +805,15 @@ function ApplicationDetail({ applicationId, navigate }: { applicationId: number;
                 }}
               />
               <button
-                onClick={() => fileInputRef.current?.click()}
+                onClick={() => {
+                  if (!uploadRequirementId) {
+                    toast.error('Select which requirement this document is for first.');
+                    return;
+                  }
+                  fileInputRef.current?.click();
+                }}
                 disabled={uploading}
-                className="inline-flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-semibold shadow-sm cursor-pointer disabled:opacity-60"
+                className="inline-flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-semibold shadow-sm cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
                 style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
               >
                 {uploading ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
@@ -744,7 +821,7 @@ function ApplicationDetail({ applicationId, navigate }: { applicationId: number;
               </button>
             </div>
           </div>
-          <p className="text-[10px] text-secondary mb-3">PDF, JPG, or PNG · up to 10 MB.</p>
+          <p className="text-[10px] text-secondary mb-3">PDF only · up to 10 MB. Select a requirement above before uploading.</p>
 
           {documents.length === 0 ? (
             <EmptyState title="No documents" description="No supporting documents have been recorded for this application yet." />

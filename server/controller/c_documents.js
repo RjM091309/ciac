@@ -38,6 +38,15 @@ exports.download = async (req, res) => {
 
     if (document.content_type) res.type(document.content_type);
     const downloadName = document.original_file_name || document.file_name || path.basename(abs);
+
+    // ?view=1 renders the PDF in the browser (officer clicking a requirement
+    // to check what the locator submitted) instead of forcing a download —
+    // res.download() always sets Content-Disposition: attachment, so that
+    // path needs its own inline header + res.sendFile() instead.
+    if (req.query.view === "1") {
+      res.setHeader("Content-Disposition", `inline; filename="${downloadName.replace(/"/g, "")}"`);
+      return res.sendFile(abs);
+    }
     return res.download(abs, downloadName);
   } catch (error) {
     console.error("Document download error:", error);

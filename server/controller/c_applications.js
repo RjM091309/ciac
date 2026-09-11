@@ -57,7 +57,7 @@ exports.create = async (req, res) => {
       if (!proponent) {
         return res.status(403).json({
           success: false,
-          message: "Your account is not linked to a business record yet. Contact the administrator.",
+          message: "Complete your business profile before filing an application.",
         });
       }
       proponent_id = proponent.id;

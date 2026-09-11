@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Building2, Clock, Loader2, PencilLine } from 'lucide-react';
 import { toast } from 'sonner';
 import { EmptyState } from '../ui/EmptyState';
+import { clearLocatorSetupSkipAndReload } from '../../lib/locatorSetup';
 
 type ProponentProfileData = {
   id: number;
@@ -142,7 +143,16 @@ export function ProponentProfile() {
       <div className="glass-card p-4 sm:p-5 !border-transparent" style={{ backgroundColor: 'var(--surface)' }}>
         <EmptyState
           title="No business profile linked"
-          description="Your account isn't linked to a locator/company profile yet. Please contact CIAC to have your account linked."
+          description="You skipped the business profile setup — finish it to unlock the rest of the portal."
+          action={
+            <button
+              className="rounded-lg px-4 py-2 text-sm font-semibold shadow-sm transition-colors cursor-pointer"
+              style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
+              onClick={clearLocatorSetupSkipAndReload}
+            >
+              Complete your business profile
+            </button>
+          }
         />
       </div>
     );

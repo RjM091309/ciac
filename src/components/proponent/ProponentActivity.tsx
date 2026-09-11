@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { FileUp, KeyRound, Loader2, LogIn, ShieldCheck, UserPlus, PencilLine } from 'lucide-react';
 import { EmptyState } from '../ui/EmptyState';
+import { clearLocatorSetupSkipAndReload } from '../../lib/locatorSetup';
 
 type ActivityRow = {
   id: number;
@@ -75,9 +76,24 @@ export function ProponentActivity() {
   }
 
   if (error) {
+    const noProfile = /no proponent profile/i.test(error);
     return (
       <div className="glass-card p-4 sm:p-5 !border-transparent" style={{ backgroundColor: 'var(--surface)' }}>
-        <EmptyState title="Couldn't load your activity" description={error} />
+        <EmptyState
+          title="Couldn't load your activity"
+          description={noProfile ? "You skipped the business profile setup — finish it to unlock the rest of the portal." : error}
+          action={
+            noProfile ? (
+              <button
+                className="rounded-lg px-4 py-2 text-sm font-semibold shadow-sm transition-colors cursor-pointer"
+                style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
+                onClick={clearLocatorSetupSkipAndReload}
+              >
+                Complete your business profile
+              </button>
+            ) : undefined
+          }
+        />
       </div>
     );
   }

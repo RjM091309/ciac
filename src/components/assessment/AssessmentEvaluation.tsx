@@ -19,6 +19,7 @@ import { cn } from '../../lib/utils';
 import { AppSelect } from '../ui/AppSelect';
 import { DataTableControls } from '../ui/DataTableControls';
 import { EmptyState } from '../ui/EmptyState';
+import { ConfirmModal } from '../ui/ConfirmModal';
 import { TableSkeleton } from '../ui/Skeleton';
 import { useControlPanelAccess } from '../../context/ControlPanelAccessContext';
 import { useSessionStorageCachedResource } from '../../hooks/useSessionStorageCachedResource';
@@ -88,6 +89,7 @@ type ChargeRow = {
 
 type RequirementRow = {
   id: number;
+  requirement_id: number;
   requirement_code: string | null;
   requirement_name: string | null;
   status: string;
@@ -110,7 +112,13 @@ type DetailPayload = {
   charges: ChargeRow[];
   activity: ActivityRow[];
   requirements: RequirementRow[];
-  documents: { id: number; file_name: string; original_file_name: string | null; requirement_code: string | null }[];
+  documents: {
+    id: number;
+    file_name: string;
+    original_file_name: string | null;
+    requirement_id: number | null;
+    requirement_code: string | null;
+  }[];
 };
 
 type Summary = {
@@ -747,6 +755,8 @@ function ComplianceTab({
   busy: boolean;
   run: RunFn;
 }) {
+  const [confirmTarget, setConfirmTarget] = useState<{ id: number; status: 'VERIFIED' | 'REJECTED'; label: string } | null>(null);
+
   const setReq = (id: number, status: string) =>
     run(
       () =>
@@ -770,12 +780,30 @@ function ComplianceTab({
         />
       ) : (
         <div className="rounded-xl border divide-y" style={{ borderColor: 'var(--border)' }}>
-          {data.requirements.map((r) => (
-            <div key={r.id} className="p-2.5 flex items-center justify-between gap-2">
-              <div className="min-w-0">
-                <div className="text-[13px] font-medium truncate">
+          {data.requirements.map((r) => {
+            // Most recent first (listDocumentsByApplication orders DESC by id) —
+            // if a requirement was rejected and re-uploaded, this is the latest one.
+            const doc = data.documents.find((d) => d.requirement_id === r.requirement_id);
+            const hasDocument = Boolean(doc);
+            return (
+            <div
+              key={r.id}
+              className="p-2.5 flex items-center justify-between gap-2 transition-opacity"
+              style={{
+                backgroundColor: hasDocument ? 'var(--surface)' : 'transparent',
+                opacity: hasDocument ? 1 : 0.5,
+              }}
+              title={hasDocument ? undefined : 'No document uploaded yet'}
+            >
+              <div
+                className={hasDocument ? 'min-w-0 cursor-pointer' : 'min-w-0'}
+                onClick={hasDocument ? () => window.open(`/api/documents/${doc!.id}/download?view=1`, '_blank') : undefined}
+                title={hasDocument ? 'Click to view the submitted PDF' : undefined}
+              >
+                <div className={`text-[13px] font-medium truncate ${hasDocument ? 'hover:underline' : ''}`}>
                   {r.requirement_code ? `${r.requirement_code} · ` : ''}
                   {r.requirement_name || `Requirement #${r.id}`}
+                  {hasDocument ? <FileText size={12} className="inline-block ml-1.5 -mt-0.5 opacity-60" /> : null}
                 </div>
                 {r.remarks ? <div className="text-[11px] text-secondary truncate">{r.remarks}</div> : null}
               </div>
@@ -793,18 +821,30 @@ function ComplianceTab({
                 {canEdit ? (
                   <>
                     <button
-                      className="rounded px-2 py-1 text-[11px] border disabled:opacity-40"
+                      className="rounded px-2 py-1 text-[11px] border cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                       style={{ borderColor: 'var(--border)' }}
                       disabled={busy || r.status === 'VERIFIED'}
-                      onClick={() => setReq(r.id, 'VERIFIED')}
+                      onClick={() =>
+                        setConfirmTarget({
+                          id: r.id,
+                          status: 'VERIFIED',
+                          label: `${r.requirement_code ? `${r.requirement_code} · ` : ''}${r.requirement_name || `Requirement #${r.id}`}`,
+                        })
+                      }
                     >
                       Verify
                     </button>
                     <button
-                      className="rounded px-2 py-1 text-[11px] border disabled:opacity-40"
+                      className="rounded px-2 py-1 text-[11px] border cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                       style={{ borderColor: 'var(--border)' }}
-                      disabled={busy || r.status === 'REJECTED'}
-                      onClick={() => setReq(r.id, 'REJECTED')}
+                      disabled={busy || r.status === 'REJECTED' || r.status === 'VERIFIED'}
+                      onClick={() =>
+                        setConfirmTarget({
+                          id: r.id,
+                          status: 'REJECTED',
+                          label: `${r.requirement_code ? `${r.requirement_code} · ` : ''}${r.requirement_name || `Requirement #${r.id}`}`,
+                        })
+                      }
                     >
                       Reject
                     </button>
@@ -812,9 +852,31 @@ function ComplianceTab({
                 ) : null}
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
+
+      <ConfirmModal
+        open={confirmTarget !== null}
+        title={confirmTarget?.status === 'VERIFIED' ? 'Verify this requirement?' : 'Reject this requirement?'}
+        description={
+          confirmTarget
+            ? confirmTarget.status === 'VERIFIED'
+              ? `Marks "${confirmTarget.label}" as verified.`
+              : `Marks "${confirmTarget.label}" as rejected — the locator will need to resubmit it.`
+            : undefined
+        }
+        confirmText={confirmTarget?.status === 'VERIFIED' ? 'Verify' : 'Reject'}
+        danger={confirmTarget?.status === 'REJECTED'}
+        loading={busy}
+        onCancel={() => setConfirmTarget(null)}
+        onConfirm={async () => {
+          if (!confirmTarget) return;
+          await setReq(confirmTarget.id, confirmTarget.status);
+          setConfirmTarget(null);
+        }}
+      />
     </div>
   );
 }

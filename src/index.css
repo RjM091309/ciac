@@ -417,3 +417,55 @@ select.input-field:-webkit-autofill:focus {
     transform: translateX(120%);
   }
 }
+
+/* Google Places autocomplete dropdown (AddressAutocomplete) — Google renders
+   this straight onto document.body with its own default styling, so it
+   needs to be reskinned here rather than via component classes. */
+.pac-container {
+  margin-top: 6px !important;
+  border: 1px solid var(--border-subtle) !important;
+  border-radius: 0.75rem !important;
+  box-shadow: none !important;
+  background-color: var(--surface) !important;
+  font-family: var(--font-sans, inherit) !important;
+  padding: 6px !important;
+  z-index: 9999 !important;
+}
+
+.pac-item {
+  border: none !important;
+  border-radius: 0.5rem !important;
+  padding: 8px 10px !important;
+  font-size: 12px !important;
+  line-height: 1.4 !important;
+  color: var(--text-secondary) !important;
+  cursor: pointer;
+}
+
+.pac-item:hover,
+.pac-item-selected {
+  background-color: var(--selected-bg) !important;
+}
+
+.pac-item-query {
+  font-size: 12px !important;
+  color: var(--text) !important;
+  font-weight: 600 !important;
+}
+
+.pac-matched {
+  color: var(--text) !important;
+}
+
+.pac-icon {
+  margin-top: 2px;
+  filter: var(--pac-icon-filter, none);
+}
+
+.dark .pac-icon {
+  --pac-icon-filter: invert(1) brightness(1.6);
+}
+
+.pac-logo:after {
+  margin: 4px 6px 2px;
+}

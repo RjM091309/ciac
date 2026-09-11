@@ -142,44 +142,6 @@ export const LANDING_CONFIG: Record<AppView, LandingConfig> = {
       ],
     },
   },
-  'verification:pending': {
-    title: 'Pending Document Verification',
-    description: 'Queue of SEC, DTI, BIR and permit documents awaiting admin verification.',
-    badge: 'Verification',
-    icon: FileCheck,
-    stats: [
-      { label: 'Total Pending', value: '24' },
-      { label: 'Over SLA (3 days)', value: '5' },
-      { label: 'Assigned to You', value: '11' },
-    ],
-    table: {
-      columns: ['Document', 'Type', 'Locator', 'Uploaded', 'Assigned To'],
-      rows: [
-        ['SEC Registration 2026-0310', 'SEC', 'SkyPort Logistics Inc.', 'Mar 10, 2026', 'You'],
-        ['BIR 2303-2026-019', 'BIR COR', 'NorthGate Foods Corp.', 'Mar 09, 2026', 'Admin D. Ramos'],
-        ['DTI Permit 24-8931', 'DTI', 'HarborFresh Cold Storage', 'Mar 08, 2026', 'You'],
-      ],
-    },
-  },
-  'verification:audit': {
-    title: 'Verification Audit Trail',
-    description: 'History of verification decisions for each critical document.',
-    badge: 'Audit',
-    icon: ShieldCheck,
-    stats: [
-      { label: 'Docs Verified This Week', value: '63' },
-      { label: 'Rejected Uploads', value: '4', hint: 'Mostly blurred scans' },
-      { label: 'Average Verification Time', value: '2h 18m' },
-    ],
-    table: {
-      columns: ['Date & Time', 'Action', 'Document', 'Locator', 'By'],
-      rows: [
-        ['Mar 11, 2026 15:42', 'Approved', 'BIR Tax Clearance 24-019', 'GreenFuel Terminals Corp.', 'Admin J. Cruz'],
-        ['Mar 11, 2026 10:05', 'Rejected', 'SEC AOI Scan', 'Atlas Aero Parts', 'Admin Demo'],
-        ['Mar 10, 2026 09:31', 'Approved', 'DTI Certificate 24-778', 'HarborFresh Cold Storage', 'Admin Demo'],
-      ],
-    },
-  },
   'directory:companies': {
     title: 'Locator Directory',
     description: 'Master list of all registered and active locators.',

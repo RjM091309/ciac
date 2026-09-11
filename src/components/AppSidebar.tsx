@@ -277,7 +277,6 @@ export function AppSidebar({
     canView('settings:requirement-categories');
   const showAssessment = canView('assessment:queue');
   const showApproval = canView('approval:queue');
-  const showVerification = canView('verification:pending') || canView('verification:audit');
   const showComplianceInspection = canView('compliance:inspections');
   const showPermits = canView('compliance:permits');
   const showBirTax = canView('compliance:bir');
@@ -311,11 +310,6 @@ export function AppSidebar({
 
   const approvalItems: SidebarLeaf[] = [
     canView('approval:queue') && { key: 'approval:queue', label: 'Approval Queue', active: view === 'approval:queue', onClick: () => onViewChange('approval:queue') },
-  ].filter(Boolean) as SidebarLeaf[];
-
-  const verificationItems: SidebarLeaf[] = [
-    canView('verification:pending') && { key: 'verification:pending', label: 'Pending Review', active: view === 'verification:pending', onClick: () => onViewChange('verification:pending') },
-    canView('verification:audit') && { key: 'verification:audit', label: 'Audit Trail', active: view === 'verification:audit', onClick: () => onViewChange('verification:audit') },
   ].filter(Boolean) as SidebarLeaf[];
 
   const complianceInspectionItems: SidebarLeaf[] = [
@@ -427,22 +421,6 @@ export function AppSidebar({
                 collapsed={collapsed}
                 isOpen={openDropdownId === 'approval'}
                 onToggle={() => toggleDropdown('approval')}
-              />
-            </div>
-          </SidebarGroup>
-          )}
-
-          {showVerification && (
-          <SidebarGroup title="Verification" collapsed={collapsed}>
-            <div className="flex flex-col gap-1.5">
-              <SidebarSection
-                icon={FileCheck}
-                label="Doc Verification"
-                items={verificationItems}
-                flat={flat}
-                collapsed={collapsed}
-                isOpen={openDropdownId === 'verification'}
-                onToggle={() => toggleDropdown('verification')}
               />
             </div>
           </SidebarGroup>

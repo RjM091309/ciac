@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 import { EmptyState } from '../ui/EmptyState';
 import { getStatusBadgeStyles } from './statusBadge';
 import { useControlPanelAccess } from '../../context/ControlPanelAccessContext';
+import { clearLocatorSetupSkipAndReload } from '../../lib/locatorSetup';
 
 type DashboardApplicationRow = {
   id: number;
@@ -90,7 +91,16 @@ export function ProponentDashboard({
       <div className="glass-card p-4 sm:p-5 !border-transparent" style={{ backgroundColor: 'var(--surface)' }}>
         <EmptyState
           title="No locator profile linked"
-          description="Your account isn't linked to a locator/company profile yet. Please contact CIAC to have your account linked."
+          description="You skipped the business profile setup — finish it to file applications and unlock the rest of the portal."
+          action={
+            <button
+              className="rounded-lg px-4 py-2 text-sm font-semibold shadow-sm transition-colors cursor-pointer"
+              style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
+              onClick={clearLocatorSetupSkipAndReload}
+            >
+              Complete your business profile
+            </button>
+          }
         />
       </div>
     );

@@ -12,9 +12,6 @@ const MAX_FILE_BYTES = 10 * 1024 * 1024; // 10 MB
 
 const ALLOWED = {
   "application/pdf": ".pdf",
-  "image/jpeg": ".jpg",
-  "image/pjpeg": ".jpg",
-  "image/png": ".png",
 };
 
 function ensureDir(dir) {
@@ -44,7 +41,7 @@ const storage = multer.diskStorage({
 
 function fileFilter(req, file, cb) {
   if (ALLOWED[file.mimetype]) return cb(null, true);
-  return cb(new Error("Only PDF, JPG, or PNG files are allowed."));
+  return cb(new Error("Only PDF files are allowed."));
 }
 
 const uploadDocument = multer({

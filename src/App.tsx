@@ -5,6 +5,7 @@ import { SubHeader, type DashboardPreviewRole } from './components/SubHeader';
 import { FileCheck, FolderTree, ShieldCheck, Users, CalendarClock, Loader2, Search } from 'lucide-react';
 import { LoginPage } from './components/auth/LoginPage';
 import { LocatorProfileSetup } from './components/proponent/LocatorProfileSetup';
+import { locatorSetupSkipKey } from './lib/locatorSetup';
 import { DataTableControls } from './components/ui/DataTableControls';
 import { Toaster } from 'sonner';
 
@@ -56,8 +57,6 @@ const VIEW_TO_PATH: Record<AppView, string> = {
   'applications:requirements': '/applications/requirements',
   'assessment:queue': '/assessment',
   'approval:queue': '/approval',
-  'verification:pending': '/verification/pending',
-  'verification:audit': '/verification/audit',
   'directory:companies': '/directory/companies',
   'directory:officers': '/directory/officers',
   'directory:site-plans': '/directory/site-plans',
@@ -212,10 +211,6 @@ export default function App() {
   // them. `null` = not applicable / not checked yet; checked once per login.
   const [proponentSetupComplete, setProponentSetupComplete] = useState<boolean | null>(null);
 
-  function skipKey(userId: number) {
-    return `ciac.locatorSetupSkipped.${userId}`;
-  }
-
   useEffect(() => {
     if (!isProponent || !user?.id) {
       setProponentSetupComplete(null);
@@ -225,7 +220,7 @@ export default function App() {
     // browser/device still gets prompted once, which is fine for a one-time
     // "fill this in later" nudge rather than a hard gate.
     try {
-      if (window.localStorage.getItem(skipKey(user.id)) === '1') {
+      if (window.localStorage.getItem(locatorSetupSkipKey(user.id)) === '1') {
         setProponentSetupComplete(true);
         return;
       }
@@ -363,7 +358,7 @@ export default function App() {
         onSkip={() => {
           if (user?.id) {
             try {
-              window.localStorage.setItem(skipKey(user.id), '1');
+              window.localStorage.setItem(locatorSetupSkipKey(user.id), '1');
             } catch {
               // ignore — worst case, they're prompted again next login
             }
@@ -670,44 +665,6 @@ const LANDING_CONFIG: Record<AppView, LandingConfig> = {
         ['APP-2026-00001', 'SkyPort Logistics Inc.', 'In Progress', 'Division Chief', '—'],
         ['REN-2026-00007', 'Delta AeroTech', 'Approved', '—', 'Approval Order'],
         ['APP-2026-00012', 'Metro Agro Trading', 'Awaiting Start', '—', '—'],
-      ],
-    },
-  },
-  'verification:pending': {
-    title: 'Pending Document Verification',
-    description: 'Queue of SEC, DTI, BIR and permit documents awaiting admin verification.',
-    badge: 'Verification',
-    icon: FileCheck,
-    stats: [
-      { label: 'Total Pending', value: '24' },
-      { label: 'Over SLA (3 days)', value: '5' },
-      { label: 'Assigned to You', value: '11' },
-    ],
-    table: {
-      columns: ['Document', 'Type', 'Locator', 'Uploaded', 'Assigned To'],
-      rows: [
-        ['SEC Registration 2026-0310', 'SEC', 'SkyPort Logistics Inc.', 'Mar 10, 2026', 'You'],
-        ['BIR 2303-2026-019', 'BIR COR', 'NorthGate Foods Corp.', 'Mar 09, 2026', 'Admin D. Ramos'],
-        ['DTI Permit 24-8931', 'DTI', 'HarborFresh Cold Storage', 'Mar 08, 2026', 'You'],
-      ],
-    },
-  },
-  'verification:audit': {
-    title: 'Verification Audit Trail',
-    description: 'History of verification decisions for each critical document.',
-    badge: 'Audit',
-    icon: ShieldCheck,
-    stats: [
-      { label: 'Docs Verified This Week', value: '63' },
-      { label: 'Rejected Uploads', value: '4', hint: 'Mostly blurred scans' },
-      { label: 'Average Verification Time', value: '2h 18m' },
-    ],
-    table: {
-      columns: ['Date & Time', 'Action', 'Document', 'Locator', 'By'],
-      rows: [
-        ['Mar 11, 2026 15:42', 'Approved', 'BIR Tax Clearance 24-019', 'GreenFuel Terminals Corp.', 'Admin J. Cruz'],
-        ['Mar 11, 2026 10:05', 'Rejected', 'SEC AOI Scan', 'Atlas Aero Parts', 'Admin Demo'],
-        ['Mar 10, 2026 09:31', 'Approved', 'DTI Certificate 24-778', 'HarborFresh Cold Storage', 'Admin Demo'],
       ],
     },
   },
