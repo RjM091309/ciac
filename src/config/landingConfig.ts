@@ -26,7 +26,7 @@ export const LANDING_CONFIG: Record<AppView, LandingConfig> = {
     table: { columns: [], rows: [] },
   },
   'applications:new': {
-    title: 'New Applications',
+    title: 'New Applications Directory',
     description: 'Recently submitted direct lease applications waiting for initial review.',
     badge: 'Applications',
     icon: FileCheck,
@@ -60,25 +60,6 @@ export const LANDING_CONFIG: Record<AppView, LandingConfig> = {
         ['NorthGate Foods Corp.', 'DL-2020-018', 'Jun 15, 2026', '95', 'For LOI Submission'],
         ['Delta AeroTech', 'DL-2019-004', 'May 30, 2026', '79', 'Docs Under Review'],
         ['HarborFresh Cold Storage', 'DL-2021-022', 'Apr 21, 2026', '40', 'For Board Approval'],
-      ],
-    },
-  },
-  'applications:projects': {
-    title: 'Project Evaluations',
-    description: 'Monitoring of notarized project evaluations and technical reviews.',
-    badge: 'Evaluation',
-    icon: FileCheck,
-    stats: [
-      { label: 'Projects Under Evaluation', value: '9' },
-      { label: 'Average Evaluation Age', value: '18 days' },
-      { label: 'Technical Clarifications', value: '5', hint: 'Awaiting locator reply' },
-    ],
-    table: {
-      columns: ['Project', 'Locator', 'Evaluator', 'Stage', 'Last Action'],
-      rows: [
-        ['Cold Chain Facility', 'HarborFresh Cold Storage', 'Engr. Santos', 'Technical Review', 'Requested load profile'],
-        ['Fuel Depot Expansion', 'GreenFuel Terminals Corp.', 'Engr. Cruz', 'For Board', 'Endorsed to CIAC Board'],
-        ['Maintenance Hangar', 'Atlas Aero Parts', 'Engr. Dela Cruz', 'Initial Review', 'Site visit scheduled'],
       ],
     },
   },
@@ -369,26 +350,6 @@ export const LANDING_CONFIG: Record<AppView, LandingConfig> = {
       rows: [
         ['jdelacruz', 'Juan Dela Cruz', 'j.delacruz@skyport.com', 'On', 'Active'],
         ['mreyes', 'Maria Reyes', 'm.reyes@greenfuel.com', 'On', 'Active'],
-      ],
-    },
-  },
-  'settings:proponents': {
-    title: 'Locator Management',
-    description: 'Manage registered locator business profiles and their status.',
-    badge: 'Directory',
-    icon: Users,
-    isCrud: true,
-    stats: [
-      { label: 'Total Locators', value: '—' },
-      { label: 'Active', value: '—' },
-      { label: 'Deactivated', value: '—' },
-    ],
-    table: {
-      columns: ['Business Name', 'TIN', 'Registration No.', 'Status', 'Last Updated'],
-      rows: [
-        ['SkyPort Logistics Inc.', '—', 'SEC-2026-0310', 'Active', 'Mar 10, 2026'],
-        ['GreenFuel Terminals Corp.', '—', 'SEC-2024-0182', 'Active', 'Mar 09, 2026'],
-        ['Metro Agro Trading', '—', 'DTI-24-8931', 'Inactive', 'Feb 12, 2026'],
       ],
     },
   },

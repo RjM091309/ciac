@@ -6,14 +6,17 @@ import {
   FileCheck,
   FileSignature,
   FileText,
+  KeyRound,
   Moon,
   Search,
+  Settings,
   ShieldCheck,
   SunMedium,
   Zap,
 } from 'lucide-react';
 import { useGlobalDate } from '../state/GlobalDateContext';
 import { DatePicker } from './ui/DatePicker';
+import { ChangePasswordModal } from './ChangePasswordModal';
 import {
   countUnread,
   filterNotificationsForUser,
@@ -31,6 +34,8 @@ import {
   markNotificationReadRequest,
 } from '../lib/notificationClient';
 import { NOTIFICATIONS_REFRESH_EVENT, requestNotificationsRefresh } from '../lib/notificationRefresh';
+import { roleDisplayName } from '../lib/roleDisplay';
+import { toast } from 'sonner';
 
 function getNotificationTypeMeta(item: NotificationItem) {
   switch (item.category) {
@@ -165,12 +170,38 @@ export function AppHeader({
   }, [backendUrl]);
 
   const displayName = currentUser?.username || '';
+  // roleDisplayName renders PROPONENT as "Locator" everywhere else in the
+  // UI — the stored role name's casing isn't guaranteed (seeded as
+  // lowercase 'proponent', but c_roles.js's SYSTEM_ROLE_NAMES and existing
+  // callers all compare case-insensitively), so match it the same way
+  // rather than a literal === 'proponent' that only catches one casing.
+  // Lowercased before render so the `capitalize` class below title-cases it
+  // consistently with every other role's badge, regardless of roleDisplayName
+  // forcing "LOCATOR" (all caps) or the raw stored name's own casing.
+  const displayRole = currentUser?.role ? roleDisplayName(currentUser.role).toLowerCase() : undefined;
   const avatarInitials = displayName
     ? displayName.replace(/[^a-zA-Z0-9]/g, ' ').trim().split(/\s+/).slice(0, 2).map((s) => s[0]?.toUpperCase()).join('')
     : '';
   const [notificationFilter, setNotificationFilter] = useState<NotificationFilter>('all');
   const notificationWrapRef = useRef<HTMLDivElement | null>(null);
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const userMenuWrapRef = useRef<HTMLDivElement | null>(null);
+  const [changePasswordOpen, setChangePasswordOpen] = useState(false);
   const latestLoadIdRef = useRef(0);
+  // Locator-triggered notifications get a toast that stays open until the
+  // officer/admin dismisses it, instead of sonner's default auto-dismiss.
+  // Maps notification id -> live sonner toast id, so a dismiss (individual
+  // or "Clear all") can be reconciled back to state, and so a 15s poll
+  // doesn't stack a duplicate toast for one that's already showing.
+  const openLocatorToastIdsRef = useRef<Map<string, string | number>>(new Map());
+  // sonner keeps an updated-in-place toast (same id) pinned at its ORIGINAL
+  // array position rather than moving it to the front — so the "Clear all"
+  // summary would visually "climb" up the stack as toasts around it got
+  // closed instead of staying anchored at the bottom/front. Tracking its
+  // current id lets syncLocatorEventsClearAllToast dismiss the old instance
+  // and re-create a fresh one (a new id always lands at the front) instead
+  // of updating in place.
+  const clearAllToastIdRef = useRef<string | number | null>(null);
 
   const visibleNotifications = useMemo(
     () => filterNotificationsForUser(notifications, { role: userRole, userId }),
@@ -183,6 +214,50 @@ export function AppHeader({
   );
   const unreadCount = useMemo(() => countUnread(visibleNotifications), [visibleNotifications]);
 
+  /** Reconciles the "N locator updates" pinned toast to how many
+   * individually-dismissible ones are still open — one alone doesn't need a
+   * summary, but from two onward a single "Clear all" beats closing each by
+   * hand. */
+  function syncLocatorEventsClearAllToast() {
+    if (clearAllToastIdRef.current !== null) {
+      toast.dismiss(clearAllToastIdRef.current);
+      clearAllToastIdRef.current = null;
+    }
+    const count = openLocatorToastIdsRef.current.size;
+    if (count < 2) return;
+    clearAllToastIdRef.current = toast(`${count} locator updates waiting`, {
+      duration: Infinity,
+      closeButton: true,
+      position: 'bottom-right',
+      action: {
+        label: 'Clear all',
+        onClick: () => {
+          // Mark the underlying notifications read, not just dismiss the
+          // toast widgets — otherwise they're still unread server-side and
+          // loadNotifications() re-toasts every one of them on the very
+          // next refresh/poll. Closing one toast at a time (X) deliberately
+          // skips this — see dismissLocatorEventToast — so that stays a
+          // "not dealt with yet" reminder that survives a refresh; "Clear
+          // all" is the explicit bulk acknowledgment.
+          openLocatorToastIdsRef.current.forEach((toastId, notificationId) => {
+            toast.dismiss(toastId);
+            markOneAsRead(notificationId);
+          });
+          openLocatorToastIdsRef.current.clear();
+          if (clearAllToastIdRef.current !== null) {
+            toast.dismiss(clearAllToastIdRef.current);
+            clearAllToastIdRef.current = null;
+          }
+        },
+      },
+    });
+  }
+
+  function dismissLocatorEventToast(notificationId: string) {
+    openLocatorToastIdsRef.current.delete(notificationId);
+    syncLocatorEventsClearAllToast();
+  }
+
   const loadNotifications = useCallback(async () => {
     const loadId = ++latestLoadIdRef.current;
     const nextNotifications = await fetchNotificationsList({
@@ -193,6 +268,39 @@ export function AppHeader({
     });
     if (loadId !== latestLoadIdRef.current) return;
     setNotifications(nextNotifications);
+
+    // Officer/admin only — a locator shouldn't get a "locator did something"
+    // toast about their own action.
+    if (userRole === 'proponent') return;
+
+    // Deliberately re-toasts still-unread items on every load, including a
+    // fresh page load/refresh — not just newly-arrived ones. The toast
+    // itself is ephemeral (gone the instant the page reloads, same as any
+    // toast library), but the "stays until the officer deals with it"
+    // requirement is about the underlying notification, not the toast
+    // widget — so a refresh must bring it back rather than silently
+    // dropping the reminder. Dedup is against "already showing a toast for
+    // this id right now" (openLocatorToastIdsRef), not "have we ever shown
+    // it before" — that's what stops every 15s poll from stacking a
+    // duplicate for the same still-open toast.
+    for (const item of nextNotifications) {
+      if (item.actorRole !== 'proponent' || item.isRead) continue;
+      if (openLocatorToastIdsRef.current.has(item.id)) continue;
+
+      const toastId = toast(item.title, {
+        description: item.message,
+        duration: Infinity,
+        closeButton: true,
+        position: 'bottom-right',
+        action:
+          item.targetPath && item.applicationId
+            ? { label: 'View', onClick: () => handleNotificationClick(item) }
+            : undefined,
+        onDismiss: () => dismissLocatorEventToast(item.id),
+      });
+      openLocatorToastIdsRef.current.set(item.id, toastId);
+    }
+    syncLocatorEventsClearAllToast();
   }, [backendUrl, userRole, userId]);
 
   useEffect(() => {
@@ -254,13 +362,18 @@ export function AppHeader({
 
   useEffect(() => {
     function onDocumentClick(event: MouseEvent) {
-      if (!notificationWrapRef.current) return;
-      if (!notificationWrapRef.current.contains(event.target as Node)) {
+      if (notificationWrapRef.current && !notificationWrapRef.current.contains(event.target as Node)) {
         setNotificationOpen(false);
+      }
+      if (userMenuWrapRef.current && !userMenuWrapRef.current.contains(event.target as Node)) {
+        setUserMenuOpen(false);
       }
     }
     function onEsc(event: KeyboardEvent) {
-      if (event.key === 'Escape') setNotificationOpen(false);
+      if (event.key === 'Escape') {
+        setNotificationOpen(false);
+        setUserMenuOpen(false);
+      }
     }
     document.addEventListener('mousedown', onDocumentClick);
     document.addEventListener('keydown', onEsc);
@@ -442,13 +555,6 @@ export function AppHeader({
                   style={{ borderColor: 'var(--border-subtle)' }}
                 >
                   <span className="text-xs font-bold text-[var(--text)]">Notifications</span>
-                  <button
-                    type="button"
-                    onClick={markAllAsRead}
-                    className="text-[10px] font-semibold text-[var(--text-muted)] hover:text-[var(--text)] cursor-pointer"
-                  >
-                    Mark all as read
-                  </button>
                 </div>
                 <div
                   className="grid grid-cols-3 gap-1 px-2 py-2 border-b"
@@ -569,6 +675,20 @@ export function AppHeader({
                     </div>
                   )}
                 </div>
+
+                <div
+                  className="flex items-center justify-center px-3 py-2 border-t"
+                  style={{ borderColor: 'var(--border-subtle)' }}
+                >
+                  <button
+                    type="button"
+                    onClick={markAllAsRead}
+                    disabled={unreadCount === 0}
+                    className="text-[10px] font-semibold text-[var(--text-muted)] hover:text-[var(--text)] disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                  >
+                    Mark all as read
+                  </button>
+                </div>
               </div>
             )}
           </div>
@@ -579,34 +699,78 @@ export function AppHeader({
             style={{ backgroundColor: 'var(--border-subtle)' }}
           />
 
-          <div
-            className="h-9 min-w-[32px] flex items-center gap-1.5 sm:gap-2 pl-1 pr-1.5 sm:pr-2.5 rounded-full cursor-pointer group transition-colors shrink-0 text-[var(--text-muted)] hover:text-[var(--text)]"
-            style={{
-              backgroundColor: 'color-mix(in oklab, var(--control-bg) 88%, transparent)',
-            }}
-          >
-            <div
-              className="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0 text-[var(--foreground)] uppercase"
+          <div className="relative shrink-0" ref={userMenuWrapRef}>
+            <button
+              aria-label="Account menu"
+              aria-expanded={userMenuOpen}
+              onClick={() => setUserMenuOpen((prev) => !prev)}
+              className="h-9 min-w-[32px] flex items-center gap-1.5 sm:gap-2 pl-1 pr-1.5 sm:pr-2.5 rounded-full cursor-pointer group transition-colors shrink-0 text-[var(--text-muted)] hover:text-[var(--text)]"
               style={{
-                backgroundColor: 'color-mix(in oklab, var(--control-bg) 55%, transparent)',
+                backgroundColor: 'color-mix(in oklab, var(--control-bg) 88%, transparent)',
               }}
             >
-              {avatarInitials || '?'}
-            </div>
-            <span className="hidden sm:flex flex-col leading-tight min-w-0">
-              <span className="text-xs font-bold truncate max-w-[6rem] md:max-w-[8rem] lg:max-w-[12rem]">
-                {displayName || 'Not signed in'}
-              </span>
-              {currentUser?.role ? (
-                <span className="text-[9px] font-medium text-[var(--text-muted)] capitalize truncate">
-                  {currentUser.role}
+              <div
+                className="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0 text-[var(--foreground)] uppercase"
+                style={{
+                  backgroundColor: 'color-mix(in oklab, var(--control-bg) 55%, transparent)',
+                }}
+              >
+                {avatarInitials || '?'}
+              </div>
+              <span className="hidden sm:flex flex-col leading-tight min-w-0">
+                <span className="text-xs font-bold truncate max-w-[6rem] md:max-w-[8rem] lg:max-w-[12rem]">
+                  {displayName || 'Not signed in'}
                 </span>
-              ) : null}
-            </span>
-            <ChevronRight size={12} className="rotate-90 opacity-70 shrink-0 hidden sm:block" />
+                {displayRole ? (
+                  <span className="text-[9px] font-medium text-[var(--text-muted)] capitalize truncate">
+                    {displayRole}
+                  </span>
+                ) : null}
+              </span>
+              <ChevronRight
+                size={12}
+                className={`transition-transform shrink-0 hidden sm:block ${userMenuOpen ? '-rotate-90' : 'rotate-90'}`}
+              />
+            </button>
+
+            {userMenuOpen && (
+              <div
+                className="absolute right-0 mt-2 w-48 rounded-2xl border z-[120] overflow-hidden py-1.5"
+                style={{
+                  backgroundColor: theme === 'dark' ? '#0f1115' : '#ffffff',
+                  borderColor: 'var(--border-subtle)',
+                  boxShadow: '0 12px 34px rgba(0,0,0,0.24)',
+                }}
+              >
+                <button
+                  onClick={() => {
+                    setUserMenuOpen(false);
+                    navigate('/me/profile');
+                  }}
+                  className="w-full flex items-center gap-2.5 px-3.5 py-2 text-xs font-medium text-left cursor-pointer transition-colors hover:bg-[var(--hover-bg)]"
+                  style={{ color: 'var(--text)' }}
+                >
+                  <Settings size={14} className="text-secondary" />
+                  Settings
+                </button>
+                <button
+                  onClick={() => {
+                    setUserMenuOpen(false);
+                    setChangePasswordOpen(true);
+                  }}
+                  className="w-full flex items-center gap-2.5 px-3.5 py-2 text-xs font-medium text-left cursor-pointer transition-colors hover:bg-[var(--hover-bg)]"
+                  style={{ color: 'var(--text)' }}
+                >
+                  <KeyRound size={14} className="text-secondary" />
+                  Change Password
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </div>
+
+      <ChangePasswordModal open={changePasswordOpen} onClose={() => setChangePasswordOpen(false)} />
     </header>
   );
 }

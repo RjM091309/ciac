@@ -13,7 +13,13 @@ module.exports = {
       // reconnect — the "browser refreshes after upload" bug. The frontend
       // has no reason to react to backend file changes at all; Vite's own
       // watcher already handles src/ hot-reload without this outer restart.
-      ignore_watch: ['node_modules', 'server', '.git'],
+      // 'src' is excluded for the same reason: pm2 restarting the whole
+      // node/Vite process on every component edit (on top of Vite's own
+      // HMR) was killing the dev server's live connection mid-edit, forcing
+      // a full page reload and occasionally racing a save mid-write —
+      // pm2 still restarts for anything outside src/server (vite.config.ts,
+      // package.json, index.html, etc.), which genuinely need a fresh process.
+      ignore_watch: ['node_modules', 'server', 'src', '.git'],
       env: {
         NODE_ENV: 'development',
       },

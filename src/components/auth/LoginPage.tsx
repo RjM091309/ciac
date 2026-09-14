@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
-import { ArrowRight, Copy, Eye, EyeOff, KeyRound, Moon, ShieldCheck, Smartphone, Sun } from 'lucide-react';
+import { ArrowLeft, ArrowRight, CheckCircle2, Copy, Eye, EyeOff, KeyRound, Mail, Moon, ShieldCheck, Smartphone, Sun } from 'lucide-react';
 import { validatePassword } from '../../lib/passwordPolicy';
 
 type Enrollment = { otpauthUrl: string; secret: string; qrDataUrl: string };
@@ -59,7 +59,17 @@ async function loginRequest(args: {
 
 const EMPTY_USER = { id: 0, username: '' };
 
-export function LoginPage(props: { backendUrl: string; onLoggedIn: (user: { id: number; username: string; role?: string }) => void }) {
+export function LoginPage(props: {
+  backendUrl: string;
+  /** Present (and truthy) when the URL is an emailed reset link
+   * (/reset-password?token=...) — forces straight into the resetPassword
+   * step regardless of any in-progress login attempt. */
+  resetToken?: string | null;
+  /** Called once a reset link has been consumed (success or "start over"),
+   * so App.tsx can drop ?token=... from the URL. */
+  onResetHandled: () => void;
+  onLoggedIn: (user: { id: number; username: string; role?: string }) => void;
+}) {
   const backend = useMemo(() => normalizeBaseUrl(props.backendUrl), [props.backendUrl]);
 
   const [username, setUsername] = useState('');
@@ -72,6 +82,18 @@ export function LoginPage(props: { backendUrl: string; onLoggedIn: (user: { id: 
   const [confirmNewPassword, setConfirmNewPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [showNewPassword, setShowNewPassword] = useState(false);
+
+  // "Forgot password?" — request-a-link step, independent of the login
+  // attempt state machine above (it never touches username/password).
+  const [forgotStep, setForgotStep] = useState<'none' | 'email' | 'sent'>('none');
+  const [forgotEmail, setForgotEmail] = useState('');
+
+  // Completing an emailed reset link (props.resetToken present).
+  const [resetNewPassword, setResetNewPassword] = useState('');
+  const [confirmResetPassword, setConfirmResetPassword] = useState('');
+  const [showResetPassword, setShowResetPassword] = useState(false);
+  const [resetDone, setResetDone] = useState(false);
+
   const [theme, setTheme] = useState<ThemeMode>(() => {
     if (typeof window === 'undefined') return 'dark';
     const stored = window.localStorage.getItem('theme');
@@ -84,17 +106,28 @@ export function LoginPage(props: { backendUrl: string; onLoggedIn: (user: { id: 
     text: '',
   });
 
-  const step: 'credentials' | 'enroll' | 'mfa' | 'forceChangePassword' = mustChangePassword
-    ? 'forceChangePassword'
-    : enrollment
-      ? 'enroll'
-      : mfaRequired
-        ? 'mfa'
-        : 'credentials';
+  const step: 'credentials' | 'enroll' | 'mfa' | 'forceChangePassword' | 'forgotEmail' | 'forgotSent' | 'resetPassword' =
+    props.resetToken
+      ? 'resetPassword'
+      : forgotStep === 'email'
+        ? 'forgotEmail'
+        : forgotStep === 'sent'
+          ? 'forgotSent'
+          : mustChangePassword
+            ? 'forceChangePassword'
+            : enrollment
+              ? 'enroll'
+              : mfaRequired
+                ? 'mfa'
+                : 'credentials';
   const codeStep = step === 'enroll' || step === 'mfa';
   const newPasswordError = newPassword ? validatePassword(newPassword) : null;
   const canSubmitNewPassword =
     Boolean(newPassword) && !newPasswordError && newPassword === confirmNewPassword;
+
+  const resetPasswordError = resetNewPassword ? validatePassword(resetNewPassword) : null;
+  const canSubmitReset =
+    Boolean(resetNewPassword) && !resetPasswordError && resetNewPassword === confirmResetPassword;
 
   React.useEffect(() => {
     if (theme === 'dark') document.documentElement.classList.add('dark');
@@ -109,11 +142,67 @@ export function LoginPage(props: { backendUrl: string; onLoggedIn: (user: { id: 
     setNewPassword('');
     setConfirmNewPassword('');
     setCode('');
+    setForgotStep('none');
+    setForgotEmail('');
     setMessage({ type: 'muted', text: '' });
+  }
+
+  /** Leaves the "forgot password" flow entirely, back to the credentials
+   * form — including dropping ?token=... from the URL when the visitor
+   * arrived via an emailed reset link, so a page refresh doesn't dump them
+   * back into resetPassword. */
+  function backToSignIn() {
+    resetToCredentials();
+    if (props.resetToken) props.onResetHandled();
   }
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
+
+    if (step === 'forgotEmail') {
+      if (!forgotEmail.trim()) return;
+      setMessage({ type: 'muted', text: '' });
+      setSubmitting(true);
+      try {
+        const res = await fetch(`${backend}/api/auth/forgot-password`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ email: forgotEmail.trim() }),
+        });
+        const json = await res.json().catch(() => ({} as any));
+        if (!res.ok || !json?.success) throw new Error(json?.message || 'Something went wrong. Please try again.');
+        setForgotStep('sent');
+      } catch (err: any) {
+        setMessage({ type: 'error', text: err?.message || 'Something went wrong. Please try again.' });
+      } finally {
+        setSubmitting(false);
+      }
+      return;
+    }
+
+    if (step === 'resetPassword') {
+      if (!canSubmitReset || !props.resetToken) return;
+      setMessage({ type: 'muted', text: '' });
+      setSubmitting(true);
+      try {
+        const res = await fetch(`${backend}/api/auth/reset-password`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ token: props.resetToken, newPassword: resetNewPassword }),
+        });
+        const json = await res.json().catch(() => ({} as any));
+        if (!res.ok || !json?.success) throw new Error(json?.message || 'This reset link is invalid or has expired.');
+        setResetDone(true);
+      } catch (err: any) {
+        setMessage({ type: 'error', text: err?.message || 'This reset link is invalid or has expired.' });
+      } finally {
+        setSubmitting(false);
+      }
+      return;
+    }
+
     if (step === 'forceChangePassword' && !canSubmitNewPassword) return;
     setMessage({ type: 'muted', text: '' });
     setSubmitting(true);
@@ -290,19 +379,39 @@ export function LoginPage(props: { backendUrl: string; onLoggedIn: (user: { id: 
         >
           <div className="mb-7 sm:mb-10">
             <h2 className="text-3xl sm:text-4xl font-bold tracking-tight mb-2 sm:mb-3">
-              {step === 'enroll' ? 'Set up two-factor' : step === 'forceChangePassword' ? 'Set a new password' : 'Sign in'}
+              {step === 'enroll'
+                ? 'Set up two-factor'
+                : step === 'forceChangePassword'
+                  ? 'Set a new password'
+                  : step === 'forgotEmail'
+                    ? 'Reset your password'
+                    : step === 'forgotSent'
+                      ? 'Check your email'
+                      : step === 'resetPassword'
+                        ? resetDone
+                          ? 'Password updated'
+                          : 'Set a new password'
+                        : 'Sign in'}
             </h2>
             <p className="text-secondary">
               {step === 'enroll'
                 ? 'Add this account to your authenticator app to finish signing in.'
                 : step === 'forceChangePassword'
                   ? 'Your password was reset by an administrator. Choose a new one to continue.'
-                  : 'Welcome back to your workspace.'}
+                  : step === 'forgotEmail'
+                    ? "Enter the email on your account and we'll send you a link to reset your password."
+                    : step === 'forgotSent'
+                      ? `We've sent a password reset link to ${forgotEmail}. It expires in 30 minutes.`
+                      : step === 'resetPassword'
+                        ? resetDone
+                          ? 'You can now sign in with your new password.'
+                          : 'Choose a new password for your account.'
+                        : 'Welcome back to your workspace.'}
             </p>
           </div>
 
           <form onSubmit={onSubmit} className="space-y-5 sm:space-y-6" autoComplete="off">
-            {step !== 'enroll' ? (
+            {step === 'credentials' || step === 'mfa' || step === 'forceChangePassword' ? (
               <>
                 <div className="space-y-2">
                   <div className="flex items-center justify-between ml-1">
@@ -333,7 +442,11 @@ export function LoginPage(props: { backendUrl: string; onLoggedIn: (user: { id: 
                     <button
                       type="button"
                       className="text-xs font-medium text-secondary hover:text-primary transition-colors cursor-pointer"
-                      onClick={() => setMessage({ type: 'muted', text: 'Please contact the administrator.' })}
+                      onClick={() => {
+                        setForgotEmail(username.includes('@') ? username : '');
+                        setMessage({ type: 'muted', text: '' });
+                        setForgotStep('email');
+                      }}
                     >
                       Forgot?
                     </button>
@@ -526,50 +639,231 @@ export function LoginPage(props: { backendUrl: string; onLoggedIn: (user: { id: 
               ) : null}
             </AnimatePresence>
 
-            <button
-              type="submit"
-              disabled={submitting || (step === 'forceChangePassword' && !canSubmitNewPassword)}
-              className="w-full font-bold py-3.5 sm:py-4 rounded-xl hover:scale-[1.02] active:scale-[0.98] transition-all flex items-center justify-center gap-3 disabled:opacity-70 disabled:cursor-not-allowed shadow-xl min-h-[48px]"
-              style={{
-                backgroundColor: 'var(--nav-active-bg)',
-                color: 'var(--nav-active-text)',
-                boxShadow: '0 10px 30px color-mix(in oklab, var(--nav-active-bg) 30%, transparent)',
-              }}
-            >
-              {submitting ? (
-                <div
-                  className="w-5 h-5 border-2 rounded-full animate-spin"
-                  style={{
-                    borderColor: 'color-mix(in oklab, var(--nav-active-text) 35%, transparent)',
-                    borderTopColor: 'var(--nav-active-text)',
-                  }}
-                />
-              ) : (
-                <>
-                  {step === 'enroll' ? (
-                    <>
-                      <Smartphone size={18} />
-                      Verify &amp; finish setup
-                    </>
-                  ) : step === 'mfa' ? (
-                    <>
-                      Verify &amp; continue
-                      <ArrowRight size={18} />
-                    </>
-                  ) : step === 'forceChangePassword' ? (
-                    <>
-                      <KeyRound size={18} />
-                      Set password &amp; continue
-                    </>
-                  ) : (
-                    <>
-                      Continue
-                      <ArrowRight size={18} />
-                    </>
-                  )}
-                </>
-              )}
-            </button>
+            <AnimatePresence>
+              {step === 'forgotEmail' ? (
+                <motion.div
+                  key="forgot-email"
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                  transition={{ duration: 0.18, ease: 'easeOut' }}
+                  className="space-y-2"
+                >
+                  <div className="flex items-center justify-between ml-1">
+                    <label className="text-xs font-bold uppercase tracking-widest text-secondary" htmlFor="forgot-email">
+                      Email
+                    </label>
+                    <button
+                      type="button"
+                      className="text-xs font-medium text-secondary hover:text-primary transition-colors cursor-pointer"
+                      onClick={backToSignIn}
+                    >
+                      Back to sign in
+                    </button>
+                  </div>
+                  <input
+                    id="forgot-email"
+                    type="email"
+                    placeholder="you@example.com"
+                    value={forgotEmail}
+                    onChange={(e) => setForgotEmail(e.target.value)}
+                    className="input-field w-full px-4 sm:px-5 py-3.5 sm:py-4 text-sm focus:border-primary transition-all duration-300"
+                    required
+                    autoFocus
+                  />
+                </motion.div>
+              ) : null}
+            </AnimatePresence>
+
+            <AnimatePresence>
+              {step === 'forgotSent' ? (
+                <motion.div
+                  key="forgot-sent"
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                  transition={{ duration: 0.18, ease: 'easeOut' }}
+                  className="flex flex-col items-center gap-4 py-2 text-center"
+                >
+                  <div
+                    className="w-14 h-14 rounded-full flex items-center justify-center"
+                    style={{ backgroundColor: 'color-mix(in oklab, var(--nav-active-bg) 14%, transparent)', color: 'var(--nav-active-bg)' }}
+                  >
+                    <Mail size={24} />
+                  </div>
+                  <p className="text-[13px] text-secondary">
+                    Didn't get it? Check your spam folder, or{' '}
+                    <button
+                      type="button"
+                      className="font-semibold underline cursor-pointer"
+                      style={{ color: 'var(--text)' }}
+                      onClick={() => setForgotStep('email')}
+                    >
+                      try again
+                    </button>
+                    .
+                  </p>
+                </motion.div>
+              ) : null}
+            </AnimatePresence>
+
+            <AnimatePresence>
+              {step === 'resetPassword' && !resetDone ? (
+                <motion.div
+                  key="reset-password"
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                  transition={{ duration: 0.18, ease: 'easeOut' }}
+                  className="space-y-4"
+                >
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold uppercase tracking-widest text-secondary ml-1" htmlFor="reset-new-password">
+                      New password
+                    </label>
+                    <div className="relative">
+                      <input
+                        id="reset-new-password"
+                        type={showResetPassword ? 'text' : 'password'}
+                        placeholder="••••••••"
+                        value={resetNewPassword}
+                        onChange={(e) => setResetNewPassword(e.target.value)}
+                        className="input-field w-full px-4 sm:px-5 py-3.5 sm:py-4 pr-12 sm:pr-14 text-sm focus:border-primary transition-all duration-300"
+                        required
+                        autoFocus
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowResetPassword((p) => !p)}
+                        className="absolute right-2.5 sm:right-4 top-1/2 -translate-y-1/2 text-secondary hover:text-primary transition-colors p-2 cursor-pointer min-h-[40px] min-w-[40px] flex items-center justify-center"
+                        aria-label={showResetPassword ? 'Hide password' : 'Show password'}
+                      >
+                        {showResetPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                      </button>
+                    </div>
+                    <p className="text-[11px] ml-1" style={{ color: resetPasswordError ? 'var(--errorColor)' : 'var(--text-secondary)' }}>
+                      {resetPasswordError || 'At least 8 characters, with a letter and a number.'}
+                    </p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold uppercase tracking-widest text-secondary ml-1" htmlFor="reset-confirm-password">
+                      Confirm new password
+                    </label>
+                    <input
+                      id="reset-confirm-password"
+                      type={showResetPassword ? 'text' : 'password'}
+                      placeholder="••••••••"
+                      value={confirmResetPassword}
+                      onChange={(e) => setConfirmResetPassword(e.target.value)}
+                      className="input-field w-full px-4 sm:px-5 py-3.5 sm:py-4 text-sm focus:border-primary transition-all duration-300"
+                      required
+                    />
+                    {confirmResetPassword && confirmResetPassword !== resetNewPassword ? (
+                      <p className="text-[11px] ml-1" style={{ color: 'var(--errorColor)' }}>
+                        Passwords don't match.
+                      </p>
+                    ) : null}
+                  </div>
+                </motion.div>
+              ) : null}
+            </AnimatePresence>
+
+            <AnimatePresence>
+              {step === 'resetPassword' && resetDone ? (
+                <motion.div
+                  key="reset-done"
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                  transition={{ duration: 0.18, ease: 'easeOut' }}
+                  className="flex flex-col items-center gap-3 py-2 text-center"
+                >
+                  <div
+                    className="w-14 h-14 rounded-full flex items-center justify-center"
+                    style={{ backgroundColor: 'color-mix(in oklab, #10b981 16%, transparent)', color: '#10b981' }}
+                  >
+                    <CheckCircle2 size={26} />
+                  </div>
+                </motion.div>
+              ) : null}
+            </AnimatePresence>
+
+            {step === 'forgotSent' || (step === 'resetPassword' && resetDone) ? (
+              <button
+                type="button"
+                onClick={backToSignIn}
+                className="w-full font-bold py-3.5 sm:py-4 rounded-xl hover:scale-[1.02] active:scale-[0.98] transition-all flex items-center justify-center gap-3 shadow-xl min-h-[48px] cursor-pointer"
+                style={{
+                  backgroundColor: 'var(--nav-active-bg)',
+                  color: 'var(--nav-active-text)',
+                  boxShadow: '0 10px 30px color-mix(in oklab, var(--nav-active-bg) 30%, transparent)',
+                }}
+              >
+                <ArrowLeft size={18} />
+                Back to sign in
+              </button>
+            ) : (
+              <button
+                type="submit"
+                disabled={
+                  submitting ||
+                  (step === 'forceChangePassword' && !canSubmitNewPassword) ||
+                  (step === 'forgotEmail' && !forgotEmail.trim()) ||
+                  (step === 'resetPassword' && !canSubmitReset)
+                }
+                className="w-full font-bold py-3.5 sm:py-4 rounded-xl hover:scale-[1.02] active:scale-[0.98] transition-all flex items-center justify-center gap-3 disabled:opacity-70 disabled:cursor-not-allowed shadow-xl min-h-[48px]"
+                style={{
+                  backgroundColor: 'var(--nav-active-bg)',
+                  color: 'var(--nav-active-text)',
+                  boxShadow: '0 10px 30px color-mix(in oklab, var(--nav-active-bg) 30%, transparent)',
+                }}
+              >
+                {submitting ? (
+                  <div
+                    className="w-5 h-5 border-2 rounded-full animate-spin"
+                    style={{
+                      borderColor: 'color-mix(in oklab, var(--nav-active-text) 35%, transparent)',
+                      borderTopColor: 'var(--nav-active-text)',
+                    }}
+                  />
+                ) : (
+                  <>
+                    {step === 'enroll' ? (
+                      <>
+                        <Smartphone size={18} />
+                        Verify &amp; finish setup
+                      </>
+                    ) : step === 'mfa' ? (
+                      <>
+                        Verify &amp; continue
+                        <ArrowRight size={18} />
+                      </>
+                    ) : step === 'forceChangePassword' ? (
+                      <>
+                        <KeyRound size={18} />
+                        Set password &amp; continue
+                      </>
+                    ) : step === 'forgotEmail' ? (
+                      <>
+                        <Mail size={18} />
+                        Send reset link
+                      </>
+                    ) : step === 'resetPassword' ? (
+                      <>
+                        <KeyRound size={18} />
+                        Reset password
+                      </>
+                    ) : (
+                      <>
+                        Continue
+                        <ArrowRight size={18} />
+                      </>
+                    )}
+                  </>
+                )}
+              </button>
+            )}
 
             <div className="min-h-5">
               <span className="text-xs" style={{ color: messageColor }} role="status" aria-live="polite">

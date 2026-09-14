@@ -259,7 +259,44 @@ async function login(username, password, totpCode, newPassword) {
   }
 }
 
+const crypto = require("crypto");
+
+const RESET_TOKEN_TTL_MINUTES = 30;
+
+function hashResetToken(token) {
+  return crypto.createHash("sha256").update(String(token)).digest("hex");
+}
+
+/** Always resolves the same shape whether or not the email matches an
+ * account — the controller must not let a caller tell the two cases apart
+ * (that's how "forgot password" forms leak which emails are registered). */
+async function requestPasswordReset(email) {
+  const user = await User.getActiveUserByEmail(email);
+  if (!user) return { matched: false };
+
+  const token = crypto.randomBytes(32).toString("hex");
+  await User.setPasswordResetToken(user.id, hashResetToken(token), RESET_TOKEN_TTL_MINUTES);
+  return { matched: true, token, user };
+}
+
+async function resetPasswordWithToken(token, newPassword) {
+  const tokenValue = String(token || "").trim();
+  if (!tokenValue) return { success: false, message: "This reset link is invalid or has expired." };
+
+  const passwordError = validatePasswordStrength(newPassword);
+  if (passwordError) return { success: false, message: passwordError };
+
+  const user = await User.getUserByResetTokenHash(hashResetToken(tokenValue));
+  if (!user) return { success: false, message: "This reset link is invalid or has expired." };
+
+  await User.completePasswordReset(user.id, newPassword);
+  return { success: true, user };
+}
+
 module.exports = {
   login,
+  requestPasswordReset,
+  resetPasswordWithToken,
+  RESET_TOKEN_TTL_MINUTES,
 };
 

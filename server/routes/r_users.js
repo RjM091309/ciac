@@ -1,9 +1,14 @@
 const express = require("express");
 const router = express.Router();
 const usersController = require("../controller/c_users");
-const { requireMenuAccess } = require("../middleware/m_auth");
+const { requireMenuAccess, isAuthenticated } = require("../middleware/m_auth");
 
 const MENU_KEY = "settings:users";
+
+// Self-service — any signed-in user changing their own password, regardless
+// of role or Control Panel permissions (not gated by MENU_KEY, which only
+// covers admin management of *other* users' accounts).
+router.patch("/me/password", isAuthenticated, usersController.changeMyPassword);
 
 router.get("/", requireMenuAccess(MENU_KEY, "view"), usersController.list);
 router.get("/:id", requireMenuAccess(MENU_KEY, "view"), usersController.getById);

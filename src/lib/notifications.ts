@@ -23,6 +23,9 @@ export interface NotificationItem {
   applicationNumber?: string;
   targetPath?: string;
   ownerUserId?: number;
+  /** Role of whoever triggered this notification (from the actor's own
+   * user_roles, not the recipient's) — null for system-generated rows. */
+  actorRole?: Role | null;
 }
 
 export type NotificationFilter = 'all' | 'unread' | 'read';

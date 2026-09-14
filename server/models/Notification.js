@@ -216,9 +216,17 @@ async function listForUser(userId, limit = 50) {
       n.application_id,
       n.event_type,
       a.application_no,
-      a.is_renewal AS application_is_renewal
+      a.is_renewal AS application_is_renewal,
+      actor_role.role_name AS actor_role
     FROM dbo.notifications n
     LEFT JOIN dbo.applications a ON a.id = n.application_id
+    OUTER APPLY (
+      SELECT TOP (1) LOWER(LTRIM(RTRIM(r.name))) AS role_name
+      FROM dbo.user_roles ur
+      INNER JOIN dbo.roles r ON r.id = ur.role_id
+      WHERE ur.user_id = n.created_by
+      ORDER BY CASE WHEN LOWER(r.name) = 'admin' THEN 0 ELSE 1 END, r.id ASC
+    ) actor_role
     WHERE n.user_id = @param0
     ORDER BY n.created_at DESC, n.id DESC
     `,
@@ -241,6 +249,11 @@ async function listForUser(userId, limit = 50) {
     application_no: row.application_no ?? null,
     application_is_renewal: row.application_is_renewal ?? null,
     event_type: normalizeEventType(row.event_type),
+    // Who triggered this notification (by role, not just user id) — lets the
+    // recipient's UI tell "a locator did something" apart from "another
+    // officer/admin did", e.g. to decide which events deserve a
+    // stay-until-dismissed toast. Null for system-generated rows.
+    actor_role: row.actor_role ?? null,
   }));
 }
 

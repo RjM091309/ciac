@@ -163,6 +163,20 @@ async function ensureSchema() {
   `);
   hasStatusColumnCache = null;
 
+  // Self-service "forgot password" (emailed reset link, see Auth.js). Only
+  // the SHA-256 hash of the token is stored, same reasoning as a password
+  // hash — a DB read alone shouldn't hand out a usable reset link. NULL
+  // expiry means no reset in progress; completePasswordReset() clears both
+  // once the link is used.
+  await updateSchema(`
+    IF COL_LENGTH('dbo.users', 'password_reset_token_hash') IS NULL
+      ALTER TABLE dbo.users ADD password_reset_token_hash NVARCHAR(128) NULL;
+  `);
+  await updateSchema(`
+    IF COL_LENGTH('dbo.users', 'password_reset_expires') IS NULL
+      ALTER TABLE dbo.users ADD password_reset_expires DATETIME2(3) NULL;
+  `);
+
   // user_roles
   await updateSchema(`
     IF OBJECT_ID('dbo.user_roles', 'U') IS NULL
@@ -660,6 +674,89 @@ async function setPasswordAndClearMustChange(userId, plainPassword) {
   );
 }
 
+/** Self-service change-your-own-password: the controller verifies the
+ * submitted current password against this hash before calling
+ * changeOwnPassword. Unlike adminResetPassword/setPasswordAndClearMustChange,
+ * neither of the two below touches must_change_password or token_version —
+ * the caller already proved they hold the account by typing the current
+ * password, so there's no reason to force a re-login. */
+async function getPasswordHashById(userId) {
+  const rows = await selectData(`SELECT TOP (1) password_hash FROM users WHERE id = @param0`, [userId]);
+  return rows?.[0]?.password_hash || null;
+}
+
+async function changeOwnPassword(userId, plainPassword) {
+  await updateData(
+    `
+      UPDATE users
+      SET password_hash = @param1, updated_at = GETDATE()
+      WHERE id = @param0
+    `,
+    [userId, await hashPasswordIfNeeded(plainPassword)]
+  );
+}
+
+/** "Forgot password" lookup — active accounts only, so a reset link can
+ * never be issued for a pending/suspended/deactivated account. */
+async function getActiveUserByEmail(email) {
+  const mail = String(email ?? "").trim();
+  if (!mail) return null;
+  const rows = await selectData(
+    `SELECT TOP (1) id, username, email, full_name FROM users WHERE email = @param0 AND is_active = 1`,
+    [mail]
+  );
+  return rows?.[0] || null;
+}
+
+async function setPasswordResetToken(userId, tokenHash, ttlMinutes) {
+  await updateData(
+    `
+      UPDATE users
+      SET password_reset_token_hash = @param1, password_reset_expires = DATEADD(MINUTE, @param2, SYSUTCDATETIME())
+      WHERE id = @param0
+    `,
+    [userId, tokenHash, ttlMinutes]
+  );
+}
+
+/** Fail-closed: no row back for an unknown, wrong, or expired token hash —
+ * the controller can't tell those three apart, same as a login rejecting a
+ * wrong password without saying which part was wrong. */
+async function getUserByResetTokenHash(tokenHash) {
+  const rows = await selectData(
+    `
+      SELECT TOP (1) id, username, email
+      FROM users
+      WHERE password_reset_token_hash = @param0
+        AND password_reset_expires > SYSUTCDATETIME()
+        AND is_active = 1
+    `,
+    [tokenHash]
+  );
+  return rows?.[0] || null;
+}
+
+/** Completes an emailed-link reset. Unlike changeOwnPassword, this bumps
+ * token_version (any session left open on the old password is cut off —
+ * the request came from an unauthenticated link, not a session that already
+ * proved it holds the account) and clears must_change_password/the reset
+ * token itself so the link is single-use. */
+async function completePasswordReset(userId, plainPassword) {
+  await updateData(
+    `
+      UPDATE users
+      SET password_hash = @param1,
+          must_change_password = 0,
+          token_version = token_version + 1,
+          password_reset_token_hash = NULL,
+          password_reset_expires = NULL,
+          updated_at = GETDATE()
+      WHERE id = @param0
+    `,
+    [userId, await hashPasswordIfNeeded(plainPassword)]
+  );
+}
+
 module.exports = {
   ensureSchema,
   listUsers,
@@ -685,6 +782,12 @@ module.exports = {
   getSessionCheck,
   adminResetPassword,
   setPasswordAndClearMustChange,
+  getPasswordHashById,
+  changeOwnPassword,
+  getActiveUserByEmail,
+  setPasswordResetToken,
+  getUserByResetTokenHash,
+  completePasswordReset,
   setMustChangePassword,
 };
 

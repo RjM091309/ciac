@@ -172,6 +172,11 @@
   .text-secondary {
     color: var(--text-secondary);
   }
+
+  ::selection {
+    background-color: #3b82f6;
+    color: #ffffff;
+  }
 }
 
 .glass-card {
@@ -468,4 +473,22 @@ select.input-field:-webkit-autofill:focus {
 
 .pac-logo:after {
   margin: 4px 6px 2px;
+}
+
+/* sonner's own close-button dismiss always animates out vertically
+   (translateY, baked into its --y custom property per data-front/
+   data-expanded state) — only a manual swipe gesture respects direction.
+   Right-positioned toasts (top-right default, bottom-right locator-event
+   toasts) should exit toward the right edge they're anchored to instead.
+   Composed as `var(--y) translateX(...)` rather than replacing transform
+   outright — --y also encodes this toast's current vertical offset in an
+   expanded stack (sonner keeps it live via JS), so dropping it snapped
+   every non-front toast back to y:0 as it left, reading as "falls to the
+   bottom, then slides right" instead of sliding right in place.
+   !important is needed since sonner injects its own stylesheet at runtime
+   and may load after this one. */
+[data-sonner-toast][data-x-position='right'][data-removed='true'] {
+  transform: var(--y) translateX(150%) !important;
+  opacity: 0 !important;
+  transition: transform 0.3s ease, opacity 0.3s ease !important;
 }

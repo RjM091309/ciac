@@ -11,7 +11,6 @@ export type AppView =
   | 'dashboard'
   | 'applications:new'
   | 'applications:renewals'
-  | 'applications:projects'
   | 'applications:requirements'
   | 'assessment:queue'
   | 'approval:queue'
@@ -27,7 +26,6 @@ export type AppView =
   | 'operations:gad'
   | 'settings:users'
   | 'settings:locator-users'
-  | 'settings:proponents'
   | 'settings:requirement-categories'
   | 'settings:inspection-types'
   | 'settings:compliance-types'
@@ -211,7 +209,7 @@ export function AppLayout({
       <ControlPanelAccessProvider>
       <div
         className={cn(
-          'h-screen overflow-hidden flex flex-col font-sans selection:bg-white/10 relative',
+          'h-screen overflow-hidden flex flex-col font-sans relative',
         )}
         style={{ backgroundColor: 'var(--background)', color: 'var(--foreground)', transition: 'background-color 220ms ease-out, color 220ms ease-out' }}
       >

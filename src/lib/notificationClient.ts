@@ -27,6 +27,9 @@ function mapNotificationRows(rows: any[], userRole: Role, userId?: number | null
       : undefined;
     const isRead =
       statusNum === 2 || statusText === 'READ' || statusText === 'SEEN' || statusText === 'READ_BY_USER';
+    const rawActorRole = String(row?.actor_role ?? '').trim().toLowerCase();
+    const actorRole: Role | null =
+      rawActorRole === 'admin' || rawActorRole === 'officer' || rawActorRole === 'proponent' ? rawActorRole : null;
 
     return {
       id: String(row?.id ?? ''),
@@ -41,6 +44,7 @@ function mapNotificationRows(rows: any[], userRole: Role, userId?: number | null
       applicationNumber: row?.application_no ? String(row.application_no) : undefined,
       targetPath,
       ownerUserId: Number(userId || 0),
+      actorRole,
     } satisfies NotificationItem;
   });
 }

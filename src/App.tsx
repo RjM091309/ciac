@@ -19,7 +19,6 @@ const PermitsManagement = lazy(() => import('./components/compliance/PermitsMana
 const UsersManagement = lazy(() => import('./components/settings/UsersManagement').then((m) => ({ default: m.UsersManagement })));
 const LocatorUsersManagement = lazy(() => import('./components/settings/LocatorUsersManagement').then((m) => ({ default: m.LocatorUsersManagement })));
 const ControlPanelManagement = lazy(() => import('./components/settings/ControlPanelManagement').then((m) => ({ default: m.ControlPanelManagement })));
-const ProponentsManagement = lazy(() => import('./components/proponent/ProponentsManagement').then((m) => ({ default: m.ProponentsManagement })));
 const RequirementsManagement = lazy(() => import('./components/applications/Requirements').then((m) => ({ default: m.RequirementsManagement })));
 const RequirementCategoriesManagement = lazy(() => import('./components/applications/RequirementCategories').then((m) => ({ default: m.RequirementCategoriesManagement })));
 const ApplicationsWorkflow = lazy(() => import('./components/applications/ApplicationsWorkflow').then((m) => ({ default: m.ApplicationsWorkflow })));
@@ -53,7 +52,6 @@ const VIEW_TO_PATH: Record<AppView, string> = {
   dashboard: '/dashboard',
   'applications:new': '/applications/new',
   'applications:renewals': '/applications/renewals',
-  'applications:projects': '/applications/projects',
   'applications:requirements': '/applications/requirements',
   'assessment:queue': '/assessment',
   'approval:queue': '/approval',
@@ -69,7 +67,6 @@ const VIEW_TO_PATH: Record<AppView, string> = {
   'operations:gad': '/operations/gad',
   'settings:users': '/settings/users',
   'settings:locator-users': '/settings/locator-users',
-  'settings:proponents': '/settings/proponents',
   'settings:requirement-categories': '/settings/requirement-categories',
   'settings:inspection-types': '/settings/inspection-types',
   'settings:compliance-types': '/settings/compliance-types',
@@ -158,6 +155,22 @@ export default function App() {
         search: nextUrl.search || '',
       });
     };
+  }, []);
+
+  // Mirrors AppLayout's theme toggle (which sets the 'dark' class on <html>)
+  // so the Toaster below can render toasts in the OPPOSITE theme — a toast
+  // pops against the page instead of blending into it. AppLayout owns the
+  // actual theme state/toggle; this just observes the DOM class it writes,
+  // since Toaster is a sibling rendered outside AppLayout.
+  const [isDarkMode, setIsDarkMode] = useState(
+    () => typeof document !== 'undefined' && document.documentElement.classList.contains('dark')
+  );
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    const root = document.documentElement;
+    const observer = new MutationObserver(() => setIsDarkMode(root.classList.contains('dark')));
+    observer.observe(root, { attributes: true, attributeFilter: ['class'] });
+    return () => observer.disconnect();
   }, []);
 
   const [user, setUser] = useState<UserData | null>(null);
@@ -331,9 +344,12 @@ export default function App() {
   }, [navigate, path]);
 
   if (authState === 'guest') {
+    const resetToken = path === '/reset-password' ? new URLSearchParams(locationSearch).get('token') : null;
     return (
       <LoginPage
         backendUrl={backendUrl}
+        resetToken={resetToken}
+        onResetHandled={() => navigate('/', { replace: true })}
         onLoggedIn={(u) => {
           setUser({ id: u.id, username: u.username, role: normalizeRole(u.role) });
           setAuthState('authed');
@@ -371,7 +387,16 @@ export default function App() {
 
   return (
     <>
-      <Toaster richColors position="top-right" />
+      {/* expand: sonner collapses multiple simultaneous toasts into a stack
+          with only the front one fully visible (rest peek behind until
+          hovered) — that was burying the "Clear all" locator-events toast
+          whenever 2+ were open at once, since it wasn't always the
+          frontmost. Expanded keeps every open toast, in every position,
+          fully visible without a hover. */}
+      {/* theme: inverted relative to the page's own light/dark mode (see
+          isDarkMode above) — a black toast on a light page, a white toast on
+          a dark page, so it always pops instead of blending in. */}
+      <Toaster richColors position="top-right" expand theme={isDarkMode ? 'light' : 'dark'} />
       <AppLayout
         view={
           isProponent
@@ -508,8 +533,6 @@ export default function App() {
                 <ApprovalIssuance />
               ) : view === 'compliance:inspections' ? (
                 <ComplianceInspections />
-              ) : view === 'settings:proponents' ? (
-                <ProponentsManagement />
               ) : view === 'settings:requirement-categories' ? (
                 <RequirementCategoriesManagement />
               ) : view === 'settings:inspection-types' ? (
@@ -555,7 +578,7 @@ const LANDING_CONFIG: Record<AppView, LandingConfig> = {
     table: { columns: [], rows: [] },
   },
   'applications:new': {
-    title: 'New Applications',
+    title: 'New Applications Directory',
     description: 'Recently submitted direct lease applications waiting for initial review.',
     badge: 'Applications',
     icon: FileCheck,
@@ -589,25 +612,6 @@ const LANDING_CONFIG: Record<AppView, LandingConfig> = {
         ['NorthGate Foods Corp.', 'DL-2020-018', 'Jun 15, 2026', '95', 'For LOI Submission'],
         ['Delta AeroTech', 'DL-2019-004', 'May 30, 2026', '79', 'Docs Under Review'],
         ['HarborFresh Cold Storage', 'DL-2021-022', 'Apr 21, 2026', '40', 'For Board Approval'],
-      ],
-    },
-  },
-  'applications:projects': {
-    title: 'Project Evaluations',
-    description: 'Monitoring of notarized project evaluations and technical reviews.',
-    badge: 'Evaluation',
-    icon: FileCheck,
-    stats: [
-      { label: 'Projects Under Evaluation', value: '9' },
-      { label: 'Average Evaluation Age', value: '18 days' },
-      { label: 'Technical Clarifications', value: '5', hint: 'Awaiting locator reply' },
-    ],
-    table: {
-      columns: ['Project', 'Locator', 'Evaluator', 'Stage', 'Last Action'],
-      rows: [
-        ['Cold Chain Facility', 'HarborFresh Cold Storage', 'Engr. Santos', 'Technical Review', 'Requested load profile'],
-        ['Fuel Depot Expansion', 'GreenFuel Terminals Corp.', 'Engr. Cruz', 'For Board', 'Endorsed to CIAC Board'],
-        ['Maintenance Hangar', 'Atlas Aero Parts', 'Engr. Dela Cruz', 'Initial Review', 'Site visit scheduled'],
       ],
     },
   },
@@ -892,25 +896,6 @@ const LANDING_CONFIG: Record<AppView, LandingConfig> = {
       rows: [
         ['jdelacruz', 'Juan Dela Cruz', 'j.delacruz@skyport.com', 'On', 'Active'],
         ['mreyes', 'Maria Reyes', 'm.reyes@greenfuel.com', 'On', 'Active'],
-      ],
-    },
-  },
-  'settings:proponents': {
-    title: 'Locator Management',
-    description: 'Manage registered locator business profiles and their status.',
-    badge: 'Directory',
-    icon: Users,
-    stats: [
-      { label: 'Total Locators', value: '—' },
-      { label: 'Active', value: '—' },
-      { label: 'Deactivated', value: '—' },
-    ],
-    table: {
-      columns: ['Business Name', 'TIN', 'Registration No.', 'Status', 'Last Updated'],
-      rows: [
-        ['SkyPort Logistics Inc.', '—', 'SEC-2026-0310', 'Active', 'Mar 10, 2026'],
-        ['GreenFuel Terminals Corp.', '—', 'SEC-2024-0182', 'Active', 'Mar 09, 2026'],
-        ['Metro Agro Trading', '—', 'DTI-24-8931', 'Inactive', 'Feb 12, 2026'],
       ],
     },
   },

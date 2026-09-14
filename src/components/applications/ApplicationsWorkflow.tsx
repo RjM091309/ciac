@@ -117,8 +117,11 @@ function getBadgeStyles(status: string) {
   if (s === 'REJECTED' || s === 'INCOMPLETE') {
     return { bg: 'rgba(239,68,68,.14)', color: '#ef4444', border: 'rgba(239,68,68,.38)' };
   }
-  if (s === 'UNDER_REVIEW') {
+  if (s === 'UNDER_REVIEW' || s === 'FOR_APPROVAL') {
     return { bg: 'rgba(59,130,246,.14)', color: '#3b82f6', border: 'rgba(59,130,246,.38)' };
+  }
+  if (s === 'DISAPPROVED') {
+    return { bg: 'rgba(220,38,38,.14)', color: '#dc2626', border: 'rgba(220,38,38,.38)' };
   }
   return { bg: 'rgba(148,163,184,.14)', color: '#94a3b8', border: 'rgba(148,163,184,.28)' };
 }
@@ -812,28 +815,6 @@ export function ApplicationsWorkflow({
     }
   }
 
-  async function updateRequirementStatus(row: AppRequirementRow, nextStatus: string) {
-    setSaving(true);
-    try {
-      const res = await fetch(api(`/api/applications/requirements/${row.id}/status`), {
-        method: 'PATCH',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: nextStatus, remarks: row.remarks ?? null }),
-      });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok || !json?.success) throw new Error(json?.message || 'Failed to update requirement');
-      toast.success(`Requirement marked as ${nextStatus}`);
-      requestNotificationsRefresh();
-      if (selectedId) await loadDetails(selectedId);
-      await refreshBase({ showLoading: false });
-    } catch (error: any) {
-      toast.error(error?.message || 'Failed to update requirement');
-    } finally {
-      setSaving(false);
-    }
-  }
-
   /** Moves a DRAFT to SUBMITTED or a RETURNED application to RESUBMITTED —
    * the only transition available from a plain button, matching what the
    * server allows via POST /:id/submit (BRM-06/BRM-07). */
@@ -861,10 +842,7 @@ export function ApplicationsWorkflow({
 
   return (
     <div className="space-y-4 sm:space-y-5">
-      <div className="flex items-center justify-between gap-2">
-        <h3 className="text-base sm:text-lg font-bold tracking-tight" style={{ color: 'var(--text)' }}>
-          {renewalMode ? 'Renewal Applications Directory' : 'Locators Directory'}
-        </h3>
+      <div className="flex items-center justify-end gap-2">
         <button
           className="rounded-lg px-3 py-2 text-sm font-semibold inline-flex items-center gap-1.5 shadow-sm cursor-pointer"
           style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
@@ -1261,22 +1239,18 @@ export function ApplicationsWorkflow({
                                         </td>
 
                                         <td className="px-3 py-3.5 align-top">
-                                          <select
-                                            value={effectiveDisplayStatus || 'PENDING'}
-                                            onChange={(e) => updateRequirementStatus(r, e.target.value)}
-                                            className="text-xs rounded-lg border py-1.5 pl-2.5 pr-7 bg-transparent"
+                                          {/* Read-only here — verifying/rejecting a requirement happens in
+                                              Assessment Evaluation, the one place that owns this status now. */}
+                                          <span
+                                            className="inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold border"
                                             style={{
                                               borderColor: effectiveBadge.border,
                                               color: effectiveBadge.color,
                                               backgroundColor: effectiveBadge.bg,
                                             }}
-                                            disabled={saving}
                                           >
-                                            <option value="PENDING">PENDING</option>
-                                            <option value="PENDING_REVIEW">PENDING_REVIEW</option>
-                                            <option value="VERIFIED">VERIFIED</option>
-                                            <option value="REJECTED">REJECTED</option>
-                                          </select>
+                                            {effectiveDisplayStatus || 'PENDING'}
+                                          </span>
                                         </td>
 
                                         <td className="px-2 py-3.5 align-top text-right">

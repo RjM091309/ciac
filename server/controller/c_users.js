@@ -1,3 +1,4 @@
+const bcrypt = require("bcryptjs");
 const User = require("../models/User");
 const AuditLog = require("../models/AuditLog");
 const Proponent = require("../models/Proponent");
@@ -420,6 +421,51 @@ exports.reject = async (req, res) => {
     return res.json({ success: true, data: updated });
   } catch (error) {
     console.error("Reject user error:", error);
+    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+  }
+};
+
+// --- Self-service password change (topbar "Change Password") ---
+
+exports.changeMyPassword = async (req, res) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) return res.status(401).json({ success: false, message: "Access token required" });
+
+    const { currentPassword, newPassword } = req.body || {};
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ success: false, message: "Current and new password are required." });
+    }
+
+    const storedHash = await User.getPasswordHashById(userId);
+    if (!storedHash || !storedHash.startsWith("$2")) {
+      return res.status(400).json({ success: false, message: "Account password is using an unsupported format. Ask admin to reset your password." });
+    }
+    const matches = await bcrypt.compare(String(currentPassword), storedHash);
+    if (!matches) {
+      return res.status(400).json({ success: false, message: "Current password is incorrect." });
+    }
+
+    const strengthError = validatePasswordStrength(newPassword);
+    if (strengthError) return res.status(400).json({ success: false, message: strengthError });
+
+    if (String(newPassword) === String(currentPassword)) {
+      return res.status(400).json({ success: false, message: "New password must be different from your current password." });
+    }
+
+    await User.changeOwnPassword(userId, newPassword);
+    await AuditLog.record({
+      actorId: userId,
+      actorUsername: req.user?.username,
+      action: "USER_PASSWORD_SELF_CHANGE",
+      entityType: "user",
+      entityId: userId,
+      ipAddress: req.ip,
+    });
+
+    return res.json({ success: true, message: "Password updated." });
+  } catch (error) {
+    console.error("Change own password error:", error);
     return res.status(500).json({ success: false, message: error.message || "Internal server error" });
   }
 };

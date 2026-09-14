@@ -4,6 +4,8 @@ const authController = require("../controller/c_auth");
 
 router.post("/login", authController.login);
 router.post("/logout", authController.logout);
+router.post("/forgot-password", authController.forgotPassword);
+router.post("/reset-password", authController.resetPassword);
 router.get("/logout", (req, res) => {
   res.clearCookie("jwt");
   const frontend = process.env.FRONTEND_URL;

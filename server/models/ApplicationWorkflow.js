@@ -970,6 +970,23 @@ async function createDocument({
     ]
   );
   const id = result?.recordset?.[0]?.id;
+
+  // A reupload against a previously REJECTED requirement is a new submission
+  // that needs review again — otherwise it stays REJECTED until an officer
+  // happens to revisit it, even though a fresh document is now sitting there
+  // unreviewed. Only REJECTED resets; VERIFIED never reaches here since the
+  // proponent UI disables reupload once a requirement is VERIFIED.
+  if (toInt(requirement_id)) {
+    await updateData(
+      `
+      UPDATE dbo.application_requirements
+      SET status = 'PENDING', updated_at = SYSUTCDATETIME()
+      WHERE application_id = @param0 AND requirement_id = @param1 AND status = 'REJECTED'
+      `,
+      [toInt(application_id), toInt(requirement_id)]
+    );
+  }
+
   const rows = await selectData(
     `
     SELECT TOP (1)

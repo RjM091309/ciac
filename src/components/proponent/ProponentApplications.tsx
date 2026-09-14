@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, ClipboardList, Download, FileText, History, Loader2, Pencil, Plus, ScrollText, Send, Table2, Trash2, Upload } from 'lucide-react';
+import { ArrowLeft, ClipboardList, FileText, History, Loader2, Pencil, Plus, ScrollText, Send, Table2, Trash2, Upload } from 'lucide-react';
 import { toast } from 'sonner';
 import { EmptyState } from '../ui/EmptyState';
 import { SidePanel } from '../ui/SidePanel';
@@ -374,7 +374,6 @@ type DetailData = {
 const TABS = [
   { id: 'overview', label: 'Overview', icon: Table2 },
   { id: 'requirements', label: 'Requirements', icon: ClipboardList },
-  { id: 'documents', label: 'Documents', icon: FileText },
   { id: 'history', label: 'History', icon: History },
   { id: 'contract', label: 'Contract & Permits', icon: ScrollText },
 ] as const;
@@ -616,6 +615,33 @@ function ApplicationDetail({ applicationId, navigate }: { applicationId: number;
   }
 
   const { application: app, requirements, documents, history, contract, permits } = data;
+
+  // History tab: status changes and document uploads merged into one
+  // chronological trail (both already come back newest-first) instead of
+  // requiring the locator to cross-reference two separate tabs.
+  type TimelineEntry =
+    | { kind: 'status'; id: string; at: string; from_status: string | null; to_status: string; remarks: string | null }
+    | { kind: 'document'; id: string; at: string; docId: number; file_name: string; requirement_code: string | null; requirement_name: string | null };
+  const timeline: TimelineEntry[] = [
+    ...history.map((h): TimelineEntry => ({
+      kind: 'status',
+      id: `s-${h.id}`,
+      at: h.changed_at,
+      from_status: h.from_status,
+      to_status: h.to_status,
+      remarks: h.remarks,
+    })),
+    ...documents.map((d): TimelineEntry => ({
+      kind: 'document',
+      id: `d-${d.id}`,
+      at: d.created_at || '',
+      docId: d.id,
+      file_name: d.original_file_name || d.file_name,
+      requirement_code: d.requirement_code,
+      requirement_name: d.requirement_name,
+    })),
+  ].sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
+
   const status = String(app.status || '').toUpperCase();
   const isDraft = status === 'DRAFT';
   const isReturned = status === 'RETURNED';
@@ -717,7 +743,6 @@ function ApplicationDetail({ applicationId, navigate }: { applicationId: number;
               }}
             >
               <Icon size={13} /> {t.label}
-              {t.id === 'documents' && documents.length ? ` (${documents.length})` : ''}
             </button>
           );
         })}
@@ -737,41 +762,6 @@ function ApplicationDetail({ applicationId, navigate }: { applicationId: number;
       )}
 
       {tab === 'requirements' && (
-        <Card>
-          {requirements.length === 0 ? (
-            <EmptyState title="No requirements" description="No requirement checklist has been attached to this application yet." />
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="min-w-full text-left text-xs">
-                <thead>
-                  <tr>
-                    {['Requirement', 'Mandatory', 'Status', 'Remarks'].map((c) => (
-                      <th key={c} className="px-3 py-2 font-semibold text-[10px] uppercase tracking-widest text-secondary border-b" style={{ borderColor: 'var(--border-subtle)' }}>
-                        {c}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {requirements.map((r) => (
-                    <tr key={r.id} className="border-b last:border-b-0" style={{ borderColor: 'var(--border-subtle)' }}>
-                      <td className="px-3 py-2 text-[11px]" style={{ color: 'var(--text)' }}>
-                        <span className="font-semibold">{r.requirement_code ? `${r.requirement_code} — ` : ''}{r.requirement_name || 'Requirement'}</span>
-                        {r.requirement_description ? <div className="text-secondary mt-0.5">{r.requirement_description}</div> : null}
-                      </td>
-                      <td className="px-3 py-2 text-[11px] text-secondary">{Number(r.is_mandatory) ? 'Yes' : 'No'}</td>
-                      <td className="px-3 py-2 text-[11px]"><StatusPill status={r.status} /></td>
-                      <td className="px-3 py-2 text-[11px] text-secondary">{r.remarks || '—'}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </Card>
-      )}
-
-      {tab === 'documents' && (
         <Card>
           <div
             className="rounded-lg border border-dashed p-4 mb-4 flex flex-col sm:flex-row sm:items-end gap-3"
@@ -821,65 +811,138 @@ function ApplicationDetail({ applicationId, navigate }: { applicationId: number;
               </button>
             </div>
           </div>
-          <p className="text-[10px] text-secondary mb-3">PDF only · up to 10 MB. Select a requirement above before uploading.</p>
+          <p className="text-[10px] text-secondary mb-3">
+            PDF only · up to 10 MB. Select a requirement above, or use Reupload on a row below.
+          </p>
 
-          {documents.length === 0 ? (
-            <EmptyState title="No documents" description="No supporting documents have been recorded for this application yet." />
+          {requirements.length === 0 ? (
+            <EmptyState title="No requirements" description="No requirement checklist has been attached to this application yet." />
           ) : (
-            <ul className="space-y-2">
-              {documents.map((d) => {
-                const isUrl = /^https?:\/\//i.test(d.storage_path || '');
-                const name = d.original_file_name || d.file_name;
-                return (
-                  <li
-                    key={d.id}
-                    className="flex items-center justify-between gap-3 rounded-lg border px-3 py-2"
-                    style={{ borderColor: 'var(--border-subtle)' }}
-                  >
-                    <div className="min-w-0">
-                      <div className="text-[12px] font-semibold truncate" style={{ color: 'var(--text)' }}>{name}</div>
-                      <div className="text-[10px] text-secondary">
-                        {(d.requirement_code || d.requirement_name) ? `${d.requirement_code || ''} ${d.requirement_name || ''}`.trim() + ' · ' : ''}
-                        {fmtDate(d.created_at)}
-                      </div>
-                    </div>
-                    <a
-                      href={isUrl ? d.storage_path : `/api/documents/${d.id}/download`}
-                      target={isUrl ? '_blank' : undefined}
-                      rel="noreferrer"
-                      className="inline-flex items-center gap-1 text-[11px] font-semibold shrink-0"
-                      style={{ color: 'var(--text)' }}
-                    >
-                      <Download size={12} /> {isUrl ? 'Open' : 'Download'}
-                    </a>
-                  </li>
-                );
-              })}
-            </ul>
+            <div className="overflow-x-auto">
+              <table className="min-w-full text-left text-xs">
+                <thead>
+                  <tr>
+                    {['Requirement', 'Mandatory', 'Status', 'Document', 'Remarks', 'Actions'].map((c) => (
+                      <th key={c} className="px-3 py-2 font-semibold text-[10px] uppercase tracking-widest text-secondary border-b" style={{ borderColor: 'var(--border-subtle)' }}>
+                        {c}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {requirements.map((r) => {
+                    // Most recent first (documents ordered DESC by id) — after a
+                    // reject-and-reupload, this is the latest file for the row.
+                    const doc = documents.find((d) => d.requirement_id === r.requirement_id);
+                    return (
+                      <tr key={r.id} className="border-b last:border-b-0" style={{ borderColor: 'var(--border-subtle)' }}>
+                        <td className="px-3 py-2 text-[11px]" style={{ color: 'var(--text)' }}>
+                          <span className="font-semibold">{r.requirement_code ? `${r.requirement_code} — ` : ''}{r.requirement_name || 'Requirement'}</span>
+                          {r.requirement_description ? <div className="text-secondary mt-0.5">{r.requirement_description}</div> : null}
+                        </td>
+                        <td className="px-3 py-2 text-[11px] text-secondary">{Number(r.is_mandatory) ? 'Yes' : 'No'}</td>
+                        <td className="px-3 py-2 text-[11px]"><StatusPill status={r.status} /></td>
+                        <td className="px-3 py-2 text-[11px] text-secondary max-w-[180px]">
+                          {doc ? (
+                            <span className="block truncate" title={doc.original_file_name || doc.file_name}>
+                              {doc.original_file_name || doc.file_name}
+                            </span>
+                          ) : (
+                            <span className="opacity-60">Not uploaded</span>
+                          )}
+                        </td>
+                        <td className="px-3 py-2 text-[11px] text-secondary">{r.remarks || '—'}</td>
+                        <td className="px-3 py-2 text-[11px]">
+                          <div className="flex items-center gap-2.5 whitespace-nowrap">
+                            {doc ? (
+                              <button
+                                onClick={() => window.open(`/api/documents/${doc.id}/download?view=1`, '_blank')}
+                                className="cursor-pointer"
+                                style={{ color: 'var(--text)' }}
+                                title="View submitted PDF"
+                                aria-label="View submitted PDF"
+                              >
+                                <FileText size={14} />
+                              </button>
+                            ) : null}
+                            {r.status !== 'VERIFIED' ? (
+                              <button
+                                onClick={() => {
+                                  setUploadRequirementId(String(r.requirement_id));
+                                  fileInputRef.current?.click();
+                                }}
+                                disabled={uploading}
+                                className="cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                                style={{ color: 'var(--nav-active-bg)' }}
+                                title={doc ? 'Reupload document' : 'Upload document'}
+                                aria-label={doc ? 'Reupload document' : 'Upload document'}
+                              >
+                                <Upload size={14} />
+                              </button>
+                            ) : null}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           )}
         </Card>
       )}
 
       {tab === 'history' && (
         <Card>
-          {history.length === 0 ? (
-            <EmptyState title="No history" description="No status changes have been recorded for this application yet." />
+          {timeline.length === 0 ? (
+            <EmptyState title="No history" description="No status changes or document uploads have been recorded for this application yet." />
           ) : (
             <ol className="relative border-l ml-2" style={{ borderColor: 'var(--border-subtle)' }}>
-              {history.map((h) => (
-                <li key={h.id} className="ml-4 pb-4 last:pb-0">
-                  <span
-                    className="absolute -left-[5px] mt-1.5 h-2.5 w-2.5 rounded-full"
-                    style={{ backgroundColor: getStatusBadgeStyles(h.to_status).color }}
-                  />
-                  <div className="flex items-center gap-2 flex-wrap">
-                    {h.from_status ? <span className="text-[11px] text-secondary">{h.from_status} →</span> : null}
-                    <StatusPill status={h.to_status} />
-                    <span className="text-[10px] text-secondary">{fmtDateTime(h.changed_at)}</span>
-                  </div>
-                  {h.remarks ? <div className="text-[11px] text-secondary mt-1">{h.remarks}</div> : null}
-                </li>
-              ))}
+              {timeline.map((entry) =>
+                entry.kind === 'status' ? (
+                  <li key={entry.id} className="ml-4 pb-4 last:pb-0">
+                    <span
+                      className="absolute -left-[5px] mt-1.5 h-2.5 w-2.5 rounded-full"
+                      style={{ backgroundColor: getStatusBadgeStyles(entry.to_status).color }}
+                    />
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {entry.from_status ? <span className="text-[11px] text-secondary">{entry.from_status} →</span> : null}
+                      <StatusPill status={entry.to_status} />
+                      <span className="text-[10px] text-secondary">{fmtDateTime(entry.at)}</span>
+                    </div>
+                    {entry.remarks ? <div className="text-[11px] text-secondary mt-1">{entry.remarks}</div> : null}
+                  </li>
+                ) : (
+                  <li key={entry.id} className="ml-4 pb-4 last:pb-0">
+                    <span
+                      className="absolute -left-[5px] mt-1.5 h-2.5 w-2.5 rounded-full"
+                      style={{ backgroundColor: 'var(--text-muted)' }}
+                    />
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span
+                        className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold border"
+                        style={{ borderColor: 'var(--border-subtle)', color: 'var(--text-secondary)' }}
+                      >
+                        <Upload size={10} /> Document uploaded
+                      </span>
+                      <span className="text-[10px] text-secondary">{fmtDateTime(entry.at)}</span>
+                    </div>
+                    <button
+                      onClick={() => window.open(`/api/documents/${entry.docId}/download?view=1`, '_blank')}
+                      className="inline-flex items-center gap-1 text-[11px] font-semibold mt-1 cursor-pointer hover:underline"
+                      style={{ color: 'var(--text)' }}
+                    >
+                      <FileText size={12} />
+                      {entry.file_name}
+                      {(entry.requirement_code || entry.requirement_name) ? (
+                        <span className="text-secondary font-normal">
+                          · {entry.requirement_code || entry.requirement_name}
+                        </span>
+                      ) : null}
+                    </button>
+                  </li>
+                )
+              )}
             </ol>
           )}
         </Card>

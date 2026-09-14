@@ -6,13 +6,15 @@ import {
   ClipboardCheck,
   FileCheck,
   Globe,
+  HeartHandshake,
   LayoutDashboard,
   LogOut,
+  Megaphone,
   Settings,
   ShieldCheck,
   Sparkles,
-  Stamp,
   Users,
+  Workflow,
 } from 'lucide-react';
 import { useControlPanelAccess } from '../context/ControlPanelAccessContext';
 import { cn } from '../lib/utils';
@@ -111,10 +113,15 @@ const SidebarSubItem = ({
   label,
   onClick,
   active,
+  icon: Icon,
 }: {
   label: string;
   onClick?: () => void;
   active?: boolean;
+  /** Optional — most dropdowns just use the plain bullet below; a group
+   * whose items are distinct enough to earn their own icon (e.g. Operations
+   * & Assets) can pass one per leaf instead. */
+  icon?: any;
 }) => {
   return (
     <button
@@ -124,12 +131,16 @@ const SidebarSubItem = ({
         active ? 'text-[var(--text)]' : 'text-[var(--text-muted)]',
       )}
     >
-      <span
-        className={cn(
-          'w-1.5 h-1.5 rounded-full transition-colors',
-          active ? 'bg-[var(--text)]' : 'bg-[var(--text-muted)] group-hover:bg-[var(--text)]',
-        )}
-      />
+      {Icon ? (
+        <Icon size={14} className="shrink-0" />
+      ) : (
+        <span
+          className={cn(
+            'w-1.5 h-1.5 rounded-full transition-colors',
+            active ? 'bg-[var(--text)]' : 'bg-[var(--text-muted)] group-hover:bg-[var(--text)]',
+          )}
+        />
+      )}
       <span className="flex-1 text-left leading-snug whitespace-nowrap overflow-hidden text-ellipsis">
         {label}
       </span>
@@ -167,7 +178,7 @@ const SidebarDropdown = ({
   );
 };
 
-type SidebarLeaf = { key: string; label: string; active: boolean; onClick: () => void };
+type SidebarLeaf = { key: string; label: string; active: boolean; onClick: () => void; icon?: any };
 
 /** Stands in for a lucide icon component so SidebarItem can render a plain
  * bullet — used for flattened leaf rows, which don't each need their own
@@ -219,10 +230,19 @@ const SidebarSection = ({
     );
   }
 
+  // A dropdown that only ever holds one item (e.g. Assessment, Approval —
+  // each backed by a single queue) has nothing to expand into; the chevron
+  // and extra click are pure friction. Render it as one direct row instead,
+  // under the group's own icon/label, same as any other top-level item.
+  if (items.length === 1) {
+    const only = items[0];
+    return <SidebarItem icon={icon} label={label} active={only.active} onClick={only.onClick} collapsed={collapsed} />;
+  }
+
   return (
     <SidebarDropdown icon={icon} label={label} collapsed={collapsed} isOpen={isOpen} onToggle={onToggle}>
       {items.map((item) => (
-        <SidebarSubItem key={item.key} label={item.label} active={item.active} onClick={item.onClick} />
+        <SidebarSubItem key={item.key} label={item.label} active={item.active} onClick={item.onClick} icon={item.icon} />
       ))}
     </SidebarDropdown>
   );
@@ -271,12 +291,9 @@ export function AppSidebar({
   const showApplicationsMgmt =
     canView('applications:new') ||
     canView('applications:renewals') ||
-    canView('applications:projects') ||
-    canView('settings:proponents') ||
     canView('applications:requirements') ||
-    canView('settings:requirement-categories');
-  const showAssessment = canView('assessment:queue');
-  const showApproval = canView('approval:queue');
+    canView('assessment:queue') ||
+    canView('approval:queue');
   const showComplianceInspection = canView('compliance:inspections');
   const showPermits = canView('compliance:permits');
   const showBirTax = canView('compliance:bir');
@@ -288,7 +305,10 @@ export function AppSidebar({
     canView('settings:locator-users') ||
     canView('settings:control-panel') ||
     canView('settings:audit-log');
-  const showFileMaintenance = canView('settings:inspection-types') || canView('settings:compliance-types');
+  const showFileMaintenance =
+    canView('settings:inspection-types') ||
+    canView('settings:compliance-types') ||
+    canView('settings:requirement-categories');
   const showSystemGroup = showSystemSettings || showFileMaintenance;
 
   // Officer/Locator-style restricted roles (previewed or real) get a flat
@@ -298,17 +318,8 @@ export function AppSidebar({
   const applicationsItems: SidebarLeaf[] = [
     canView('applications:new') && { key: 'applications:new', label: 'New Applications', active: view === 'applications:new', onClick: () => onViewChange('applications:new') },
     canView('applications:renewals') && { key: 'applications:renewals', label: 'Renewal Tracking', active: view === 'applications:renewals', onClick: () => onViewChange('applications:renewals') },
-    canView('applications:projects') && { key: 'applications:projects', label: 'Project Evaluations', active: view === 'applications:projects', onClick: () => onViewChange('applications:projects') },
-    canView('settings:proponents') && { key: 'settings:proponents', label: 'Locator Management', active: view === 'settings:proponents', onClick: () => onViewChange('settings:proponents') },
     canView('applications:requirements') && { key: 'applications:requirements', label: 'Requirements', active: view === 'applications:requirements', onClick: () => onViewChange('applications:requirements') },
-    canView('settings:requirement-categories') && { key: 'settings:requirement-categories', label: 'Requirement Categories', active: view === 'settings:requirement-categories', onClick: () => onViewChange('settings:requirement-categories') },
-  ].filter(Boolean) as SidebarLeaf[];
-
-  const assessmentItems: SidebarLeaf[] = [
     canView('assessment:queue') && { key: 'assessment:queue', label: 'Evaluation Queue', active: view === 'assessment:queue', onClick: () => onViewChange('assessment:queue') },
-  ].filter(Boolean) as SidebarLeaf[];
-
-  const approvalItems: SidebarLeaf[] = [
     canView('approval:queue') && { key: 'approval:queue', label: 'Approval Queue', active: view === 'approval:queue', onClick: () => onViewChange('approval:queue') },
   ].filter(Boolean) as SidebarLeaf[];
 
@@ -329,9 +340,9 @@ export function AppSidebar({
   ].filter(Boolean) as SidebarLeaf[];
 
   const operationsItems: SidebarLeaf[] = [
-    canView('operations:flowcharts') && { key: 'operations:flowcharts', label: 'Production Flowcharts', active: view === 'operations:flowcharts', onClick: () => onViewChange('operations:flowcharts') },
-    canView('operations:brochures') && { key: 'operations:brochures', label: 'Brochures & Marketing', active: view === 'operations:brochures', onClick: () => onViewChange('operations:brochures') },
-    canView('operations:gad') && { key: 'operations:gad', label: 'GAD Programs', active: view === 'operations:gad', onClick: () => onViewChange('operations:gad') },
+    canView('operations:flowcharts') && { key: 'operations:flowcharts', label: 'Production Flowcharts', active: view === 'operations:flowcharts', onClick: () => onViewChange('operations:flowcharts'), icon: Workflow },
+    canView('operations:brochures') && { key: 'operations:brochures', label: 'Brochures & Marketing', active: view === 'operations:brochures', onClick: () => onViewChange('operations:brochures'), icon: Megaphone },
+    canView('operations:gad') && { key: 'operations:gad', label: 'GAD Programs', active: view === 'operations:gad', onClick: () => onViewChange('operations:gad'), icon: HeartHandshake },
   ].filter(Boolean) as SidebarLeaf[];
 
   const systemSettingsItems: SidebarLeaf[] = [
@@ -342,6 +353,7 @@ export function AppSidebar({
   ].filter(Boolean) as SidebarLeaf[];
 
   const fileMaintenanceItems: SidebarLeaf[] = [
+    canView('settings:requirement-categories') && { key: 'settings:requirement-categories', label: 'Requirement Categories', active: view === 'settings:requirement-categories', onClick: () => onViewChange('settings:requirement-categories') },
     canView('settings:inspection-types') && { key: 'settings:inspection-types', label: 'Inspection Types', active: view === 'settings:inspection-types', onClick: () => onViewChange('settings:inspection-types') },
     canView('settings:compliance-types') && { key: 'settings:compliance-types', label: 'Compliance Types', active: view === 'settings:compliance-types', onClick: () => onViewChange('settings:compliance-types') },
   ].filter(Boolean) as SidebarLeaf[];
@@ -394,38 +406,6 @@ export function AppSidebar({
           </SidebarGroup>
           )}
 
-          {showAssessment && (
-          <SidebarGroup title="Assessment & Evaluation" collapsed={collapsed}>
-            <div className="flex flex-col gap-1.5">
-              <SidebarSection
-                icon={ClipboardCheck}
-                label="Assessment"
-                items={assessmentItems}
-                flat={flat}
-                collapsed={collapsed}
-                isOpen={openDropdownId === 'assessment'}
-                onToggle={() => toggleDropdown('assessment')}
-              />
-            </div>
-          </SidebarGroup>
-          )}
-
-          {showApproval && (
-          <SidebarGroup title="Approval & Issuance" collapsed={collapsed}>
-            <div className="flex flex-col gap-1.5">
-              <SidebarSection
-                icon={Stamp}
-                label="Approval"
-                items={approvalItems}
-                flat={flat}
-                collapsed={collapsed}
-                isOpen={openDropdownId === 'approval'}
-                onToggle={() => toggleDropdown('approval')}
-              />
-            </div>
-          </SidebarGroup>
-          )}
-
           {showComplianceGroup && (
           <SidebarGroup title="Compliance & Permits" collapsed={collapsed}>
             <div className="flex flex-col gap-1.5">
@@ -472,15 +452,16 @@ export function AppSidebar({
           {showOperations && (
           <SidebarGroup title="Operations" collapsed={collapsed}>
             <div className="flex flex-col gap-1.5">
-              <SidebarSection
-                icon={Globe}
-                label="Operations & Assets"
-                items={operationsItems}
-                flat={flat}
-                collapsed={collapsed}
-                isOpen={openDropdownId === 'operations'}
-                onToggle={() => toggleDropdown('operations')}
-              />
+              {operationsItems.map((item) => (
+                <SidebarItem
+                  key={item.key}
+                  icon={item.icon || Globe}
+                  label={item.label}
+                  active={item.active}
+                  onClick={item.onClick}
+                  collapsed={collapsed}
+                />
+              ))}
             </div>
           </SidebarGroup>
           )}
