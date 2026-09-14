@@ -3,7 +3,10 @@ import { Loader2 } from 'lucide-react';
 import { OfficerDashboard, type OfficerDashboardData } from './OfficerDashboard';
 import { ProponentDashboard, type ProponentDashboardData } from './ProponentDashboard';
 
-type PreviewRole = 'account-officer' | 'proponent';
+// 'proponent' or the exact name of any staff role (Officer, Account
+// Officer, Assessment Officer, ...) — the backend resolves any non-
+// 'proponent' name generically, so this isn't a fixed union any more.
+type PreviewRole = string;
 type Navigate = (to: string, opts?: { replace?: boolean }) => void;
 
 type PreviewState =
@@ -32,7 +35,7 @@ export function PreviewDashboard({ role, navigate }: { role: PreviewRole; naviga
   useEffect(() => {
     let cancelled = false;
     setState({ status: 'loading' });
-    fetch(`/api/dashboard/preview/${role}`, { credentials: 'include' })
+    fetch(`/api/dashboard/preview/${encodeURIComponent(role)}`, { credentials: 'include' })
       .then((res) => res.json().catch(() => ({})))
       .then((json) => {
         if (cancelled) return;

@@ -1,15 +1,38 @@
 const Workflow = require("../models/ApplicationWorkflow");
 const Proponent = require("../models/Proponent");
+const Role = require("../models/Role");
+const ControlPanelPermission = require("../models/ControlPanelPermission");
 
-/** Staff (admin/officer) can reach any application; a proponent only their
- * own. Returns the application row, or null with `forbidden` set when the
- * caller isn't allowed to see it (vs. not found, which is a plain null). */
+// Same menu set as Notification.js's EVENT_TYPE_MENU_KEYS.application_status
+// — whoever can see one of these queues can open an application's detail.
+const APPLICATION_ACCESS_MENU_KEYS = ["applications:new", "applications:renewals", "assessment:queue", "approval:queue"];
+
+/** Whether `role` (any name — Officer, Account Officer, Assessment Officer,
+ * or any future custom staff role) has Control Panel sidebar access to at
+ * least one application-relevant menu. Checked by permission rather than a
+ * hardcoded `role === "officer"` so a custom role isn't silently forbidden
+ * from every application, and the built-in Officer role can be renamed
+ * without breaking this check. */
+async function hasStaffApplicationAccess(role) {
+  if (role === "admin") return true;
+  const roleId = await Role.getActiveRoleIdByName(role);
+  if (!roleId) return false;
+  const permissions = await ControlPanelPermission.getSidebarPermissions(roleId);
+  return permissions.some(
+    (p) => APPLICATION_ACCESS_MENU_KEYS.includes(p.menu_key) && (Number(p.is_enabled) === 1 || p.is_enabled === true)
+  );
+}
+
+/** Staff (admin, or any role with Control Panel access to an applications
+ * menu) can reach any application; a proponent only their own. Returns the
+ * application row, or null with `forbidden` set when the caller isn't
+ * allowed to see it (vs. not found, which is a plain null). */
 async function loadWithAccess(req, applicationId) {
   const application = await Workflow.getApplicationById(applicationId);
   if (!application) return { application: null, forbidden: false };
 
   const role = String(req.user?.role || "").toLowerCase();
-  if (role === "admin" || role === "officer") return { application, forbidden: false };
+  if (await hasStaffApplicationAccess(role)) return { application, forbidden: false };
 
   if (role === "proponent") {
     const proponent = await Proponent.getProponentByUserId(req.user.id);

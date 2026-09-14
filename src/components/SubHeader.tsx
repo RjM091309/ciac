@@ -1,8 +1,15 @@
 import React, { useState } from 'react';
 import { ChevronRight, Home, ShieldCheck, UserCog, User } from 'lucide-react';
 import { cn } from '../lib/utils';
+import { roleDisplayName } from '../lib/roleDisplay';
 
-export type DashboardPreviewRole = 'admin' | 'account-officer' | 'proponent';
+// 'admin' and 'proponent' are the two fixed tabs; anything else is a staff
+// role's numeric id (as a string), from the Roles table fetched live (see
+// previewStaffRoles below) — not a small hardcoded union, so a newly-added
+// custom role shows up as its own tab without a code change. ID rather than
+// name: unlike the 3 fixed roles, a custom role can be renamed, so a name
+// baked into this value could go stale mid-session.
+export type DashboardPreviewRole = string;
 
 type SubHeaderProps = {
   title?: string;
@@ -11,16 +18,27 @@ type SubHeaderProps = {
   /** Admin-only "preview other roles' dashboard" switcher. Omit to hide it. */
   previewRole?: DashboardPreviewRole;
   onPreviewRoleChange?: (role: DashboardPreviewRole) => void;
+  /** Every role besides the built-in Admin/Locator — Officer, Account
+   * Officer, Assessment Officer, or any other custom role — rendered as its
+   * own tab between the two fixed ones. */
+  previewStaffRoles?: { id: number; name: string }[];
 };
 
-export function SubHeader({ title, description, badge, previewRole, onPreviewRoleChange }: SubHeaderProps) {
+export function SubHeader({
+  title,
+  description,
+  badge,
+  previewRole,
+  onPreviewRoleChange,
+  previewStaffRoles = [],
+}: SubHeaderProps) {
   const roles = [
     { id: 'admin', label: 'Administrator', icon: ShieldCheck },
-    { id: 'account-officer', label: 'Account Officer', icon: UserCog },
+    ...previewStaffRoles.map((r) => ({ id: String(r.id), label: roleDisplayName(r.name), icon: UserCog })),
     { id: 'proponent', label: 'Locator', icon: User },
-  ] as const;
+  ];
 
-  const [shimmerRole, setShimmerRole] = useState<(typeof roles)[number]['id'] | null>(null);
+  const [shimmerRole, setShimmerRole] = useState<string | null>(null);
   const showRoleSwitcher = Boolean(onPreviewRoleChange);
 
   return (
@@ -81,7 +99,12 @@ export function SubHeader({ title, description, badge, previewRole, onPreviewRol
                     isActive ? 'text-[var(--nav-active-text)]' : 'text-secondary',
                   )}
                 />
-                <span>{role.label}</span>
+                {/* uppercase via CSS, not by relying on the label's own
+                    casing — a custom role's stored name (and so its
+                    roleDisplayName() output) isn't guaranteed uppercase,
+                    while the two fixed tabs are typed that way here. This
+                    keeps every tab visually consistent regardless of source. */}
+                <span className="uppercase">{role.label}</span>
               </button>
             );
           })}

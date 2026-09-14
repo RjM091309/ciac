@@ -228,7 +228,7 @@ export function AppHeader({
     clearAllToastIdRef.current = toast(`${count} locator updates waiting`, {
       duration: Infinity,
       closeButton: true,
-      position: 'bottom-right',
+      toasterId: 'locator-events',
       action: {
         label: 'Clear all',
         onClick: () => {
@@ -291,7 +291,7 @@ export function AppHeader({
         description: item.message,
         duration: Infinity,
         closeButton: true,
-        position: 'bottom-right',
+        toasterId: 'locator-events',
         action:
           item.targetPath && item.applicationId
             ? { label: 'View', onClick: () => handleNotificationClick(item) }

@@ -11,10 +11,13 @@ function api(path: string) {
   return path;
 }
 
-// Matched literally (lowercased) throughout login/permission/routing logic —
-// renaming or retiring one silently breaks every user on that role, not just
-// its label. Mirrors the same guard in server/controller/c_roles.js.
-const SYSTEM_ROLE_NAMES = ['ADMIN', 'OFFICER', 'PROPONENT'];
+// Fixed roles — locked against rename/retire in this UI. Mirrors the same
+// list in server/controller/c_roles.js: ADMIN/PROPONENT are matched
+// literally throughout login/permission/routing logic, while ACCOUNT
+// OFFICER/ASSESSMENT OFFICER have no such code dependency — they're locked
+// because the client treats them as fixed organizational positions. Any
+// other role stays freely renameable/retireable.
+const SYSTEM_ROLE_NAMES = ['ADMIN', 'PROPONENT', 'ACCOUNT OFFICER', 'ASSESSMENT OFFICER'];
 function isSystemRoleName(name: string) {
   return SYSTEM_ROLE_NAMES.includes(name.trim().toUpperCase());
 }
@@ -22,7 +25,15 @@ function isSystemRoleName(name: string) {
 /** Role CRUD (TOR: "user role management") — roles previously could only be
  * listed (for the assignment dropdown), never created/edited/retired from
  * the app itself. Admin-only, enforced server-side too. */
-export function RolesPanel({ onChanged }: { onChanged: () => void }) {
+export function RolesPanel({
+  onChanged,
+  navigate,
+}: {
+  onChanged: () => void;
+  /** Optional — omitting it just drops the "Configure in Control Panel"
+   * nudge after creating a role, everything else still works. */
+  navigate?: (to: string, opts?: { replace?: boolean }) => void;
+}) {
   const [open, setOpen] = useState(false);
   const [roles, setRoles] = useState<Role[]>([]);
   const [loading, setLoading] = useState(false);
@@ -79,10 +90,30 @@ export function RolesPanel({ onChanged }: { onChanged: () => void }) {
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json?.message || 'Failed to save role');
-      toast.success(editing ? 'Role updated' : 'Role created');
+      const wasCreate = !editing;
+      const newRoleId = json?.data?.id;
       startCreate();
       await load();
       onChanged();
+      // A freshly created role starts with zero Control Panel permissions
+      // (fail-closed — see ControlPanelPermission.isSidebarVisible) — no
+      // sidebar menus, no dashboard widgets, nothing. Without this nudge an
+      // admin who stops at "Add Role" walks away thinking it's done, then
+      // wonders why the new role's users see a completely empty app.
+      if (wasCreate && navigate && Number.isFinite(Number(newRoleId))) {
+        toast.success('Role created', {
+          description: 'It has no menu access yet — set that up in Control Panel.',
+          action: {
+            label: 'Configure in Control Panel',
+            onClick: () => {
+              setOpen(false);
+              navigate(`/settings/control-panel?roleId=${newRoleId}`);
+            },
+          },
+        });
+      } else {
+        toast.success(editing ? 'Role updated' : 'Role created');
+      }
     } catch (e: any) {
       toast.error(e?.message || 'Failed to save role');
     } finally {

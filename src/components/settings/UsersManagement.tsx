@@ -52,7 +52,13 @@ function isLocatorRoleName(name: string) {
   return String(name || '').trim().toUpperCase() === 'PROPONENT';
 }
 
-export function UsersManagement() {
+export function UsersManagement({
+  navigate,
+}: {
+  /** Optional — passed through to RolesPanel for its "Configure in Control
+   * Panel" nudge after creating a role; omitting it just drops that link. */
+  navigate?: (to: string, opts?: { replace?: boolean }) => void;
+} = {}) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<UserRow | null>(null);
@@ -392,7 +398,7 @@ export function UsersManagement() {
             User Management List
           </h3>
           <div className="flex items-center gap-2">
-            <RolesPanel onChanged={() => refresh({ showLoading: false })} />
+            <RolesPanel onChanged={() => refresh({ showLoading: false })} navigate={navigate} />
             <button
               className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-semibold shadow-sm cursor-pointer"
               style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}

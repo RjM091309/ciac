@@ -179,31 +179,44 @@ exports.getMyDashboard = async (req, res) => {
       });
     }
 
-    if (role === "officer") {
-      const applications = await Workflow.listApplicationsForOfficer(req.user.id);
+    if (role === "admin") {
+      // Only the literal admin role gets the real system-wide overview —
+      // this used to be the fallback for "officer or anything else", which
+      // meant a custom staff role (Account Officer, Assessment Officer, or
+      // any future one) that isn't literally named "officer" fell through
+      // to here and got the *admin-level* dashboard (every application,
+      // every proponent) instead of its own scoped view. Not just an
+      // "OFFICER can't be renamed" problem — a real data-exposure bug for
+      // any custom role the moment a user was assigned to it.
+      const [applications, proponents, categoryCompletion, turnaround] = await Promise.all([
+        Workflow.listAllApplicationsWithProgress(),
+        Proponent.listProponents(),
+        Workflow.getRequirementCompletionByCategory(),
+        Workflow.getApplicationTurnaroundStats(),
+      ]);
       return res.json({
         success: true,
-        role: "officer",
-        data: { applications, stats: summarize(applications), attention: attentionQueue(applications) },
+        role,
+        data: {
+          ...summarizeAdmin(applications, proponents),
+          categoryCompletion,
+          turnaround,
+          attention: attentionQueue(applications),
+        },
       });
     }
 
-    // admin (or any other exempt role): real system-wide overview.
-    const [applications, proponents, categoryCompletion, turnaround] = await Promise.all([
-      Workflow.listAllApplicationsWithProgress(),
-      Proponent.listProponents(),
-      Workflow.getRequirementCompletionByCategory(),
-      Workflow.getApplicationTurnaroundStats(),
-    ]);
+    // Every other role — Officer, Account Officer, Assessment Officer, or
+    // any future custom staff role — shares the same scoped "my assigned
+    // applications" dashboard. Sidebar/widget visibility (which menus they
+    // even see) is still driven by that role's own Control Panel
+    // permissions elsewhere; this only controls the *shape* of dashboard
+    // data, which every staff role shares.
+    const applications = await Workflow.listApplicationsForOfficer(req.user.id);
     return res.json({
       success: true,
-      role,
-      data: {
-        ...summarizeAdmin(applications, proponents),
-        categoryCompletion,
-        turnaround,
-        attention: attentionQueue(applications),
-      },
+      role: "officer",
+      data: { applications, stats: summarize(applications), attention: attentionQueue(applications) },
     });
   } catch (error) {
     console.error("Get my dashboard error:", error);
@@ -216,22 +229,11 @@ exports.getMyDashboard = async (req, res) => {
 // system data shaped the same way the real per-role dashboard is.
 exports.getPreview = async (req, res) => {
   try {
-    const previewRole = String(req.params.role || "").toLowerCase();
-
-    if (previewRole === "account-officer" || previewRole === "officer") {
-      const [applications, widgetPermissions, sidebarPermissions] = await Promise.all([
-        Workflow.listAllApplicationsWithProgress(),
-        getWidgetVisibilityForRoleName("officer"),
-        getSidebarVisibilityForRoleName("officer"),
-      ]);
-      return res.json({
-        success: true,
-        role: "officer",
-        widgetPermissions,
-        sidebarPermissions,
-        data: { applications, stats: summarize(applications), attention: attentionQueue(applications) },
-      });
-    }
+    // Express decodes the route param already (e.g. "Account%20Officer" ->
+    // "Account Officer"), so this is the role's exact name as stored, not a
+    // slug — only lower-cased here for the 'proponent' sentinel comparison.
+    const rawPreviewRole = String(req.params.role || "").trim();
+    const previewRole = rawPreviewRole.toLowerCase();
 
     if (previewRole === "proponent") {
       const [widgetPermissions, sidebarPermissions] = await Promise.all([
@@ -262,7 +264,34 @@ exports.getPreview = async (req, res) => {
       });
     }
 
-    return res.status(400).json({ success: false, message: "Unknown preview role" });
+    // Any other value is a role ID — Officer, Account Officer, Assessment
+    // Officer, or any future custom staff role, all sharing the same
+    // officer-style application-management dashboard; only widget/sidebar
+    // visibility differs, driven by that exact role's own Control Panel
+    // permissions. ID rather than name: these roles (unlike the 3 fixed
+    // system ones) CAN be renamed, so a name in the URL could go stale
+    // mid-session, and an ID skips the extra name -> id lookup entirely
+    // since Control Panel permissions are already keyed by role_id.
+    const roleId = Number(rawPreviewRole);
+    if (!Number.isFinite(roleId) || roleId <= 0) {
+      return res.status(400).json({ success: false, message: "Unknown preview role" });
+    }
+    const role = await Role.getRoleById(roleId);
+    if (!role || !role.is_active) {
+      return res.status(400).json({ success: false, message: "Unknown preview role" });
+    }
+    const [applications, widgetPermissions, sidebarPermissions] = await Promise.all([
+      Workflow.listAllApplicationsWithProgress(),
+      ControlPanelPermission.getDashboardWidgetPermissions(roleId),
+      ControlPanelPermission.getSidebarPermissions(roleId),
+    ]);
+    return res.json({
+      success: true,
+      role: "officer",
+      widgetPermissions,
+      sidebarPermissions,
+      data: { applications, stats: summarize(applications), attention: attentionQueue(applications) },
+    });
   } catch (error) {
     console.error("Get dashboard preview error:", error);
     return res.status(500).json({ success: false, message: error.message || "Internal server error" });

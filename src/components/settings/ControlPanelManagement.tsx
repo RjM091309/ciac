@@ -98,10 +98,16 @@ function PermissionToggle({
   );
 }
 
-export function ControlPanelManagement() {
+export function ControlPanelManagement({ locationSearch }: { locationSearch?: string } = {}) {
   const [activeTab, setActiveTab] = useState<'sidebar' | 'crud' | 'widgets'>('sidebar');
   const [roles, setRoles] = useState<Role[]>([]);
-  const [selectedRoleId, setSelectedRoleId] = useState<string>('');
+  // Pre-selects the role named in ?roleId=... (e.g. arriving here via
+  // RolesPanel's "Configure in Control Panel" nudge right after creating a
+  // role) — loadRoles()'s own `prev || ...` fallback below only picks a
+  // default when this is still empty, so a query-param value always wins.
+  const [selectedRoleId, setSelectedRoleId] = useState<string>(
+    () => new URLSearchParams(locationSearch || '').get('roleId') || ''
+  );
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [sidebarPermissions, setSidebarPermissions] = useState<SidebarPermissionMap>({});
@@ -115,12 +121,28 @@ export function ControlPanelManagement() {
     []
   );
 
+  // Every CRUD-capable menu, regardless of current Sidebar visibility — this
+  // stays the full set so saveCrudPermissions() (below) never drops a
+  // hidden menu's already-configured Add/Edit/Delete permissions just
+  // because it isn't rendered this session. Re-checking a Sidebar box later
+  // brings its previously-saved CRUD row right back.
   const crudMenuItems: MenuItem[] = useMemo(
     () =>
       Object.entries(LANDING_CONFIG)
         .filter(([, cfg]) => Boolean((cfg as any)?.isCrud))
         .map(([key, cfg]) => ({ key, label: (cfg as any).title })),
     []
+  );
+
+  // What actually RENDERS as a togglable row — scoped to menus the selected
+  // role can even SEE in their sidebar. A CRUD toggle for a menu they don't
+  // have Sidebar access to would be dead configuration (they can never
+  // reach that screen to use it) and reads as the two tabs disagreeing
+  // about what this role can do. Reactive to sidebarPermissions, not just
+  // the saved value, so unchecking a Sidebar box drops the row immediately.
+  const visibleCrudMenuItems: MenuItem[] = useMemo(
+    () => crudMenuItems.filter((item) => Boolean(sidebarPermissions[item.key])),
+    [crudMenuItems, sidebarPermissions]
   );
 
   const selectedRole = useMemo(
@@ -548,7 +570,12 @@ export function ControlPanelManagement() {
                         Delete
                       </span>
                     </div>
-                    {crudMenuItems.map((item) => {
+                    {visibleCrudMenuItems.length === 0 ? (
+                      <p className="text-[11px] text-secondary px-3 py-4 text-center">
+                        No CRUD-capable modules are enabled for this role in Sidebar Menu Permissions yet.
+                      </p>
+                    ) : null}
+                    {visibleCrudMenuItems.map((item) => {
                       const row = crudPermissions[item.key] || {
                         can_add: false,
                         can_edit: false,

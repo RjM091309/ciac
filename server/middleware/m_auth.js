@@ -114,6 +114,82 @@ function requireMenuAccess(menuKey, action = "view") {
   };
 }
 
+async function checkMenuAllowed(role, menuKey, action) {
+  if (role === "admin") return true;
+  const roleId = await Role.getActiveRoleIdByName(role);
+  if (!roleId) return false;
+  return action === "view"
+    ? await ControlPanelPermission.isSidebarVisible(roleId, menuKey)
+    : await ControlPanelPermission.hasCrudPermission(roleId, menuKey, action);
+}
+
+/**
+ * Gates a route behind ANY ONE of several menu permissions — used where one
+ * screen's data (e.g. GET /api/users, shared by both "User Management" and
+ * "Locator Accounts") is reachable from either sidebar entry, so holding
+ * just one of the two Control Panel permissions should be enough to load it.
+ */
+function requireAnyMenuAccess(menuKeys, action = "view") {
+  return async function anyMenuAccessGuard(req, res, next) {
+    if (!req.user) {
+      return res.status(401).json({ success: false, message: "Access token required" });
+    }
+    const role = String(req.user.role || "").toLowerCase();
+    try {
+      for (const menuKey of menuKeys) {
+        if (await checkMenuAllowed(role, menuKey, action)) return next();
+      }
+      return res.status(403).json({ success: false, message: "Forbidden" });
+    } catch (error) {
+      console.error("Any-menu access check failed:", error);
+      return res.status(500).json({ success: false, message: "Internal server error" });
+    }
+  };
+}
+
+/**
+ * Gates a /api/users route that acts on one specific account (:id) or
+ * creates one (role_id in the body) behind whichever Control Panel
+ * permission actually matches that account — settings:locator-users if the
+ * target holds (or is being given) the Proponent role, settings:users
+ * otherwise. Both "User Management" and "Locator Accounts" call the same
+ * /api/users endpoints under the hood; gating all of it on settings:users
+ * alone meant a role granted only settings:locator-users saw that sidebar
+ * entry but got 403 on every action there, while a role granted only
+ * settings:users could still manage Locator accounts it was never meant to
+ * touch. Falls back to settings:users when the target can't be determined
+ * (e.g. malformed body) — fail toward the stricter of the two.
+ */
+function requireUserMenuAccess(action = "view") {
+  return async function userMenuAccessGuard(req, res, next) {
+    if (!req.user) {
+      return res.status(401).json({ success: false, message: "Access token required" });
+    }
+    const role = String(req.user.role || "").toLowerCase();
+    if (role === "admin") return next();
+
+    try {
+      let isLocatorTarget = false;
+      const targetId = Number(req.params.id);
+      if (Number.isFinite(targetId) && targetId > 0) {
+        isLocatorTarget = await Role.userHasRoleName(targetId, "proponent");
+      } else if (req.body?.role_id) {
+        const targetRole = await Role.getRoleById(Number(req.body.role_id));
+        isLocatorTarget = String(targetRole?.name || "").trim().toLowerCase() === "proponent";
+      }
+      const menuKey = isLocatorTarget ? "settings:locator-users" : "settings:users";
+      const allowed = await checkMenuAllowed(role, menuKey, action);
+      if (!allowed) {
+        return res.status(403).json({ success: false, message: "Forbidden" });
+      }
+      return next();
+    } catch (error) {
+      console.error("User menu access check failed:", error);
+      return res.status(500).json({ success: false, message: "Internal server error" });
+    }
+  };
+}
+
 /**
  * Role-only half of requireProponentSelf's check, exported separately for the
  * one self-service route that must work BEFORE a proponent profile exists —
@@ -201,6 +277,8 @@ module.exports = {
   authenticateToken,
   requireRole,
   requireMenuAccess,
+  requireAnyMenuAccess,
+  requireUserMenuAccess,
   requireProponentRole,
   requireProponentSelf,
   requireOwnApplication,

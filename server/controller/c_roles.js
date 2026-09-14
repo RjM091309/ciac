@@ -1,15 +1,52 @@
 const Role = require("../models/Role");
 const AuditLog = require("../models/AuditLog");
 
-// These three exact names are matched literally, in lowercase, throughout
-// the app's login/permission/routing logic (e.g. "role === 'proponent'")
-// — renaming or deactivating one of them doesn't just change a label, it
-// silently breaks self-service portal access, MFA exemption, and every
-// requireRole() check for every user on that role.
-const SYSTEM_ROLE_NAMES = ["ADMIN", "OFFICER", "PROPONENT"];
+// Fixed roles — locked against rename/retire from the UI. Two different
+// reasons land a name on this list:
+//  - ADMIN, PROPONENT: matched literally (lowercase) throughout the app's
+//    login/permission/routing logic (e.g. "role === 'admin'" for the
+//    Control Panel bypass, "role === 'proponent'" for self-service portal
+//    access and MFA exemption) — renaming or deactivating either one
+//    doesn't just change a label, it silently breaks that logic for every
+//    user on the role.
+//  - ACCOUNT OFFICER, ASSESSMENT OFFICER: no code keys off these literal
+//    strings (they're driven entirely by Control Panel's per-role_id
+//    permissions, same as any custom role) — locked instead because the
+//    client treats these as fixed positions in their organization, not
+//    something an admin should accidentally rename or retire from the UI.
+//    A genuinely new custom role (anything not in this list) stays freely
+//    renameable/retireable.
+const SYSTEM_ROLE_NAMES = ["ADMIN", "PROPONENT", "ACCOUNT OFFICER", "ASSESSMENT OFFICER"];
+
+// Same set, PLUS "LOCATOR" — the cosmetic display name roleDisplayName()
+// (src/lib/roleDisplay.ts) substitutes for "PROPONENT" everywhere a human
+// reads a role name in this app, including right on this very edit form. An
+// admin renaming some other role would only ever see/type "Locator", never
+// the real stored name "PROPONENT" — checking SYSTEM_ROLE_NAMES alone here
+// would let that through and recreate the exact two-roles-mean-"Locator"
+// bug already fixed once this session (server/models/Role.js's seed
+// silently mints a fresh 'proponent' row the next time it doesn't find an
+// exact match, so the app ends up with two competing "Locator" roles again).
+const RESERVED_TARGET_ROLE_NAMES = [...SYSTEM_ROLE_NAMES, "LOCATOR"];
 
 function isSystemRoleName(name) {
   return SYSTEM_ROLE_NAMES.includes(String(name || "").trim().toUpperCase());
+}
+
+function isReservedTargetRoleName(name) {
+  return RESERVED_TARGET_ROLE_NAMES.includes(String(name || "").trim().toUpperCase());
+}
+
+/** roles.name has a UNIQUE index (case-insensitive collation), so renaming
+ * any role to a name already in use — a built-in one or just a duplicate of
+ * another custom role — throws a raw SQL Server error (number 2627) that
+ * would otherwise surface as an unhandled 500. Callers check this first so
+ * the common case gets a clear message instead, but it's also a backstop:
+ * without it, a rename that slips past the explicit isSystemRoleName check
+ * (or just collides with another custom role) still crashes cleanly caught
+ * rather than as a raw 500. */
+function isUniqueNameViolation(error) {
+  return Number(error?.number) === 2627 || Number(error?.originalError?.info?.number) === 2627;
 }
 
 exports.list = async (req, res) => {
@@ -28,7 +65,21 @@ exports.create = async (req, res) => {
     if (!String(name || "").trim()) {
       return res.status(400).json({ success: false, message: "Role name is required" });
     }
-    const row = await Role.createRole({ name, description });
+    if (isReservedTargetRoleName(name)) {
+      return res.status(400).json({
+        success: false,
+        message: `"${String(name).trim()}" is reserved — choose a different name.`,
+      });
+    }
+    let row;
+    try {
+      row = await Role.createRole({ name, description });
+    } catch (error) {
+      if (isUniqueNameViolation(error)) {
+        return res.status(409).json({ success: false, message: `A role named "${String(name).trim()}" already exists.` });
+      }
+      throw error;
+    }
     await AuditLog.record({
       actorId: req.user?.id,
       actorUsername: req.user?.username,
@@ -66,8 +117,28 @@ exports.update = async (req, res) => {
         message: `"${current.name}" is a built-in role name the system relies on and can't be renamed. Only its description can be changed.`,
       });
     }
+    // The other direction: renaming a DIFFERENT role (e.g. Account Officer)
+    // *into* "Admin", "Proponent", or "Locator" — current.name isn't locked
+    // here, so the check above doesn't fire, but it's exactly as unsafe: the
+    // app would then have two roles both matching `role === "proponent"`
+    // (or displaying as "Locator"), and whichever the DB's UNIQUE constraint
+    // let through wins.
+    if (name !== undefined && isReservedTargetRoleName(name) && !isSystemRoleName(current.name)) {
+      return res.status(400).json({
+        success: false,
+        message: `"${String(name).trim()}" is reserved — choose a different name.`,
+      });
+    }
 
-    const row = await Role.updateRole(id, { name, description });
+    let row;
+    try {
+      row = await Role.updateRole(id, { name, description });
+    } catch (error) {
+      if (isUniqueNameViolation(error)) {
+        return res.status(409).json({ success: false, message: `A role named "${String(name).trim()}" already exists.` });
+      }
+      throw error;
+    }
     if (!row) return res.status(404).json({ success: false, message: "Role not found" });
     await AuditLog.record({
       actorId: req.user?.id,

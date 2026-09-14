@@ -188,16 +188,50 @@ export default function App() {
   // scoped to a real locator's own record server-side, so there's no route
   // for an admin session to land on; see the preview placeholder below.
   const [previewProponentView, setPreviewProponentView] = useState<ProponentView>('dashboard');
+  // Populates the dashboard preview switcher's dynamic staff tabs (everything
+  // besides the fixed Administrator/Locator ones) from the live Roles table,
+  // so a newly-added custom role (e.g. "Assessment Officer") shows up there
+  // on its own — no code change needed per role.
+  const [previewStaffRoles, setPreviewStaffRoles] = useState<{ id: number; name: string }[]>([]);
+
+  useEffect(() => {
+    if (user?.role !== 'admin') {
+      setPreviewStaffRoles([]);
+      return;
+    }
+    let cancelled = false;
+    fetch('/api/roles', { credentials: 'include' })
+      .then((res) => res.json())
+      .then((json) => {
+        if (cancelled) return;
+        const rows = Array.isArray(json?.data) ? json.data : [];
+        const staff = rows
+          .filter((r: any) => {
+            const name = String(r?.name || '').trim().toLowerCase();
+            return name && name !== 'admin' && name !== 'proponent';
+          })
+          .map((r: any) => ({ id: Number(r.id), name: String(r.name) }));
+        setPreviewStaffRoles(staff);
+      })
+      .catch(() => {
+        if (!cancelled) setPreviewStaffRoles([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.role]);
 
   useEffect(() => {
     setPreviewProponentView('dashboard');
-    if (dashboardPreviewRole !== 'account-officer' && dashboardPreviewRole !== 'proponent') {
+    if (dashboardPreviewRole === 'admin') {
       setPreviewSidebarPermissions(null);
       return;
     }
     let cancelled = false;
-    const previewRoleParam = dashboardPreviewRole === 'account-officer' ? 'account-officer' : 'proponent';
-    fetch(`/api/dashboard/preview/${previewRoleParam}`, { credentials: 'include' })
+    // dashboardPreviewRole is either 'proponent' or a staff role's numeric id
+    // (as a string, from /api/roles — see previewStaffRoles below), passed
+    // straight through rather than mapped from a small hardcoded set.
+    fetch(`/api/dashboard/preview/${encodeURIComponent(dashboardPreviewRole)}`, { credentials: 'include' })
       .then((res) => res.json())
       .then((json) => {
         if (cancelled) return;
@@ -389,14 +423,30 @@ export default function App() {
     <>
       {/* expand: sonner collapses multiple simultaneous toasts into a stack
           with only the front one fully visible (rest peek behind until
-          hovered) — that was burying the "Clear all" locator-events toast
-          whenever 2+ were open at once, since it wasn't always the
-          frontmost. Expanded keeps every open toast, in every position,
-          fully visible without a hover. */}
-      {/* theme: inverted relative to the page's own light/dark mode (see
-          isDarkMode above) — a black toast on a light page, a white toast on
-          a dark page, so it always pops instead of blending in. */}
+          hovered). theme: inverted relative to the page's own light/dark
+          mode (see isDarkMode above) — a black toast on a light page, a
+          white toast on a dark page, so it always pops instead of blending
+          in. Default z-index (sonner's own, way above every modal) — this
+          is the shared instance every plain toast.success()/toast.error()
+          call in the app renders into, and those are direct feedback for
+          whatever the user just did (e.g. Save inside an open modal), so
+          they must stay visible even with a modal open. */}
       <Toaster richColors position="top-right" expand theme={isDarkMode ? 'light' : 'dark'} />
+      {/* Second, separate instance — only locator-triggered event toasts
+          (tagged with toasterId: 'locator-events' in AppHeader.tsx) render
+          here, never the app's regular success/error toasts. Its lower
+          z-index (index.css, scoped to .locator-events-toaster) is what
+          lets an open modal's own backdrop cover it — a background
+          "a locator did something" ping shouldn't float on top of a modal
+          the officer has open, unlike the Toaster above. */}
+      <Toaster
+        id="locator-events"
+        className="locator-events-toaster"
+        richColors
+        position="bottom-right"
+        expand
+        theme={isDarkMode ? 'light' : 'dark'}
+      />
       <AppLayout
         view={
           isProponent
@@ -419,15 +469,16 @@ export default function App() {
             ? undefined
             : dashboardPreviewRole === 'proponent'
               ? 'proponent'
-              : dashboardPreviewRole === 'account-officer'
-                ? 'officer'
-                : undefined
+              : dashboardPreviewRole === 'admin'
+                ? undefined
+                // Any other staff role — Officer, Account Officer, Assessment
+                // Officer, or any future custom role — shares the same
+                // permission-gated AppSidebar; only sidebarPermissionOverride
+                // below (that role's own Control Panel settings) changes what
+                // it actually shows.
+                : 'officer'
         }
-        sidebarPermissionOverride={
-          dashboardPreviewRole === 'account-officer' || dashboardPreviewRole === 'proponent'
-            ? previewSidebarPermissions
-            : null
-        }
+        sidebarPermissionOverride={dashboardPreviewRole !== 'admin' ? previewSidebarPermissions : null}
         userId={user?.id ?? null}
         backendUrl={backendUrl}
         onLogout={async () => {
@@ -462,6 +513,7 @@ export default function App() {
           <SubHeader
             previewRole={dashboardPreviewRole}
             onPreviewRoleChange={user?.role === 'admin' ? setDashboardPreviewRole : undefined}
+            previewStaffRoles={previewStaffRoles}
           />
         ) : (
           <SubHeader
@@ -518,7 +570,7 @@ export default function App() {
                   <PreviewDashboard role={dashboardPreviewRole} navigate={navigate} />
                 )
               ) : view === 'settings:users' ? (
-                <UsersManagement />
+                <UsersManagement navigate={navigate} />
               ) : view === 'settings:locator-users' ? (
                 <LocatorUsersManagement />
               ) : view === 'applications:new' ? (
@@ -542,7 +594,7 @@ export default function App() {
               ) : view === 'settings:audit-log' ? (
                 <AuditLog />
               ) : view === 'settings:control-panel' ? (
-                <ControlPanelManagement />
+                <ControlPanelManagement locationSearch={locationSearch} />
               ) : view === 'compliance:permits' ? (
                 <PermitsManagement />
               ) : (
@@ -730,7 +782,7 @@ const LANDING_CONFIG: Record<AppView, LandingConfig> = {
     },
   },
   'compliance:permits': {
-    title: 'CDC/CIAC Permits',
+    title: 'Permits',
     description: 'Monitoring of environmental, fire, occupancy and sanitary permits.',
     badge: 'Compliance',
     icon: ShieldCheck,

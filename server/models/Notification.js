@@ -1,5 +1,6 @@
 const { selectData, insertData, updateData, updateSchema } = require("../config/database");
 const { publishToUser } = require("../lib/notificationStream");
+const ControlPanelPermission = require("./ControlPanelPermission");
 
 function toInt(value) {
   if (value === null || value === undefined) return null;
@@ -38,6 +39,28 @@ function normalizeEventType(value) {
   return "application_status";
 }
 
+// Which sidebar menu "owns" each notification eventType. An officer/admin
+// (any role other than the fixed 'admin', which always bypasses this) only
+// receives a notification of this type if their Control Panel sidebar
+// permissions grant them at least one of these menus — so a new custom
+// role (e.g. an "Assessment Officer" scoped to just Evaluation Queue) gets
+// the right slice of notifications automatically, the same way its sidebar
+// is already driven by Control Panel rather than a hardcoded role-name
+// allowlist. Kept intentionally generous (a couple of menus per event)
+// since staff working adjacent queues still want the heads-up — e.g.
+// Applications Management can still see a requirement get verified even
+// though Assessment Evaluation is the one that acts on it.
+const EVENT_TYPE_MENU_KEYS = {
+  application_status: ["applications:new", "applications:renewals", "assessment:queue", "approval:queue"],
+  requirement: ["applications:new", "applications:renewals", "assessment:queue"],
+  document: ["applications:new", "applications:renewals", "assessment:queue"],
+  inspection: ["compliance:inspections"],
+  compliance: ["compliance:inspections", "compliance:permits", "compliance:bir"],
+  assessment: ["assessment:queue"],
+  approval: ["approval:queue"],
+  contract: ["compliance:permits", "applications:new", "applications:renewals"],
+};
+
 async function ensureSchema() {
   await updateSchema(`
     IF OBJECT_ID('dbo.notifications', 'U') IS NOT NULL
@@ -75,7 +98,7 @@ async function getApplicationContext(applicationId) {
   return rows?.[0] || null;
 }
 
-async function resolveApplicationRecipients(application, actorId) {
+async function resolveApplicationRecipients(application, actorId, eventType) {
   const recipients = new Set();
   const createdBy = toInt(application?.created_by);
   const assignedOfficerId = toInt(application?.current_officer_id);
@@ -98,20 +121,50 @@ async function resolveApplicationRecipients(application, actorId) {
     if (proponentUserId) recipients.add(proponentUserId);
   }
 
-  const adminAndOfficerRows = await selectData(
+  // Admins always get every application event — Control Panel exempts them
+  // from per-menu restrictions entirely (see requireMenuAccess bypassing on
+  // role === 'admin'), so they may have no role_sidebar_menu_permissions
+  // rows to match against in the first place.
+  const adminRows = await selectData(
     `
     SELECT DISTINCT u.id
     FROM dbo.users u
     INNER JOIN dbo.user_roles ur ON ur.user_id = u.id
     INNER JOIN dbo.roles r ON r.id = ur.role_id
-    WHERE u.is_active = 1
-      AND LOWER(LTRIM(RTRIM(r.name))) IN ('admin', 'administrator', 'officer', 'account officer')
+    WHERE u.is_active = 1 AND LOWER(LTRIM(RTRIM(r.name))) = 'admin'
     `
   );
-
-  for (const row of adminAndOfficerRows) {
+  for (const row of adminRows) {
     const userId = toInt(row?.id);
     if (userId) recipients.add(userId);
+  }
+
+  // Everyone else (Officer, and any custom role — Account Officer,
+  // Assessment Officer, whatever gets added later) only gets this
+  // notification if their role's Control Panel sidebar permissions grant
+  // at least one of the menus this event type is relevant to.
+  const menuKeys = EVENT_TYPE_MENU_KEYS[normalizeEventType(eventType)] || [];
+  if (menuKeys.length) {
+    await ControlPanelPermission.ensureSchema();
+    const placeholders = menuKeys.map((_, i) => `@param${i}`).join(", ");
+    const staffRows = await selectData(
+      `
+      SELECT DISTINCT u.id
+      FROM dbo.users u
+      INNER JOIN dbo.user_roles ur ON ur.user_id = u.id
+      INNER JOIN dbo.roles r ON r.id = ur.role_id
+      INNER JOIN dbo.role_sidebar_menu_permissions p ON p.role_id = r.id
+      WHERE u.is_active = 1
+        AND LOWER(LTRIM(RTRIM(r.name))) <> 'admin'
+        AND p.is_enabled = 1
+        AND p.menu_key IN (${placeholders})
+      `,
+      menuKeys
+    );
+    for (const row of staffRows) {
+      const userId = toInt(row?.id);
+      if (userId) recipients.add(userId);
+    }
   }
 
   if (normalizedActorId) recipients.add(normalizedActorId);
@@ -170,7 +223,7 @@ async function createApplicationScopedNotifications({
 }) {
   const application = await getApplicationContext(applicationId);
   if (!application) return;
-  const recipients = await resolveApplicationRecipients(application, actorId);
+  const recipients = await resolveApplicationRecipients(application, actorId, eventType);
   for (const recipientUserId of recipients) {
     try {
       await createNotification({

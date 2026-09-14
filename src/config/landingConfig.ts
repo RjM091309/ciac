@@ -181,10 +181,15 @@ export const LANDING_CONFIG: Record<AppView, LandingConfig> = {
     },
   },
   'compliance:permits': {
-    title: 'CDC/CIAC Permits',
+    title: 'Permits',
     description: 'Monitoring of environmental, fire, occupancy and sanitary permits.',
     badge: 'Compliance',
     icon: ShieldCheck,
+    // Backend (r_permits.js) already gates create/edit/deactivate behind
+    // Control Panel CRUD permissions — this flag was missing, so the CRUD
+    // tab never showed a toggle for it and no non-admin role could ever be
+    // granted Add/Edit/Delete here, no matter how Control Panel was set.
+    isCrud: true,
     stats: [
       { label: 'Valid Permits', value: '211' },
       { label: 'Expiring in 30 Days', value: '8' },

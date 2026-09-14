@@ -420,7 +420,7 @@ export function AppSidebar({
               />
               <SidebarSection
                 icon={ShieldCheck}
-                label="CDC/CIAC Permits"
+                label="Permits"
                 items={permitsItems}
                 flat={flat}
                 collapsed={collapsed}
