@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import {
   AlertTriangle,
@@ -225,7 +225,13 @@ function usePagination<T>(items: T[], pageSize: number, page: number) {
   }, [items, pageSize, page]);
 }
 
-export function AssessmentEvaluation() {
+export function AssessmentEvaluation({
+  locationSearch = '',
+  navigate,
+}: {
+  locationSearch?: string;
+  navigate?: (to: string, opts?: { replace?: boolean }) => void;
+} = {}) {
   const { fullAccess, crudPermissions } = useControlPanelAccess();
   const perm = crudPermissions[MENU_KEY] || { can_add: false, can_edit: false, can_delete: false };
   const canAdd = fullAccess || perm.can_add;
@@ -291,6 +297,26 @@ export function AssessmentEvaluation() {
   useEffect(() => {
     setPage(1);
   }, [stageFilter, evaluatorFilter, search]);
+
+  // Deep-link from a notification's "View" button (?applicationId=...): jump
+  // straight to that application's detail drawer, then strip the query params
+  // so a refresh/back doesn't re-trigger it.
+  const consumedNotificationQueryRef = useRef('');
+  useEffect(() => {
+    if (!navigate) return;
+    const search = String(locationSearch || '').trim();
+    if (!search || consumedNotificationQueryRef.current === search) return;
+    const params = new URLSearchParams(search.startsWith('?') ? search : `?${search}`);
+    const rawId = Number(params.get('applicationId') || '');
+    if (!Number.isFinite(rawId) || rawId <= 0) return;
+    consumedNotificationQueryRef.current = search;
+    setSelectedId(rawId);
+    params.delete('applicationId');
+    params.delete('notificationId');
+    params.delete('focus');
+    const cleaned = params.toString();
+    navigate(`/assessment${cleaned ? `?${cleaned}` : ''}`, { replace: true });
+  }, [locationSearch, navigate]);
 
   const pg = usePagination(rows, pageSize, page);
 

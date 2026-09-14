@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import {
   AlertTriangle,
@@ -41,6 +41,7 @@ const ACTION_STATUSES = ['PENDING', 'IN_PROGRESS', 'DONE', 'OVERDUE'];
 
 type InspectionRow = {
   id: number;
+  application_id: number | null;
   proponent_id: number;
   proponent_name: string | null;
   inspection_type_id: number | null;
@@ -232,7 +233,13 @@ function usePagination<T>(items: T[], pageSize: number, page: number) {
   }, [items, pageSize, page]);
 }
 
-export function ComplianceInspections() {
+export function ComplianceInspections({
+  locationSearch = '',
+  navigate,
+}: {
+  locationSearch?: string;
+  navigate?: (to: string, opts?: { replace?: boolean }) => void;
+} = {}) {
   const { fullAccess, crudPermissions } = useControlPanelAccess();
   const perm = crudPermissions[MENU_KEY] || { can_add: false, can_edit: false, can_delete: false };
   const perms = {
@@ -291,6 +298,33 @@ export function ComplianceInspections() {
   useEffect(() => {
     setPage(1);
   }, [statusFilter, typeFilter, search]);
+
+  // Deep-link from a notification's "View" button (?applicationId=...): find
+  // the inspection tied to that application (an inspection's own id, not the
+  // application id, is what the detail drawer is keyed by) and open it. Waits
+  // for the list to finish loading since the match happens against `rows`.
+  const consumedNotificationQueryRef = useRef('');
+  useEffect(() => {
+    if (!navigate || loading) return;
+    const search = String(locationSearch || '').trim();
+    if (!search || consumedNotificationQueryRef.current === search) return;
+    const params = new URLSearchParams(search.startsWith('?') ? search : `?${search}`);
+    const rawId = Number(params.get('applicationId') || '');
+    if (!Number.isFinite(rawId) || rawId <= 0) return;
+    consumedNotificationQueryRef.current = search;
+    const match = rows.find((r) => Number(r.application_id) === rawId);
+    if (match) {
+      setTab('inspections');
+      setSelectedId(match.id);
+    } else {
+      toast.info('No inspection is linked to that application yet.');
+    }
+    params.delete('applicationId');
+    params.delete('notificationId');
+    params.delete('focus');
+    const cleaned = params.toString();
+    navigate(`/compliance/inspections${cleaned ? `?${cleaned}` : ''}`, { replace: true });
+  }, [locationSearch, navigate, rows, loading]);
 
   const pg = usePagination(rows, pageSize, page);
 

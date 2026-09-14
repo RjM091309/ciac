@@ -18,12 +18,24 @@ function mapNotificationRows(rows: any[], userRole: Role, userId?: number | null
         : 'application_status';
     const applicationId = Number(row?.application_id);
     const hasApplicationId = Number.isFinite(applicationId) && applicationId > 0;
+    // Route to whichever module actually owns this event, not always
+    // Applications — an assessment/compliance/approval notification should
+    // deep-link back into that module's own detail view, not dump the user
+    // onto the New/Renewal Applications queue. Document and requirement
+    // events are raised while an application's compliance is being
+    // evaluated, so those deep-link into the Evaluation Queue too.
     const targetPath = hasApplicationId
       ? userRole === 'proponent'
         ? '/me/applications'
-        : Number(row?.application_is_renewal) === 1
-          ? '/applications/renewals'
-          : '/applications/new'
+        : category === 'assessment' || category === 'document' || category === 'requirement'
+          ? '/assessment'
+          : category === 'compliance' || category === 'inspection'
+            ? '/compliance/inspections'
+            : category === 'approval'
+              ? '/approval'
+              : Number(row?.application_is_renewal) === 1
+                ? '/applications/renewals'
+                : '/applications/new'
       : undefined;
     const isRead =
       statusNum === 2 || statusText === 'READ' || statusText === 'SEEN' || statusText === 'READ_BY_USER';

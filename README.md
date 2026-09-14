@@ -8,6 +8,78 @@
 - [Process Track deep-dive](docs/PROCESS-MODULES.md) — Assessment & Evaluation +
   Compliance & Inspection (Modules 4 & 10) in full detail.
 
+## Process Track — RAYNAN (DEV 3)
+
+`raynandizon21` owns the **Process** track: everything that happens to an
+application *after* the locator submits it and *before* it reaches Approval.
+Org-chart nodes: **Assessment · Evaluation · Assignment · Compliance · Inspection**.
+
+| Module | Menu key | API | Frontend | Model |
+|--------|----------|-----|----------|-------|
+| 4 — Assessment & Evaluation | `assessment:queue` | `/api/assessments` | `src/components/assessment/AssessmentEvaluation.tsx` | `server/models/AssessmentEvaluation.js` |
+| 10 — Compliance & Inspection | `compliance:inspections` | `/api/inspections` | `src/components/compliance/ComplianceInspections.tsx` | `server/models/ComplianceInspection.js` |
+
+Both are permission-gated by `requireMenuAccess(<menu key>)`; `admin` gets access
+via `fullAccess`, other roles need it switched on in **Settings → Control Panel**.
+
+### Assessment & Evaluation workflow (Module 4)
+
+Sits between Business Registration (Module 3) and Approval & Issuance (Module 5).
+An Account Officer / evaluator processes each submitted application:
+
+1. **Assignment** — `PATCH /api/assessments/:applicationId/assign` gives the
+   application an evaluator; stage `UNASSIGNED → ASSIGNED`.
+2. **Review** — evaluator moves through stages
+   `ASSIGNED → IN_REVIEW → FOR_RECOMMENDATION` (`PATCH /:applicationId/stage`) and
+   verifies each documentary requirement
+   (`PATCH /api/assessments/requirements/:id/status`).
+3. **Evaluation** — records findings / deficiencies / recommendations
+   (`/:applicationId/findings`) and assesses fees, rentals, taxes and penalties as
+   charge line items (`/:applicationId/charges`; `charges_total` is recomputed in
+   a transaction on every write).
+4. **Recommendation** — `POST /:applicationId/recommendation` with
+   `ENDORSE` / `RETURN` / `DISAPPROVE`, which calls
+   `ApplicationWorkflow.updateApplicationStatus` (→ `FOR_APPROVAL` / `RETURNED` /
+   `DISAPPROVED`) and fires a notification (`eventType: "assessment"`). Stage
+   becomes `COMPLETED` or `RETURNED`; `PATCH /:applicationId/reopen` re-opens a
+   returned assessment.
+
+Every action is written to an append-only `assessment_activity` log. Management
+watches progress on the queue's monitoring stat bar.
+
+### Compliance & Inspection workflow (Module 10)
+
+Schedules and tracks inspections against locators and rolls the results up into a
+per-locator compliance standing.
+
+1. **Schedule** — `POST /api/inspections` creates an inspection (locator required,
+   optional contract / application link, type, target date); status `SCHEDULED`.
+2. **Assignment** — `PATCH /api/inspections/:id/assign` sets the inspector
+   (officer / admin).
+3. **Conduct** — `PATCH /:id/status` moves `SCHEDULED → IN_PROGRESS → COMPLETED`
+   (or `CANCELLED`). During the inspection the inspector logs findings
+   (`/:id/findings`, each with a recommendation and `OPEN / RESOLVED / WAIVED`
+   status) and raises corrective actions (`/:id/actions` — responsible party +
+   due date; status `PENDING / IN_PROGRESS / DONE`, auto-flagged `OVERDUE` past
+   the due date).
+4. **Report & result** — supporting report documents are attached by path/URL
+   (`/:id/documents`, metadata only — this system has no binary upload) and
+   `PATCH /:id/result` records `PASSED / PASSED_WITH_FINDINGS / FAILED`.
+5. **Monitor** — `GET /api/inspections/summary` returns stat counts plus a
+   `by_proponent` compliance-standing rollup shown on the "Compliance Monitor"
+   in-page tab. Notifications (`eventType: "compliance"`) fire only when the
+   inspection is linked to an `application_id`.
+
+`server/models/ComplianceInspection.js` self-migrates its 5 tables
+(`inspections`, `inspection_findings`, `inspection_corrective_actions`,
+`inspection_documents`, `inspection_activity`) once per process.
+
+### Not in this track
+
+The `compliance:bir` (BIR & Tax Records) and `compliance:expiry` (Expiry Calendar)
+sidebar screens are still static placeholders and belong to Records Management
+(Module 6, ROMAR / DEV 4), not the Process track.
+
 ## Two-factor login (Google Authenticator / TOTP)
 
 Non-admin users sign in with username + password **and** a 6-digit code from an

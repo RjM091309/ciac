@@ -528,11 +528,11 @@ export default function App() {
               ) : view === 'applications:requirements' ? (
                 <RequirementsManagement />
               ) : view === 'assessment:queue' ? (
-                <AssessmentEvaluation />
+                <AssessmentEvaluation locationSearch={locationSearch} navigate={navigate} />
               ) : view === 'approval:queue' ? (
-                <ApprovalIssuance />
+                <ApprovalIssuance locationSearch={locationSearch} navigate={navigate} />
               ) : view === 'compliance:inspections' ? (
-                <ComplianceInspections />
+                <ComplianceInspections locationSearch={locationSearch} navigate={navigate} />
               ) : view === 'settings:requirement-categories' ? (
                 <RequirementCategoriesManagement />
               ) : view === 'settings:inspection-types' ? (
