@@ -492,3 +492,17 @@ select.input-field:-webkit-autofill:focus {
   opacity: 0 !important;
   transition: transform 0.3s ease, opacity 0.3s ease !important;
 }
+
+/* sonner defaults its toast container to z-index:999999999 — above literally
+   everything, including this app's own modals/side panels (lowest in use is
+   z-55 — ComplianceInspections' confirm dialog — then SidePanel z-60,
+   ConfirmModal z-70, AppHeader dropdowns z-120, ChangePasswordModal z-130).
+   A toast floating on top of an open modal reads as it interrupting
+   whatever the user is doing in that modal, so this drops it below every
+   modal-layer z-index in the app — a modal's own backdrop then naturally
+   covers it for as long as that modal is open, with no explicit "is a
+   modal open" tracking needed. Toasts still show above ordinary page
+   content (header is z-40) the rest of the time. */
+[data-sonner-toaster] {
+  z-index: 50 !important;
+}
