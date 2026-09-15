@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Pencil, Search, Trash2 } from 'lucide-react';
+import { FileText, Pencil, Search, Trash2 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { toast } from 'sonner';
 import { SidePanel } from '../ui/SidePanel';
@@ -42,6 +42,7 @@ type PermitRow = {
   effective_status: string;
   remarks: string | null;
   is_active: number | boolean;
+  has_certificate?: boolean;
 };
 
 type Option = { value: string; label: string };
@@ -258,6 +259,15 @@ export function PermitsManagement() {
                       </td>
                       <td className="px-3 py-2 pr-2">
                         <div className="flex items-center justify-end gap-2">
+                          {p.has_certificate ? (
+                            <button
+                              className="rounded-md p-1.5 text-secondary cursor-pointer"
+                              onClick={() => window.open(`/api/permits/${p.id}/certificate?view=1`, '_blank')}
+                              title="View certificate"
+                            >
+                              <FileText size={14} />
+                            </button>
+                          ) : null}
                           {canEdit ? (
                             <button className="rounded-md p-1.5 text-secondary cursor-pointer" onClick={() => openEdit(p)} title="Edit">
                               <Pencil size={14} />

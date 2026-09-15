@@ -53,13 +53,19 @@ async function ensureSchema() {
       CREATE INDEX IX_permits_application_id ON dbo.permits(application_id);
       CREATE INDEX IX_permits_expiry_date ON dbo.permits(expiry_date);
     END
+    ELSE
+    BEGIN
+      IF COL_LENGTH('dbo.permits', 'certificate_path') IS NULL
+        ALTER TABLE dbo.permits ADD certificate_path NVARCHAR(1000) NULL;
+    END;
   `);
 }
 
 const SELECT_COLS = `
   p.id, p.proponent_id, p.application_id, p.permit_type, p.permit_no,
   p.issuing_authority, p.issue_date, p.expiry_date, p.status, p.document_id,
-  p.remarks, p.is_active, p.created_by, p.updated_by, p.created_at, p.updated_at
+  p.remarks, p.is_active, p.created_by, p.updated_by, p.created_at, p.updated_at,
+  p.certificate_path
 `;
 
 function mapRow(r, extra = {}) {
@@ -82,6 +88,10 @@ function mapRow(r, extra = {}) {
     updated_by: r.updated_by ?? null,
     created_at: r.created_at ?? null,
     updated_at: r.updated_at ?? null,
+    // Auto-generated certificate PDF (see server/lib/permitCertificate.js) —
+    // only a presence flag here, never the raw storage path; the actual
+    // file is served through GET /api/permits/:id/certificate.
+    has_certificate: Boolean(r.certificate_path),
     ...extra,
   };
 }
@@ -191,6 +201,20 @@ async function deactivate(id, updatedBy) {
   return getById(id);
 }
 
+async function setCertificatePath(id, certificatePath) {
+  await ensureSchema();
+  await updateData(`UPDATE dbo.permits SET certificate_path = @param1 WHERE id = @param0`, [
+    toInt(id),
+    certificatePath || null,
+  ]);
+}
+
+async function getCertificatePath(id) {
+  await ensureSchema();
+  const rows = await selectData(`SELECT certificate_path FROM dbo.permits WHERE id = @param0`, [toInt(id)]);
+  return rows?.[0]?.certificate_path || null;
+}
+
 module.exports = {
   PERMIT_TYPES,
   ensureSchema,
@@ -202,4 +226,6 @@ module.exports = {
   create,
   update,
   deactivate,
+  setCertificatePath,
+  getCertificatePath,
 };

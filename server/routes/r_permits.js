@@ -6,6 +6,7 @@ const { requireMenuAccess } = require("../middleware/m_auth");
 const MENU_KEY = "compliance:permits";
 
 router.get("/", requireMenuAccess(MENU_KEY, "view"), controller.list);
+router.get("/:id/certificate", requireMenuAccess(MENU_KEY, "view"), controller.downloadCertificate);
 router.get("/:id", requireMenuAccess(MENU_KEY, "view"), controller.getById);
 router.post("/", requireMenuAccess(MENU_KEY, "add"), controller.create);
 router.put("/:id", requireMenuAccess(MENU_KEY, "edit"), controller.update);

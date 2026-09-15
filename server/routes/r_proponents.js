@@ -33,6 +33,7 @@ router.get("/me/applications/:id/permits", requireProponentSelf, requireOwnAppli
 
 router.get("/me/contracts", requireProponentSelf, portalController.listMyContracts);
 router.get("/me/permits", requireProponentSelf, portalController.listMyPermits);
+router.get("/me/permits/:id/certificate", requireProponentSelf, portalController.downloadMyPermitCertificate);
 router.get("/me/activity", requireProponentSelf, portalController.getMyActivity);
 
 // Admin review of profile change requests — before "/:id" for the same reason.

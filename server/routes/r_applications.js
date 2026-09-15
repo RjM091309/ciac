@@ -17,12 +17,14 @@ router.get("/:id/requirements", requireApplicationsAccess({ allowProponent: true
 router.get("/:id/documents", requireApplicationsAccess({ allowProponent: true }), controller.listDocuments);
 router.get("/:id/status-history", requireApplicationsAccess({ allowProponent: true }), controller.listStatusHistory);
 
-// Self-service filing (BRM-01/02): a proponent files for their own business;
-// staff can still file/upload on a proponent's behalf.
-router.post("/", requireApplicationsAccess({ allowProponent: true }), controller.create);
+// Filing a new application is staff-only now (Assessment Officer creates it
+// on the locator's behalf) — a locator's only self-service actions are
+// viewing their own applications and uploading documents against them.
+router.post("/", requireApplicationsAccess(), controller.create);
 router.patch("/:id/submit", requireApplicationsAccess({ allowProponent: true }), controller.submit);
-router.patch("/:id", requireApplicationsAccess({ allowProponent: true }), controller.updateDraft);
-router.delete("/:id", requireApplicationsAccess({ allowProponent: true }), controller.remove);
+// Editing/deleting a draft is staff-only too (Assessment Officer's call).
+router.patch("/:id", requireApplicationsAccess(), controller.updateDraft);
+router.delete("/:id", requireApplicationsAccess(), controller.remove);
 router.post("/documents", requireApplicationsAccess({ allowProponent: true }), upload.single("file"), controller.createDocument);
 router.get("/documents/:id/file", requireApplicationsAccess({ allowProponent: true }), controller.downloadDocument);
 

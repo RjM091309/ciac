@@ -5,6 +5,7 @@ import { EmptyState } from '../ui/EmptyState';
 import { getStatusBadgeStyles } from './statusBadge';
 import { useControlPanelAccess } from '../../context/ControlPanelAccessContext';
 import { clearLocatorSetupSkipAndReload } from '../../lib/locatorSetup';
+import { cn } from '../../lib/utils';
 
 type DashboardApplicationRow = {
   id: number;
@@ -39,10 +40,36 @@ export type ProponentDashboardData = {
   };
 };
 
-function StatCard({ label, value, icon: Icon }: { label: string; value: string | number; icon: any }) {
+function StatCard({
+  label,
+  value,
+  icon: Icon,
+  onClick,
+}: {
+  label: string;
+  value: string | number;
+  icon: any;
+  onClick?: () => void;
+}) {
   return (
     <div
-      className="glass-card p-3.5 flex flex-col gap-2 !border-transparent"
+      role={onClick ? 'button' : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      onClick={onClick}
+      onKeyDown={
+        onClick
+          ? (e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                onClick();
+              }
+            }
+          : undefined
+      }
+      className={cn(
+        'glass-card p-3.5 flex flex-col gap-2 !border-transparent transition-colors',
+        onClick && 'cursor-pointer hover:brightness-110 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--nav-active-bg)]',
+      )}
       style={{ backgroundColor: 'var(--surface)' }}
     >
       <div className="flex items-center gap-2">
@@ -71,6 +98,7 @@ function formatDate(value: string | null) {
 export function ProponentDashboard({
   data,
   widgetOverrides,
+  navigate,
 }: {
   data: ProponentDashboardData | null;
   /** Accepted for call-site compatibility; filing now lives in My Applications. */
@@ -79,6 +107,7 @@ export function ProponentDashboard({
    * visibility, since the admin viewing this preview is exempt from Control
    * Panel restrictions and would otherwise always see everything. */
   widgetOverrides?: Record<string, boolean>;
+  navigate?: (to: string, opts?: { replace?: boolean }) => void;
 }) {
   const proponent = data?.proponent ?? null;
   const applications = data?.applications ?? [];
@@ -133,22 +162,23 @@ export function ProponentDashboard({
 
       {canShowWidget('dashboard:stats') && (
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-3 sm:gap-4">
-          <StatCard label="Total Applications" value={stats.total} icon={FileText} />
-          <StatCard label="Drafts" value={stats.draft ?? 0} icon={FileClock} />
-          <StatCard label="Pending" value={stats.pending} icon={Inbox} />
-          <StatCard label="Approved" value={stats.approved} icon={FileCheck} />
-          <StatCard label="Rejected" value={stats.rejected ?? 0} icon={XCircle} />
-          <StatCard label="Returned" value={stats.returned ?? 0} icon={RotateCcw} />
+          <StatCard label="Total Applications" value={stats.total} icon={FileText} onClick={navigate ? () => navigate('/me/applications') : undefined} />
+          <StatCard label="Drafts" value={stats.draft ?? 0} icon={FileClock} onClick={navigate ? () => navigate('/me/applications') : undefined} />
+          <StatCard label="Pending" value={stats.pending} icon={Inbox} onClick={navigate ? () => navigate('/me/applications') : undefined} />
+          <StatCard label="Approved" value={stats.approved} icon={FileCheck} onClick={navigate ? () => navigate('/me/applications') : undefined} />
+          <StatCard label="Rejected" value={stats.rejected ?? 0} icon={XCircle} onClick={navigate ? () => navigate('/me/applications') : undefined} />
+          <StatCard label="Returned" value={stats.returned ?? 0} icon={RotateCcw} onClick={navigate ? () => navigate('/me/applications') : undefined} />
           <StatCard
             label="Requirements Verified"
             value={`${stats.requirementsVerified}/${stats.requirementsTotal}`}
             icon={FileCheck}
+            onClick={navigate ? () => navigate('/me/applications') : undefined}
           />
         </div>
       )}
 
       {canShowWidget('dashboard:table') && (
-      <div className="glass-card p-4 sm:p-5 !border-transparent" style={{ backgroundColor: 'var(--surface)' }}>
+      <div className="rounded-2xl p-0 sm:p-4 sm:p-5 sm:border sm:border-transparent sm:shadow-[0_1px_2px_0_rgb(0_0_0_/_0.05)] sm:bg-[var(--surface)]">
         <h4 className="text-sm font-bold mb-3" style={{ color: 'var(--text)' }}>
           My Applications
         </h4>
@@ -159,64 +189,122 @@ export function ProponentDashboard({
             description="You haven't submitted any lease applications yet."
           />
         ) : (
-          <div className="overflow-x-auto">
-            <table className="min-w-full text-left text-xs">
-              <thead>
-                <tr>
-                  {['Application No.', 'Type', 'Status', 'Requirements', 'Submitted'].map((col) => (
-                    <th
-                      key={col}
-                      className="px-3 py-2 font-semibold text-[10px] uppercase tracking-widest text-secondary border-b"
-                      style={{ borderColor: 'var(--border-subtle)' }}
-                    >
-                      {col}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {applications.map((app) => {
-                  const badge = getStatusBadgeStyles(app.status);
-                  const total = Number(app.requirements_total || 0);
-                  const verified = Number(app.requirements_verified || 0);
-                  const pct = total > 0 ? Math.round((verified / total) * 100) : 0;
-                  return (
-                    <tr key={app.id} className="border-b last:border-b-0" style={{ borderColor: 'var(--border-subtle)' }}>
-                      <td className="px-3 py-2 text-[11px] font-semibold" style={{ color: 'var(--text)' }}>
+          <>
+            {/* Mobile: card list — a <table> forces horizontal scrolling on narrow screens. */}
+            <div className="sm:hidden space-y-2.5">
+              {applications.map((app) => {
+                const badge = getStatusBadgeStyles(app.status);
+                const total = Number(app.requirements_total || 0);
+                const verified = Number(app.requirements_verified || 0);
+                const pct = total > 0 ? Math.round((verified / total) * 100) : 0;
+                return (
+                  <div
+                    key={app.id}
+                    role={navigate ? 'button' : undefined}
+                    tabIndex={navigate ? 0 : undefined}
+                    onClick={navigate ? () => navigate(`/me/applications?applicationId=${app.id}`) : undefined}
+                    className={cn(
+                      'rounded-xl border p-3',
+                      navigate && 'cursor-pointer active:brightness-95',
+                    )}
+                    style={{
+                      borderColor: 'var(--border-subtle)',
+                      backgroundColor: 'var(--surface)',
+                      boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
+                    }}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[12px] font-semibold truncate" style={{ color: 'var(--text)' }}>
                         {app.application_no}
-                      </td>
-                      <td className="px-3 py-2 text-[11px] text-secondary">
-                        {Number(app.is_renewal) ? 'Renewal' : 'New'}
-                      </td>
-                      <td className="px-3 py-2 text-[11px]">
-                        <span
-                          className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold border"
-                          style={{ backgroundColor: badge.bg, color: badge.color, borderColor: badge.border }}
-                        >
-                          {app.status}
-                        </span>
-                      </td>
-                      <td className="px-3 py-2 text-[11px] text-secondary w-40">
-                        <div className="flex items-center gap-2">
-                          <div
-                            className="h-1.5 flex-1 rounded-full overflow-hidden"
-                            style={{ backgroundColor: 'var(--control-bg)' }}
+                      </span>
+                      <span
+                        className="shrink-0 inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold border"
+                        style={{ backgroundColor: badge.bg, color: badge.color, borderColor: badge.border }}
+                      >
+                        {app.status}
+                      </span>
+                    </div>
+                    <div className="mt-1 flex items-center justify-between gap-2 text-[11px] text-secondary">
+                      <span>{Number(app.is_renewal) ? 'Renewal' : 'New'}</span>
+                      <span>{formatDate(app.submitted_at || app.created_at)}</span>
+                    </div>
+                    <div className="mt-2 flex items-center gap-2">
+                      <div
+                        className="h-1.5 flex-1 rounded-full overflow-hidden"
+                        style={{ backgroundColor: 'var(--control-bg)' }}
+                      >
+                        <div
+                          className="h-full rounded-full"
+                          style={{ width: `${pct}%`, backgroundColor: 'var(--nav-active-bg)' }}
+                        />
+                      </div>
+                      <span className="shrink-0 text-[10px] text-secondary">{verified}/{total} reqs</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Tablet/desktop: table. */}
+            <div className="hidden sm:block overflow-x-auto">
+              <table className="min-w-full text-left text-xs">
+                <thead>
+                  <tr>
+                    {['Application No.', 'Type', 'Status', 'Requirements', 'Submitted'].map((col) => (
+                      <th
+                        key={col}
+                        className="px-3 py-2 font-semibold text-[10px] uppercase tracking-widest text-secondary border-b"
+                        style={{ borderColor: 'var(--border-subtle)' }}
+                      >
+                        {col}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {applications.map((app) => {
+                    const badge = getStatusBadgeStyles(app.status);
+                    const total = Number(app.requirements_total || 0);
+                    const verified = Number(app.requirements_verified || 0);
+                    const pct = total > 0 ? Math.round((verified / total) * 100) : 0;
+                    return (
+                      <tr key={app.id} className="border-b last:border-b-0" style={{ borderColor: 'var(--border-subtle)' }}>
+                        <td className="px-3 py-2 text-[11px] font-semibold" style={{ color: 'var(--text)' }}>
+                          {app.application_no}
+                        </td>
+                        <td className="px-3 py-2 text-[11px] text-secondary">
+                          {Number(app.is_renewal) ? 'Renewal' : 'New'}
+                        </td>
+                        <td className="px-3 py-2 text-[11px]">
+                          <span
+                            className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold border"
+                            style={{ backgroundColor: badge.bg, color: badge.color, borderColor: badge.border }}
                           >
+                            {app.status}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2 text-[11px] text-secondary w-40">
+                          <div className="flex items-center gap-2">
                             <div
-                              className="h-full rounded-full"
-                              style={{ width: `${pct}%`, backgroundColor: 'var(--nav-active-bg)' }}
-                            />
+                              className="h-1.5 flex-1 rounded-full overflow-hidden"
+                              style={{ backgroundColor: 'var(--control-bg)' }}
+                            >
+                              <div
+                                className="h-full rounded-full"
+                                style={{ width: `${pct}%`, backgroundColor: 'var(--nav-active-bg)' }}
+                              />
+                            </div>
+                            <span className="shrink-0 text-[10px]">{verified}/{total}</span>
                           </div>
-                          <span className="shrink-0 text-[10px]">{verified}/{total}</span>
-                        </div>
-                      </td>
-                      <td className="px-3 py-2 text-[11px] text-secondary">{formatDate(app.submitted_at || app.created_at)}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+                        </td>
+                        <td className="px-3 py-2 text-[11px] text-secondary">{formatDate(app.submitted_at || app.created_at)}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </>
         )}
       </div>
       )}

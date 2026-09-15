@@ -25,6 +25,7 @@ type PermitRow = {
   issue_date: string | null;
   expiry_date: string | null;
   effective_status: 'VALID' | 'EXPIRING' | 'EXPIRED' | 'REVOKED';
+  has_certificate?: boolean;
 };
 
 const PERMIT_TYPE_LABELS: Record<string, string> = {
@@ -172,7 +173,7 @@ export function ProponentContractsPermits({ navigate }: { navigate: Navigate }) 
             <table className="min-w-full text-left text-xs">
               <thead>
                 <tr>
-                  {['Type', 'Permit No.', 'Issuing Authority', 'Issued', 'Expiry', 'Status'].map((c) => (
+                  {['Type', 'Permit No.', 'Issuing Authority', 'Issued', 'Expiry', 'Status', ''].map((c) => (
                     <th key={c} className="px-3 py-2 font-semibold text-[10px] uppercase tracking-widest text-secondary border-b" style={{ borderColor: 'var(--border-subtle)' }}>
                       {c}
                     </th>
@@ -193,6 +194,17 @@ export function ProponentContractsPermits({ navigate }: { navigate: Navigate }) 
                         <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold" style={{ backgroundColor: s.bg, color: s.color }}>
                           {p.effective_status}
                         </span>
+                      </td>
+                      <td className="px-3 py-2 text-right">
+                        {p.has_certificate ? (
+                          <button
+                            className="rounded-md px-2 py-1 text-[11px] font-semibold border cursor-pointer"
+                            style={{ borderColor: 'var(--border-subtle)', color: 'var(--text)' }}
+                            onClick={() => window.open(`/api/proponents/me/permits/${p.id}/certificate?view=1`, '_blank')}
+                          >
+                            View Certificate
+                          </button>
+                        ) : null}
                       </td>
                     </tr>
                   );

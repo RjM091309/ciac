@@ -1,12 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, ClipboardList, FileText, History, Loader2, Pencil, Plus, ScrollText, Send, Table2, Trash2, Upload } from 'lucide-react';
+import { ArrowLeft, ChevronRight, ClipboardList, FileText, History, Loader2, ScrollText, Send, Table2, Upload } from 'lucide-react';
 import { toast } from 'sonner';
 import { EmptyState } from '../ui/EmptyState';
-import { SidePanel } from '../ui/SidePanel';
-import { AppSelect } from '../ui/AppSelect';
-import { ConfirmModal } from '../ui/ConfirmModal';
 import { getStatusBadgeStyles } from '../dashboard/statusBadge';
-import { APPLICATION_TYPES, applicationTypeLabel } from '../../lib/applicationTypes';
+import { applicationTypeLabel } from '../../lib/applicationTypes';
 import { clearLocatorSetupSkipAndReload } from '../../lib/locatorSetup';
 
 type Navigate = (to: string, opts?: { replace?: boolean }) => void;
@@ -113,110 +110,17 @@ function StatusPill({ status }: { status: string }) {
 
 const PRIMARY_BTN =
   'inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-[12px] font-semibold shadow-sm cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed';
-const GHOST_BTN =
-  'inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-[12px] font-semibold border cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed';
-
-// ---------- Filing / editing form ----------
-
-function ApplicationForm({
-  mode,
-  initial,
-  saving,
-  onCancel,
-  onSubmit,
-}: {
-  mode: 'create' | 'edit';
-  initial?: { application_type: string; is_renewal: boolean };
-  saving: boolean;
-  onCancel: () => void;
-  onSubmit: (values: { application_type: string; is_renewal: boolean }) => void;
-}) {
-  const [applicationType, setApplicationType] = useState(initial?.application_type || APPLICATION_TYPES[0]);
-  const [isRenewal, setIsRenewal] = useState(Boolean(initial?.is_renewal));
-  const [typeOptions, setTypeOptions] = useState<{ code: string; name: string }[]>(
-    APPLICATION_TYPES.map((t) => ({ code: t, name: applicationTypeLabel(t) }))
-  );
-
-  useEffect(() => {
-    let cancelled = false;
-    fetch('/api/application-types', { credentials: 'include' })
-      .then((res) => res.json())
-      .then((json) => {
-        if (cancelled || !Array.isArray(json?.data)) return;
-        const active = json.data
-          .filter((t: any) => Number(t?.is_active) === 1)
-          .map((t: any) => ({ code: String(t.code), name: String(t.name) }));
-        if (active.length) setTypeOptions(active);
-      })
-      .catch(() => {
-        // Fetch failed — the static seed list above stays as the fallback.
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  return (
-    <SidePanel
-      open
-      title={mode === 'create' ? 'New Application' : 'Edit draft details'}
-      subtitle={
-        mode === 'create'
-          ? 'Saved as a draft — a reference number is issued right away. Upload documents and submit from the next screen.'
-          : 'Only unsubmitted drafts can be edited.'
-      }
-      saving={saving}
-      saveLabel={mode === 'create' ? 'Create draft' : 'Save changes'}
-      widthClassName="max-w-[28rem]"
-      onClose={onCancel}
-      onSave={() => onSubmit({ application_type: applicationType, is_renewal: isRenewal })}
-    >
-      <div className="space-y-4">
-        <div className="space-y-1.5">
-          <label className="text-[11px] font-semibold uppercase tracking-widest text-secondary">Application type</label>
-          <AppSelect
-            options={typeOptions.map((t) => ({ value: t.code, label: t.name }))}
-            value={applicationType}
-            onChange={(value) => setApplicationType(value)}
-            placeholder="Select application type..."
-            isDisabled={saving}
-            isClearable={false}
-          />
-        </div>
-
-        <label
-          className="flex items-center gap-2 rounded-lg border px-3 py-2 text-xs cursor-pointer"
-          style={{ borderColor: 'var(--input-border)' }}
-        >
-          <input
-            type="checkbox"
-            className="cursor-pointer"
-            checked={isRenewal}
-            disabled={saving}
-            onChange={(e) => setIsRenewal(e.target.checked)}
-          />
-          <span style={{ color: 'var(--text)' }}>This is a renewal of an existing lease</span>
-        </label>
-
-        {mode === 'edit' ? (
-          <p className="text-[11px] text-secondary">
-            Switching between New and Renewal rebuilds the requirement checklist, so it's blocked once you've uploaded a
-            document.
-          </p>
-        ) : null}
-      </div>
-    </SidePanel>
-  );
-}
 
 // ---------- List ----------
 
+// Locators no longer file their own applications here — Assessment Officer
+// creates the application on their behalf (see ApplicationsWorkflow.tsx's
+// New Application modal); a locator's only self-service actions are viewing
+// their own applications and uploading documents against them.
 function ApplicationsList({ navigate }: { navigate: Navigate }) {
   const [rows, setRows] = useState<ApplicationRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [creating, setCreating] = useState(false);
-  const [saving, setSaving] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -237,53 +141,10 @@ function ApplicationsList({ navigate }: { navigate: Navigate }) {
     load();
   }, [load]);
 
-  async function createDraft(values: { application_type: string; is_renewal: boolean }) {
-    setSaving(true);
-    try {
-      const res = await fetch('/api/applications', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ ...values, save_as_draft: true }),
-      });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(json?.message || 'Failed to create application');
-      const id = json?.data?.id;
-      toast.success(`Draft ${json?.data?.application_no || ''} created`);
-      setCreating(false);
-      if (id) navigate(`/me/applications?applicationId=${id}`);
-      else load();
-    } catch (e: any) {
-      const message = e?.message || 'Failed to create application';
-      if (/complete your business profile/i.test(message)) {
-        toast.error(message, {
-          action: { label: 'Complete profile', onClick: clearLocatorSetupSkipAndReload },
-          duration: 10000,
-        });
-      } else {
-        toast.error(message);
-      }
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  const header = (
-    <div className="flex items-center justify-end gap-3 mb-4">
-      <button
-        className={PRIMARY_BTN}
-        style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
-        onClick={() => setCreating(true)}
-      >
-        <Plus size={14} /> New Application
-      </button>
-    </div>
-  );
+  const needsProfileSetup = Boolean(error && /no proponent profile/i.test(error));
 
   return (
     <div>
-      {header}
-
       {loading ? (
         <div className="flex items-center justify-center py-24">
           <Loader2 className="h-6 w-6 animate-spin opacity-60" style={{ color: 'var(--text)' }} />
@@ -293,12 +154,12 @@ function ApplicationsList({ navigate }: { navigate: Navigate }) {
           <EmptyState
             title="Couldn't load your applications"
             description={
-              /no proponent profile/i.test(error)
+              needsProfileSetup
                 ? "You skipped the business profile setup — finish it to unlock the rest of the portal."
                 : error
             }
             action={
-              /no proponent profile/i.test(error) ? (
+              needsProfileSetup ? (
                 <button
                   className="rounded-lg px-4 py-2 text-sm font-semibold shadow-sm transition-colors cursor-pointer"
                   style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
@@ -314,12 +175,56 @@ function ApplicationsList({ navigate }: { navigate: Navigate }) {
         <div className="glass-card p-4 sm:p-5 !border-transparent" style={{ backgroundColor: 'var(--surface)' }}>
           <EmptyState
             title="No applications yet"
-            description="Click “New Application” to file your first lease application."
+            description="Applications filed on your behalf will show up here — upload requirements once one appears."
           />
         </div>
       ) : (
-        <div className="glass-card p-4 sm:p-5 !border-transparent" style={{ backgroundColor: 'var(--surface)' }}>
-          <div className="overflow-x-auto">
+        <div className="rounded-2xl p-0 sm:p-4 sm:p-5 sm:border sm:border-transparent sm:shadow-[0_1px_2px_0_rgb(0_0_0_/_0.05)] sm:bg-[var(--surface)]">
+          {/* Mobile: card list — a <table> forces horizontal scrolling on narrow screens. */}
+          <div className="sm:hidden space-y-2.5">
+            {rows.map((app) => {
+              const total = Number(app.requirements_total || 0);
+              const verified = Number(app.requirements_verified || 0);
+              const pct = total > 0 ? Math.round((verified / total) * 100) : 0;
+              return (
+                <div
+                  key={app.id}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => navigate(`/me/applications?applicationId=${app.id}`)}
+                  className="rounded-xl border p-3 cursor-pointer active:brightness-95"
+                  style={{
+                    borderColor: 'var(--border-subtle)',
+                    backgroundColor: 'var(--surface)',
+                    boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
+                  }}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[12px] font-semibold truncate" style={{ color: 'var(--text)' }}>
+                      {app.application_no}
+                    </span>
+                    <StatusPill status={app.status} />
+                  </div>
+                  <div className="mt-1 flex items-center justify-between gap-2 text-[11px] text-secondary">
+                    <span className="truncate">
+                      {applicationTypeLabel(app.application_type)} · {Number(app.is_renewal) ? 'Renewal' : 'New'}
+                    </span>
+                    <span className="shrink-0">{fmtDate(app.submitted_at || app.created_at)}</span>
+                  </div>
+                  <div className="mt-2 flex items-center gap-2">
+                    <div className="h-1.5 flex-1 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--control-bg)' }}>
+                      <div className="h-full rounded-full" style={{ width: `${pct}%`, backgroundColor: 'var(--nav-active-bg)' }} />
+                    </div>
+                    <span className="shrink-0 text-[10px] text-secondary">{verified}/{total} reqs</span>
+                    <ChevronRight size={14} className="shrink-0" style={{ color: 'var(--text-muted)' }} />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Tablet/desktop: table. */}
+          <div className="hidden sm:block overflow-x-auto">
             <table className="min-w-full text-left text-xs">
               <thead>
                 <tr>
@@ -372,10 +277,6 @@ function ApplicationsList({ navigate }: { navigate: Navigate }) {
           </div>
         </div>
       )}
-
-      {creating ? (
-        <ApplicationForm mode="create" saving={saving} onCancel={() => setCreating(false)} onSubmit={createDraft} />
-      ) : null}
     </div>
   );
 }
@@ -395,12 +296,27 @@ const TABS = [
   { id: 'overview', label: 'Overview', icon: Table2 },
   { id: 'requirements', label: 'Requirements', icon: ClipboardList },
   { id: 'history', label: 'History', icon: History },
-  { id: 'contract', label: 'Contract & Permits', icon: ScrollText },
+  { id: 'contract', label: 'Contract', icon: ScrollText },
 ] as const;
 
 type TabId = (typeof TABS)[number]['id'];
 
-function Card({ children }: { children: React.ReactNode }) {
+function Card({
+  children,
+  mobileFlat,
+}: {
+  children: React.ReactNode;
+  /** Skip the card chrome on mobile — for tabs whose content is already a
+   * list of individually-boxed cards there, so it doesn't nest card-in-card. */
+  mobileFlat?: boolean;
+}) {
+  if (mobileFlat) {
+    return (
+      <div className="rounded-2xl p-0 sm:p-4 sm:p-5 sm:border sm:border-transparent sm:shadow-[0_1px_2px_0_rgb(0_0_0_/_0.05)] sm:bg-[var(--surface)]">
+        {children}
+      </div>
+    );
+  }
   return (
     <div className="glass-card p-4 sm:p-5 !border-transparent" style={{ backgroundColor: 'var(--surface)' }}>
       {children}
@@ -424,9 +340,7 @@ function ApplicationDetail({ applicationId, navigate }: { applicationId: number;
   const [tab, setTab] = useState<TabId>('overview');
   const [uploading, setUploading] = useState(false);
   const [uploadRequirementId, setUploadRequirementId] = useState('');
-  const [busy, setBusy] = useState<'submit' | 'delete' | 'edit' | null>(null);
-  const [editing, setEditing] = useState(false);
-  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [busy, setBusy] = useState<'submit' | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const load = useCallback(async () => {
@@ -564,45 +478,6 @@ function ApplicationDetail({ applicationId, navigate }: { applicationId: number;
     }
   }
 
-  async function saveDraftEdit(values: { application_type: string; is_renewal: boolean }) {
-    setBusy('edit');
-    try {
-      const res = await fetch(`/api/applications/${applicationId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify(values),
-      });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(json?.message || 'Update failed');
-      toast.success('Draft updated.');
-      setEditing(false);
-      await load();
-    } catch (e: any) {
-      toast.error(e?.message || 'Update failed');
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  async function deleteDraft() {
-    setBusy('delete');
-    try {
-      const res = await fetch(`/api/applications/${applicationId}`, {
-        method: 'DELETE',
-        credentials: 'include',
-      });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(json?.message || 'Delete failed');
-      toast.success('Draft deleted.');
-      navigate('/me/applications');
-    } catch (e: any) {
-      toast.error(e?.message || 'Delete failed');
-      setBusy(null);
-      setConfirmDelete(false);
-    }
-  }
-
   const backButton = (
     <button
       onClick={() => navigate('/me/applications')}
@@ -723,16 +598,6 @@ function ApplicationDetail({ applicationId, navigate }: { applicationId: number;
             </p>
           </div>
           <div className="flex items-center gap-2 shrink-0">
-            {isDraft ? (
-              <>
-                <button className={GHOST_BTN} style={{ borderColor: 'var(--border-subtle)', color: 'var(--text)' }} disabled={busy !== null} onClick={() => setEditing(true)}>
-                  <Pencil size={13} /> Edit
-                </button>
-                <button className={GHOST_BTN} style={{ borderColor: 'var(--border-subtle)', color: '#ef4444' }} disabled={busy !== null} onClick={() => setConfirmDelete(true)}>
-                  <Trash2 size={13} /> Delete
-                </button>
-              </>
-            ) : null}
             <button
               className={PRIMARY_BTN}
               style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
@@ -747,7 +612,7 @@ function ApplicationDetail({ applicationId, navigate }: { applicationId: number;
       )}
 
       <div
-        className="inline-flex items-center gap-1 rounded-full p-1 overflow-x-auto max-w-full"
+        className="flex items-center gap-1 rounded-full p-1 w-full"
         style={{ backgroundColor: 'color-mix(in oklab, var(--control-bg) 82%, transparent)' }}
       >
         {TABS.map((t) => {
@@ -757,13 +622,13 @@ function ApplicationDetail({ applicationId, navigate }: { applicationId: number;
             <button
               key={t.id}
               onClick={() => setTab(t.id)}
-              className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[11px] font-semibold cursor-pointer transition-colors whitespace-nowrap"
+              className="flex-1 min-w-0 inline-flex items-center justify-center gap-1.5 rounded-full px-2 py-1.5 text-[11px] font-semibold cursor-pointer transition-colors"
               style={{
                 backgroundColor: active ? 'var(--nav-active-bg)' : 'transparent',
                 color: active ? 'var(--nav-active-text)' : 'var(--text-muted)',
               }}
             >
-              <Icon size={13} /> {t.label}
+              <Icon size={13} className="shrink-0" /> <span className="truncate">{t.label}</span>
             </button>
           );
         })}
@@ -771,7 +636,7 @@ function ApplicationDetail({ applicationId, navigate }: { applicationId: number;
 
       {tab === 'overview' && (
         <Card>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-5">
+          <div className="grid grid-cols-2 gap-4 sm:gap-5">
             <Info label="Application No." value={app.application_no} />
             <Info label="Type" value={applicationTypeLabel(app.application_type)} />
             <Info label="Track" value={Number(app.is_renewal) ? 'Renewal' : 'New'} />
@@ -783,139 +648,180 @@ function ApplicationDetail({ applicationId, navigate }: { applicationId: number;
       )}
 
       {tab === 'requirements' && (
-        <Card>
-          <div
-            className="rounded-lg border border-dashed p-4 mb-4 flex flex-col sm:flex-row sm:items-end gap-3"
-            style={{ borderColor: 'var(--border-subtle)' }}
-          >
-            <div className="flex-1 space-y-1.5">
-              <label className="text-[10px] font-semibold uppercase tracking-widest text-secondary">
-                Attach to requirement
-              </label>
-              <AppSelect
-                options={requirements.map((r) => ({
-                  value: String(r.requirement_id),
-                  label: `${r.requirement_code ? `${r.requirement_code} — ` : ''}${r.requirement_name || 'Requirement'}`,
-                }))}
-                value={uploadRequirementId}
-                onChange={setUploadRequirementId}
-                placeholder="Select a requirement…"
-                isDisabled={uploading}
-                isClearable
-              />
-            </div>
-            <div>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".pdf,application/pdf"
-                className="hidden"
-                onChange={(e) => {
-                  const f = e.target.files?.[0];
-                  if (f) void uploadDoc(f);
-                }}
-              />
-              <button
-                onClick={() => {
-                  if (!uploadRequirementId) {
-                    toast.error('Select which requirement this document is for first.');
-                    return;
-                  }
-                  fileInputRef.current?.click();
-                }}
-                disabled={uploading}
-                className="inline-flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-semibold shadow-sm cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
-                style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
-              >
-                {uploading ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
-                {uploading ? 'Uploading…' : 'Upload document'}
-              </button>
-            </div>
-          </div>
+        <Card mobileFlat>
+          {/* Triggered by each row's Upload/Reupload button, which sets uploadRequirementId first. */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".pdf,application/pdf"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) void uploadDoc(f);
+            }}
+          />
           <p className="text-[10px] text-secondary mb-3">
-            PDF only · up to 10 MB. Select a requirement above, or use Reupload on a row below.
+            PDF only · up to 10 MB. Use Upload/Reupload on a row below.
           </p>
 
           {requirements.length === 0 ? (
             <EmptyState title="No requirements" description="No requirement checklist has been attached to this application yet." />
           ) : (
-            <div className="overflow-x-auto">
-              <table className="min-w-full text-left text-xs">
-                <thead>
-                  <tr>
-                    {['Requirement', 'Mandatory', 'Status', 'Document', 'Remarks', 'Actions'].map((c) => (
-                      <th key={c} className="px-3 py-2 font-semibold text-[10px] uppercase tracking-widest text-secondary border-b" style={{ borderColor: 'var(--border-subtle)' }}>
-                        {c}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {requirements.map((r) => {
-                    // Most recent first (documents ordered DESC by id) — after a
-                    // reject-and-reupload, this is the latest file for the row.
-                    const doc = documents.find((d) => d.requirement_id === r.requirement_id);
-                    return (
-                      <tr key={r.id} className="border-b last:border-b-0" style={{ borderColor: 'var(--border-subtle)' }}>
-                        <td className="px-3 py-2 text-[11px]" style={{ color: 'var(--text)' }}>
-                          <span className="font-semibold">{r.requirement_code ? `${r.requirement_code} — ` : ''}{r.requirement_name || 'Requirement'}</span>
-                          {r.requirement_description ? <div className="text-secondary mt-0.5">{r.requirement_description}</div> : null}
-                        </td>
-                        <td className="px-3 py-2 text-[11px] text-secondary">{Number(r.is_mandatory) ? 'Yes' : 'No'}</td>
-                        <td className="px-3 py-2 text-[11px]"><StatusPill status={r.status} /></td>
-                        <td className="px-3 py-2 text-[11px] text-secondary max-w-[180px]">
-                          {doc ? (
-                            <>
-                              <span className="block truncate" title={doc.original_file_name || doc.file_name}>
-                                {doc.original_file_name || doc.file_name}
-                              </span>
-                              {Number(doc.version) > 1 ? (
-                                <span className="block text-[10px] opacity-70">
-                                  V{Number(doc.version)} — reuploaded after rejection
-                                </span>
-                              ) : null}
-                            </>
-                          ) : (
-                            <span className="opacity-60">Not uploaded</span>
-                          )}
-                        </td>
-                        <td className="px-3 py-2 text-[11px] text-secondary">{r.remarks || '—'}</td>
-                        <td className="px-3 py-2 text-[11px]">
-                          <div className="flex items-center gap-2.5 whitespace-nowrap">
-                            {doc ? (
-                              <button
-                                onClick={() => window.open(`/api/documents/${doc.id}/download?view=1`, '_blank')}
-                                className="cursor-pointer"
-                                style={{ color: 'var(--text)' }}
-                                title="View submitted PDF"
-                                aria-label="View submitted PDF"
-                              >
-                                <FileText size={14} />
-                              </button>
-                            ) : null}
-                            {r.status !== 'VERIFIED' ? (
-                              <button
-                                onClick={() => {
-                                  setUploadRequirementId(String(r.requirement_id));
-                                  fileInputRef.current?.click();
-                                }}
-                                disabled={uploading}
-                                className="cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                                style={{ color: 'var(--nav-active-bg)' }}
-                                title={doc ? 'Reupload document' : 'Upload document'}
-                                aria-label={doc ? 'Reupload document' : 'Upload document'}
-                              >
-                                <Upload size={14} />
-                              </button>
-                            ) : null}
+            <>
+              {/* Mobile: card list — a 6-column <table> forces horizontal scrolling on narrow screens. */}
+              <div className="sm:hidden space-y-2.5">
+                {requirements.map((r) => {
+                  const doc = documents.find((d) => d.requirement_id === r.requirement_id);
+                  return (
+                    <div
+                      key={r.id}
+                      className="rounded-xl border p-3"
+                      style={{
+                        borderColor: 'var(--border-subtle)',
+                        backgroundColor: 'var(--surface)',
+                        boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
+                      }}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <div className="text-[12px] font-semibold" style={{ color: 'var(--text)' }}>
+                            {r.requirement_code ? `${r.requirement_code} — ` : ''}{r.requirement_name || 'Requirement'}
                           </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+                          {r.requirement_description ? (
+                            <div className="text-[11px] text-secondary mt-0.5">{r.requirement_description}</div>
+                          ) : null}
+                        </div>
+                        <StatusPill status={r.status} />
+                      </div>
+
+                      <div className="mt-2 flex items-center justify-between gap-2 text-[11px] text-secondary">
+                        <span>{Number(r.is_mandatory) ? 'Mandatory' : 'Optional'}</span>
+                        {doc ? (
+                          <span className="truncate max-w-[60%]" title={doc.original_file_name || doc.file_name}>
+                            {doc.original_file_name || doc.file_name}
+                            {Number(doc.version) > 1 ? ` (v${Number(doc.version)})` : ''}
+                          </span>
+                        ) : (
+                          <span className="opacity-60">Not uploaded</span>
+                        )}
+                      </div>
+
+                      {r.remarks ? (
+                        <div className="mt-1.5 text-[11px] text-secondary">
+                          <span className="font-semibold" style={{ color: 'var(--text)' }}>Remarks:</span> {r.remarks}
+                        </div>
+                      ) : null}
+
+                      {doc || r.status !== 'VERIFIED' ? (
+                        <div className="mt-2.5 flex items-center gap-2 pt-2.5 border-t" style={{ borderColor: 'var(--border-subtle)' }}>
+                          {doc ? (
+                            <button
+                              onClick={() => window.open(`/api/documents/${doc.id}/download?view=1`, '_blank')}
+                              className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-semibold cursor-pointer border"
+                              style={{ color: 'var(--text)', borderColor: 'var(--border-subtle)' }}
+                            >
+                              <FileText size={13} /> View
+                            </button>
+                          ) : null}
+                          {r.status !== 'VERIFIED' ? (
+                            <button
+                              onClick={() => {
+                                setUploadRequirementId(String(r.requirement_id));
+                                fileInputRef.current?.click();
+                              }}
+                              disabled={uploading}
+                              className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-semibold cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed border"
+                              style={{ color: 'var(--nav-active-bg)', borderColor: 'var(--border-subtle)' }}
+                            >
+                              <Upload size={13} /> {doc ? 'Reupload' : 'Upload'}
+                            </button>
+                          ) : null}
+                        </div>
+                      ) : null}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Tablet/desktop: table. */}
+              <div className="hidden sm:block overflow-x-auto">
+                <table className="min-w-full text-left text-xs">
+                  <thead>
+                    <tr>
+                      {['Requirement', 'Mandatory', 'Status', 'Document', 'Remarks', 'Actions'].map((c) => (
+                        <th key={c} className="px-3 py-2 font-semibold text-[10px] uppercase tracking-widest text-secondary border-b" style={{ borderColor: 'var(--border-subtle)' }}>
+                          {c}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {requirements.map((r) => {
+                      // Most recent first (documents ordered DESC by id) — after a
+                      // reject-and-reupload, this is the latest file for the row.
+                      const doc = documents.find((d) => d.requirement_id === r.requirement_id);
+                      return (
+                        <tr key={r.id} className="border-b last:border-b-0" style={{ borderColor: 'var(--border-subtle)' }}>
+                          <td className="px-3 py-2 text-[11px]" style={{ color: 'var(--text)' }}>
+                            <span className="font-semibold">{r.requirement_code ? `${r.requirement_code} — ` : ''}{r.requirement_name || 'Requirement'}</span>
+                            {r.requirement_description ? <div className="text-secondary mt-0.5">{r.requirement_description}</div> : null}
+                          </td>
+                          <td className="px-3 py-2 text-[11px] text-secondary">{Number(r.is_mandatory) ? 'Yes' : 'No'}</td>
+                          <td className="px-3 py-2 text-[11px]"><StatusPill status={r.status} /></td>
+                          <td className="px-3 py-2 text-[11px] text-secondary max-w-[180px]">
+                            {doc ? (
+                              <>
+                                <span className="block truncate" title={doc.original_file_name || doc.file_name}>
+                                  {doc.original_file_name || doc.file_name}
+                                </span>
+                                {Number(doc.version) > 1 ? (
+                                  <span className="block text-[10px] opacity-70">
+                                    V{Number(doc.version)} — reuploaded after rejection
+                                  </span>
+                                ) : null}
+                              </>
+                            ) : (
+                              <span className="opacity-60">Not uploaded</span>
+                            )}
+                          </td>
+                          <td className="px-3 py-2 text-[11px] text-secondary">{r.remarks || '—'}</td>
+                          <td className="px-3 py-2 text-[11px]">
+                            <div className="flex items-center gap-2.5 whitespace-nowrap">
+                              {doc ? (
+                                <button
+                                  onClick={() => window.open(`/api/documents/${doc.id}/download?view=1`, '_blank')}
+                                  className="cursor-pointer"
+                                  style={{ color: 'var(--text)' }}
+                                  title="View submitted PDF"
+                                  aria-label="View submitted PDF"
+                                >
+                                  <FileText size={14} />
+                                </button>
+                              ) : null}
+                              {r.status !== 'VERIFIED' ? (
+                                <button
+                                  onClick={() => {
+                                    setUploadRequirementId(String(r.requirement_id));
+                                    fileInputRef.current?.click();
+                                  }}
+                                  disabled={uploading}
+                                  className="cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                                  style={{ color: 'var(--nav-active-bg)' }}
+                                  title={doc ? 'Reupload document' : 'Upload document'}
+                                  aria-label={doc ? 'Reupload document' : 'Upload document'}
+                                >
+                                  <Upload size={14} />
+                                </button>
+                              ) : null}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </>
           )}
         </Card>
       )}
@@ -983,7 +889,7 @@ function ApplicationDetail({ applicationId, navigate }: { applicationId: number;
             {!contract ? (
               <EmptyState title="No contract yet" description="No executed contract has been recorded for this application." />
             ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-5">
+              <div className="grid grid-cols-2 gap-4 sm:gap-5">
                 <Info label="Contract No." value={contract.contract_no} />
                 <Info label="Issue Date" value={fmtDate(contract.issue_date)} />
                 <Info label="Effective Start" value={fmtDate(contract.effective_start)} />
@@ -991,60 +897,70 @@ function ApplicationDetail({ applicationId, navigate }: { applicationId: number;
               </div>
             )}
           </Card>
-          <Card>
+          <Card mobileFlat>
             <h4 className="text-sm font-bold mb-4" style={{ color: 'var(--text)' }}>Permits</h4>
             {permits.length === 0 ? (
               <EmptyState title="No permits" description="No permits are linked to this application yet." />
             ) : (
-              <div className="overflow-x-auto">
-                <table className="min-w-full text-left text-xs">
-                  <thead>
-                    <tr>
-                      {['Type', 'Permit No.', 'Authority', 'Expiry', 'Status'].map((c) => (
-                        <th key={c} className="px-3 py-2 font-semibold text-[10px] uppercase tracking-widest text-secondary border-b" style={{ borderColor: 'var(--border-subtle)' }}>
-                          {c}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {permits.map((p) => (
-                      <tr key={p.id} className="border-b last:border-b-0" style={{ borderColor: 'var(--border-subtle)' }}>
-                        <td className="px-3 py-2 text-[11px]" style={{ color: 'var(--text)' }}>{PERMIT_TYPE_LABELS[p.permit_type] || p.permit_type}</td>
-                        <td className="px-3 py-2 text-[11px] font-semibold" style={{ color: 'var(--text)' }}>{p.permit_no}</td>
-                        <td className="px-3 py-2 text-[11px] text-secondary">{p.issuing_authority || '—'}</td>
-                        <td className="px-3 py-2 text-[11px] text-secondary">{fmtDate(p.expiry_date)}</td>
-                        <td className="px-3 py-2 text-[11px]"><StatusPill status={p.effective_status} /></td>
+              <>
+                {/* Mobile: card list — a <table> forces horizontal scrolling on narrow screens. */}
+                <div className="sm:hidden space-y-2.5">
+                  {permits.map((p) => (
+                    <div
+                      key={p.id}
+                      className="rounded-xl border p-3"
+                      style={{
+                        borderColor: 'var(--border-subtle)',
+                        backgroundColor: 'var(--surface)',
+                        boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
+                      }}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <span className="text-[12px] font-semibold" style={{ color: 'var(--text)' }}>
+                          {PERMIT_TYPE_LABELS[p.permit_type] || p.permit_type}
+                        </span>
+                        <StatusPill status={p.effective_status} />
+                      </div>
+                      <div className="mt-1 text-[11px] text-secondary">{p.permit_no}</div>
+                      <div className="mt-2 flex items-center justify-between gap-2 text-[11px] text-secondary">
+                        <span className="truncate">{p.issuing_authority || '—'}</span>
+                        <span className="shrink-0">Expires {fmtDate(p.expiry_date)}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Tablet/desktop: table. */}
+                <div className="hidden sm:block overflow-x-auto">
+                  <table className="min-w-full text-left text-xs">
+                    <thead>
+                      <tr>
+                        {['Type', 'Permit No.', 'Authority', 'Expiry', 'Status'].map((c) => (
+                          <th key={c} className="px-3 py-2 font-semibold text-[10px] uppercase tracking-widest text-secondary border-b" style={{ borderColor: 'var(--border-subtle)' }}>
+                            {c}
+                          </th>
+                        ))}
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                    </thead>
+                    <tbody>
+                      {permits.map((p) => (
+                        <tr key={p.id} className="border-b last:border-b-0" style={{ borderColor: 'var(--border-subtle)' }}>
+                          <td className="px-3 py-2 text-[11px]" style={{ color: 'var(--text)' }}>{PERMIT_TYPE_LABELS[p.permit_type] || p.permit_type}</td>
+                          <td className="px-3 py-2 text-[11px] font-semibold" style={{ color: 'var(--text)' }}>{p.permit_no}</td>
+                          <td className="px-3 py-2 text-[11px] text-secondary">{p.issuing_authority || '—'}</td>
+                          <td className="px-3 py-2 text-[11px] text-secondary">{fmtDate(p.expiry_date)}</td>
+                          <td className="px-3 py-2 text-[11px]"><StatusPill status={p.effective_status} /></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
             )}
           </Card>
         </div>
       )}
 
-      {editing ? (
-        <ApplicationForm
-          mode="edit"
-          initial={{ application_type: app.application_type, is_renewal: Boolean(Number(app.is_renewal)) }}
-          saving={busy === 'edit'}
-          onCancel={() => setEditing(false)}
-          onSubmit={saveDraftEdit}
-        />
-      ) : null}
-
-      <ConfirmModal
-        open={confirmDelete}
-        title="Delete this draft?"
-        description={`${app.application_no} and its requirement checklist will be permanently removed. This can't be undone.`}
-        confirmText="Delete draft"
-        danger
-        loading={busy === 'delete'}
-        onConfirm={deleteDraft}
-        onCancel={() => setConfirmDelete(false)}
-      />
     </div>
   );
 }

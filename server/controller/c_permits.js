@@ -1,4 +1,35 @@
+const fs = require("fs");
+const path = require("path");
 const Permit = require("../models/Permit");
+const Proponent = require("../models/Proponent");
+const Workflow = require("../models/ApplicationWorkflow");
+const { renderPermitCertificate } = require("../lib/permitCertificate");
+const { STORAGE_ROOT, relativeStoragePath, resolveStoredPath } = require("../lib/fileStorage");
+
+/** Renders and saves the certificate PDF for a permit, then points the
+ * permit row at it. Best-effort — a failure here shouldn't fail the
+ * create/update itself; the permit record is still valid without a
+ * certificate, same as before this existed. */
+async function generateAndAttachCertificate(permit) {
+  try {
+    const [proponent, application] = await Promise.all([
+      Proponent.getProponentById(permit.proponent_id),
+      permit.application_id ? Workflow.getApplicationById(permit.application_id) : Promise.resolve(null),
+    ]);
+    const pdfBuffer = await renderPermitCertificate({
+      permit,
+      proponentName: proponent?.business_name || null,
+      applicationNo: application?.application_no || null,
+    });
+    const dir = path.join(STORAGE_ROOT, "permits", String(permit.id));
+    fs.mkdirSync(dir, { recursive: true });
+    const absPath = path.join(dir, "certificate.pdf");
+    fs.writeFileSync(absPath, pdfBuffer);
+    await Permit.setCertificatePath(permit.id, relativeStoragePath(absPath));
+  } catch (error) {
+    console.error("Generate permit certificate error:", error);
+  }
+}
 
 exports.list = async (req, res) => {
   try {
@@ -33,7 +64,9 @@ exports.create = async (req, res) => {
     if (!permit_no || !String(permit_no).trim()) {
       return res.status(400).json({ success: false, message: "permit_no is required" });
     }
-    const row = await Permit.create({ ...req.body, created_by: req.user?.id ?? null });
+    let row = await Permit.create({ ...req.body, created_by: req.user?.id ?? null });
+    await generateAndAttachCertificate(row);
+    row = await Permit.getById(row.id);
     return res.status(201).json({ success: true, data: row });
   } catch (error) {
     console.error("Create permit error:", error);
@@ -45,8 +78,12 @@ exports.update = async (req, res) => {
   try {
     const id = Number(req.params.id);
     if (!Number.isFinite(id)) return res.status(400).json({ success: false, message: "Invalid id" });
-    const row = await Permit.update(id, { ...req.body, updated_by: req.user?.id ?? null });
+    let row = await Permit.update(id, { ...req.body, updated_by: req.user?.id ?? null });
     if (!row) return res.status(404).json({ success: false, message: "Permit not found" });
+    // Regenerate so the certificate always reflects the latest details
+    // (dates, permit no, issuing authority, etc. may have just changed).
+    await generateAndAttachCertificate(row);
+    row = await Permit.getById(id);
     return res.json({ success: true, data: row });
   } catch (error) {
     console.error("Update permit error:", error);
@@ -63,6 +100,33 @@ exports.deactivate = async (req, res) => {
     return res.json({ success: true, data: row });
   } catch (error) {
     console.error("Deactivate permit error:", error);
+    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+  }
+};
+
+/** Serves the auto-generated certificate PDF — ?view=1 renders it inline in
+ * the browser (staff clicking to preview), otherwise it downloads. */
+exports.downloadCertificate = async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ success: false, message: "Invalid id" });
+    const certificatePath = await Permit.getCertificatePath(id);
+    if (!certificatePath) {
+      return res.status(404).json({ success: false, message: "No certificate has been generated for this permit yet." });
+    }
+    const absPath = resolveStoredPath(certificatePath);
+    if (!absPath || !fs.existsSync(absPath)) {
+      return res.status(404).json({ success: false, message: "Certificate file is no longer available." });
+    }
+    const filename = `Permit-Certificate-${id}.pdf`;
+    res.type("application/pdf");
+    if (req.query.view === "1") {
+      res.setHeader("Content-Disposition", `inline; filename="${filename}"`);
+      return res.sendFile(absPath);
+    }
+    return res.download(absPath, filename);
+  } catch (error) {
+    console.error("Download permit certificate error:", error);
     return res.status(500).json({ success: false, message: error.message || "Internal server error" });
   }
 };

@@ -370,12 +370,12 @@ export function LoginPage(props: {
         </div>
       </div>
 
-      <div className="flex-1 grid place-items-center px-4 py-6 sm:px-8 sm:py-8 xl:p-24 relative">
+      <div className="flex-1 flex flex-col items-center justify-center px-4 py-6 sm:px-8 sm:py-8 xl:p-24 relative">
         <motion.div
           initial={{ opacity: 0, scale: 0.95 }}
           animate={{ opacity: 1, scale: 1 }}
           transition={{ duration: 0.5, delay: 0.2 }}
-          className="w-full max-w-[420px] min-w-0 self-center"
+          className="w-full max-w-[420px] min-w-0"
         >
           <div className="mb-7 sm:mb-10">
             <h2 className="text-3xl sm:text-4xl font-bold tracking-tight mb-2 sm:mb-3">
@@ -428,7 +428,7 @@ export function LoginPage(props: {
                       setUsername(e.target.value);
                       setMfaRequired(false);
                     }}
-                    className="input-field w-full px-4 sm:px-5 py-3.5 sm:py-4 text-sm focus:border-primary transition-all duration-300"
+                    className="input-field w-full px-4 sm:px-5 py-3.5 sm:py-4 text-base sm:text-sm focus:border-primary transition-all duration-300"
                     required
                     disabled={mfaRequired || mustChangePassword}
                   />
@@ -461,7 +461,7 @@ export function LoginPage(props: {
                         setPassword(e.target.value);
                         setMfaRequired(false);
                       }}
-                      className="input-field w-full px-4 sm:px-5 py-3.5 sm:py-4 pr-12 sm:pr-14 text-sm focus:border-primary transition-all duration-300"
+                      className="input-field w-full px-4 sm:px-5 py-3.5 sm:py-4 pr-12 sm:pr-14 text-base sm:text-sm focus:border-primary transition-all duration-300"
                       required
                       disabled={mfaRequired || mustChangePassword}
                     />
@@ -556,7 +556,7 @@ export function LoginPage(props: {
                     placeholder="123456"
                     value={code}
                     onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                    className="input-field w-full px-4 sm:px-5 py-3.5 sm:py-4 text-sm tracking-[0.4em] focus:border-primary transition-all duration-300"
+                    className="input-field w-full px-4 sm:px-5 py-3.5 sm:py-4 text-base sm:text-sm tracking-[0.4em] focus:border-primary transition-all duration-300"
                     required
                   />
                   {step === 'mfa' ? (
@@ -598,7 +598,7 @@ export function LoginPage(props: {
                         placeholder="••••••••"
                         value={newPassword}
                         onChange={(e) => setNewPassword(e.target.value)}
-                        className="input-field w-full px-4 sm:px-5 py-3.5 sm:py-4 pr-12 sm:pr-14 text-sm focus:border-primary transition-all duration-300"
+                        className="input-field w-full px-4 sm:px-5 py-3.5 sm:py-4 pr-12 sm:pr-14 text-base sm:text-sm focus:border-primary transition-all duration-300"
                         required
                         autoFocus
                       />
@@ -626,7 +626,7 @@ export function LoginPage(props: {
                       placeholder="••••••••"
                       value={confirmNewPassword}
                       onChange={(e) => setConfirmNewPassword(e.target.value)}
-                      className="input-field w-full px-4 sm:px-5 py-3.5 sm:py-4 text-sm focus:border-primary transition-all duration-300"
+                      className="input-field w-full px-4 sm:px-5 py-3.5 sm:py-4 text-base sm:text-sm focus:border-primary transition-all duration-300"
                       required
                     />
                     {confirmNewPassword && confirmNewPassword !== newPassword ? (
@@ -667,7 +667,7 @@ export function LoginPage(props: {
                     placeholder="you@example.com"
                     value={forgotEmail}
                     onChange={(e) => setForgotEmail(e.target.value)}
-                    className="input-field w-full px-4 sm:px-5 py-3.5 sm:py-4 text-sm focus:border-primary transition-all duration-300"
+                    className="input-field w-full px-4 sm:px-5 py-3.5 sm:py-4 text-base sm:text-sm focus:border-primary transition-all duration-300"
                     required
                     autoFocus
                   />
@@ -728,7 +728,7 @@ export function LoginPage(props: {
                         placeholder="••••••••"
                         value={resetNewPassword}
                         onChange={(e) => setResetNewPassword(e.target.value)}
-                        className="input-field w-full px-4 sm:px-5 py-3.5 sm:py-4 pr-12 sm:pr-14 text-sm focus:border-primary transition-all duration-300"
+                        className="input-field w-full px-4 sm:px-5 py-3.5 sm:py-4 pr-12 sm:pr-14 text-base sm:text-sm focus:border-primary transition-all duration-300"
                         required
                         autoFocus
                       />
@@ -756,7 +756,7 @@ export function LoginPage(props: {
                       placeholder="••••••••"
                       value={confirmResetPassword}
                       onChange={(e) => setConfirmResetPassword(e.target.value)}
-                      className="input-field w-full px-4 sm:px-5 py-3.5 sm:py-4 text-sm focus:border-primary transition-all duration-300"
+                      className="input-field w-full px-4 sm:px-5 py-3.5 sm:py-4 text-base sm:text-sm focus:border-primary transition-all duration-300"
                       required
                     />
                     {confirmResetPassword && confirmResetPassword !== resetNewPassword ? (
@@ -877,7 +877,7 @@ export function LoginPage(props: {
           </p>
         </motion.div>
 
-        <div className="absolute bottom-4 sm:bottom-8 left-0 w-full flex justify-center gap-5 sm:gap-8 text-[9px] sm:text-[10px] uppercase tracking-[0.16em] sm:tracking-widest text-secondary opacity-50 xl:hidden">
+        <div className="w-full mt-8 sm:mt-10 flex justify-center gap-5 sm:gap-8 text-[9px] sm:text-[10px] uppercase tracking-[0.16em] sm:tracking-widest text-secondary opacity-50 xl:hidden">
           <button type="button" className="hover:opacity-80" onClick={() => setMessage({ type: 'muted', text: 'Privacy policy not configured.' })}>
             Privacy
           </button>

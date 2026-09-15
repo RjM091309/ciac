@@ -145,10 +145,9 @@ export function ProponentSidebar({
   return (
     <aside
       className={cn(
-        'shrink-0 pb-6 transition-[width] duration-300 ease-in-out',
-        isDrawer ? 'pt-1' : 'pt-3',
+        'shrink-0 transition-[width] duration-300 ease-in-out',
+        isDrawer ? 'h-full' : 'pt-3 pb-6',
         collapsed ? 'w-[88px] px-3' : 'w-64 pl-4 pr-2',
-        isDrawer && 'h-full',
       )}
     >
       <div

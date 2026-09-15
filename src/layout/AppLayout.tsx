@@ -3,6 +3,7 @@ import { AppFooter } from '../components/AppFooter';
 import { AppHeader } from '../components/AppHeader';
 import { AppSidebar } from '../components/AppSidebar';
 import { ProponentSidebar } from '../components/proponent/ProponentSidebar';
+import { ProponentBottomNav, BOTTOM_NAV_HEIGHT } from '../components/proponent/ProponentBottomNav';
 import { ControlPanelAccessProvider } from '../context/ControlPanelAccessContext';
 import { cn } from '../lib/utils';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
@@ -197,6 +198,9 @@ export function AppLayout({
   // Panel permissions; every other role uses the permission-gated AppSidebar.
   const effectiveSidebarRole = sidebarRoleOverride ?? userRole;
   const SidebarComponent = effectiveSidebarRole === 'proponent' ? ProponentSidebar : AppSidebar;
+  // Locators get a persistent bottom tab bar on mobile instead of relying on
+  // the hamburger drawer for primary nav; other roles are unaffected.
+  const showBottomNav = isMobile && effectiveSidebarRole === 'proponent';
 
   return (
     <ThemeProvider theme={muiTheme}>
@@ -222,9 +226,10 @@ export function AppLayout({
           {isMobile ? (
             <>
               <div
-                className="fixed left-0 bottom-0 z-50 w-64 max-w-[85vw] pt-1 pb-6 flex flex-col"
+                className="fixed left-0 z-50 w-64 max-w-[85vw] pt-1 pb-6 flex flex-col"
                 style={{
                   top: 'calc(3.5rem + env(safe-area-inset-top, 0px))',
+                  bottom: showBottomNav ? `calc(${BOTTOM_NAV_HEIGHT}px + env(safe-area-inset-bottom, 0px))` : 0,
                   paddingBottom: 'max(1.5rem, env(safe-area-inset-bottom, 0px))',
                   transform: sidebarCollapsed ? 'translateX(-100%)' : 'translateX(0)',
                   transition: 'transform 0.35s cubic-bezier(0.32, 0.72, 0, 1)',
@@ -255,7 +260,13 @@ export function AppLayout({
           )}
 
           <div className="flex-1 flex flex-col overflow-hidden min-w-0">
-            <main className="flex-1 overflow-y-auto overflow-x-hidden px-3 sm:px-4 pt-6 sm:pt-8 pb-safe custom-scrollbar">
+            <main
+              className={cn(
+                'flex-1 overflow-y-auto overflow-x-hidden px-3 sm:px-4 pt-6 sm:pt-8 custom-scrollbar',
+                showBottomNav ? undefined : 'pb-safe',
+              )}
+              style={showBottomNav ? { paddingBottom: `calc(${BOTTOM_NAV_HEIGHT}px + max(1.5rem, env(safe-area-inset-bottom, 0px)))` } : undefined}
+            >
               <div className="min-h-full flex flex-col">
                 <div className="flex-1">{children}</div>
                 <AppFooter />
@@ -263,6 +274,15 @@ export function AppLayout({
             </main>
           </div>
         </div>
+
+        {showBottomNav && (
+          <ProponentBottomNav
+            view={view}
+            onViewChange={onViewChange}
+            onOpenMore={toggleSidebar}
+            permissionOverride={sidebarPermissionOverride}
+          />
+        )}
       </div>
     </ControlPanelAccessProvider>
     </ThemeProvider>

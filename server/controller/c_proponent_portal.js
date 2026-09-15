@@ -3,7 +3,7 @@ const Workflow = require("../models/ApplicationWorkflow");
 const Contract = require("../models/Contract");
 const Permit = require("../models/Permit");
 const ActivityLog = require("../models/ActivityLog");
-const { relativeStoragePath } = require("../lib/fileStorage");
+const { relativeStoragePath, resolveStoredPath } = require("../lib/fileStorage");
 
 // All handlers below assume requireProponentSelf (req.proponent) has run, and
 // the per-application ones assume requireOwnApplication (req.application) has run.
@@ -140,6 +140,35 @@ exports.listMyPermits = async (req, res) => {
     return res.json({ success: true, data: rows });
   } catch (error) {
     console.error("List my permits error:", error);
+    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+  }
+};
+
+exports.downloadMyPermitCertificate = async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ success: false, message: "Invalid id" });
+    const permit = await Permit.getById(id);
+    if (!permit || Number(permit.proponent_id) !== Number(req.proponent.id)) {
+      return res.status(404).json({ success: false, message: "Permit not found" });
+    }
+    const certificatePath = await Permit.getCertificatePath(id);
+    if (!certificatePath) {
+      return res.status(404).json({ success: false, message: "No certificate has been generated for this permit yet." });
+    }
+    const absPath = resolveStoredPath(certificatePath);
+    if (!absPath || !fs.existsSync(absPath)) {
+      return res.status(404).json({ success: false, message: "Certificate file is no longer available." });
+    }
+    const filename = `Permit-Certificate-${id}.pdf`;
+    res.type("application/pdf");
+    if (req.query.view === "1") {
+      res.setHeader("Content-Disposition", `inline; filename="${filename}"`);
+      return res.sendFile(absPath);
+    }
+    return res.download(absPath, filename);
+  } catch (error) {
+    console.error("Download my permit certificate error:", error);
     return res.status(500).json({ success: false, message: error.message || "Internal server error" });
   }
 };

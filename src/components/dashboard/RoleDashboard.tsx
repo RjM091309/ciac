@@ -56,6 +56,6 @@ export function RoleDashboard({ navigate }: { navigate: Navigate }) {
   }
 
   if (state.status === 'officer') return <OfficerDashboard data={state.data} navigate={navigate} />;
-  if (state.status === 'proponent') return <ProponentDashboard data={state.data} onFiled={load} />;
+  if (state.status === 'proponent') return <ProponentDashboard data={state.data} onFiled={load} navigate={navigate} />;
   return <Dashboard data={state.data} navigate={navigate} />;
 }

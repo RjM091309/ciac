@@ -65,7 +65,7 @@ export function PreviewDashboard({ role, navigate }: { role: PreviewRole; naviga
   }
 
   if (state.status === 'officer') return <OfficerDashboard data={state.data} widgetOverrides={state.widgetOverrides} navigate={navigate} />;
-  if (state.status === 'proponent') return <ProponentDashboard data={state.data} widgetOverrides={state.widgetOverrides} />;
+  if (state.status === 'proponent') return <ProponentDashboard data={state.data} widgetOverrides={state.widgetOverrides} navigate={navigate} />;
 
   return (
     <div className="glass-card p-6 text-center text-xs text-secondary !border-transparent" style={{ backgroundColor: 'var(--surface)' }}>

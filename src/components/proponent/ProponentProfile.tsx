@@ -255,9 +255,9 @@ export function ProponentProfile() {
           <p className="text-[11px] text-secondary mb-4">
             Edit the fields you want to change. Your request goes to 3CORE for approval before it takes effect.
           </p>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="grid grid-cols-2 gap-4">
             {EDITABLE.map((f) => (
-              <div key={f.key} className={f.key === 'address' ? 'sm:col-span-2 space-y-1.5' : 'space-y-1.5'}>
+              <div key={f.key} className={f.key === 'address' ? 'col-span-2 space-y-1.5' : 'space-y-1.5'}>
                 <label className="text-[10px] font-semibold uppercase tracking-widest text-secondary">{f.label}</label>
                 <input
                   className="w-full rounded-md px-3 py-2 text-sm border focus:outline-none focus:border-[var(--nav-active-bg)]"
@@ -288,27 +288,30 @@ export function ProponentProfile() {
           </div>
         </div>
       ) : (
-        <div className="glass-card p-4 sm:p-5 !border-transparent" style={{ backgroundColor: 'var(--surface)' }}>
-          <h4 className="text-sm font-bold mb-4" style={{ color: 'var(--text)' }}>
-            Business &amp; Registration
-          </h4>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-5">
-            <Field label="Business Name" value={p.business_name} />
-            <Field label="Registration No." value={p.registration_no} />
-            <Field label="TIN" value={p.tin} />
-            <Field label="Contact No." value={p.contact_no} />
-            <div className="sm:col-span-2">
-              <Field label="Address" value={p.address} />
+        <>
+          <div className="glass-card p-4 sm:p-5 !border-transparent" style={{ backgroundColor: 'var(--surface)' }}>
+            <h4 className="text-sm font-bold mb-4" style={{ color: 'var(--text)' }}>
+              Business &amp; Registration
+            </h4>
+            <div className="grid grid-cols-2 gap-4 sm:gap-5">
+              <Field label="Business Name" value={p.business_name} />
+              <Field label="Registration No." value={p.registration_no} />
+              <Field label="TIN" value={p.tin} />
+              <Field label="Contact No." value={p.contact_no} />
             </div>
           </div>
-        </div>
+
+          <div className="glass-card p-4 sm:p-5 !border-transparent" style={{ backgroundColor: 'var(--surface)' }}>
+            <Field label="Address" value={p.address} />
+          </div>
+        </>
       )}
 
       <div className="glass-card p-4 sm:p-5 !border-transparent" style={{ backgroundColor: 'var(--surface)' }}>
         <h4 className="text-sm font-bold mb-4" style={{ color: 'var(--text)' }}>
           Record
         </h4>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-5">
+        <div className="grid grid-cols-2 gap-4 sm:gap-5">
           <Field label="Profile Created" value={formatDate(p.created_at)} />
           <Field label="Last Updated" value={formatDate(p.updated_at)} />
         </div>
