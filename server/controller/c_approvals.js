@@ -1,4 +1,7 @@
+const fs = require("fs");
 const Approval = require("../models/ApprovalIssuance");
+const Contract = require("../models/Contract");
+const { resolveStoredPath } = require("../lib/fileStorage");
 
 function fail(res, error, label) {
   console.error(`${label} error:`, error);
@@ -176,6 +179,33 @@ exports.saveContract = async (req, res) => {
     return res.json({ success: true, data: row });
   } catch (error) {
     return fail(res, error, "Save contract");
+  }
+};
+
+/** Serves the auto-generated contract certificate PDF — ?view=1 renders it
+ * inline in the browser, otherwise it downloads. Mirrors
+ * c_permits.js's downloadCertificate. */
+exports.downloadContractCertificate = async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ success: false, message: "Invalid id" });
+    const certificatePath = await Contract.getCertificatePath(id);
+    if (!certificatePath) {
+      return res.status(404).json({ success: false, message: "No certificate has been generated for this contract yet." });
+    }
+    const absPath = resolveStoredPath(certificatePath);
+    if (!absPath || !fs.existsSync(absPath)) {
+      return res.status(404).json({ success: false, message: "Certificate file is no longer available." });
+    }
+    const filename = `Contract-Certificate-${id}.pdf`;
+    res.type("application/pdf");
+    if (req.query.view === "1") {
+      res.setHeader("Content-Disposition", `inline; filename="${filename}"`);
+      return res.sendFile(absPath);
+    }
+    return res.download(absPath, filename);
+  } catch (error) {
+    return fail(res, error, "Download contract certificate");
   }
 };
 

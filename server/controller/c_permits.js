@@ -3,8 +3,22 @@ const path = require("path");
 const Permit = require("../models/Permit");
 const Proponent = require("../models/Proponent");
 const Workflow = require("../models/ApplicationWorkflow");
+const User = require("../models/User");
+const Contract = require("../models/Contract");
 const { renderPermitCertificate } = require("../lib/permitCertificate");
 const { STORAGE_ROOT, relativeStoragePath, resolveStoredPath } = require("../lib/fileStorage");
+
+/** Title-cases a stored role name ("ASSESSMENT OFFICER" -> "Assessment
+ * Officer") for the certificate's signature block — roles are stored
+ * uppercase, but a certificate reads better in normal case. */
+function titleCaseRoleName(name) {
+  return String(name || "")
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(" ");
+}
 
 /** Renders and saves the certificate PDF for a permit, then points the
  * permit row at it. Best-effort — a failure here shouldn't fail the
@@ -12,14 +26,19 @@ const { STORAGE_ROOT, relativeStoragePath, resolveStoredPath } = require("../lib
  * certificate, same as before this existed. */
 async function generateAndAttachCertificate(permit) {
   try {
-    const [proponent, application] = await Promise.all([
+    const approverId = permit.updated_by || permit.created_by;
+    const [proponent, application, approver] = await Promise.all([
       Proponent.getProponentById(permit.proponent_id),
       permit.application_id ? Workflow.getApplicationById(permit.application_id) : Promise.resolve(null),
+      approverId ? User.getUserById(approverId) : Promise.resolve(null),
     ]);
     const pdfBuffer = await renderPermitCertificate({
       permit,
       proponentName: proponent?.business_name || null,
+      proponentAddress: proponent?.address || null,
       applicationNo: application?.application_no || null,
+      approvedByName: approver?.full_name || approver?.username || null,
+      approvedByPosition: titleCaseRoleName(approver?.roles?.[0]?.name) || null,
     });
     const dir = path.join(STORAGE_ROOT, "permits", String(permit.id));
     fs.mkdirSync(dir, { recursive: true });
@@ -127,6 +146,44 @@ exports.downloadCertificate = async (req, res) => {
     return res.download(absPath, filename);
   } catch (error) {
     console.error("Download permit certificate error:", error);
+    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+  }
+};
+
+/** Serves the contract certificate linked to this permit's application —
+ * a separate PDF from the permit certificate, surfaced here so staff working
+ * the Permits Management table don't have to go find it in the Approval
+ * Queue. Gated by compliance:permits (same as the rest of this page) rather
+ * than approval:queue, since that's the permission the caller actually has. */
+exports.downloadContractCertificate = async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ success: false, message: "Invalid id" });
+    const permit = await Permit.getById(id);
+    if (!permit || !permit.application_id) {
+      return res.status(404).json({ success: false, message: "This permit isn't linked to an application." });
+    }
+    const contract = await Contract.getByApplicationId(permit.application_id);
+    if (!contract) {
+      return res.status(404).json({ success: false, message: "No contract recorded for this application yet." });
+    }
+    const certificatePath = await Contract.getCertificatePath(contract.id);
+    if (!certificatePath) {
+      return res.status(404).json({ success: false, message: "No certificate has been generated for this contract yet." });
+    }
+    const absPath = resolveStoredPath(certificatePath);
+    if (!absPath || !fs.existsSync(absPath)) {
+      return res.status(404).json({ success: false, message: "Certificate file is no longer available." });
+    }
+    const filename = `Contract-Certificate-${contract.id}.pdf`;
+    res.type("application/pdf");
+    if (req.query.view === "1") {
+      res.setHeader("Content-Disposition", `inline; filename="${filename}"`);
+      return res.sendFile(absPath);
+    }
+    return res.download(absPath, filename);
+  } catch (error) {
+    console.error("Download contract certificate (via permit) error:", error);
     return res.status(500).json({ success: false, message: error.message || "Internal server error" });
   }
 };

@@ -2,6 +2,10 @@ const { selectData, insertData, updateData, updateSchema } = require("../config/
 const Notification = require("./Notification");
 
 function toInt(v) {
+  // Number(null) is 0, not NaN — without this guard, an explicitly-absent
+  // optional FK (document_id, when no document is picked) silently became 0
+  // instead of NULL and violated the FK constraint against dbo.documents.
+  if (v === null || v === undefined || v === "") return null;
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
 }
@@ -39,8 +43,25 @@ async function ensureSchema() {
 
       IF COL_LENGTH('dbo.contracts', 'updated_at') IS NULL
         ALTER TABLE dbo.contracts ADD updated_at DATETIME2(3) NULL;
+
+      IF COL_LENGTH('dbo.contracts', 'certificate_path') IS NULL
+        ALTER TABLE dbo.contracts ADD certificate_path NVARCHAR(1000) NULL;
     END;
   `);
+}
+
+async function setCertificatePath(id, certificatePath) {
+  await ensureSchema();
+  await updateData(`UPDATE dbo.contracts SET certificate_path = @param1 WHERE id = @param0`, [
+    toInt(id),
+    certificatePath || null,
+  ]);
+}
+
+async function getCertificatePath(id) {
+  await ensureSchema();
+  const rows = await selectData(`SELECT certificate_path FROM dbo.contracts WHERE id = @param0`, [toInt(id)]);
+  return rows?.[0]?.certificate_path || null;
 }
 
 async function createContractNotifications({ applicationId, contractNo, actorId, isUpdate }) {
@@ -58,6 +79,12 @@ async function createContractNotifications({ applicationId, contractNo, actorId,
   }
 }
 
+function withHasCertificate(row) {
+  if (!row) return row;
+  const { certificate_path, ...rest } = row;
+  return { ...rest, has_certificate: Boolean(certificate_path) };
+}
+
 async function getById(id) {
   await ensureSchema();
   const rows = await selectData(
@@ -73,13 +100,14 @@ async function getById(id) {
       c.created_by,
       c.updated_by,
       c.created_at,
-      c.updated_at
+      c.updated_at,
+      c.certificate_path
     FROM dbo.contracts c
     WHERE c.id = @param0
     `,
     [id]
   );
-  return rows?.[0] || null;
+  return withHasCertificate(rows?.[0]) || null;
 }
 
 async function getByApplicationId(applicationId) {
@@ -97,14 +125,15 @@ async function getByApplicationId(applicationId) {
       c.created_by,
       c.updated_by,
       c.created_at,
-      c.updated_at
+      c.updated_at,
+      c.certificate_path
     FROM dbo.contracts c
     WHERE c.application_id = @param0
     ORDER BY c.id DESC
     `,
     [applicationId]
   );
-  return rows?.[0] || null;
+  return withHasCertificate(rows?.[0]) || null;
 }
 
 // System-wide, for the Account Officer's "Needs Your Attention" widget
@@ -150,6 +179,7 @@ async function listByProponentId(proponentId) {
       c.document_id,
       c.created_at,
       c.updated_at,
+      c.certificate_path,
       a.application_no,
       a.is_renewal
     FROM dbo.contracts c
@@ -159,7 +189,7 @@ async function listByProponentId(proponentId) {
     `,
     [toInt(proponentId)]
   );
-  return rows;
+  return rows.map(withHasCertificate);
 }
 
 async function createContract({
@@ -252,5 +282,7 @@ module.exports = {
   listByProponentId,
   createContract,
   updateContract,
+  setCertificatePath,
+  getCertificatePath,
 };
 

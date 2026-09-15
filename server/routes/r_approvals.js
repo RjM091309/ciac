@@ -29,5 +29,6 @@ router.patch("/steps/:id/assign", requireMenuAccess(MENU_KEY, "edit"), controlle
 router.post("/:applicationId/issuances", requireMenuAccess(MENU_KEY, "add"), controller.addIssuance);
 router.delete("/issuances/:id", requireMenuAccess(MENU_KEY, "delete"), controller.deleteIssuance);
 router.put("/:applicationId/contract", requireMenuAccess(MENU_KEY, "edit"), controller.saveContract);
+router.get("/contracts/:id/certificate", requireMenuAccess(MENU_KEY, "view"), controller.downloadContractCertificate);
 
 module.exports = router;

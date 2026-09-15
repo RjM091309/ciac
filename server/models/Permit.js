@@ -92,6 +92,10 @@ function mapRow(r, extra = {}) {
     // only a presence flag here, never the raw storage path; the actual
     // file is served through GET /api/permits/:id/certificate.
     has_certificate: Boolean(r.certificate_path),
+    // The linked application's contract (if any) — a separate PDF from the
+    // permit certificate, surfaced so staff can jump to it from the same row
+    // instead of hunting through the Approval Queue.
+    has_contract_certificate: Boolean(r.contract_certificate_path),
     ...extra,
   };
 }
@@ -99,9 +103,11 @@ function mapRow(r, extra = {}) {
 async function listAll() {
   await ensureSchema();
   const rows = await selectData(
-    `SELECT ${SELECT_COLS}, pr.business_name AS proponent_name
+    `SELECT ${SELECT_COLS}, pr.business_name AS proponent_name,
+       c.certificate_path AS contract_certificate_path
      FROM dbo.permits p
      LEFT JOIN dbo.proponents pr ON pr.id = p.proponent_id
+     LEFT JOIN dbo.contracts c ON c.application_id = p.application_id
      ORDER BY p.id DESC`
   );
   return rows.map((r) => mapRow(r, { proponent_name: r.proponent_name ?? null }));

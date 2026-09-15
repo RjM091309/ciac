@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { FileText, Pencil, Search, Trash2 } from 'lucide-react';
+import { FileSignature, FileText, Pencil, Search, Trash2 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { toast } from 'sonner';
 import { SidePanel } from '../ui/SidePanel';
@@ -43,6 +43,7 @@ type PermitRow = {
   remarks: string | null;
   is_active: number | boolean;
   has_certificate?: boolean;
+  has_contract_certificate?: boolean;
 };
 
 type Option = { value: string; label: string };
@@ -202,8 +203,7 @@ export function PermitsManagement() {
   return (
     <div className="space-y-4 sm:space-y-5">
       <div className="glass-card p-4 sm:p-5 !border-transparent" style={{ backgroundColor: 'var(--surface)' }}>
-        <div className="flex items-center justify-between mb-3 gap-2">
-          <h3 className="text-sm font-bold tracking-tight" style={{ color: 'var(--text)' }}>Permits</h3>
+        <div className="flex items-center justify-end mb-3 gap-2">
           {canAdd ? (
             <button
               className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-semibold shadow-sm cursor-pointer"
@@ -263,9 +263,18 @@ export function PermitsManagement() {
                             <button
                               className="rounded-md p-1.5 text-secondary cursor-pointer"
                               onClick={() => window.open(`/api/permits/${p.id}/certificate?view=1`, '_blank')}
-                              title="View certificate"
+                              title="View permit certificate"
                             >
                               <FileText size={14} />
+                            </button>
+                          ) : null}
+                          {p.has_contract_certificate ? (
+                            <button
+                              className="rounded-md p-1.5 text-secondary cursor-pointer"
+                              onClick={() => window.open(`/api/permits/${p.id}/contract-certificate?view=1`, '_blank')}
+                              title="View contract"
+                            >
+                              <FileSignature size={14} />
                             </button>
                           ) : null}
                           {canEdit ? (

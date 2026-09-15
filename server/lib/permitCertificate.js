@@ -1,4 +1,5 @@
-const PDFDocument = require("pdfkit");
+const crypto = require("crypto");
+const { fmtDate, buildCertificateHtml, renderHtmlToPdf, buildQrDataUrl } = require("./certificateRenderer");
 
 const PERMIT_TYPE_LABELS = {
   ENVIRONMENTAL: "Environmental Permit",
@@ -8,150 +9,99 @@ const PERMIT_TYPE_LABELS = {
   AUTHORITY_TO_OPERATE: "Authority to Operate",
 };
 
+// The certificate's own headline — the actual PH-style name each permit type
+// is issued under, not a generic "Certificate of Permit" for every kind.
+const CERTIFICATE_TITLES = {
+  ENVIRONMENTAL: "CERTIFICATE OF ENVIRONMENTAL COMPLIANCE",
+  FIRE: "FIRE SAFETY CERTIFICATE",
+  OCCUPANCY: "CERTIFICATE OF OCCUPANCY",
+  SANITARY: "SANITARY PERMIT",
+  AUTHORITY_TO_OPERATE: "AUTHORITY TO OPERATE",
+};
+
 function permitTypeLabel(type) {
   return PERMIT_TYPE_LABELS[String(type || "").toUpperCase()] || String(type || "Permit");
 }
 
-function fmtDate(value) {
-  if (!value) return "—";
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return "—";
-  return d.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
+function certificateTitle(type) {
+  return CERTIFICATE_TITLES[String(type || "").toUpperCase()] || "CERTIFICATE OF COMPLIANCE";
+}
+
+/** Stable reference numbers derived from the permit itself — no extra DB
+ * column, no randomness, so regenerating the certificate (e.g. after an
+ * edit) always reproduces the same numbers instead of a new one each time. */
+function certificateNo(permit) {
+  const year = (permit.issue_date ? new Date(permit.issue_date) : new Date(permit.created_at || Date.now())).getFullYear();
+  return `CERT-${year}-${String(permit.id).padStart(5, "0")}`;
+}
+
+function verificationCode(permit) {
+  const hash = crypto
+    .createHash("sha256")
+    .update(`${permit.id}:${permit.permit_no}:${permit.created_at || ""}`)
+    .digest("hex")
+    .toUpperCase();
+  return `${hash.slice(0, 4)}-${hash.slice(4, 8)}-${hash.slice(8, 12)}`;
 }
 
 /**
  * Renders a one-page certificate PDF for an issued permit into an in-memory
  * Buffer — called right after a permit is created/updated (see
  * c_permits.js) so every permit gets a real, presentable document instead of
- * relying on staff to source/upload their own scan. Kept intentionally
- * simple (no external logo asset, no barcode/QR) so it has zero extra
- * dependencies; swap in real letterhead assets here later if the client
- * supplies them.
+ * relying on staff to source/upload their own scan. HTML+CSS rendered via a
+ * headless Chromium (Playwright, see certificateRenderer.js) rather than
+ * hand-drawing shapes, so the layout can actually match a real certificate
+ * design — and matches the same visual language every other generated
+ * certificate (e.g. contracts) uses.
+ *
+ * No logo/stamp/signature image assets yet — those slots just aren't in the
+ * layout rather than showing a broken image; add them to the shared shell
+ * once the client supplies real letterhead assets. The QR encodes the
+ * reference number itself (plain text, not a URL) since there's no live
+ * verification lookup page yet — honest about what scanning it actually
+ * gets you, while still matching the requested "scan to verify" layout.
  */
-function renderPermitCertificate({ permit, proponentName, applicationNo }) {
-  return new Promise((resolve, reject) => {
-    const doc = new PDFDocument({ size: "A4", margin: 56 });
-    const chunks = [];
-    doc.on("data", (chunk) => chunks.push(chunk));
-    doc.on("end", () => resolve(Buffer.concat(chunks)));
-    doc.on("error", reject);
+async function renderPermitCertificate({
+  permit,
+  proponentName,
+  proponentAddress,
+  applicationNo,
+  approvedByName,
+  approvedByPosition,
+}) {
+  const refCode = verificationCode(permit);
+  const qrDataUrl = await buildQrDataUrl(refCode);
 
-    const pageWidth = doc.page.width;
-    const contentWidth = pageWidth - doc.page.margins.left - doc.page.margins.right;
+  const metaRows = [
+    { label: "Permit No.", value: permit.permit_no || "—", mono: true },
+    { label: "Issuing Authority", value: permit.issuing_authority || "—" },
+    { label: "Date Issued", value: fmtDate(permit.issue_date) },
+    { label: "Valid Until", value: fmtDate(permit.expiry_date) },
+    ...(applicationNo ? [{ label: "Application No.", value: applicationNo, mono: true }] : []),
+  ];
 
-    // Decorative border frame.
-    doc
-      .lineWidth(1.5)
-      .strokeColor("#1f2937")
-      .rect(24, 24, pageWidth - 48, doc.page.height - 48)
-      .stroke();
-    doc
-      .lineWidth(0.75)
-      .strokeColor("#9ca3af")
-      .rect(30, 30, pageWidth - 60, doc.page.height - 60)
-      .stroke();
-
-    doc.moveDown(2.5);
-
-    // Header / letterhead.
-    doc
-      .font("Helvetica-Bold")
-      .fontSize(11)
-      .fillColor("#1f2937")
-      .text("3CORE LOCATOR & COMPLIANCE SYSTEM", { align: "center" });
-    doc
-      .font("Helvetica")
-      .fontSize(9)
-      .fillColor("#6b7280")
-      .text("Clark Development Corporation", { align: "center" });
-
-    doc.moveDown(1.5);
-    doc
-      .font("Helvetica-Bold")
-      .fontSize(22)
-      .fillColor("#111827")
-      .text("CERTIFICATE OF PERMIT", { align: "center" });
-    doc
-      .font("Helvetica")
-      .fontSize(13)
-      .fillColor("#374151")
-      .text(permitTypeLabel(permit.permit_type), { align: "center" });
-
-    doc.moveDown(2);
-    doc
-      .font("Helvetica")
-      .fontSize(11)
-      .fillColor("#374151")
-      .text("This is to certify that", { align: "center" });
-
-    doc.moveDown(0.5);
-    doc
-      .font("Helvetica-Bold")
-      .fontSize(18)
-      .fillColor("#111827")
-      .text(proponentName || "—", { align: "center" });
-
-    doc.moveDown(0.5);
-    doc
-      .font("Helvetica")
-      .fontSize(11)
-      .fillColor("#374151")
-      .text(`has been granted the above-named permit, subject to the terms and conditions on record.`, {
-        align: "center",
-      });
-
-    doc.moveDown(2.5);
-
-    // Details table.
-    const rows = [
-      ["Permit No.", permit.permit_no || "—"],
-      ["Permit Type", permitTypeLabel(permit.permit_type)],
-      ["Issuing Authority", permit.issuing_authority || "—"],
-      ["Issue Date", fmtDate(permit.issue_date)],
-      ["Expiry Date", fmtDate(permit.expiry_date)],
-      ...(applicationNo ? [["Linked Application", applicationNo]] : []),
-    ];
-
-    const labelWidth = 160;
-    const startX = doc.page.margins.left;
-    let y = doc.y;
-    for (const [label, value] of rows) {
-      doc
-        .font("Helvetica-Bold")
-        .fontSize(10)
-        .fillColor("#4b5563")
-        .text(label, startX, y, { width: labelWidth });
-      doc
-        .font("Helvetica")
-        .fontSize(10)
-        .fillColor("#111827")
-        .text(String(value), startX + labelWidth, y, { width: contentWidth - labelWidth });
-      y = doc.y + 8;
-    }
-
-    doc.y = y + 40;
-
-    // Signature block.
-    const sigY = Math.max(doc.y, doc.page.height - 170);
-    doc
-      .moveTo(startX, sigY)
-      .lineTo(startX + 220, sigY)
-      .strokeColor("#9ca3af")
-      .lineWidth(0.75)
-      .stroke();
-    doc.font("Helvetica").fontSize(9).fillColor("#6b7280").text("Authorized Signatory", startX, sigY + 4);
-
-    doc
-      .font("Helvetica")
-      .fontSize(9)
-      .fillColor("#9ca3af")
-      .text(`Generated by the 3CORE Portal on ${fmtDate(new Date())}`, startX, doc.page.height - 80, {
-        width: contentWidth,
-        align: "center",
-      });
-
-    doc.end();
+  const html = buildCertificateHtml({
+    officeLine: "Office of Compliance & Permits — 3CORE Locator & Compliance System",
+    titleText: certificateTitle(permit.permit_type),
+    certLabel: "CERTIFICATE NO",
+    certNo: certificateNo(permit),
+    businessName: proponentName,
+    businessAddress: proponentAddress,
+    statementHtml:
+      `has duly complied with and fulfilled the mandatory criteria, documentary requirements, and ` +
+      `operational standards for the above permit type, as administered under the applicable ` +
+      `compliance rules of this Office, and is hereby granted this ${permitTypeLabel(permit.permit_type)}.`,
+    metaRows,
+    refCode,
+    qrDataUrl,
+    approvedByName,
+    approvedByPosition,
+    footerNotice:
+      "NOTICE: This Certificate remains the official property of the issuing authority. Any alteration, " +
+      "erasure, or unauthorized duplication renders this certificate null and void.",
   });
+
+  return renderHtmlToPdf(html);
 }
 
-module.exports = { renderPermitCertificate, permitTypeLabel };
+module.exports = { renderPermitCertificate, permitTypeLabel, certificateTitle, certificateNo, verificationCode };

@@ -1,3 +1,5 @@
+const fs = require("fs");
+const path = require("path");
 const {
   selectData,
   insertData,
@@ -9,6 +11,51 @@ const Notification = require("./Notification");
 const Workflow = require("./ApplicationWorkflow");
 const Contract = require("./Contract");
 const Assessment = require("./AssessmentEvaluation");
+const Proponent = require("./Proponent");
+const User = require("./User");
+const ApplicationType = require("./ApplicationType");
+const { renderContractCertificate } = require("../lib/contractCertificate");
+const { STORAGE_ROOT, relativeStoragePath } = require("../lib/fileStorage");
+
+function titleCaseRoleName(name) {
+  return String(name || "")
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(" ");
+}
+
+/** Renders and saves the contract's certificate PDF, then points the
+ * contract row at it — same pattern as c_permits.js's permit certificate.
+ * Best-effort: a failure here shouldn't fail the contract save itself. */
+async function generateAndAttachContractCertificate(contract, actorId) {
+  try {
+    const application = await Workflow.getApplicationById(contract.application_id);
+    const [proponent, applicationType, approver] = await Promise.all([
+      application?.proponent_id ? Proponent.getProponentById(application.proponent_id) : Promise.resolve(null),
+      application?.application_type ? ApplicationType.getByCode(application.application_type) : Promise.resolve(null),
+      actorId ? User.getUserById(actorId) : Promise.resolve(null),
+    ]);
+    const pdfBuffer = await renderContractCertificate({
+      contract,
+      proponentName: proponent?.business_name || null,
+      proponentAddress: proponent?.address || null,
+      representativeName: proponent?.contact_name || null,
+      applicationNo: application?.application_no || null,
+      applicationTypeName: applicationType?.name || null,
+      approvedByName: approver?.full_name || approver?.username || null,
+      approvedByPosition: titleCaseRoleName(approver?.roles?.[0]?.name) || null,
+    });
+    const dir = path.join(STORAGE_ROOT, "contracts", String(contract.id));
+    fs.mkdirSync(dir, { recursive: true });
+    const absPath = path.join(dir, "certificate.pdf");
+    fs.writeFileSync(absPath, pdfBuffer);
+    await Contract.setCertificatePath(contract.id, relativeStoragePath(absPath));
+  } catch (error) {
+    console.error("Generate contract certificate error:", error);
+  }
+}
 
 function toInt(v) {
   if (v === null || v === undefined || v === "") return null;
@@ -761,6 +808,12 @@ async function saveContract(applicationId, payload, actorId) {
       });
   if (approval) {
     await logActivity(approval.id, existing ? "CONTRACT_UPDATED" : "CONTRACT_RECORDED", contractNo, actorId);
+  }
+  if (saved) {
+    // Regenerated on every save so the certificate always reflects the
+    // latest contract details (dates, contract no. may have just changed).
+    await generateAndAttachContractCertificate(saved, actorId);
+    return Contract.getById(saved.id);
   }
   return saved;
 }

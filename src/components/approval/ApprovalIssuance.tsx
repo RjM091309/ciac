@@ -100,6 +100,7 @@ type ContractRow = {
   effective_start: string | null;
   effective_end: string | null;
   document_id: number | null;
+  has_certificate?: boolean;
 } | null;
 
 type StatusHistoryRow = {
@@ -1191,6 +1192,15 @@ function ContractTab({
             >
               View executed contract file
             </a>
+          ) : null}
+          {c.has_certificate ? (
+            <button
+              type="button"
+              className="text-[12px] underline text-secondary hover:text-[var(--text)] col-span-2 text-left cursor-pointer"
+              onClick={() => window.open(`/api/approvals/contracts/${c.id}/certificate?view=1`, '_blank')}
+            >
+              View Contract
+            </button>
           ) : null}
         </div>
       ) : (

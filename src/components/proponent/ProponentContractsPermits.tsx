@@ -14,6 +14,7 @@ type ContractRow = {
   effective_end: string | null;
   application_no: string | null;
   is_renewal: number | null;
+  has_certificate?: boolean;
 };
 
 type PermitRow = {
@@ -135,7 +136,7 @@ export function ProponentContractsPermits({ navigate }: { navigate: Navigate }) 
             <table className="min-w-full text-left text-xs">
               <thead>
                 <tr>
-                  {['Contract No.', 'Application', 'Issued', 'Effective', 'Expires'].map((c) => (
+                  {['Contract No.', 'Application', 'Issued', 'Effective', 'Expires', ''].map((c) => (
                     <th key={c} className="px-3 py-2 font-semibold text-[10px] uppercase tracking-widest text-secondary border-b" style={{ borderColor: 'var(--border-subtle)' }}>
                       {c}
                     </th>
@@ -157,6 +158,17 @@ export function ProponentContractsPermits({ navigate }: { navigate: Navigate }) 
                     <td className="px-3 py-2 text-[11px] text-secondary">{fmtDate(c.issue_date)}</td>
                     <td className="px-3 py-2 text-[11px] text-secondary">{fmtDate(c.effective_start)}</td>
                     <td className="px-3 py-2 text-[11px] text-secondary">{fmtDate(c.effective_end)}</td>
+                    <td className="px-3 py-2 text-right">
+                      {c.has_certificate ? (
+                        <button
+                          className="rounded-md px-2 py-1 text-[11px] font-semibold border cursor-pointer"
+                          style={{ borderColor: 'var(--border-subtle)', color: 'var(--text)' }}
+                          onClick={() => window.open(`/api/proponents/me/contracts/${c.id}/certificate?view=1`, '_blank')}
+                        >
+                          View Contract
+                        </button>
+                      ) : null}
+                    </td>
                   </tr>
                 ))}
               </tbody>

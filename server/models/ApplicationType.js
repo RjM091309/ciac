@@ -95,6 +95,19 @@ async function getApplicationTypeById(id) {
   return row ? mapRow(row) : null;
 }
 
+// Used to give the contract certificate a proper "CERTIFICATE OF DIRECT
+// LEASE CONTRACT"-style title driven by the File Maintenance-configurable
+// type name, instead of a hardcoded label (see c_permits/contractCertificate).
+async function getByCode(code) {
+  await ensureSchema();
+  const rows = await selectData(
+    `SELECT id, code, name, description, is_active FROM dbo.application_types WHERE UPPER(code) = UPPER(@param0)`,
+    [String(code || "").trim()]
+  );
+  const row = rows?.[0];
+  return row ? mapRow(row) : null;
+}
+
 async function createApplicationType({ code, name, description, created_by, is_active = 1 }) {
   await ensureSchema();
   const createdBy = toInt(created_by);
@@ -172,6 +185,7 @@ module.exports = {
   listApplicationTypes,
   listActiveCodes,
   getApplicationTypeById,
+  getByCode,
   createApplicationType,
   updateApplicationType,
   deactivateApplicationType,

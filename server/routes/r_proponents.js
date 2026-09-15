@@ -32,6 +32,7 @@ router.get("/me/applications/:id/contract", requireProponentSelf, requireOwnAppl
 router.get("/me/applications/:id/permits", requireProponentSelf, requireOwnApplication, portalController.getMyApplicationPermits);
 
 router.get("/me/contracts", requireProponentSelf, portalController.listMyContracts);
+router.get("/me/contracts/:id/certificate", requireProponentSelf, portalController.downloadMyContractCertificate);
 router.get("/me/permits", requireProponentSelf, portalController.listMyPermits);
 router.get("/me/permits/:id/certificate", requireProponentSelf, portalController.downloadMyPermitCertificate);
 router.get("/me/activity", requireProponentSelf, portalController.getMyActivity);

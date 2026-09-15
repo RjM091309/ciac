@@ -134,6 +134,37 @@ exports.listMyContracts = async (req, res) => {
   }
 };
 
+exports.downloadMyContractCertificate = async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ success: false, message: "Invalid id" });
+    const contract = await Contract.getById(id);
+    if (!contract) return res.status(404).json({ success: false, message: "Contract not found" });
+    const application = await Workflow.getApplicationById(contract.application_id);
+    if (!application || Number(application.proponent_id) !== Number(req.proponent.id)) {
+      return res.status(404).json({ success: false, message: "Contract not found" });
+    }
+    const certificatePath = await Contract.getCertificatePath(id);
+    if (!certificatePath) {
+      return res.status(404).json({ success: false, message: "No certificate has been generated for this contract yet." });
+    }
+    const absPath = resolveStoredPath(certificatePath);
+    if (!absPath || !fs.existsSync(absPath)) {
+      return res.status(404).json({ success: false, message: "Certificate file is no longer available." });
+    }
+    const filename = `Contract-Certificate-${id}.pdf`;
+    res.type("application/pdf");
+    if (req.query.view === "1") {
+      res.setHeader("Content-Disposition", `inline; filename="${filename}"`);
+      return res.sendFile(absPath);
+    }
+    return res.download(absPath, filename);
+  } catch (error) {
+    console.error("Download my contract certificate error:", error);
+    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+  }
+};
+
 exports.listMyPermits = async (req, res) => {
   try {
     const rows = await Permit.listByProponent(req.proponent.id);
