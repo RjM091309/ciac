@@ -211,6 +211,18 @@ const SidebarSection = ({
 }) => {
   if (items.length === 0) return null;
 
+  // A section that only ever holds one item (e.g. Assessment, Approval,
+  // Permits — each backed by a single queue/page) has nothing to expand
+  // into or distinguish itself from; render it as one direct row under the
+  // group's own icon/label instead of the item's internal sub-label, in
+  // BOTH flat and dropdown mode — otherwise a restricted role (flat) sees a
+  // raw descriptive sub-label ("Environmental, Fire, Occupancy, Sanitary")
+  // where a full-access role sees the clean group name ("Permit & Contract").
+  if (items.length === 1) {
+    const only = items[0];
+    return <SidebarItem icon={icon} label={label} active={only.active} onClick={only.onClick} collapsed={collapsed} />;
+  }
+
   if (flat) {
     return (
       <>
@@ -226,15 +238,6 @@ const SidebarSection = ({
         ))}
       </>
     );
-  }
-
-  // A dropdown that only ever holds one item (e.g. Assessment, Approval —
-  // each backed by a single queue) has nothing to expand into; the chevron
-  // and extra click are pure friction. Render it as one direct row instead,
-  // under the group's own icon/label, same as any other top-level item.
-  if (items.length === 1) {
-    const only = items[0];
-    return <SidebarItem icon={icon} label={label} active={only.active} onClick={only.onClick} collapsed={collapsed} />;
   }
 
   return (

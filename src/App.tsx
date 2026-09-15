@@ -16,6 +16,7 @@ const ProponentApplications = lazy(() => import('./components/proponent/Proponen
 const ProponentContractsPermits = lazy(() => import('./components/proponent/ProponentContractsPermits').then((m) => ({ default: m.ProponentContractsPermits })));
 const ProponentActivity = lazy(() => import('./components/proponent/ProponentActivity').then((m) => ({ default: m.ProponentActivity })));
 const PermitsManagement = lazy(() => import('./components/compliance/PermitsManagement').then((m) => ({ default: m.PermitsManagement })));
+const ExpiryCalendar = lazy(() => import('./components/compliance/ExpiryCalendar').then((m) => ({ default: m.ExpiryCalendar })));
 const UsersManagement = lazy(() => import('./components/settings/UsersManagement').then((m) => ({ default: m.UsersManagement })));
 const LocatorUsersManagement = lazy(() => import('./components/settings/LocatorUsersManagement').then((m) => ({ default: m.LocatorUsersManagement })));
 const ControlPanelManagement = lazy(() => import('./components/settings/ControlPanelManagement').then((m) => ({ default: m.ControlPanelManagement })));
@@ -594,6 +595,8 @@ export default function App() {
                 <ControlPanelManagement locationSearch={locationSearch} />
               ) : view === 'compliance:permits' ? (
                 <PermitsManagement />
+              ) : view === 'compliance:expiry' ? (
+                <ExpiryCalendar navigate={navigate} />
               ) : (
                 <SectionLanding view={view} />
               )}
