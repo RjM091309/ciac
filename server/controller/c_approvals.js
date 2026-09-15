@@ -57,8 +57,19 @@ exports.detail = async (req, res) => {
   try {
     const id = appIdParam(req, res);
     if (id === null) return undefined;
-    const data = await Approval.getApprovalDetail(id);
+    let data = await Approval.getApprovalDetail(id);
     if (!data) return res.status(404).json({ success: false, message: "Application not found" });
+    // Self-healing: an application that's reached FOR_APPROVAL but hasn't had
+    // its routing ladder started yet (freshly endorsed before this auto-start
+    // existed, or any other gap) gets started the moment someone opens it —
+    // no one should ever need to press "Start approval routing" by hand.
+    if (data.approval.application_status === "FOR_APPROVAL" && data.approval.approval_status === "PENDING") {
+      const started = await Approval.startApproval(id, req.user?.id ?? null).catch((error) => {
+        console.error("Auto-start approval on view error:", error);
+        return null;
+      });
+      if (started) data = started;
+    }
     return res.json({ success: true, data });
   } catch (error) {
     return fail(res, error, "Approval detail");

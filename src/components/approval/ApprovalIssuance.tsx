@@ -10,7 +10,6 @@ import {
   Plus,
   RotateCcw,
   Search,
-  Send,
   Stamp,
   Trash2,
   X,
@@ -697,7 +696,6 @@ function OverviewTab({
   run: RunFn;
 }) {
   const a = data.approval;
-  const notStarted = a.approval_status === 'PENDING';
   const settled = ['APPROVED', 'DISAPPROVED', 'RETURNED'].includes(a.approval_status);
 
   return (
@@ -720,21 +718,6 @@ function OverviewTab({
           style={{ borderColor: 'rgba(245,158,11,.38)', backgroundColor: 'rgba(245,158,11,.10)', color: '#f59e0b' }}
         >
           Assessment recommended <b>{a.assessment_recommendation}</b>, not ENDORSE. Confirm before routing this for approval.
-        </div>
-      ) : null}
-
-      {notStarted ? (
-        <div className="rounded-xl border p-3 flex flex-wrap items-center gap-2" style={{ borderColor: 'var(--border-subtle)' }}>
-          <button
-            className="rounded-lg px-3 py-1.5 text-[12px] font-semibold disabled:opacity-50"
-            style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
-            disabled={busy || !perms.canEdit}
-            onClick={() =>
-              run(() => apiFetch(`/api/approvals/${a.application_id}/start`, { method: 'POST' }), 'Approval workflow started')
-            }
-          >
-            <Send size={13} className="inline mr-1" /> Start approval routing
-          </button>
         </div>
       ) : null}
 
@@ -776,7 +759,7 @@ function ChainTab({
       <EmptyState
         icon={<Stamp size={40} className="opacity-40" />}
         title="Not routed yet"
-        description="Start the approval from the Overview tab to create the routing ladder from the configured levels."
+        description="This application hasn't reached the approval workflow yet — the routing ladder starts automatically once Assessment endorses it."
       />
     );
   }
@@ -827,10 +810,6 @@ function ChainTab({
 
       {current && perms.canEdit ? (
         <div className="rounded-xl border p-3 flex flex-col gap-3" style={{ borderColor: 'var(--border-subtle)' }}>
-          <div className="text-[11px] font-bold uppercase tracking-wide text-secondary">
-            Act on “{current.level_name}”
-          </div>
-
           <Field label="Remarks / basis">
             <textarea
               className={cn(inputCls, 'min-h-[64px] resize-y')}

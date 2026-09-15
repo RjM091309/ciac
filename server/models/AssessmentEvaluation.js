@@ -667,6 +667,20 @@ async function submitRecommendation(applicationId, { recommendation, summary, ac
     console.error("submitRecommendation: application status update failed:", error);
   }
 
+  if (targetStatus === "FOR_APPROVAL") {
+    try {
+      // Lazy require — ApprovalIssuance.js requires this module too (for
+      // CHARGE_TYPES/addCharge/etc.), so a top-level require here would be
+      // circular. Auto-starts the routing ladder the moment Assessment
+      // endorses, so the Account Officer never has to click "Start approval
+      // routing" themselves — Level 1 is already PENDING when they open it.
+      const ApprovalIssuance = require("./ApprovalIssuance");
+      await ApprovalIssuance.startApproval(applicationId, actorId);
+    } catch (error) {
+      console.error("submitRecommendation: auto-start approval failed:", error);
+    }
+  }
+
   return getAssessmentDetail(applicationId);
 }
 
