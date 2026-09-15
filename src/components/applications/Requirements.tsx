@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Pencil, Plus, RotateCcw, Search, UserX } from 'lucide-react';
+import { Ban, Pencil, Plus, RotateCcw, Search, X } from 'lucide-react';
+import { AnimatePresence, motion } from 'motion/react';
 import { cn } from '../../lib/utils';
 import { toast } from 'sonner';
 import { SidePanel } from '../ui/SidePanel';
@@ -60,6 +61,10 @@ export function RequirementsManagement() {
   const [searchQuery, setSearchQuery] = useState('');
   const [pageSize, setPageSize] = useState(20);
   const [page, setPage] = useState(1);
+  const [isRecoveryOpen, setIsRecoveryOpen] = useState(false);
+  const [recoverySearch, setRecoverySearch] = useState('');
+  const [recoveryPageSize, setRecoveryPageSize] = useState(10);
+  const [recoveryPage, setRecoveryPage] = useState(1);
 
   const { data: requirementsData, isLoading, isRevalidating, refresh } =
     useSessionStorageCachedResource<RequirementsData>({
@@ -122,22 +127,38 @@ export function RequirementsManagement() {
     return { active, inactive, total: items.length };
   }, [items]);
 
+  const activeItems = useMemo(() => items.filter((i) => i.is_active === 1), [items]);
+  const deactivatedItems = useMemo(() => items.filter((i) => i.is_active === 0), [items]);
+
   const filteredItems = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
-    if (!q) return items;
-    return items.filter((i) => {
-      const statusStr = i.is_active === 1 ? 'active' : 'inactive';
+    if (!q) return activeItems;
+    return activeItems.filter((i) => {
       const flags = [i.for_new ? 'new' : '', i.for_renewal ? 'renewal' : '', i.is_mandatory ? 'mandatory' : 'optional'].join(' ');
       return (
         (i.code || '').toLowerCase().includes(q) ||
         (i.name || '').toLowerCase().includes(q) ||
         (i.description || '').toLowerCase().includes(q) ||
         (i.category_name || '').toLowerCase().includes(q) ||
-        flags.includes(q) ||
-        statusStr.includes(q)
+        flags.includes(q)
       );
     });
-  }, [items, searchQuery]);
+  }, [activeItems, searchQuery]);
+
+  const filteredDeactivatedItems = useMemo(() => {
+    const q = recoverySearch.trim().toLowerCase();
+    if (!q) return deactivatedItems;
+    return deactivatedItems.filter((i) => {
+      const flags = [i.for_new ? 'new' : '', i.for_renewal ? 'renewal' : '', i.is_mandatory ? 'mandatory' : 'optional'].join(' ');
+      return (
+        (i.code || '').toLowerCase().includes(q) ||
+        (i.name || '').toLowerCase().includes(q) ||
+        (i.description || '').toLowerCase().includes(q) ||
+        (i.category_name || '').toLowerCase().includes(q) ||
+        flags.includes(q)
+      );
+    });
+  }, [deactivatedItems, recoverySearch]);
 
   const canSubmit = useMemo(() => {
     const code = form.code.trim();
@@ -205,6 +226,42 @@ export function RequirementsManagement() {
   useEffect(() => {
     if (page > totalPages) setPage(totalPages);
   }, [page, totalPages]);
+
+  const recoveryTotalPages = useMemo(
+    () => Math.max(1, Math.ceil(filteredDeactivatedItems.length / Math.max(1, recoveryPageSize))),
+    [filteredDeactivatedItems.length, recoveryPageSize]
+  );
+
+  const pagedDeactivatedItems = useMemo(() => {
+    const safePage = Math.min(Math.max(1, recoveryPage), recoveryTotalPages);
+    const start = (safePage - 1) * recoveryPageSize;
+    return filteredDeactivatedItems.slice(start, start + recoveryPageSize);
+  }, [filteredDeactivatedItems, recoveryPage, recoveryPageSize, recoveryTotalPages]);
+
+  const recoveryShowingRange = useMemo(() => {
+    if (filteredDeactivatedItems.length === 0) return { from: 0, to: 0 };
+    const safePage = Math.min(Math.max(1, recoveryPage), recoveryTotalPages);
+    return {
+      from: (safePage - 1) * recoveryPageSize + 1,
+      to: Math.min(filteredDeactivatedItems.length, safePage * recoveryPageSize),
+    };
+  }, [filteredDeactivatedItems.length, recoveryPage, recoveryPageSize, recoveryTotalPages]);
+
+  const recoveryVisiblePageNumbers = useMemo(() => {
+    const current = Math.min(Math.max(1, recoveryPage), recoveryTotalPages);
+    const start = Math.max(1, current - 1);
+    const end = Math.min(recoveryTotalPages, start + 2);
+    const adjustedStart = Math.max(1, end - 2);
+    return Array.from({ length: end - adjustedStart + 1 }, (_, i) => adjustedStart + i);
+  }, [recoveryPage, recoveryTotalPages]);
+
+  useEffect(() => {
+    setRecoveryPage(1);
+  }, [recoverySearch, recoveryPageSize]);
+
+  useEffect(() => {
+    if (recoveryPage > recoveryTotalPages) setRecoveryPage(recoveryTotalPages);
+  }, [recoveryPage, recoveryTotalPages]);
 
   function openCreate() {
     setEditing(null);
@@ -319,7 +376,11 @@ export function RequirementsManagement() {
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4 mt-3">
         <StatCard label="Active Requirements" value={String(stats.active)} />
         <StatCard label="Total Requirements" value={String(stats.total)} />
-        <StatCard label="Deactivated" value={String(stats.inactive)} />
+        <StatCard
+          label="Deactivated"
+          value={String(stats.inactive)}
+          onClick={() => setIsRecoveryOpen(true)}
+        />
       </div>
 
       <div className="flex items-center justify-between gap-2">
@@ -364,7 +425,7 @@ export function RequirementsManagement() {
 
         {isLoading ? (
           <div className="py-2">
-            <TableSkeleton columns={6} rows={5} />
+            <TableSkeleton columns={5} rows={5} />
           </div>
         ) : filteredItems.length === 0 ? (
           <EmptyState
@@ -391,7 +452,7 @@ export function RequirementsManagement() {
             <table className="min-w-full text-left text-xs">
               <thead>
                 <tr style={{ borderBottom: '1px solid var(--border-subtle)' }}>
-                  {['Code', 'Name', 'Category', 'Flags', 'Status', 'Actions'].map((col) => (
+                  {['Code', 'Name', 'Category', 'Flags', 'Actions'].map((col) => (
                     <th
                       key={col}
                       className={cn(
@@ -415,18 +476,6 @@ export function RequirementsManagement() {
                         .filter(Boolean)
                         .join(', ')}
                     </td>
-                    <td className="px-3 py-2 text-[11px]">
-                      <span
-                        className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold"
-                        style={
-                          item.is_active === 1
-                            ? { backgroundColor: 'rgba(34,197,94,.14)', color: 'rgba(34,197,94,.95)' }
-                            : { backgroundColor: 'rgba(148,163,184,.14)', color: 'rgba(148,163,184,.95)' }
-                        }
-                      >
-                        {item.is_active === 1 ? 'Active' : 'Inactive'}
-                      </span>
-                    </td>
                     <td className="px-3 py-2 pr-2">
                       <div className="flex items-center justify-end gap-2">
                         {canEdit ? (
@@ -443,8 +492,7 @@ export function RequirementsManagement() {
                             <Pencil size={14} />
                           </button>
                         ) : null}
-                        {item.is_active === 1 ? (
-                          canDelete ? (
+                        {canDelete ? (
                           <button
                             className={cn(
                               'inline-flex items-center justify-center rounded-md p-1.5 text-secondary',
@@ -455,21 +503,7 @@ export function RequirementsManagement() {
                             aria-label={`Deactivate ${item.name}`}
                             title="Deactivate"
                           >
-                            <UserX size={14} />
-                          </button>
-                          ) : null
-                        ) : canEdit ? (
-                          <button
-                            className={cn(
-                              'inline-flex items-center justify-center rounded-md p-1.5 text-secondary',
-                              saving ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
-                            )}
-                            onClick={() => setConfirmReactivateId(item.id)}
-                            disabled={saving}
-                            aria-label={`Reactivate ${item.name}`}
-                            title="Reactivate"
-                          >
-                            <RotateCcw size={14} />
+                            <Ban size={14} />
                           </button>
                         ) : null}
                       </div>
@@ -580,23 +614,169 @@ export function RequirementsManagement() {
           if (confirmReactivateId !== null) void reactivate(confirmReactivateId);
         }}
       />
+
+      <AnimatePresence>
+        {isRecoveryOpen ? (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center px-3">
+            <motion.div
+              className="absolute inset-0"
+              style={{ backgroundColor: 'rgba(0,0,0,.45)' }}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.2, ease: 'easeOut' }}
+              onClick={() => {
+                setIsRecoveryOpen(false);
+                setRecoverySearch('');
+                setRecoveryPage(1);
+              }}
+            />
+            <motion.div
+              className="w-full max-w-3xl max-h-[85vh] rounded-2xl border p-4 sm:p-5 relative z-10 flex flex-col"
+              style={{ backgroundColor: 'var(--surface)', borderColor: 'var(--border-subtle)' }}
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              transition={{ duration: 0.2, ease: 'easeOut' }}
+            >
+              <div className="flex items-center justify-between gap-2 mb-3">
+                <div>
+                  <h3 className="text-sm font-bold tracking-tight" style={{ color: 'var(--text)' }}>
+                    Deactivated Requirements
+                  </h3>
+                  <p className="text-xs text-secondary">Recover a requirement to make it active again.</p>
+                </div>
+                <button
+                  className="inline-flex items-center justify-center rounded-md p-1.5 text-secondary cursor-pointer hover:bg-white/5"
+                  onClick={() => {
+                    setIsRecoveryOpen(false);
+                    setRecoverySearch('');
+                    setRecoveryPage(1);
+                  }}
+                  aria-label="Close"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+
+              <div className="relative group w-full mb-3">
+                <Search
+                  className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)] group-focus-within:text-[var(--text)] transition-colors pointer-events-none"
+                  size={14}
+                />
+                <input
+                  type="text"
+                  placeholder="Search deactivated requirements..."
+                  value={recoverySearch}
+                  onChange={(e) => setRecoverySearch(e.target.value)}
+                  className="h-9 rounded-full pl-9 pr-3 text-xs w-full focus:outline-none focus:ring-1 focus:ring-[var(--border)] text-[var(--text)] placeholder:text-[var(--text-muted)] transition-all"
+                  style={{ backgroundColor: 'color-mix(in oklab, var(--control-bg) 70%, transparent)' }}
+                />
+              </div>
+
+              {filteredDeactivatedItems.length === 0 ? (
+                <EmptyState
+                  title="No deactivated requirements"
+                  description={
+                    recoverySearch
+                      ? 'Try adjusting your search.'
+                      : 'There are no deactivated requirements to recover.'
+                  }
+                />
+              ) : (
+                <div className="flex-1 min-h-0 flex flex-col">
+                  <div className="overflow-auto flex-1">
+                    <table className="min-w-full text-left text-xs">
+                      <thead className="sticky top-0 z-10" style={{ backgroundColor: 'var(--surface)' }}>
+                        <tr style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+                          {['Code', 'Name', 'Category', 'Flags', 'Actions'].map((col) => (
+                            <th
+                              key={col}
+                              className={cn(
+                                'px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary',
+                                col === 'Actions' && 'text-right pr-2'
+                              )}
+                            >
+                              {col}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {pagedDeactivatedItems.map((item) => (
+                          <tr key={item.id} style={{ borderTop: '1px solid var(--border-subtle)' }}>
+                            <td className="px-3 py-2 text-[11px]" style={{ color: 'var(--text)' }}>{item.code}</td>
+                            <td className="px-3 py-2 text-[11px]" style={{ color: 'var(--text)' }}>{item.name}</td>
+                            <td className="px-3 py-2 text-[11px] text-secondary">{item.category_name || '-'}</td>
+                            <td className="px-3 py-2 text-[11px] text-secondary">
+                              {[item.for_new ? 'New' : null, item.for_renewal ? 'Renewal' : null, item.is_mandatory ? 'Mandatory' : 'Optional']
+                                .filter(Boolean)
+                                .join(', ')}
+                            </td>
+                            <td className="px-3 py-2 pr-2">
+                              <div className="flex items-center justify-end gap-2">
+                                <button
+                                  className={cn(
+                                    'inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-semibold text-secondary',
+                                    saving ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer hover:bg-white/5'
+                                  )}
+                                  onClick={() => setConfirmReactivateId(item.id)}
+                                  disabled={saving}
+                                  aria-label={`Recover ${item.name}`}
+                                  title="Recover"
+                                >
+                                  <RotateCcw size={13} />
+                                  Recover
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <DataTableControls
+                    page={recoveryPage}
+                    totalPages={recoveryTotalPages}
+                    totalItems={filteredDeactivatedItems.length}
+                    showingFrom={recoveryShowingRange.from}
+                    showingTo={recoveryShowingRange.to}
+                    visiblePageNumbers={recoveryVisiblePageNumbers}
+                    pageSize={recoveryPageSize}
+                    pageSizeOptions={[10, 20, 50]}
+                    onPageSizeChange={(value) => setRecoveryPageSize(value)}
+                    onPageChange={(p) => setRecoveryPage(p)}
+                  />
+                </div>
+              )}
+            </motion.div>
+          </div>
+        ) : null}
+      </AnimatePresence>
     </div>
   );
 }
 
-function StatCard({ label, value }: { label: string; value: string }) {
+function StatCard({ label, value, onClick }: { label: string; value: string; onClick?: () => void }) {
+  const Comp: any = onClick ? 'button' : 'div';
   return (
-    <div
-      className="rounded-xl px-3 py-3 flex flex-col gap-1 shadow-sm"
+    <Comp
+      type={onClick ? 'button' : undefined}
+      onClick={onClick}
+      className={cn(
+        'rounded-xl px-3 py-3 flex flex-col gap-1 shadow-sm text-left w-full transition-colors',
+        onClick && 'cursor-pointer hover:bg-white/5'
+      )}
       style={{
         backgroundColor: 'color-mix(in oklab, var(--surface) 94%, white 6%)',
       }}
+      title={onClick ? 'View deactivated items' : undefined}
     >
       <span className="text-[10px] font-semibold text-secondary uppercase tracking-widest">{label}</span>
       <span className="text-base sm:text-lg font-bold leading-tight" style={{ color: 'var(--text)' }}>
         {value}
       </span>
-    </div>
+    </Comp>
   );
 }
 
