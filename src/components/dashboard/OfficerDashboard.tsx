@@ -268,7 +268,7 @@ export function OfficerDashboard({
                           >
                             <div
                               className="h-full rounded-full"
-                              style={{ width: `${pct}%`, backgroundColor: 'var(--nav-active-bg)' }}
+                              style={{ width: `${pct}%`, backgroundColor: 'var(--text)' }}
                             />
                           </div>
                           <span className="shrink-0 text-[10px]">{verified}/{total}</span>

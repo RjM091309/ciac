@@ -213,7 +213,7 @@ function ApplicationsList({ navigate }: { navigate: Navigate }) {
                   </div>
                   <div className="mt-2 flex items-center gap-2">
                     <div className="h-1.5 flex-1 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--control-bg)' }}>
-                      <div className="h-full rounded-full" style={{ width: `${pct}%`, backgroundColor: 'var(--nav-active-bg)' }} />
+                      <div className="h-full rounded-full" style={{ width: `${pct}%`, backgroundColor: 'var(--text)' }} />
                     </div>
                     <span className="shrink-0 text-[10px] text-secondary">{verified}/{total} reqs</span>
                     <ChevronRight size={14} className="shrink-0" style={{ color: 'var(--text-muted)' }} />
@@ -262,7 +262,7 @@ function ApplicationsList({ navigate }: { navigate: Navigate }) {
                       <td className="px-3 py-2.5 text-[11px] text-secondary w-44">
                         <div className="flex items-center gap-2">
                           <div className="h-1.5 flex-1 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--control-bg)' }}>
-                            <div className="h-full rounded-full" style={{ width: `${pct}%`, backgroundColor: 'var(--nav-active-bg)' }} />
+                            <div className="h-full rounded-full" style={{ width: `${pct}%`, backgroundColor: 'var(--text)' }} />
                           </div>
                           <span className="shrink-0 text-[10px]">{verified}/{total}</span>
                         </div>
