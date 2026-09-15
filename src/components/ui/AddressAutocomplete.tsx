@@ -28,6 +28,11 @@ export function AddressAutocomplete({
   const inputRef = useRef<HTMLInputElement>(null);
   const autocompleteRef = useRef<google.maps.places.Autocomplete | null>(null);
   const [ready, setReady] = useState(false);
+  const onChangeRef = useRef(onChange);
+
+  useEffect(() => {
+    onChangeRef.current = onChange;
+  }, [onChange]);
 
   useEffect(() => {
     const loader = loadGoogleMaps();
@@ -42,7 +47,7 @@ export function AddressAutocomplete({
         });
         autocompleteRef.current.addListener('place_changed', () => {
           const place = autocompleteRef.current?.getPlace();
-          if (place?.formatted_address) onChange(place.formatted_address);
+          if (place?.formatted_address) onChangeRef.current(place.formatted_address);
         });
         setReady(true);
       })
@@ -55,7 +60,7 @@ export function AddressAutocomplete({
         (window as any).google.maps.event.clearInstanceListeners(autocompleteRef.current);
       }
     };
-  }, [onChange]);
+  }, []);
 
   return (
     <input

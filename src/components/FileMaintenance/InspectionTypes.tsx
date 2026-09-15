@@ -7,6 +7,9 @@ import { ConfirmModal } from '../ui/ConfirmModal';
 import { DataTableControls } from '../ui/DataTableControls';
 import { Skeleton, TableSkeleton } from '../ui/Skeleton';
 import { EmptyState } from '../ui/EmptyState';
+import { useControlPanelAccess } from '../../context/ControlPanelAccessContext';
+
+const MENU_KEY = 'settings:inspection-types';
 
 type InspectionTypeRow = {
   id: number;
@@ -25,6 +28,11 @@ function api(path: string) {
 }
 
 export function InspectionTypesManagement() {
+  const { fullAccess, crudPermissions } = useControlPanelAccess();
+  const perm = crudPermissions[MENU_KEY] || { can_add: false, can_edit: false, can_delete: false };
+  const canAdd = fullAccess || perm.can_add;
+  const canEdit = fullAccess || perm.can_edit;
+  const canDelete = fullAccess || perm.can_delete;
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -244,13 +252,15 @@ export function InspectionTypesManagement() {
           <h3 className="text-sm font-bold tracking-tight" style={{ color: 'var(--text)' }}>
             Inspection Types List
           </h3>
-          <button
-            className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-semibold shadow-sm cursor-pointer"
-            style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
-            onClick={openCreate}
-          >
-            + New Record
-          </button>
+          {canAdd ? (
+            <button
+              className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-semibold shadow-sm cursor-pointer"
+              style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
+              onClick={openCreate}
+            >
+              + New Record
+            </button>
+          ) : null}
         </div>
 
         {error && (
@@ -272,7 +282,7 @@ export function InspectionTypesManagement() {
                 : 'There are no inspection types to show here yet. Create a new inspection type to get started.'
             }
             action={
-              !searchQuery ? (
+              !searchQuery && canAdd ? (
                 <button
                   className="rounded-lg px-4 py-2 text-sm font-semibold shadow-sm transition-colors"
                   style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
@@ -342,32 +352,36 @@ export function InspectionTypesManagement() {
                     </td>
                     <td className="px-3 py-2 pr-2">
                       <div className="flex items-center justify-end gap-2">
-                        <button
-                          className={cn(
-                            'inline-flex items-center justify-center rounded-md p-1.5 text-secondary',
-                            saving ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer',
-                          )}
-                          onClick={() => openEdit(item)}
-                          disabled={saving}
-                          aria-label={`Edit ${item.name}`}
-                          title="Edit"
-                        >
-                          <Pencil size={14} />
-                        </button>
-                        {item.is_active === 1 ? (
+                        {canEdit ? (
                           <button
                             className={cn(
                               'inline-flex items-center justify-center rounded-md p-1.5 text-secondary',
                               saving ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer',
                             )}
-                            onClick={() => setConfirmDeactivateId(item.id)}
+                            onClick={() => openEdit(item)}
                             disabled={saving}
-                            aria-label={`Deactivate ${item.name}`}
-                            title="Deactivate"
+                            aria-label={`Edit ${item.name}`}
+                            title="Edit"
                           >
-                            <UserX size={14} />
+                            <Pencil size={14} />
                           </button>
-                        ) : (
+                        ) : null}
+                        {item.is_active === 1 ? (
+                          canDelete ? (
+                            <button
+                              className={cn(
+                                'inline-flex items-center justify-center rounded-md p-1.5 text-secondary',
+                                saving ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer',
+                              )}
+                              onClick={() => setConfirmDeactivateId(item.id)}
+                              disabled={saving}
+                              aria-label={`Deactivate ${item.name}`}
+                              title="Deactivate"
+                            >
+                              <UserX size={14} />
+                            </button>
+                          ) : null
+                        ) : canEdit ? (
                           <button
                             className={cn(
                               'inline-flex items-center justify-center rounded-md p-1.5 text-secondary',
@@ -380,7 +394,7 @@ export function InspectionTypesManagement() {
                           >
                             <RotateCcw size={14} />
                           </button>
-                        )}
+                        ) : null}
                       </div>
                     </td>
                   </tr>

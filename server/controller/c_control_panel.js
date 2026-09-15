@@ -1,10 +1,25 @@
 const ControlPanelPermission = require("../models/ControlPanelPermission");
 const Role = require("../models/Role");
 const AuditLog = require("../models/AuditLog");
+const { publishToUsers } = require("../lib/notificationStream");
 
 function parseRoleId(v) {
   const id = Number(v);
   return Number.isFinite(id) ? id : null;
+}
+
+// Pushes a live "permissions" SSE event (same stream AppHeader.tsx already
+// keeps open for notifications, see server/lib/notificationStream.js) to
+// everyone currently holding this role, so ControlPanelAccessContext can
+// silently re-fetch instead of the change only taking effect on their next
+// manual page refresh.
+async function notifyRolePermissionsChanged(roleId) {
+  try {
+    const userIds = await Role.listUserIdsByRole(roleId);
+    publishToUsers(userIds, { roleId }, "permissions");
+  } catch (error) {
+    console.error("Notify role permissions changed error:", error);
+  }
 }
 
 exports.getSidebarPermissions = async (req, res) => {
@@ -38,6 +53,7 @@ exports.setSidebarPermissions = async (req, res) => {
       entityId: roleId,
       ipAddress: req.ip,
     });
+    await notifyRolePermissionsChanged(roleId);
     return res.json({ success: true });
   } catch (error) {
     console.error("Set sidebar permissions error:", error);
@@ -76,6 +92,7 @@ exports.setMenuCrudPermissions = async (req, res) => {
       entityId: roleId,
       ipAddress: req.ip,
     });
+    await notifyRolePermissionsChanged(roleId);
     return res.json({ success: true });
   } catch (error) {
     console.error("Set menu CRUD permissions error:", error);
@@ -151,6 +168,7 @@ exports.setDashboardWidgetPermissions = async (req, res) => {
       entityId: roleId,
       ipAddress: req.ip,
     });
+    await notifyRolePermissionsChanged(roleId);
     return res.json({ success: true });
   } catch (error) {
     console.error("Set dashboard widget permissions error:", error);

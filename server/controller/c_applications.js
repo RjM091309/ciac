@@ -1,7 +1,43 @@
 const Workflow = require("../models/ApplicationWorkflow");
 const Proponent = require("../models/Proponent");
 const Role = require("../models/Role");
+const User = require("../models/User");
+const ApplicationType = require("../models/ApplicationType");
 const ControlPanelPermission = require("../models/ControlPanelPermission");
+const { generateTempPassword } = require("../lib/password");
+const { sendTempPasswordEmail } = require("./c_users");
+
+/** A locator account created via Locator Accounts with a business profile
+ * starts PENDING (see c_users.js's exports.create) — no login access, no
+ * email sent yet. The first real application filed for them (SUBMITTED, not
+ * a draft) is what actually activates it: generate a real temp password,
+ * flip the account ACTIVE, and email their credentials now that they have
+ * something to act on. Best-effort — the application itself is already
+ * created by the time this runs, so a failure here shouldn't undo that. */
+async function activateLocatorIfPending(proponentId, actorId) {
+  try {
+    const proponent = await Proponent.getProponentById(proponentId);
+    const userId = proponent?.user_id;
+    if (!userId) return null;
+    const user = await User.getUserById(userId);
+    if (!user || String(user.status || "").toUpperCase() !== "PENDING") return null;
+
+    const tempPassword = generateTempPassword();
+    await User.adminResetPassword(userId, tempPassword);
+    const activated = await User.setUserStatus(userId, "ACTIVE");
+    const mailResult = await sendTempPasswordEmail({
+      to: activated.email,
+      name: activated.full_name || activated.username,
+      username: activated.username,
+      tempPassword,
+      isNewAccount: true,
+    });
+    return { activated: true, emailSent: mailResult.sent };
+  } catch (error) {
+    console.error("Activate pending locator error:", error);
+    return null;
+  }
+}
 
 // Same menu set as Notification.js's EVENT_TYPE_MENU_KEYS.application_status
 // — whoever can see one of these queues can open an application's detail.
@@ -93,10 +129,11 @@ exports.create = async (req, res) => {
     if (!normalizedType) {
       return res.status(400).json({ success: false, message: "application_type is required" });
     }
-    if (!Workflow.isValidApplicationType(normalizedType)) {
+    if (!(await Workflow.isValidApplicationType(normalizedType))) {
+      const activeCodes = await ApplicationType.listActiveCodes();
       return res.status(400).json({
         success: false,
-        message: `Invalid application type. Expected one of: ${Workflow.APPLICATION_TYPES.join(", ")}.`,
+        message: `Invalid application type. Expected one of: ${activeCodes.join(", ")}.`,
       });
     }
 
@@ -109,7 +146,17 @@ exports.create = async (req, res) => {
       current_officer_id,
       created_by: req.user?.id ?? null,
     });
-    return res.status(201).json({ success: true, data: row });
+
+    // Only a real submission activates a still-pending locator — a draft
+    // isn't a commitment yet, so it shouldn't hand out login access.
+    const activation = save_as_draft ? null : await activateLocatorIfPending(proponent_id, req.user?.id ?? null);
+
+    return res.status(201).json({
+      success: true,
+      data: row,
+      locatorActivated: activation?.activated || undefined,
+      locatorEmailSent: activation ? activation.emailSent : undefined,
+    });
   } catch (error) {
     console.error("Create application error:", error);
     return res.status(500).json({ success: false, message: error.message || "Internal server error" });

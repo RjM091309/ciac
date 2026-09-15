@@ -46,6 +46,9 @@ type DocumentRow = {
   requirement_code: string | null;
   requirement_name: string | null;
   created_at: string | null;
+  /** Upload order within this requirement — 1 for the first submission, 2+
+   * for a reupload after a rejection, and so on. */
+  version?: number | string | null;
 };
 
 type StatusHistoryRow = {
@@ -130,6 +133,28 @@ function ApplicationForm({
 }) {
   const [applicationType, setApplicationType] = useState(initial?.application_type || APPLICATION_TYPES[0]);
   const [isRenewal, setIsRenewal] = useState(Boolean(initial?.is_renewal));
+  const [typeOptions, setTypeOptions] = useState<{ code: string; name: string }[]>(
+    APPLICATION_TYPES.map((t) => ({ code: t, name: applicationTypeLabel(t) }))
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/application-types', { credentials: 'include' })
+      .then((res) => res.json())
+      .then((json) => {
+        if (cancelled || !Array.isArray(json?.data)) return;
+        const active = json.data
+          .filter((t: any) => Number(t?.is_active) === 1)
+          .map((t: any) => ({ code: String(t.code), name: String(t.name) }));
+        if (active.length) setTypeOptions(active);
+      })
+      .catch(() => {
+        // Fetch failed — the static seed list above stays as the fallback.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   return (
     <SidePanel
@@ -149,19 +174,14 @@ function ApplicationForm({
       <div className="space-y-4">
         <div className="space-y-1.5">
           <label className="text-[11px] font-semibold uppercase tracking-widest text-secondary">Application type</label>
-          <select
+          <AppSelect
+            options={typeOptions.map((t) => ({ value: t.code, label: t.name }))}
             value={applicationType}
-            onChange={(e) => setApplicationType(e.target.value)}
-            disabled={saving}
-            className="w-full rounded-md px-3 py-2 text-sm border focus:outline-none"
-            style={{ borderColor: 'var(--input-border)', color: 'var(--text)', backgroundColor: 'var(--input-bg)' }}
-          >
-            {APPLICATION_TYPES.map((t) => (
-              <option key={t} value={t}>
-                {applicationTypeLabel(t)}
-              </option>
-            ))}
-          </select>
+            onChange={(value) => setApplicationType(value)}
+            placeholder="Select application type..."
+            isDisabled={saving}
+            isClearable={false}
+          />
         </div>
 
         <label
@@ -621,7 +641,7 @@ function ApplicationDetail({ applicationId, navigate }: { applicationId: number;
   // requiring the locator to cross-reference two separate tabs.
   type TimelineEntry =
     | { kind: 'status'; id: string; at: string; from_status: string | null; to_status: string; remarks: string | null }
-    | { kind: 'document'; id: string; at: string; docId: number; file_name: string; requirement_code: string | null; requirement_name: string | null };
+    | { kind: 'document'; id: string; at: string; docId: number; file_name: string; requirement_code: string | null; requirement_name: string | null; version: number | null };
   const timeline: TimelineEntry[] = [
     ...history.map((h): TimelineEntry => ({
       kind: 'status',
@@ -639,6 +659,7 @@ function ApplicationDetail({ applicationId, navigate }: { applicationId: number;
       file_name: d.original_file_name || d.file_name,
       requirement_code: d.requirement_code,
       requirement_name: d.requirement_name,
+      version: d.version != null ? Number(d.version) : null,
     })),
   ].sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
 
@@ -844,9 +865,16 @@ function ApplicationDetail({ applicationId, navigate }: { applicationId: number;
                         <td className="px-3 py-2 text-[11px]"><StatusPill status={r.status} /></td>
                         <td className="px-3 py-2 text-[11px] text-secondary max-w-[180px]">
                           {doc ? (
-                            <span className="block truncate" title={doc.original_file_name || doc.file_name}>
-                              {doc.original_file_name || doc.file_name}
-                            </span>
+                            <>
+                              <span className="block truncate" title={doc.original_file_name || doc.file_name}>
+                                {doc.original_file_name || doc.file_name}
+                              </span>
+                              {Number(doc.version) > 1 ? (
+                                <span className="block text-[10px] opacity-70">
+                                  V{Number(doc.version)} — reuploaded after rejection
+                                </span>
+                              ) : null}
+                            </>
                           ) : (
                             <span className="opacity-60">Not uploaded</span>
                           )}
@@ -923,7 +951,7 @@ function ApplicationDetail({ applicationId, navigate }: { applicationId: number;
                         className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold border"
                         style={{ borderColor: 'var(--border-subtle)', color: 'var(--text-secondary)' }}
                       >
-                        <Upload size={10} /> Document uploaded
+                        <Upload size={10} /> Document uploaded{entry.version && entry.version > 1 ? ` (V${entry.version})` : ''}
                       </span>
                       <span className="text-[10px] text-secondary">{fmtDateTime(entry.at)}</span>
                     </div>

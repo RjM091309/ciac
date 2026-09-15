@@ -141,11 +141,18 @@ function summarizeAdmin(applications, proponents) {
 }
 
 /** Real "needs attention" list — replaces the old hardcoded Quick Tasks
- * sample data (DBM-06). Oldest-first so the longest-waiting items surface. */
-function attentionQueue(applications, limit = 6) {
+ * sample data (DBM-06). Oldest-first so the longest-waiting items surface.
+ * `statuses`/`isRenewal` let a caller scope this to one queue's shape (e.g.
+ * only FOR_APPROVAL renewals for the Account Officer) instead of the default
+ * pre-assessment mix. */
+function attentionQueue(
+  applications,
+  { limit = 6, statuses = ["SUBMITTED", "UNDER_REVIEW", "RESUBMITTED"], isRenewal } = {}
+) {
   const now = Date.now();
   return applications
-    .filter((a) => ["SUBMITTED", "UNDER_REVIEW", "RESUBMITTED"].includes(upper(a.status)))
+    .filter((a) => statuses.includes(upper(a.status)))
+    .filter((a) => isRenewal === undefined || Boolean(Number(a.is_renewal)) === isRenewal)
     .map((a) => ({
       application_id: a.id,
       application_no: a.application_no,
@@ -156,6 +163,106 @@ function attentionQueue(applications, limit = 6) {
     }))
     .sort((a, b) => b.days_waiting - a.days_waiting)
     .slice(0, limit);
+}
+
+const EXPIRY_ATTENTION_WINDOW_DAYS = 30;
+
+function daysUntil(dateStr) {
+  if (!dateStr) return null;
+  const d = new Date(dateStr);
+  if (Number.isNaN(d.getTime())) return null;
+  return Math.round((d.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+}
+
+/** Permits/contracts already expired or expiring within the window, for the
+ * Account Officer's "Needs Your Attention" widget — renewal isn't just about
+ * new applications waiting in the queue, it's also about what's about to
+ * lapse. Expired-first, then soonest-to-expire. */
+async function buildExpiryAttentionItems(limit) {
+  const [permits, contracts] = await Promise.all([Permit.listAll(), Contract.listAll()]);
+
+  const permitItems = permits
+    .filter((p) => p.effective_status === "EXPIRING" || p.effective_status === "EXPIRED")
+    .map((p) => {
+      const days = daysUntil(p.expiry_date);
+      return {
+        kind: "permit",
+        application_id: p.application_id || p.id,
+        application_no: `Permit ${p.permit_no}`,
+        proponent_name: p.proponent_name,
+        status: p.effective_status,
+        is_expired: p.effective_status === "EXPIRED",
+        days_waiting: days === null ? 0 : Math.abs(days),
+      };
+    });
+
+  const contractItems = contracts
+    .map((c) => ({ ...c, _days: daysUntil(c.effective_end) }))
+    .filter((c) => c._days !== null && c._days <= EXPIRY_ATTENTION_WINDOW_DAYS)
+    .map((c) => ({
+      kind: "contract",
+      application_id: c.application_id,
+      application_no: `Contract ${c.contract_no}`,
+      proponent_name: c.proponent_name,
+      status: c._days < 0 ? "EXPIRED" : "EXPIRING",
+      is_expired: c._days < 0,
+      days_waiting: Math.abs(c._days),
+    }));
+
+  return [...permitItems, ...contractItems]
+    .sort((a, b) => (a.is_expired === b.is_expired ? a.days_waiting - b.days_waiting : a.is_expired ? -1 : 1))
+    .slice(0, limit);
+}
+
+/** Whether `sidebarPermissions` (a role's Control Panel sidebar rows) grants
+ * a given menu — same enabled-flag check used throughout this codebase for
+ * permission-driven (not hardcoded-role-name) decisions. */
+function hasMenu(sidebarPermissions, menuKey) {
+  return sidebarPermissions.some(
+    (p) => p.menu_key === menuKey && (Number(p.is_enabled) === 1 || p.is_enabled === true)
+  );
+}
+
+/** Scopes a whole applications list (table + stats, not just the attention
+ * widget) to what each queue role actually works with — renewals only for
+ * the Account Officer's Approval Queue, new applications only for the
+ * Assessment Officer's Assessment Queue. Without this, the admin's preview
+ * switcher showed the exact same system-wide list/stats no matter which
+ * role was selected, since only the attention widget was being scoped. Any
+ * other role (no queue-specific menu) keeps seeing everything, unscoped. */
+function scopeApplicationsForRole(applications, sidebarPermissions) {
+  if (hasMenu(sidebarPermissions, "approval:queue")) {
+    return applications.filter((a) => Boolean(Number(a.is_renewal)));
+  }
+  if (hasMenu(sidebarPermissions, "assessment:queue")) {
+    return applications.filter((a) => !Boolean(Number(a.is_renewal)));
+  }
+  return applications;
+}
+
+/** Scopes the "Needs Your Attention" widget to the shape each queue role
+ * actually cares about: the Account Officer's Approval Queue only ever acts
+ * on renewals waiting for approval; the Assessment Officer's Assessment
+ * Queue only ever acts on new applications still pre-assessment. Driven by
+ * Control Panel menu access (approval:queue / assessment:queue), not a
+ * hardcoded role name, so this keeps working if either role is renamed and
+ * applies the same way to the admin's dashboard-preview switcher. Falls back
+ * to the caller's own default attention list for any other role shape. */
+async function buildRoleAttention(sidebarPermissions, fallbackApplications) {
+  if (hasMenu(sidebarPermissions, "approval:queue")) {
+    const [all, expiryItems] = await Promise.all([
+      Workflow.listAllApplicationsWithProgress(),
+      buildExpiryAttentionItems(6),
+    ]);
+    const remaining = Math.max(0, 6 - expiryItems.length);
+    const appItems = attentionQueue(all, { statuses: ["FOR_APPROVAL"], isRenewal: true, limit: remaining });
+    return [...expiryItems, ...appItems];
+  }
+  if (hasMenu(sidebarPermissions, "assessment:queue")) {
+    const all = await Workflow.listAllApplicationsWithProgress();
+    return attentionQueue(all, { statuses: ["SUBMITTED", "UNDER_REVIEW", "RESUBMITTED"], isRenewal: false });
+  }
+  return attentionQueue(fallbackApplications);
 }
 
 exports.getMyDashboard = async (req, res) => {
@@ -208,15 +315,21 @@ exports.getMyDashboard = async (req, res) => {
 
     // Every other role — Officer, Account Officer, Assessment Officer, or
     // any future custom staff role — shares the same scoped "my assigned
-    // applications" dashboard. Sidebar/widget visibility (which menus they
-    // even see) is still driven by that role's own Control Panel
-    // permissions elsewhere; this only controls the *shape* of dashboard
-    // data, which every staff role shares.
-    const applications = await Workflow.listApplicationsForOfficer(req.user.id);
+    // applications" dashboard, scoped by Control Panel queue access
+    // (approval:queue -> renewals, assessment:queue -> new applications)
+    // via scopeApplicationsForRole, same as the admin's preview switcher.
+    // Not listApplicationsForOfficer's current_officer_id assignment — that
+    // column is never actually set anywhere in this codebase, so it always
+    // returned an empty "Assigned to Me" for every real staff account.
+    const roleId = await Role.getActiveRoleIdByName(role);
+    const sidebarPermissions = roleId ? await ControlPanelPermission.getSidebarPermissions(roleId) : [];
+    const allApplications = await Workflow.listAllApplicationsWithProgress();
+    const applications = scopeApplicationsForRole(allApplications, sidebarPermissions);
+    const attention = await buildRoleAttention(sidebarPermissions, applications);
     return res.json({
       success: true,
       role: "officer",
-      data: { applications, stats: summarize(applications), attention: attentionQueue(applications) },
+      data: { applications, stats: summarize(applications), attention },
     });
   } catch (error) {
     console.error("Get my dashboard error:", error);
@@ -280,17 +393,27 @@ exports.getPreview = async (req, res) => {
     if (!role || !role.is_active) {
       return res.status(400).json({ success: false, message: "Unknown preview role" });
     }
-    const [applications, widgetPermissions, sidebarPermissions] = await Promise.all([
+    const [allApplications, widgetPermissions, sidebarPermissions] = await Promise.all([
       Workflow.listAllApplicationsWithProgress(),
       ControlPanelPermission.getDashboardWidgetPermissions(roleId),
       ControlPanelPermission.getSidebarPermissions(roleId),
     ]);
+    // Scope the whole preview (table + stats), not just the attention
+    // widget — otherwise every role preview showed the identical
+    // system-wide list regardless of which one was selected.
+    const applications = scopeApplicationsForRole(allApplications, sidebarPermissions);
+    // buildRoleAttention does its own system-wide fetch for the queue-scoped
+    // branches (needed since `applications` here is already renewal/new-only
+    // — the attention widget for approval:queue also needs expiring
+    // permits/contracts, which aren't application rows at all); the
+    // already-scoped `applications` is only used as the plain fallback.
+    const attention = await buildRoleAttention(sidebarPermissions, applications);
     return res.json({
       success: true,
       role: "officer",
       widgetPermissions,
       sidebarPermissions,
-      data: { applications, stats: summarize(applications), attention: attentionQueue(applications) },
+      data: { applications, stats: summarize(applications), attention },
     });
   } catch (error) {
     console.error("Get dashboard preview error:", error);

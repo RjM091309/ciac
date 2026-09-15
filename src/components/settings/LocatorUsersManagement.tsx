@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Ban, KeyRound, LogOut, Pencil, RotateCcw, Search, ShieldCheck, ShieldOff, Smartphone, UserX } from 'lucide-react';
+import { Ban, Clock3, KeyRound, LogOut, Pencil, RotateCcw, Search, ShieldCheck, ShieldOff, Smartphone, UserX } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { toast } from 'sonner';
 import { SidePanel } from '../ui/SidePanel';
@@ -7,7 +7,11 @@ import { ConfirmModal } from '../ui/ConfirmModal';
 import { DataTableControls } from '../ui/DataTableControls';
 import { Skeleton, TableSkeleton } from '../ui/Skeleton';
 import { EmptyState } from '../ui/EmptyState';
+import { AddressAutocomplete } from '../ui/AddressAutocomplete';
 import { useSessionStorageCachedResource } from '../../hooks/useSessionStorageCachedResource';
+import { useControlPanelAccess } from '../../context/ControlPanelAccessContext';
+
+const MENU_KEY = 'settings:locator-users';
 
 type Role = {
   id: number;
@@ -16,7 +20,7 @@ type Role = {
   is_active?: number;
 };
 
-type AccountStatus = 'ACTIVE' | 'SUSPENDED' | 'DEACTIVATED';
+type AccountStatus = 'ACTIVE' | 'SUSPENDED' | 'DEACTIVATED' | 'PENDING';
 
 type UserRow = {
   id: number;
@@ -49,6 +53,11 @@ function isLocatorRoleName(name: string) {
 }
 
 export function LocatorUsersManagement() {
+  const { fullAccess, crudPermissions } = useControlPanelAccess();
+  const perm = crudPermissions[MENU_KEY] || { can_add: false, can_edit: false, can_delete: false };
+  const canAdd = fullAccess || perm.can_add;
+  const canEdit = fullAccess || perm.can_edit;
+  const canDelete = fullAccess || perm.can_delete;
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<UserRow | null>(null);
@@ -105,7 +114,12 @@ export function LocatorUsersManagement() {
     username: '',
     email: '',
     full_name: '',
+    business_name: '',
+    address: '',
+    contact_no: '',
   });
+  const [originalForm, setOriginalForm] = useState<typeof form | null>(null);
+  const [loadingProfile, setLoadingProfile] = useState(false);
 
   const stats = useMemo(() => {
     const active = userRows.filter((u) => u.is_active === 1).length;
@@ -164,16 +178,25 @@ export function LocatorUsersManagement() {
     if (!email) return false;
     if (!locatorRole) return false;
 
+    // Business name is what actually triggers creating/updating the linked
+    // proponent profile server-side — address/contact without it would
+    // silently go nowhere, so require it once either is filled in.
+    if ((form.address.trim() || form.contact_no.trim()) && !form.business_name.trim()) return false;
+
     if (!editing) {
       return Boolean(username && email);
     }
 
-    const originalUsername = (editing.username || '').trim();
-    const originalEmail = (editing.email || '').trim();
-    const originalFullName = (editing.full_name || '').trim();
-
-    return username !== originalUsername || email !== originalEmail || fullName !== originalFullName;
-  }, [editing, form.email, form.full_name, form.username, locatorRole]);
+    if (!originalForm) return false;
+    return (
+      username !== originalForm.username.trim() ||
+      email !== originalForm.email.trim() ||
+      fullName !== originalForm.full_name.trim() ||
+      form.business_name.trim() !== originalForm.business_name.trim() ||
+      form.address.trim() !== originalForm.address.trim() ||
+      form.contact_no.trim() !== originalForm.contact_no.trim()
+    );
+  }, [editing, form, locatorRole, originalForm]);
 
   useEffect(() => {
     setPage(1);
@@ -185,18 +208,44 @@ export function LocatorUsersManagement() {
 
   function openCreate() {
     setEditing(null);
-    setForm({ username: '', email: '', full_name: '' });
+    setOriginalForm(null);
+    setForm({ username: '', email: '', full_name: '', business_name: '', address: '', contact_no: '' });
     setIsCreateOpen(true);
   }
 
-  function openEdit(u: UserRow) {
+  async function openEdit(u: UserRow) {
     setIsCreateOpen(true);
     setEditing(u);
-    setForm({
+    const baseline = {
       username: u.username || '',
       email: u.email || '',
       full_name: u.full_name || '',
-    });
+      business_name: '',
+      address: '',
+      contact_no: '',
+    };
+    setForm(baseline);
+    setOriginalForm(baseline);
+
+    setLoadingProfile(true);
+    try {
+      const res = await fetch(api(`/api/users/${u.id}`), { credentials: 'include' });
+      const json = await res.json().catch(() => ({}));
+      if (res.ok && json?.data) {
+        const withProfile = {
+          ...baseline,
+          business_name: json.data.business_name || '',
+          address: json.data.address || '',
+          contact_no: json.data.contact_no || '',
+        };
+        setForm(withProfile);
+        setOriginalForm(withProfile);
+      }
+    } catch {
+      // Plain user fields still work — business profile just stays blank.
+    } finally {
+      setLoadingProfile(false);
+    }
   }
 
   async function save() {
@@ -213,6 +262,14 @@ export function LocatorUsersManagement() {
         full_name: form.full_name.trim() || null,
         role_id: locatorRole.id,
       };
+      // On create, a filled-in business profile makes the backend create the
+      // linked proponent record right away so this locator's first login
+      // skips the "one more step" wizard entirely. On edit, this is a direct
+      // admin edit of that same proponent record — separate from the
+      // proponent's own self-service change-request flow.
+      payload.business_name = form.business_name.trim() || undefined;
+      payload.address = form.address.trim() || undefined;
+      payload.contact_no = form.contact_no.trim() || undefined;
       // No password field on this form: the backend generates one and emails
       // it when none is supplied, same as an admin-triggered reset.
 
@@ -231,7 +288,12 @@ export function LocatorUsersManagement() {
       setIsCreateOpen(false);
       await refresh({ showLoading: false });
       if (!editing) {
-        if (json.emailSent) {
+        if (json.deferredActivation) {
+          toast.success(
+            json.message ||
+              'Locator account created — pending activation until their first application is submitted.'
+          );
+        } else if (json.emailSent) {
           toast.success(json.message || 'Locator account created — a temporary password was emailed.');
         } else {
           toast.warning(json.message || 'Locator account created, but the email could not be sent.');
@@ -388,15 +450,17 @@ export function LocatorUsersManagement() {
           <h3 className="text-sm font-bold tracking-tight" style={{ color: 'var(--text)' }}>
             Locator Account List
           </h3>
-          <button
-            className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-semibold shadow-sm cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-            style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
-            onClick={openCreate}
-            disabled={!locatorRole}
-            title={locatorRole ? undefined : 'No Locator role found — set it up in Manage Roles first.'}
-          >
-            + New Record
-          </button>
+          {canAdd ? (
+            <button
+              className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-semibold shadow-sm cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+              style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
+              onClick={openCreate}
+              disabled={!locatorRole}
+              title={locatorRole ? undefined : 'No Locator role found — set it up in Manage Roles first.'}
+            >
+              + New Record
+            </button>
+          ) : null}
         </div>
 
         {error && (
@@ -437,7 +501,7 @@ export function LocatorUsersManagement() {
                 : 'There are no locator accounts to show here yet. Create one to get started.'
             }
             action={
-              !searchQuery ? (
+              !searchQuery && canAdd ? (
                 <button
                   className="rounded-lg px-4 py-2 text-sm font-semibold shadow-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                   style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
@@ -492,14 +556,23 @@ export function LocatorUsersManagement() {
                       <span
                         className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold"
                         style={
-                          u.status === 'SUSPENDED'
-                            ? { backgroundColor: 'rgba(245,158,11,.14)', color: 'rgba(245,158,11,.95)' }
-                            : u.is_active === 1
-                              ? { backgroundColor: 'rgba(34,197,94,.14)', color: 'rgba(34,197,94,.95)' }
-                              : { backgroundColor: 'rgba(148,163,184,.14)', color: 'rgba(148,163,184,.95)' }
+                          u.status === 'PENDING'
+                            ? { backgroundColor: 'rgba(59,130,246,.14)', color: 'rgba(59,130,246,.95)' }
+                            : u.status === 'SUSPENDED'
+                              ? { backgroundColor: 'rgba(245,158,11,.14)', color: 'rgba(245,158,11,.95)' }
+                              : u.is_active === 1
+                                ? { backgroundColor: 'rgba(34,197,94,.14)', color: 'rgba(34,197,94,.95)' }
+                                : { backgroundColor: 'rgba(148,163,184,.14)', color: 'rgba(148,163,184,.95)' }
                         }
+                        title={u.status === 'PENDING' ? 'Created but not yet activated — activates automatically when their first application is submitted.' : undefined}
                       >
-                        {u.status === 'SUSPENDED' ? 'Suspended' : u.is_active === 1 ? 'Active' : 'Deactivated'}
+                        {u.status === 'PENDING'
+                          ? 'Pending activation'
+                          : u.status === 'SUSPENDED'
+                            ? 'Suspended'
+                            : u.is_active === 1
+                              ? 'Active'
+                              : 'Deactivated'}
                       </span>
                       {u.is_locked && (
                         <span
@@ -513,83 +586,103 @@ export function LocatorUsersManagement() {
                     </td>
                     <td className="px-3 py-2 pr-2">
                       <div className="flex items-center justify-end gap-1.5">
-                        <button
-                          className={cn(
-                            'inline-flex items-center justify-center rounded-md p-1.5 text-secondary',
-                            saving ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
-                          )}
-                          onClick={() => openEdit(u)}
-                          disabled={saving}
-                          aria-label={`Edit ${u.username}`}
-                          title="Edit"
-                        >
-                          <Pencil size={14} />
-                        </button>
-                        <button
-                          className={cn(
-                            'inline-flex items-center justify-center rounded-md p-1.5 text-secondary',
-                            saving ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
-                          )}
-                          onClick={() => setConfirmResetPasswordId(u.id)}
-                          disabled={saving}
-                          aria-label={`Reset password for ${u.username}`}
-                          title="Reset password (emails a new temporary password)"
-                        >
-                          <KeyRound size={14} />
-                        </button>
-                        {u.is_active === 1 ? (
-                          <>
-                            <button
-                              className={cn(
-                                'inline-flex items-center justify-center rounded-md p-1.5 text-secondary',
-                                saving ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
-                              )}
-                              onClick={() => setConfirmSuspendId(u.id)}
-                              disabled={saving}
-                              aria-label={`Suspend ${u.username}`}
-                              title="Suspend (temporary hold)"
-                            >
-                              <Ban size={14} />
-                            </button>
-                            <button
-                              className={cn(
-                                'inline-flex items-center justify-center rounded-md p-1.5 text-secondary',
-                                saving ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
-                              )}
-                              onClick={() => setConfirmDeactivateId(u.id)}
-                              disabled={saving}
-                              aria-label={`Deactivate ${u.username}`}
-                              title="Deactivate"
-                            >
-                              <UserX size={14} />
-                            </button>
-                            <button
-                              className={cn(
-                                'inline-flex items-center justify-center rounded-md p-1.5 text-secondary',
-                                saving ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
-                              )}
-                              onClick={() => setConfirmRevokeId(u.id)}
-                              disabled={saving}
-                              aria-label={`Revoke sessions for ${u.username}`}
-                              title="Revoke active sessions"
-                            >
-                              <LogOut size={14} />
-                            </button>
-                          </>
-                        ) : u.status === 'SUSPENDED' ? (
+                        {canEdit ? (
                           <button
                             className={cn(
                               'inline-flex items-center justify-center rounded-md p-1.5 text-secondary',
                               saving ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
                             )}
-                            onClick={() => void unsuspend(u.id)}
+                            onClick={() => openEdit(u)}
                             disabled={saving}
-                            aria-label={`Reinstate ${u.username}`}
-                            title="Lift suspension"
+                            aria-label={`Edit ${u.username}`}
+                            title="Edit"
                           >
-                            <RotateCcw size={14} />
+                            <Pencil size={14} />
                           </button>
-                        ) : (
+                        ) : null}
+                        {canEdit ? (
+                          <button
+                            className={cn(
+                              'inline-flex items-center justify-center rounded-md p-1.5 text-secondary',
+                              saving ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
+                            )}
+                            onClick={() => setConfirmResetPasswordId(u.id)}
+                            disabled={saving}
+                            aria-label={`Reset password for ${u.username}`}
+                            title="Reset password (emails a new temporary password)"
+                          >
+                            <KeyRound size={14} />
+                          </button>
+                        ) : null}
+                        {u.is_active === 1 ? (
+                          <>
+                            {canDelete ? (
+                              <button
+                                className={cn(
+                                  'inline-flex items-center justify-center rounded-md p-1.5 text-secondary',
+                                  saving ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
+                                )}
+                                onClick={() => setConfirmSuspendId(u.id)}
+                                disabled={saving}
+                                aria-label={`Suspend ${u.username}`}
+                                title="Suspend (temporary hold)"
+                              >
+                                <Ban size={14} />
+                              </button>
+                            ) : null}
+                            {canDelete ? (
+                              <button
+                                className={cn(
+                                  'inline-flex items-center justify-center rounded-md p-1.5 text-secondary',
+                                  saving ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
+                                )}
+                                onClick={() => setConfirmDeactivateId(u.id)}
+                                disabled={saving}
+                                aria-label={`Deactivate ${u.username}`}
+                                title="Deactivate"
+                              >
+                                <UserX size={14} />
+                              </button>
+                            ) : null}
+                            {canEdit ? (
+                              <button
+                                className={cn(
+                                  'inline-flex items-center justify-center rounded-md p-1.5 text-secondary',
+                                  saving ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
+                                )}
+                                onClick={() => setConfirmRevokeId(u.id)}
+                                disabled={saving}
+                                aria-label={`Revoke sessions for ${u.username}`}
+                                title="Revoke active sessions"
+                              >
+                                <LogOut size={14} />
+                              </button>
+                            ) : null}
+                          </>
+                        ) : u.status === 'SUSPENDED' ? (
+                          canEdit ? (
+                            <button
+                              className={cn(
+                                'inline-flex items-center justify-center rounded-md p-1.5 text-secondary',
+                                saving ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
+                              )}
+                              onClick={() => void unsuspend(u.id)}
+                              disabled={saving}
+                              aria-label={`Reinstate ${u.username}`}
+                              title="Lift suspension"
+                            >
+                              <RotateCcw size={14} />
+                            </button>
+                          ) : null
+                        ) : u.status === 'PENDING' ? (
+                          // Reactivating here would just flip is_active without ever
+                          // generating/emailing a real password — this account's
+                          // placeholder password was never sent to anyone. Only the
+                          // New Application flow (which does both) may activate it.
+                          <span className="text-secondary" title="Activates automatically once their first application is submitted">
+                            <Clock3 size={14} />
+                          </span>
+                        ) : canEdit ? (
                           <button
                             className={cn(
                               'inline-flex items-center justify-center rounded-md p-1.5 text-secondary',
@@ -602,7 +695,7 @@ export function LocatorUsersManagement() {
                           >
                             <RotateCcw size={14} />
                           </button>
-                        )}
+                        ) : null}
                       </div>
                     </td>
                   </tr>
@@ -663,6 +756,50 @@ export function LocatorUsersManagement() {
               onChange={(e) => setForm((p) => ({ ...p, email: e.target.value }))}
             />
           </Field>
+        </div>
+
+        <div className="mt-4 pt-4 border-t" style={{ borderColor: 'var(--border-subtle)' }}>
+          <p className="text-xs font-bold uppercase tracking-widest text-secondary mb-1">Business profile (optional)</p>
+          <p className="text-[11px] text-secondary mb-3">
+            {editing
+              ? loadingProfile
+                ? 'Loading current business profile…'
+                : "Edits here update the locator's business profile directly."
+              : "Fill this in and the locator's dashboard opens right after they set up their authenticator — otherwise they'll be asked to complete it themselves on first login."}
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <Field label="Business name">
+              <input
+                className="w-full rounded-md px-3 py-2 text-sm border focus:outline-none focus:border-[var(--nav-active-bg)]"
+                style={{ borderColor: 'var(--input-border)', color: 'var(--text)', backgroundColor: 'var(--input-bg)' }}
+                value={form.business_name}
+                onChange={(e) => setForm((p) => ({ ...p, business_name: e.target.value }))}
+                placeholder="e.g. SkyPort Logistics Inc."
+                disabled={loadingProfile}
+              />
+            </Field>
+            <Field label="Contact number">
+              <input
+                className="w-full rounded-md px-3 py-2 text-sm border focus:outline-none focus:border-[var(--nav-active-bg)]"
+                style={{ borderColor: 'var(--input-border)', color: 'var(--text)', backgroundColor: 'var(--input-bg)' }}
+                value={form.contact_no}
+                onChange={(e) => setForm((p) => ({ ...p, contact_no: e.target.value }))}
+                placeholder="09XX XXX XXXX"
+                disabled={loadingProfile}
+              />
+            </Field>
+            <div className="sm:col-span-2">
+              <Field label="Business address">
+                <AddressAutocomplete
+                  value={form.address}
+                  onChange={(address) => setForm((p) => ({ ...p, address }))}
+                  className="w-full rounded-md px-3 py-2 text-sm border focus:outline-none focus:border-[var(--nav-active-bg)]"
+                  style={{ borderColor: 'var(--input-border)', color: 'var(--text)', backgroundColor: 'var(--input-bg)' }}
+                  placeholder="Start typing to search, or type the full address"
+                />
+              </Field>
+            </div>
+          </div>
         </div>
 
         {editing ? (

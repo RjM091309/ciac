@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'motion/react';
 import {
   AlertTriangle,
+  CheckCircle2,
   ClipboardCheck,
   Clock3,
   Coins,
@@ -118,6 +119,9 @@ type DetailPayload = {
     original_file_name: string | null;
     requirement_id: number | null;
     requirement_code: string | null;
+    /** Upload order within this requirement — 1 for the first submission,
+     * 2+ for a reupload after a rejection. */
+    version?: number | string | null;
   }[];
 };
 
@@ -506,7 +510,7 @@ function StatTile({
   );
 }
 
-const TABS = ['Overview', 'Compliance', 'Charges', 'Findings', 'Recommendation', 'Activity'] as const;
+const TABS = ['Overview', 'Compliance', 'Recommendation', 'Activity'] as const;
 type Tab = (typeof TABS)[number];
 
 function AssessmentDetail({
@@ -621,8 +625,6 @@ function AssessmentDetail({
               )}
             >
               {t}
-              {t === 'Findings' && data?.findings.length ? ` (${data.findings.length})` : ''}
-              {t === 'Charges' && data?.charges.length ? ` (${data.charges.length})` : ''}
             </button>
           ))}
         </div>
@@ -636,10 +638,6 @@ function AssessmentDetail({
             <OverviewTab data={data} evaluators={evaluators} perms={perms} busy={busy} run={run} />
           ) : tab === 'Compliance' ? (
             <ComplianceTab data={data} canEdit={perms.canEdit} busy={busy} run={run} />
-          ) : tab === 'Charges' ? (
-            <ChargesTab data={data} perms={perms} busy={busy} run={run} />
-          ) : tab === 'Findings' ? (
-            <FindingsTab data={data} perms={perms} busy={busy} run={run} />
           ) : tab === 'Recommendation' ? (
             <RecommendationTab data={data} canEdit={perms.canEdit} busy={busy} run={run} />
           ) : (
@@ -782,13 +780,14 @@ function ComplianceTab({
   run: RunFn;
 }) {
   const [confirmTarget, setConfirmTarget] = useState<{ id: number; status: 'VERIFIED' | 'REJECTED'; label: string } | null>(null);
+  const [rejectRemarks, setRejectRemarks] = useState('');
 
-  const setReq = (id: number, status: string) =>
+  const setReq = (id: number, status: string, remarks?: string) =>
     run(
       () =>
         apiFetch(`/api/assessments/requirements/${id}/status`, {
           method: 'PATCH',
-          body: JSON.stringify({ status }),
+          body: JSON.stringify({ status, remarks: remarks?.trim() || null }),
         }),
       `Requirement ${status.toLowerCase()}`
     );
@@ -830,6 +829,15 @@ function ComplianceTab({
                   {r.requirement_code ? `${r.requirement_code} · ` : ''}
                   {r.requirement_name || `Requirement #${r.id}`}
                   {hasDocument ? <FileText size={12} className="inline-block ml-1.5 -mt-0.5 opacity-60" /> : null}
+                  {hasDocument && Number(doc!.version) > 1 ? (
+                    <span
+                      className="ml-1.5 inline-flex items-center rounded-full px-1.5 py-0.5 text-[9px] font-semibold align-middle"
+                      style={{ backgroundColor: 'rgba(245,158,11,.14)', color: '#f59e0b' }}
+                      title="Reuploaded after a rejection"
+                    >
+                      V{Number(doc!.version)}
+                    </span>
+                  ) : null}
                 </div>
                 {r.remarks ? <div className="text-[11px] text-secondary truncate">{r.remarks}</div> : null}
               </div>
@@ -864,13 +872,14 @@ function ComplianceTab({
                       className="rounded px-2 py-1 text-[11px] border cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                       style={{ borderColor: 'var(--border)' }}
                       disabled={busy || r.status === 'REJECTED' || r.status === 'VERIFIED'}
-                      onClick={() =>
+                      onClick={() => {
+                        setRejectRemarks('');
                         setConfirmTarget({
                           id: r.id,
                           status: 'REJECTED',
                           label: `${r.requirement_code ? `${r.requirement_code} · ` : ''}${r.requirement_name || `Requirement #${r.id}`}`,
-                        })
-                      }
+                        });
+                      }}
                     >
                       Reject
                     </button>
@@ -896,13 +905,36 @@ function ComplianceTab({
         confirmText={confirmTarget?.status === 'VERIFIED' ? 'Verify' : 'Reject'}
         danger={confirmTarget?.status === 'REJECTED'}
         loading={busy}
-        onCancel={() => setConfirmTarget(null)}
+        confirmDisabled={confirmTarget?.status === 'REJECTED' && !rejectRemarks.trim()}
+        onCancel={() => {
+          setConfirmTarget(null);
+          setRejectRemarks('');
+        }}
         onConfirm={async () => {
           if (!confirmTarget) return;
-          await setReq(confirmTarget.id, confirmTarget.status);
+          await setReq(confirmTarget.id, confirmTarget.status, confirmTarget.status === 'REJECTED' ? rejectRemarks : undefined);
           setConfirmTarget(null);
+          setRejectRemarks('');
         }}
-      />
+      >
+        {confirmTarget?.status === 'REJECTED' ? (
+          <div className="mt-3">
+            <label className="text-[11px] font-medium text-secondary">
+              Reason for rejection <span style={{ color: '#dc2626' }}>*</span>
+            </label>
+            <textarea
+              autoFocus
+              className="mt-1 w-full rounded-lg border px-2.5 py-2 text-xs resize-none"
+              style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'var(--surface)', color: 'var(--text)' }}
+              rows={3}
+              placeholder="Tell the locator what's missing or wrong so they can fix and resubmit…"
+              value={rejectRemarks}
+              onChange={(e) => setRejectRemarks(e.target.value)}
+            />
+            <div className="mt-1 text-[10px] text-secondary">Sent to the locator by email along with an in-app notification.</div>
+          </div>
+        ) : null}
+      </ConfirmModal>
     </div>
   );
 }
@@ -1272,10 +1304,18 @@ function RecommendationTab({
   const [rec, setRec] = useState(a.recommendation || 'ENDORSE');
   const [summary, setSummary] = useState('');
   const openFindings = data.findings.filter((f) => f.status === 'OPEN').length;
+  const totalReq = data.requirements.length;
+  const verifiedReq = data.requirements.filter((r) => r.status === 'VERIFIED').length;
+  const pendingReq = data.requirements.filter((r) => r.status === 'PENDING').length;
+  const rejectedReq = data.requirements.filter((r) => r.status === 'REJECTED').length;
+  const allVerified = totalReq > 0 && verifiedReq === totalReq;
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="rounded-xl border p-3 text-[12px]" style={{ borderColor: 'var(--border)' }}>
+      <div
+        className="rounded-xl border p-3 text-[12px]"
+        style={{ borderColor: allVerified ? 'rgba(16,185,129,.4)' : 'var(--border)' }}
+      >
         <div className="flex justify-between">
           <span className="text-secondary">Charges assessed</span>
           <span className="font-semibold">{peso(a.charges_total)}</span>
@@ -1288,11 +1328,33 @@ function RecommendationTab({
         </div>
         <div className="flex justify-between">
           <span className="text-secondary">Requirements verified</span>
-          <span className="font-semibold">
-            {data.requirements.filter((r) => r.status === 'VERIFIED').length}/{data.requirements.length}
+          <span className="font-semibold" style={{ color: allVerified ? '#10b981' : undefined }}>
+            {verifiedReq}/{totalReq}
           </span>
         </div>
       </div>
+
+      {allVerified ? (
+        <div
+          className="rounded-lg border px-3 py-2 text-[12px] flex items-center gap-2"
+          style={{ borderColor: 'rgba(16,185,129,.4)', backgroundColor: 'rgba(16,185,129,.1)', color: '#10b981' }}
+        >
+          <CheckCircle2 size={14} className="shrink-0" />
+          <span>All requirements verified — ready to endorse to the Account Officer (Approval Queue).</span>
+        </div>
+      ) : (
+        <div
+          className="rounded-lg border px-3 py-2 text-[12px] flex items-center gap-2"
+          style={{ borderColor: 'rgba(245,158,11,.4)', backgroundColor: 'rgba(245,158,11,.1)', color: '#f59e0b' }}
+        >
+          <AlertTriangle size={14} className="shrink-0" />
+          <span>
+            {pendingReq > 0 ? `${pendingReq} pending` : ''}
+            {pendingReq > 0 && rejectedReq > 0 ? ', ' : ''}
+            {rejectedReq > 0 ? `${rejectedReq} rejected` : ''} in Compliance — check that tab before endorsing.
+          </span>
+        </div>
+      )}
 
       {a.recommendation ? (
         <div className="rounded-lg border px-3 py-2 text-[12px]" style={{ borderColor: 'var(--border)' }}>

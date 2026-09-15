@@ -147,6 +147,43 @@ function requireAnyMenuAccess(menuKeys, action = "view") {
   };
 }
 
+// Same menu set as Notification.js's EVENT_TYPE_MENU_KEYS.application_status
+// and c_applications.js's APPLICATION_ACCESS_MENU_KEYS — whoever can see one
+// of these queues is "staff enough" to list applications and change their
+// status.
+const APPLICATION_ACCESS_MENU_KEYS = ["applications:new", "applications:renewals", "assessment:queue", "approval:queue"];
+
+/**
+ * Gates an /api/applications route. Replaces a hardcoded
+ * requireRole("admin", "officer"[, "proponent"]) — that literal "officer"
+ * broke the instant the built-in Officer role got renamed (e.g. to
+ * "Assessment Officer"), 403ing every non-admin staff user out of New
+ * Applications/Renewal Tracking. Staff access is now Control Panel-driven
+ * (any role with Sidebar visibility on one of the applications-adjacent
+ * menus), same as loadWithAccess() in c_applications.js and
+ * hasStaffApplicationAccess() there — so it survives a rename and extends
+ * to any future custom staff role automatically.
+ */
+function requireApplicationsAccess({ allowProponent = false } = {}) {
+  return async function applicationsAccessGuard(req, res, next) {
+    if (!req.user) {
+      return res.status(401).json({ success: false, message: "Access token required" });
+    }
+    const role = String(req.user.role || "").toLowerCase();
+    if (role === "admin") return next();
+    if (allowProponent && role === "proponent") return next();
+    try {
+      for (const menuKey of APPLICATION_ACCESS_MENU_KEYS) {
+        if (await checkMenuAllowed(role, menuKey, "view")) return next();
+      }
+      return res.status(403).json({ success: false, message: "Forbidden" });
+    } catch (error) {
+      console.error("Applications access check failed:", error);
+      return res.status(500).json({ success: false, message: "Internal server error" });
+    }
+  };
+}
+
 /**
  * Gates a /api/users route that acts on one specific account (:id) or
  * creates one (role_id in the body) behind whichever Control Panel
@@ -279,6 +316,7 @@ module.exports = {
   requireMenuAccess,
   requireAnyMenuAccess,
   requireUserMenuAccess,
+  requireApplicationsAccess,
   requireProponentRole,
   requireProponentSelf,
   requireOwnApplication,

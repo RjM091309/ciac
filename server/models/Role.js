@@ -98,6 +98,14 @@ async function isRoleInUse(id) {
   return rows.length > 0;
 }
 
+// Every user currently holding this role — used to push a live "permissions
+// changed" event (see server/lib/notificationStream.js) to everyone affected
+// right when Control Panel saves, instead of them needing a manual refresh.
+async function listUserIdsByRole(id) {
+  const rows = await selectData(`SELECT user_id FROM user_roles WHERE role_id = @param0`, [id]);
+  return rows.map((r) => r.user_id);
+}
+
 async function ensureSchema() {
   // roles
   await updateSchema(`
@@ -136,5 +144,6 @@ module.exports = {
   deactivateRole,
   reactivateRole,
   isRoleInUse,
+  listUserIdsByRole,
 };
 

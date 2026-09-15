@@ -9,6 +9,8 @@ type ConfirmModalProps = {
   cancelText?: string;
   loading?: boolean;
   danger?: boolean;
+  confirmDisabled?: boolean;
+  children?: React.ReactNode;
   onConfirm: () => void | Promise<void>;
   onCancel: () => void;
 };
@@ -21,6 +23,8 @@ export function ConfirmModal({
   cancelText = 'Cancel',
   loading = false,
   danger = false,
+  confirmDisabled = false,
+  children,
   onConfirm,
   onCancel,
 }: ConfirmModalProps) {
@@ -50,6 +54,7 @@ export function ConfirmModal({
                 {title}
               </h3>
               <p className="text-xs text-secondary">{description}</p>
+              {children}
             </div>
             <div className="mt-4 flex items-center justify-end gap-2">
               <button
@@ -64,14 +69,14 @@ export function ConfirmModal({
               </button>
               <button
                 className={`rounded-lg px-3 py-2 text-sm font-semibold ${
-                  loading ? 'cursor-not-allowed opacity-60' : 'cursor-pointer hover:opacity-90'
+                  loading || confirmDisabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer hover:opacity-90'
                 }`}
                 style={{
                   backgroundColor: danger ? '#dc2626' : 'var(--nav-active-bg)',
                   color: '#ffffff',
                 }}
                 onClick={onConfirm}
-                disabled={loading}
+                disabled={loading || confirmDisabled}
               >
                 {loading ? 'Processing…' : confirmText}
               </button>

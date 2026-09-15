@@ -34,6 +34,7 @@ import {
   markNotificationReadRequest,
 } from '../lib/notificationClient';
 import { NOTIFICATIONS_REFRESH_EVENT, requestNotificationsRefresh } from '../lib/notificationRefresh';
+import { requestPermissionsRefresh } from '../lib/permissionsRefresh';
 import { roleDisplayName } from '../lib/roleDisplay';
 import { toast } from 'sonner';
 
@@ -225,7 +226,7 @@ export function AppHeader({
     }
     const count = openLocatorToastIdsRef.current.size;
     if (count < 2) return;
-    clearAllToastIdRef.current = toast(`${count} locator updates waiting`, {
+    clearAllToastIdRef.current = toast(`${count} updates waiting`, {
       duration: Infinity,
       closeButton: true,
       toasterId: 'locator-events',
@@ -284,7 +285,14 @@ export function AppHeader({
     // it before" — that's what stops every 15s poll from stacking a
     // duplicate for the same still-open toast.
     for (const item of nextNotifications) {
-      if (item.actorRole !== 'proponent' || item.isRead) continue;
+      // Persistent toast covers two handoffs: a locator submitting/reuploading
+      // something (actorRole 'proponent'), and Assessment endorsing an
+      // application to the Approval Queue (eventType 'approval_ready' —
+      // deliberately its own event, distinct from the generic 'approval'
+      // events the Approval module fires for its own in-workflow activity,
+      // so this toast never fires for anything besides that one handoff).
+      const isPersistentToastEvent = item.actorRole === 'proponent' || item.eventType === 'approval_ready';
+      if (!isPersistentToastEvent || item.isRead) continue;
       if (openLocatorToastIdsRef.current.has(item.id)) continue;
 
       const toastId = toast(item.title, {
@@ -325,11 +333,16 @@ export function AppHeader({
     const onNotification = () => {
       requestNotificationsRefresh();
     };
+    const onPermissions = () => {
+      requestPermissionsRefresh();
+    };
     source.addEventListener('notification', onNotification);
     source.addEventListener('connected', onNotification);
+    source.addEventListener('permissions', onPermissions);
     return () => {
       source.removeEventListener('notification', onNotification);
       source.removeEventListener('connected', onNotification);
+      source.removeEventListener('permissions', onPermissions);
       source.close();
     };
   }, []);

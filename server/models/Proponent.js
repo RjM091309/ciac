@@ -80,8 +80,12 @@ async function listProponents() {
       p.updated_by,
       p.created_at,
       p.updated_at,
-      p.is_active
+      p.is_active,
+      u.email AS email,
+      u.full_name AS contact_name,
+      u.status AS account_status
     FROM dbo.proponents p
+    LEFT JOIN dbo.users u ON u.id = p.user_id
     ORDER BY p.id DESC
     `
   );
@@ -99,6 +103,14 @@ async function listProponents() {
     created_at: p.created_at ?? null,
     updated_at: p.updated_at ?? null,
     is_active: p.is_active,
+    // Locator's own login email/name (not the business itself) — used by
+    // the New Application picker to show who'll receive the activation
+    // email, and account_status ("PENDING" = created but not yet activated,
+    // see c_users.js's deferred-locator-activation flow) so staff can tell
+    // at a glance whether picking this locator will trigger that email.
+    email: p.email ?? null,
+    contact_name: p.contact_name ?? null,
+    account_status: p.account_status ?? null,
   }));
 }
 

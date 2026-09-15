@@ -1,5 +1,7 @@
 const { selectData, insertData, updateData, updateSchema, runInTransaction } = require("../config/database");
 const Notification = require("./Notification");
+const ApplicationType = require("./ApplicationType");
+const { sendMail } = require("../lib/mailer");
 
 function toInt(v) {
   // Number(null) is 0, not NaN — without this guard, an explicitly-absent
@@ -42,17 +44,39 @@ const SUBMIT_TRANSITIONS = {
   RETURNED: "RESUBMITTED",
 };
 
-// Canonical lease-application types (BRM). Kept here so both the create path
-// and the draft-edit path validate against the same closed set instead of
-// accepting arbitrary free text.
-const APPLICATION_TYPES = ["DIRECT_LEASE", "WAREHOUSE_LEASE", "SUBLEASE"];
-
 function isValidStatus(status) {
   return APPLICATION_STATUSES.includes(String(status || "").toUpperCase());
 }
 
-function isValidApplicationType(type) {
-  return APPLICATION_TYPES.includes(String(type || "").trim().toUpperCase());
+// File Maintenance-configurable (dbo.application_types, see ApplicationType.js)
+// rather than a fixed list — both the create path and the draft-edit path
+// validate against whichever codes are currently active there.
+async function isValidApplicationType(type) {
+  const activeCodes = await ApplicationType.listActiveCodes();
+  return activeCodes.includes(String(type || "").trim().toUpperCase());
+}
+
+// Staff who can act on the Approval Queue — by Control Panel permission
+// (menu_key = "approval:queue") rather than a hardcoded role name, same
+// reasoning as hasStaffApplicationAccess elsewhere: whichever role is
+// actually configured for that menu (Account Officer today, potentially a
+// renamed/custom role later) gets emailed, plus admins who always see
+// everything.
+async function getApprovalQueueStaffEmails() {
+  const rows = await selectData(
+    `
+    SELECT DISTINCT u.email, u.full_name
+    FROM dbo.users u
+    INNER JOIN dbo.user_roles ur ON ur.user_id = u.id
+    INNER JOIN dbo.roles r ON r.id = ur.role_id
+    LEFT JOIN dbo.role_sidebar_menu_permissions p
+      ON p.role_id = r.id AND p.menu_key = 'approval:queue' AND p.is_enabled = 1
+    WHERE u.is_active = 1
+      AND u.email IS NOT NULL AND u.email <> ''
+      AND (LOWER(LTRIM(RTRIM(r.name))) = 'admin' OR p.role_id IS NOT NULL)
+    `
+  );
+  return rows || [];
 }
 
 async function createStatusChangeNotifications({ application, toStatus, remarks, changedBy }) {
@@ -69,6 +93,58 @@ async function createStatusChangeNotifications({ application, toStatus, remarks,
     });
   } catch (error) {
     console.error("Create status-change notifications error:", error);
+  }
+
+  if (String(toStatus || "").toUpperCase() === "FOR_APPROVAL") {
+    try {
+      // Dedicated "approval_ready" event (menu_key approval:queue only, see
+      // EVENT_TYPE_MENU_KEYS) — deliberately its own type, distinct from the
+      // generic "approval" event used for in-workflow activity (level
+      // progress, issuance, etc. in ApprovalIssuance.js), so the frontend's
+      // toast fires for exactly this handoff and nothing else the Approval
+      // module does.
+      await Notification.createApplicationScopedNotifications({
+        applicationId: application?.id,
+        actorId: changedBy,
+        eventType: "approval_ready",
+        subject: `Application ${String(application?.application_no || "").trim()} ready for approval`,
+        body: remarks
+          ? `Endorsed by Assessment and waiting in the Approval Queue. Remarks: ${String(remarks).trim()}`
+          : "Endorsed by Assessment and waiting in the Approval Queue.",
+      });
+    } catch (error) {
+      console.error("Create approval-queue notification error:", error);
+    }
+
+    try {
+      const staff = await getApprovalQueueStaffEmails();
+      if (staff.length) {
+        const applicationNo = String(application?.application_no || "").trim();
+        const proponentName = String(application?.proponent_name || "").trim();
+        const trimmedRemarks = String(remarks || "").trim();
+        const loginUrl = `${String(process.env.FRONTEND_URL || "").replace(/\/+$/, "")}/`;
+        await Promise.all(
+          staff.map((person) =>
+            sendMail({
+              to: person.email,
+              subject: `Application ${applicationNo || ""} ready for approval`,
+              text:
+                `Hello ${person.full_name || ""},\n\n` +
+                `Application ${applicationNo}${proponentName ? ` (${proponentName})` : ""} was endorsed by Assessment and is now waiting in the Approval Queue.\n\n` +
+                (trimmedRemarks ? `Assessment summary: ${trimmedRemarks}\n\n` : "") +
+                `Sign in here: ${loginUrl}\n`,
+              html:
+                `<p>Hello ${person.full_name || ""},</p>` +
+                `<p>Application <b>${applicationNo}</b>${proponentName ? ` (${proponentName})` : ""} was endorsed by Assessment and is now waiting in the <b>Approval Queue</b>.</p>` +
+                (trimmedRemarks ? `<p><b>Assessment summary:</b> ${trimmedRemarks}</p>` : "") +
+                `<p><a href="${loginUrl}" style="display:inline-block;padding:10px 18px;background:#111827;color:#fff;text-decoration:none;border-radius:6px;">Sign in to the portal</a></p>`,
+            })
+          )
+        );
+      }
+    } catch (error) {
+      console.error("Send approval-queue email error:", error);
+    }
   }
 }
 
@@ -89,6 +165,24 @@ async function createApplicationCreatedNotifications({ applicationId, applicatio
   }
 }
 
+// Locator's login email for an application, resolved via its proponent's
+// linked user account — used to send a real email alongside the in-app
+// notification (e.g. on a rejected requirement), since the locator may not
+// be watching the portal in real time.
+async function getLocatorContactByProponentId(proponentId) {
+  if (!proponentId) return null;
+  const rows = await selectData(
+    `
+    SELECT TOP (1) u.email, u.full_name
+    FROM dbo.proponents p
+    JOIN dbo.users u ON u.id = p.user_id
+    WHERE p.id = @param0 AND u.email IS NOT NULL AND u.email <> ''
+    `,
+    [proponentId]
+  );
+  return rows?.[0] || null;
+}
+
 async function createRequirementStatusNotifications({
   application,
   requirementCode,
@@ -97,13 +191,13 @@ async function createRequirementStatusNotifications({
   remarks,
   actorId,
 }) {
+  const requirementLabel = [String(requirementCode || "").trim(), String(requirementName || "").trim()]
+    .filter(Boolean)
+    .join(" - ");
+  const subject = `Requirement updated for ${String(application?.application_no || "").trim()}`;
+  const bodyBase = `${requirementLabel || "Requirement"} changed to ${String(nextStatus || "").trim()}.`;
+  const body = remarks ? `${bodyBase} Remarks: ${String(remarks).trim()}` : bodyBase;
   try {
-    const requirementLabel = [String(requirementCode || "").trim(), String(requirementName || "").trim()]
-      .filter(Boolean)
-      .join(" - ");
-    const subject = `Requirement updated for ${String(application?.application_no || "").trim()}`;
-    const bodyBase = `${requirementLabel || "Requirement"} changed to ${String(nextStatus || "").trim()}.`;
-    const body = remarks ? `${bodyBase} Remarks: ${String(remarks).trim()}` : bodyBase;
     await Notification.createApplicationScopedNotifications({
       applicationId: application?.id,
       actorId,
@@ -113,6 +207,36 @@ async function createRequirementStatusNotifications({
     });
   } catch (error) {
     console.error("Create requirement notifications error:", error);
+  }
+
+  if (String(nextStatus || "").toUpperCase() === "REJECTED") {
+    try {
+      const locator = await getLocatorContactByProponentId(application?.proponent_id);
+      if (locator?.email) {
+        const applicationNo = String(application?.application_no || "").trim();
+        const trimmedRemarks = String(remarks || "").trim();
+        const loginUrl = `${String(process.env.FRONTEND_URL || "").replace(/\/+$/, "")}/`;
+        await sendMail({
+          to: locator.email,
+          subject: `Requirement rejected for ${applicationNo || "your application"}`,
+          text:
+            `Hello ${locator.full_name || ""},\n\n` +
+            `${requirementLabel || "A requirement"} for application ${applicationNo} was rejected.\n\n` +
+            (trimmedRemarks ? `Reason: ${trimmedRemarks}\n\n` : "") +
+            `Please sign in to the portal to review and resubmit: ${loginUrl}\n`,
+          html:
+            `<p>Hello ${locator.full_name || ""},</p>` +
+            `<p><b>${requirementLabel || "A requirement"}</b> for application <b>${applicationNo}</b> was rejected.</p>` +
+            (trimmedRemarks
+              ? `<p><b>Reason:</b> ${trimmedRemarks}</p>`
+              : "") +
+            `<p>Please sign in to review and resubmit.</p>` +
+            `<p><a href="${loginUrl}" style="display:inline-block;padding:10px 18px;background:#111827;color:#fff;text-decoration:none;border-radius:6px;">Sign in to the portal</a></p>`,
+        });
+      }
+    } catch (error) {
+      console.error("Send requirement rejection email error:", error);
+    }
   }
 }
 
@@ -473,7 +597,7 @@ async function createApplication({
   const renewalBit = toBit(is_renewal);
   const normalizedStatus = isValidStatus(status) ? String(status).toUpperCase() : "SUBMITTED";
   const isDraft = normalizedStatus === "DRAFT";
-  if (!isValidApplicationType(application_type)) {
+  if (!(await isValidApplicationType(application_type))) {
     throw new Error("Invalid application type.");
   }
   const normalizedType = String(application_type).trim().toUpperCase();
@@ -649,7 +773,7 @@ async function updateDraftApplication(id, { application_type, is_renewal, change
     application_type === undefined || application_type === null
       ? application.application_type
       : String(application_type).trim().toUpperCase();
-  if (!isValidApplicationType(nextType)) {
+  if (!(await isValidApplicationType(nextType))) {
     throw new Error("Invalid application type.");
   }
 
@@ -902,7 +1026,14 @@ async function listDocumentsByApplication(applicationId) {
       d.created_at,
       d.updated_at,
       r.code AS requirement_code,
-      r.name AS requirement_name
+      r.name AS requirement_name,
+      -- V1 = first ever upload for this requirement, V2 = the reupload after
+      -- a rejection, and so on — partitioned per requirement_id (not per
+      -- application) since a locator reuploads one requirement at a time,
+      -- and shared by every caller of this function (proponent portal,
+      -- Assessment, Approval) so the version label is consistent everywhere
+      -- a document shows up.
+      ROW_NUMBER() OVER (PARTITION BY d.requirement_id ORDER BY d.id ASC) AS version
     FROM dbo.documents d
     LEFT JOIN dbo.requirements r ON r.id = d.requirement_id
     WHERE d.application_id = @param0
@@ -1097,7 +1228,6 @@ async function listApplicationStatusHistory(applicationId) {
 
 module.exports = {
   APPLICATION_STATUSES,
-  APPLICATION_TYPES,
   isValidApplicationType,
   ensureSchema,
   listApplications,

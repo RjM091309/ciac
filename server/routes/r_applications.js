@@ -1,29 +1,29 @@
 const express = require("express");
 const router = express.Router();
 const controller = require("../controller/c_applications");
-const { requireRole } = require("../middleware/m_auth");
+const { requireApplicationsAccess } = require("../middleware/m_auth");
 const { upload } = require("../middleware/m_upload");
 
 // Staff-only: full listing and staff-driven status decisions.
-router.get("/", requireRole("admin", "officer"), controller.list);
-router.patch("/:id/status", requireRole("admin", "officer"), controller.updateStatus);
-router.patch("/requirements/:id/status", requireRole("admin", "officer"), controller.updateRequirementStatus);
+router.get("/", requireApplicationsAccess(), controller.list);
+router.patch("/:id/status", requireApplicationsAccess(), controller.updateStatus);
+router.patch("/requirements/:id/status", requireApplicationsAccess(), controller.updateRequirementStatus);
 
 // Staff + proponent: a proponent may only ever reach their own application —
 // enforced in the controller (loadWithAccess), not here, since that check
 // needs the row itself.
-router.get("/:id", requireRole("admin", "officer", "proponent"), controller.getById);
-router.get("/:id/requirements", requireRole("admin", "officer", "proponent"), controller.listRequirements);
-router.get("/:id/documents", requireRole("admin", "officer", "proponent"), controller.listDocuments);
-router.get("/:id/status-history", requireRole("admin", "officer", "proponent"), controller.listStatusHistory);
+router.get("/:id", requireApplicationsAccess({ allowProponent: true }), controller.getById);
+router.get("/:id/requirements", requireApplicationsAccess({ allowProponent: true }), controller.listRequirements);
+router.get("/:id/documents", requireApplicationsAccess({ allowProponent: true }), controller.listDocuments);
+router.get("/:id/status-history", requireApplicationsAccess({ allowProponent: true }), controller.listStatusHistory);
 
 // Self-service filing (BRM-01/02): a proponent files for their own business;
 // staff can still file/upload on a proponent's behalf.
-router.post("/", requireRole("admin", "officer", "proponent"), controller.create);
-router.patch("/:id/submit", requireRole("admin", "officer", "proponent"), controller.submit);
-router.patch("/:id", requireRole("admin", "officer", "proponent"), controller.updateDraft);
-router.delete("/:id", requireRole("admin", "officer", "proponent"), controller.remove);
-router.post("/documents", requireRole("admin", "officer", "proponent"), upload.single("file"), controller.createDocument);
-router.get("/documents/:id/file", requireRole("admin", "officer", "proponent"), controller.downloadDocument);
+router.post("/", requireApplicationsAccess({ allowProponent: true }), controller.create);
+router.patch("/:id/submit", requireApplicationsAccess({ allowProponent: true }), controller.submit);
+router.patch("/:id", requireApplicationsAccess({ allowProponent: true }), controller.updateDraft);
+router.delete("/:id", requireApplicationsAccess({ allowProponent: true }), controller.remove);
+router.post("/documents", requireApplicationsAccess({ allowProponent: true }), upload.single("file"), controller.createDocument);
+router.get("/documents/:id/file", requireApplicationsAccess({ allowProponent: true }), controller.downloadDocument);
 
 module.exports = router;

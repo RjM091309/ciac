@@ -1,5 +1,5 @@
 import type { AppView } from '../layout/AppLayout';
-import { CalendarClock, FileCheck, FolderTree, ShieldCheck, Users } from 'lucide-react';
+import { CalendarClock, FileCheck, FolderTree, Layers, ShieldCheck, Users } from 'lucide-react';
 
 export type LandingConfig = {
   title: string;
@@ -123,63 +123,6 @@ export const LANDING_CONFIG: Record<AppView, LandingConfig> = {
       ],
     },
   },
-  'directory:companies': {
-    title: 'Locator Directory',
-    description: 'Master list of all registered and active locators.',
-    badge: 'CRM',
-    icon: Users,
-    stats: [
-      { label: 'Total Locators', value: '142' },
-      { label: 'Active Leases', value: '87' },
-      { label: 'Prospects', value: '24' },
-    ],
-    table: {
-      columns: ['Company', 'Industry', 'Status', 'Last Activity', 'Account Officer'],
-      rows: [
-        ['SkyPort Logistics Inc.', 'Logistics', 'Active Locator', 'Site visit (Mar 08)', 'AO Santos'],
-        ['GreenFuel Terminals Corp.', 'Fuel', 'For Board Approval', 'Submission of AFS', 'AO Dizon'],
-        ['Metro Agro Trading', 'Agri-processing', 'Prospect', 'Initial LOI', 'AO Reyes'],
-      ],
-    },
-  },
-  'directory:officers': {
-    title: 'Key Officers & Stakeholders',
-    description: 'Directory of stockholders and key officers with submitted IDs and resumes.',
-    badge: 'KYC',
-    icon: Users,
-    stats: [
-      { label: 'Profiles With Complete IDs', value: '212' },
-      { label: 'With Expiring IDs', value: '9' },
-      { label: 'Missing Resumes', value: '6' },
-    ],
-    table: {
-      columns: ['Name', 'Company', 'Role', 'ID Status', 'Last Updated'],
-      rows: [
-        ['Maria L. Santos', 'SkyPort Logistics Inc.', 'President', 'Verified', 'Mar 02, 2026'],
-        ['John P. Reyes', 'GreenFuel Terminals Corp.', 'Corporate Secretary', 'ID expiring in 60 days', 'Feb 28, 2026'],
-        ['Anna K. Dizon', 'HarborFresh Cold Storage', 'Treasurer', 'Pending HR review', 'Mar 01, 2026'],
-      ],
-    },
-  },
-  'directory:site-plans': {
-    title: 'Site Development Plans',
-    description: 'Repository of approved and proposed site development plans.',
-    badge: 'Site Plans',
-    icon: FolderTree,
-    stats: [
-      { label: 'Approved Plans', value: '32' },
-      { label: 'For Technical Review', value: '5' },
-      { label: 'For CIAC Board', value: '3' },
-    ],
-    table: {
-      columns: ['Project', 'Location', 'Plan Version', 'Status', 'Last Review'],
-      rows: [
-        ['Cargo Hub Expansion', 'North Apron', 'Rev. 3', 'Approved', 'Feb 20, 2026'],
-        ['Fuel Depot Modernization', 'Fuel Farm Zone', 'Rev. 1', 'For Board', 'Mar 04, 2026'],
-        ['Cold Storage Warehouse', 'Logistics Park', 'Rev. 2', 'Tech Review', 'Mar 06, 2026'],
-      ],
-    },
-  },
   'compliance:permits': {
     title: 'Permits',
     description: 'Monitoring of environmental, fire, occupancy and sanitary permits.',
@@ -204,27 +147,8 @@ export const LANDING_CONFIG: Record<AppView, LandingConfig> = {
       ],
     },
   },
-  'compliance:bir': {
-    title: 'BIR & Tax Records',
-    description: 'Centralized view of BIR Tax Clearances, Certificates, and POS/CRM permits.',
-    badge: 'Tax',
-    icon: FileCheck,
-    stats: [
-      { label: 'Valid BIR Clearances', value: '79' },
-      { label: 'POS/CRM Registered', value: '65' },
-      { label: 'For BIR Update', value: '5' },
-    ],
-    table: {
-      columns: ['Locator', 'Document', 'Reference No.', 'Validity', 'Status'],
-      rows: [
-        ['SkyPort Logistics Inc.', 'BIR Tax Clearance', 'TC-26-045', 'Dec 31, 2026', 'Valid'],
-        ['Metro Agro Trading', 'BIR 2303 COR', 'COR-24-993', 'N/A', 'Verified'],
-        ['Delta AeroTech', 'POS/CRM Permit', 'POS-25-118', 'Dec 31, 2025', 'For Renewal'],
-      ],
-    },
-  },
   'compliance:expiry': {
-    title: 'Expiry Calendar',
+    title: 'Expiry Permits',
     description: 'Calendar view of all upcoming permit expirations across locators.',
     badge: 'Calendar',
     icon: CalendarClock,
@@ -259,63 +183,6 @@ export const LANDING_CONFIG: Record<AppView, LandingConfig> = {
         ['Annual Safety Audit', 'SkyPort Logistics Inc.', 'Safety', 'In Progress', '—'],
         ['Engineering Check', 'Delta AeroTech', 'Engineering', 'Completed', 'Passed w/ Findings'],
         ['Performance Commitment', 'Metro Agro Trading', 'Perf. Commitment', 'Scheduled', '—'],
-      ],
-    },
-  },
-  'operations:flowcharts': {
-    title: 'Production Flowcharts',
-    description: 'Uploaded production and process flow diagrams for locators.',
-    badge: 'Operations',
-    icon: FolderTree,
-    stats: [
-      { label: 'Uploaded Flowcharts', value: '27' },
-      { label: 'With Safety Review', value: '18' },
-      { label: 'For Update Request', value: '4' },
-    ],
-    table: {
-      columns: ['Locator', 'Process', 'Version', 'Status', 'Last Review'],
-      rows: [
-        ['NorthGate Foods Corp.', 'Frozen Goods Processing', 'v1.4', 'Approved', 'Feb 18, 2026'],
-        ['Metro Agro Trading', 'Grain Milling', 'v0.9', 'For HSE Review', 'Mar 02, 2026'],
-        ['GreenFuel Terminals Corp.', 'Fuel Offloading', 'v1.1', 'For Update', 'Feb 25, 2026'],
-      ],
-    },
-  },
-  'operations:brochures': {
-    title: 'Brochures & Marketing',
-    description: 'Digital library of brochures and marketing materials for locators.',
-    badge: 'Marketing',
-    icon: FolderTree,
-    stats: [
-      { label: 'Uploaded Brochures', value: '54' },
-      { label: 'With CIAC Branding', value: '21' },
-      { label: 'Pending Review', value: '7' },
-    ],
-    table: {
-      columns: ['Locator', 'Material', 'Version', 'Status', 'Last Updated'],
-      rows: [
-        ['SkyPort Logistics Inc.', 'Corporate Profile 2026', 'v2', 'Approved', 'Mar 01, 2026'],
-        ['Delta AeroTech', 'Hangar Services Flyer', 'v1', 'For Branding Review', 'Mar 07, 2026'],
-        ['HarborFresh Cold Storage', 'Cold Chain Solutions', 'v3', 'Approved', 'Feb 20, 2026'],
-      ],
-    },
-  },
-  'operations:gad': {
-    title: 'GAD Programs',
-    description: 'Tracking of Gender and Development-related programs and initiatives.',
-    badge: 'GAD',
-    icon: Users,
-    stats: [
-      { label: 'Active GAD Programs', value: '12' },
-      { label: 'Completed This Year', value: '4' },
-      { label: 'With Submitted Reports', value: '9' },
-    ],
-    table: {
-      columns: ['Program', 'Locator', 'Coverage', 'Status', 'Next Milestone'],
-      rows: [
-        ['Women in Logistics Training', 'SkyPort Logistics Inc.', 'Q1 2026', 'Ongoing', 'Final training batch'],
-        ['Safe Workplace Campaign', 'GreenFuel Terminals Corp.', '2025–2026', 'Ongoing', 'Survey rollout'],
-        ['Inclusive Hiring Drive', 'Metro Agro Trading', 'Q4 2025', 'Completed', 'Impact report review'],
       ],
     },
   },
@@ -395,6 +262,26 @@ export const LANDING_CONFIG: Record<AppView, LandingConfig> = {
         ['ENV', 'Environmental assessment', 'CDC/CIAC permits', 'Active'],
         ['FIRE', 'Fire safety inspection', 'Occupancy / Fire Safety', 'Active'],
         ['SAN', 'Sanitary compliance', 'Sanitary permits', 'Inactive'],
+      ],
+    },
+  },
+  'settings:application-types': {
+    title: 'Application Types',
+    description: 'Define the lease application types locators and staff can select when filing.',
+    badge: 'Configuration',
+    icon: Layers,
+    isCrud: true,
+    stats: [
+      { label: 'Application Types', value: '—' },
+      { label: 'Active Types', value: '—' },
+      { label: 'Deactivated', value: '—' },
+    ],
+    table: {
+      columns: ['Code', 'Name', 'Description', 'Status'],
+      rows: [
+        ['DIRECT_LEASE', 'Direct Lease', '—', 'Active'],
+        ['WAREHOUSE_LEASE', 'Warehouse Lease', '—', 'Active'],
+        ['SUBLEASE', 'Sublease', '—', 'Active'],
       ],
     },
   },

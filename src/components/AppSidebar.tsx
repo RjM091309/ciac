@@ -1,20 +1,18 @@
 import React, { useState } from 'react';
 import {
-  Briefcase,
   CalendarClock,
   ChevronRight,
   ClipboardCheck,
+  ClipboardList,
   FileCheck,
-  Globe,
-  HeartHandshake,
+  FilePlus2,
   LayoutDashboard,
   LogOut,
-  Megaphone,
+  RefreshCw,
   Settings,
   ShieldCheck,
-  Sparkles,
+  Stamp,
   Users,
-  Workflow,
 } from 'lucide-react';
 import { useControlPanelAccess } from '../context/ControlPanelAccessContext';
 import { cn } from '../lib/utils';
@@ -296,10 +294,8 @@ export function AppSidebar({
     canView('approval:queue');
   const showComplianceInspection = canView('compliance:inspections');
   const showPermits = canView('compliance:permits');
-  const showBirTax = canView('compliance:bir');
   const showExpiryCalendar = canView('compliance:expiry');
-  const showComplianceGroup = showComplianceInspection || showPermits || showBirTax || showExpiryCalendar;
-  const showOperations = canView('operations:flowcharts') || canView('operations:brochures') || canView('operations:gad');
+  const showComplianceGroup = showComplianceInspection || showPermits || showExpiryCalendar;
   const showSystemSettings =
     canView('settings:users') ||
     canView('settings:locator-users') ||
@@ -308,6 +304,7 @@ export function AppSidebar({
   const showFileMaintenance =
     canView('settings:inspection-types') ||
     canView('settings:compliance-types') ||
+    canView('settings:application-types') ||
     canView('settings:requirement-categories');
   const showSystemGroup = showSystemSettings || showFileMaintenance;
 
@@ -316,11 +313,11 @@ export function AppSidebar({
   const flat = Boolean(permissionOverride) || !fullAccess;
 
   const applicationsItems: SidebarLeaf[] = [
-    canView('applications:new') && { key: 'applications:new', label: 'New Applications', active: view === 'applications:new', onClick: () => onViewChange('applications:new') },
-    canView('applications:renewals') && { key: 'applications:renewals', label: 'Renewal Tracking', active: view === 'applications:renewals', onClick: () => onViewChange('applications:renewals') },
-    canView('applications:requirements') && { key: 'applications:requirements', label: 'Requirements', active: view === 'applications:requirements', onClick: () => onViewChange('applications:requirements') },
-    canView('assessment:queue') && { key: 'assessment:queue', label: 'Evaluation Queue', active: view === 'assessment:queue', onClick: () => onViewChange('assessment:queue') },
-    canView('approval:queue') && { key: 'approval:queue', label: 'Approval Queue', active: view === 'approval:queue', onClick: () => onViewChange('approval:queue') },
+    canView('applications:new') && { key: 'applications:new', label: 'New Applications', active: view === 'applications:new', onClick: () => onViewChange('applications:new'), icon: FilePlus2 },
+    canView('applications:renewals') && { key: 'applications:renewals', label: 'Renewal Tracking', active: view === 'applications:renewals', onClick: () => onViewChange('applications:renewals'), icon: RefreshCw },
+    canView('applications:requirements') && { key: 'applications:requirements', label: 'Requirements', active: view === 'applications:requirements', onClick: () => onViewChange('applications:requirements'), icon: ClipboardList },
+    canView('assessment:queue') && { key: 'assessment:queue', label: 'Evaluation Queue', active: view === 'assessment:queue', onClick: () => onViewChange('assessment:queue'), icon: ClipboardCheck },
+    canView('approval:queue') && { key: 'approval:queue', label: 'Approval Queue', active: view === 'approval:queue', onClick: () => onViewChange('approval:queue'), icon: Stamp },
   ].filter(Boolean) as SidebarLeaf[];
 
   const complianceInspectionItems: SidebarLeaf[] = [
@@ -331,18 +328,8 @@ export function AppSidebar({
     { key: 'compliance:permits', label: 'Environmental, Fire, Occupancy, Sanitary', active: view === 'compliance:permits', onClick: () => onViewChange('compliance:permits') },
   ];
 
-  const birTaxItems: SidebarLeaf[] = !canView('compliance:bir') ? [] : [
-    { key: 'compliance:bir', label: 'BIR Tax Clearance', active: view === 'compliance:bir', onClick: () => onViewChange('compliance:bir') },
-  ];
-
   const expiryCalendarItems: SidebarLeaf[] = [
     canView('compliance:expiry') && { key: 'compliance:expiry', label: 'Expiring Permits', active: view === 'compliance:expiry', onClick: () => onViewChange('compliance:expiry') },
-  ].filter(Boolean) as SidebarLeaf[];
-
-  const operationsItems: SidebarLeaf[] = [
-    canView('operations:flowcharts') && { key: 'operations:flowcharts', label: 'Production Flowcharts', active: view === 'operations:flowcharts', onClick: () => onViewChange('operations:flowcharts'), icon: Workflow },
-    canView('operations:brochures') && { key: 'operations:brochures', label: 'Brochures & Marketing', active: view === 'operations:brochures', onClick: () => onViewChange('operations:brochures'), icon: Megaphone },
-    canView('operations:gad') && { key: 'operations:gad', label: 'GAD Programs', active: view === 'operations:gad', onClick: () => onViewChange('operations:gad'), icon: HeartHandshake },
   ].filter(Boolean) as SidebarLeaf[];
 
   const systemSettingsItems: SidebarLeaf[] = [
@@ -356,6 +343,7 @@ export function AppSidebar({
     canView('settings:requirement-categories') && { key: 'settings:requirement-categories', label: 'Requirement Categories', active: view === 'settings:requirement-categories', onClick: () => onViewChange('settings:requirement-categories') },
     canView('settings:inspection-types') && { key: 'settings:inspection-types', label: 'Inspection Types', active: view === 'settings:inspection-types', onClick: () => onViewChange('settings:inspection-types') },
     canView('settings:compliance-types') && { key: 'settings:compliance-types', label: 'Compliance Types', active: view === 'settings:compliance-types', onClick: () => onViewChange('settings:compliance-types') },
+    canView('settings:application-types') && { key: 'settings:application-types', label: 'Application Types', active: view === 'settings:application-types', onClick: () => onViewChange('settings:application-types') },
   ].filter(Boolean) as SidebarLeaf[];
 
   return (
@@ -393,15 +381,16 @@ export function AppSidebar({
           {showApplicationsMgmt && (
           <SidebarGroup title="Applications" collapsed={collapsed}>
             <div className="flex flex-col gap-1.5">
-              <SidebarSection
-                icon={Briefcase}
-                label="Management"
-                items={applicationsItems}
-                flat={flat}
-                collapsed={collapsed}
-                isOpen={openDropdownId === 'applications'}
-                onToggle={() => toggleDropdown('applications')}
-              />
+              {applicationsItems.map((item) => (
+                <SidebarItem
+                  key={item.key}
+                  icon={item.icon || FileCheck}
+                  label={item.label}
+                  active={item.active}
+                  onClick={item.onClick}
+                  collapsed={collapsed}
+                />
+              ))}
             </div>
           </SidebarGroup>
           )}
@@ -428,40 +417,14 @@ export function AppSidebar({
                 onToggle={() => toggleDropdown('permits')}
               />
               <SidebarSection
-                icon={FileCheck}
-                label="BIR & Tax Records"
-                items={birTaxItems}
-                flat={flat}
-                collapsed={collapsed}
-                isOpen={openDropdownId === 'bir-tax'}
-                onToggle={() => toggleDropdown('bir-tax')}
-              />
-              <SidebarSection
                 icon={CalendarClock}
-                label="Expiry Calendar"
+                label="Expiry Permits"
                 items={expiryCalendarItems}
                 flat={flat}
                 collapsed={collapsed}
                 isOpen={openDropdownId === 'expiry-calendar'}
                 onToggle={() => toggleDropdown('expiry-calendar')}
               />
-            </div>
-          </SidebarGroup>
-          )}
-
-          {showOperations && (
-          <SidebarGroup title="Operations" collapsed={collapsed}>
-            <div className="flex flex-col gap-1.5">
-              {operationsItems.map((item) => (
-                <SidebarItem
-                  key={item.key}
-                  icon={item.icon || Globe}
-                  label={item.label}
-                  active={item.active}
-                  onClick={item.onClick}
-                  collapsed={collapsed}
-                />
-              ))}
             </div>
           </SidebarGroup>
           )}

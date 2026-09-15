@@ -2,6 +2,7 @@ const bcrypt = require("bcryptjs");
 const User = require("../models/User");
 const AuditLog = require("../models/AuditLog");
 const Proponent = require("../models/Proponent");
+const Role = require("../models/Role");
 const Notification = require("../models/Notification");
 const ActivityLog = require("../models/ActivityLog");
 const { validatePasswordStrength, generateTempPassword } = require("../lib/password");
@@ -36,6 +37,11 @@ function sendTempPasswordEmail({ to, name, username, tempPassword, isNewAccount 
   });
 }
 
+// Reused by c_applications.js when a deferred locator account (created with
+// a business profile but no immediate email, see exports.create below) gets
+// activated on its first real application submission.
+exports.sendTempPasswordEmail = sendTempPasswordEmail;
+
 exports.list = async (req, res) => {
   try {
     const rows = await User.listUsers();
@@ -54,7 +60,18 @@ exports.getById = async (req, res) => {
     const row = await User.getUserById(id);
     if (!row) return res.status(404).json({ success: false, message: "User not found" });
 
-    return res.json({ success: true, data: row });
+    // Locator Accounts' edit form doubles as the business profile editor, so
+    // it needs the linked proponent's fields alongside the plain user row.
+    const proponent = await Proponent.getProponentByUserId(id);
+    return res.json({
+      success: true,
+      data: {
+        ...row,
+        business_name: proponent?.business_name ?? null,
+        address: proponent?.address ?? null,
+        contact_no: proponent?.contact_no ?? null,
+      },
+    });
   } catch (error) {
     console.error("Get user error:", error);
     return res.status(500).json({ success: false, message: error.message || "Internal server error" });
@@ -63,13 +80,27 @@ exports.getById = async (req, res) => {
 
 exports.create = async (req, res) => {
   try {
-    const { username, email, phone, full_name, password, is_active, role_id } = req.body || {};
+    const { username, email, phone, full_name, password, is_active, role_id, business_name, address, contact_no } =
+      req.body || {};
     if (!username) return res.status(400).json({ success: false, message: "username is required" });
     if (!String(email || "").trim()) return res.status(400).json({ success: false, message: "email is required" });
 
+    // Locator Accounts' create form can optionally arrive with a business
+    // profile already filled in. When it does, activation and the
+    // credentials email are DEFERRED to the locator's first real
+    // application submission (see c_applications.js's exports.create)
+    // instead of firing immediately — no point emailing login access to
+    // someone with nothing to act on yet. Without a business profile
+    // (business_name left blank), account creation stays immediate/active,
+    // same as before.
+    const hasBusinessProfile = String(business_name || "").trim().length > 0;
+    const locatorRoleId = hasBusinessProfile ? await Role.getActiveRoleIdByName("proponent") : null;
+    const isDeferredLocator = Boolean(hasBusinessProfile && locatorRoleId && Number(role_id) === Number(locatorRoleId));
+
     // No password supplied (e.g. Locator Accounts' create form, which never
-    // shows a password field) — generate one, email it, and require the
-    // owner to replace it on first login instead of an admin picking it.
+    // shows a password field) — generate one. For a deferred locator this is
+    // just a placeholder that's immediately unreachable (account starts
+    // PENDING/inactive) and gets overwritten by a fresh one at activation.
     const autoGenerate = !password;
     let effectivePassword = password;
     if (autoGenerate) {
@@ -79,10 +110,39 @@ exports.create = async (req, res) => {
       if (passwordError) return res.status(400).json({ success: false, message: passwordError });
     }
 
-    const row = await User.createUser({ username, email, phone, full_name, password: effectivePassword, is_active, role_id });
+    const row = await User.createUser({
+      username,
+      email,
+      phone,
+      full_name,
+      password: effectivePassword,
+      is_active: isDeferredLocator ? 0 : is_active,
+      role_id,
+      status: isDeferredLocator ? "PENDING" : "ACTIVE",
+    });
+
+    // Create the linked proponent record now so it's pickable from the New
+    // Application locator dropdown right away. Best-effort: a failure here
+    // shouldn't fail account creation — for a non-deferred locator, they'd
+    // just see the "one more step" business-profile wizard
+    // (LocatorProfileSetup.tsx / POST /api/proponents/me/setup) on first
+    // login instead.
+    if (row && hasBusinessProfile) {
+      try {
+        await Proponent.createProponent({
+          user_id: row.id,
+          business_name: String(business_name).trim(),
+          address: address ? String(address).trim() : null,
+          contact_no: contact_no ? String(contact_no).trim() : null,
+          created_by: req.user?.id ?? null,
+        });
+      } catch (error) {
+        console.error("Create linked proponent profile error:", error);
+      }
+    }
 
     let mailResult = { sent: false };
-    if (autoGenerate && row) {
+    if (autoGenerate && row && !isDeferredLocator) {
       await User.setMustChangePassword(row.id, true);
       mailResult = await sendTempPasswordEmail({
         to: row.email,
@@ -99,18 +159,27 @@ exports.create = async (req, res) => {
       action: "USER_CREATED",
       entityType: "user",
       entityId: row?.id,
-      details: { username: row?.username, role_id, autoGeneratedPassword: autoGenerate, emailSent: mailResult.sent },
+      details: {
+        username: row?.username,
+        role_id,
+        autoGeneratedPassword: autoGenerate,
+        emailSent: mailResult.sent,
+        deferredActivation: isDeferredLocator || undefined,
+      },
       ipAddress: req.ip,
     });
     return res.status(201).json({
       success: true,
       data: row,
-      emailSent: autoGenerate ? mailResult.sent : undefined,
-      message: autoGenerate
-        ? mailResult.sent
-          ? `A temporary password was emailed to ${row.email}.`
-          : `Account created, but the email could not be sent (SMTP isn't configured on this server) — check the server console for the temporary password.`
-        : undefined,
+      deferredActivation: isDeferredLocator || undefined,
+      emailSent: isDeferredLocator ? undefined : autoGenerate ? mailResult.sent : undefined,
+      message: isDeferredLocator
+        ? "Locator account created — pending activation. Their login and temporary password will be emailed automatically once their first application is submitted."
+        : autoGenerate
+          ? mailResult.sent
+            ? `A temporary password was emailed to ${row.email}.`
+            : `Account created, but the email could not be sent (SMTP isn't configured on this server) — check the server console for the temporary password.`
+          : undefined,
     });
   } catch (error) {
     console.error("Create user error:", error);
@@ -123,7 +192,8 @@ exports.update = async (req, res) => {
     const id = Number(req.params.id);
     if (!Number.isFinite(id)) return res.status(400).json({ success: false, message: "Invalid id" });
 
-    const { username, email, phone, full_name, password, is_active, role_id } = req.body || {};
+    const { username, email, phone, full_name, password, is_active, role_id, business_name, address, contact_no } =
+      req.body || {};
     if (email !== undefined && !String(email || "").trim()) {
       return res.status(400).json({ success: false, message: "email is required" });
     }
@@ -133,6 +203,34 @@ exports.update = async (req, res) => {
     }
     const row = await User.updateUser(id, { username, email, phone, full_name, password, is_active, role_id });
     if (!row) return res.status(404).json({ success: false, message: "User not found" });
+
+    // Mirrors exports.create's best-effort linked-proponent write: this is
+    // the admin-direct edit path (gated by the same settings:locator-users
+    // permission as the rest of this route), separate from the proponent's
+    // own self-service change-request flow in c_proponents.js.
+    if (business_name !== undefined || address !== undefined || contact_no !== undefined) {
+      try {
+        const existing = await Proponent.getProponentByUserId(id);
+        if (existing) {
+          await Proponent.updateProponent(existing.id, {
+            business_name: business_name !== undefined ? String(business_name).trim() : undefined,
+            address: address !== undefined ? (address ? String(address).trim() : null) : undefined,
+            contact_no: contact_no !== undefined ? (contact_no ? String(contact_no).trim() : null) : undefined,
+            updated_by: req.user?.id ?? null,
+          });
+        } else if (String(business_name || "").trim()) {
+          await Proponent.createProponent({
+            user_id: id,
+            business_name: String(business_name).trim(),
+            address: address ? String(address).trim() : null,
+            contact_no: contact_no ? String(contact_no).trim() : null,
+            created_by: req.user?.id ?? null,
+          });
+        }
+      } catch (error) {
+        console.error("Update linked proponent profile error:", error);
+      }
+    }
 
     await AuditLog.record({
       actorId: req.user?.id,

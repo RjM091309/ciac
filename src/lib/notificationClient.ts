@@ -6,6 +6,9 @@ function mapNotificationRows(rows: any[], userRole: Role, userId?: number | null
     const statusNum = Number(rawStatus);
     const statusText = rawStatus.toUpperCase();
     const rawCategory = String(row?.event_type ?? '').trim().toLowerCase();
+    // approval_ready is a distinct eventType (so the frontend can toast for
+    // exactly that handoff, see AppHeader.tsx) but shares the 'approval'
+    // category/routing — it's still an Approval Queue item.
     const category =
       rawCategory === 'requirement' ||
       rawCategory === 'document' ||
@@ -15,7 +18,9 @@ function mapNotificationRows(rows: any[], userRole: Role, userId?: number | null
       rawCategory === 'approval' ||
       rawCategory === 'contract'
         ? rawCategory
-        : 'application_status';
+        : rawCategory === 'approval_ready'
+          ? 'approval'
+          : 'application_status';
     const applicationId = Number(row?.application_id);
     const hasApplicationId = Number.isFinite(applicationId) && applicationId > 0;
     // Route to whichever module actually owns this event, not always
@@ -144,6 +149,8 @@ export function getNotificationCategoryLabel(value: string | undefined) {
       return 'Assessment';
     case 'approval':
       return 'Approval';
+    case 'approval_ready':
+      return 'Ready for Approval';
     case 'contract':
       return 'Contract';
     default:

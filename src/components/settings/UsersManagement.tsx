@@ -12,6 +12,9 @@ import { useSessionStorageCachedResource } from '../../hooks/useSessionStorageCa
 import { RolesPanel } from './RolesPanel';
 import { validatePassword } from '../../lib/passwordPolicy';
 import { roleDisplayName } from '../../lib/roleDisplay';
+import { useControlPanelAccess } from '../../context/ControlPanelAccessContext';
+
+const MENU_KEY = 'settings:users';
 
 type Role = {
   id: number;
@@ -59,6 +62,11 @@ export function UsersManagement({
    * Panel" nudge after creating a role; omitting it just drops that link. */
   navigate?: (to: string, opts?: { replace?: boolean }) => void;
 } = {}) {
+  const { fullAccess, crudPermissions } = useControlPanelAccess();
+  const perm = crudPermissions[MENU_KEY] || { can_add: false, can_edit: false, can_delete: false };
+  const canAdd = fullAccess || perm.can_add;
+  const canEdit = fullAccess || perm.can_edit;
+  const canDelete = fullAccess || perm.can_delete;
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<UserRow | null>(null);
@@ -399,13 +407,15 @@ export function UsersManagement({
           </h3>
           <div className="flex items-center gap-2">
             <RolesPanel onChanged={() => refresh({ showLoading: false })} navigate={navigate} />
-            <button
-              className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-semibold shadow-sm cursor-pointer"
-              style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
-              onClick={openCreate}
-            >
-              + New Record
-            </button>
+            {canAdd ? (
+              <button
+                className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-semibold shadow-sm cursor-pointer"
+                style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
+                onClick={openCreate}
+              >
+                + New Record
+              </button>
+            ) : null}
           </div>
         </div>
 
@@ -447,7 +457,7 @@ export function UsersManagement({
                 : 'There are no users to show here yet. Create a new user to get started.'
             }
             action={
-              !searchQuery ? (
+              !searchQuery && canAdd ? (
                 <button
                   className="rounded-lg px-4 py-2 text-sm font-semibold shadow-sm transition-colors"
                   style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
@@ -525,71 +535,81 @@ export function UsersManagement({
                     </td>
                     <td className="px-3 py-2 pr-2">
                       <div className="flex items-center justify-end gap-1.5">
-                        <button
-                          className={cn(
-                            'inline-flex items-center justify-center rounded-md p-1.5 text-secondary',
-                            saving ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
-                          )}
-                          onClick={() => openEdit(u)}
-                          disabled={saving}
-                          aria-label={`Edit ${u.username}`}
-                          title="Edit"
-                        >
-                          <Pencil size={14} />
-                        </button>
-                        {u.is_active === 1 ? (
-                          <>
-                            <button
-                              className={cn(
-                                'inline-flex items-center justify-center rounded-md p-1.5 text-secondary',
-                                saving ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
-                              )}
-                              onClick={() => setConfirmSuspendId(u.id)}
-                              disabled={saving}
-                              aria-label={`Suspend ${u.username}`}
-                              title="Suspend (temporary hold)"
-                            >
-                              <Ban size={14} />
-                            </button>
-                            <button
-                              className={cn(
-                                'inline-flex items-center justify-center rounded-md p-1.5 text-secondary',
-                                saving ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
-                              )}
-                              onClick={() => setConfirmDeactivateId(u.id)}
-                              disabled={saving}
-                              aria-label={`Deactivate ${u.username}`}
-                              title="Deactivate"
-                            >
-                              <UserX size={14} />
-                            </button>
-                            <button
-                              className={cn(
-                                'inline-flex items-center justify-center rounded-md p-1.5 text-secondary',
-                                saving ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
-                              )}
-                              onClick={() => setConfirmRevokeId(u.id)}
-                              disabled={saving}
-                              aria-label={`Revoke sessions for ${u.username}`}
-                              title="Revoke active sessions"
-                            >
-                              <LogOut size={14} />
-                            </button>
-                          </>
-                        ) : u.status === 'SUSPENDED' ? (
+                        {canEdit ? (
                           <button
                             className={cn(
                               'inline-flex items-center justify-center rounded-md p-1.5 text-secondary',
                               saving ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
                             )}
-                            onClick={() => void unsuspend(u.id)}
+                            onClick={() => openEdit(u)}
                             disabled={saving}
-                            aria-label={`Reinstate ${u.username}`}
-                            title="Lift suspension"
+                            aria-label={`Edit ${u.username}`}
+                            title="Edit"
                           >
-                            <RotateCcw size={14} />
+                            <Pencil size={14} />
                           </button>
-                        ) : (
+                        ) : null}
+                        {u.is_active === 1 ? (
+                          <>
+                            {canDelete ? (
+                              <button
+                                className={cn(
+                                  'inline-flex items-center justify-center rounded-md p-1.5 text-secondary',
+                                  saving ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
+                                )}
+                                onClick={() => setConfirmSuspendId(u.id)}
+                                disabled={saving}
+                                aria-label={`Suspend ${u.username}`}
+                                title="Suspend (temporary hold)"
+                              >
+                                <Ban size={14} />
+                              </button>
+                            ) : null}
+                            {canDelete ? (
+                              <button
+                                className={cn(
+                                  'inline-flex items-center justify-center rounded-md p-1.5 text-secondary',
+                                  saving ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
+                                )}
+                                onClick={() => setConfirmDeactivateId(u.id)}
+                                disabled={saving}
+                                aria-label={`Deactivate ${u.username}`}
+                                title="Deactivate"
+                              >
+                                <UserX size={14} />
+                              </button>
+                            ) : null}
+                            {canEdit ? (
+                              <button
+                                className={cn(
+                                  'inline-flex items-center justify-center rounded-md p-1.5 text-secondary',
+                                  saving ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
+                                )}
+                                onClick={() => setConfirmRevokeId(u.id)}
+                                disabled={saving}
+                                aria-label={`Revoke sessions for ${u.username}`}
+                                title="Revoke active sessions"
+                              >
+                                <LogOut size={14} />
+                              </button>
+                            ) : null}
+                          </>
+                        ) : u.status === 'SUSPENDED' ? (
+                          canEdit ? (
+                            <button
+                              className={cn(
+                                'inline-flex items-center justify-center rounded-md p-1.5 text-secondary',
+                                saving ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
+                              )}
+                              onClick={() => void unsuspend(u.id)}
+                              disabled={saving}
+                              aria-label={`Reinstate ${u.username}`}
+                              title="Lift suspension"
+                            >
+                              <RotateCcw size={14} />
+                            </button>
+                          ) : null
+                        ) : canEdit ? (
                           <button
                             className={cn(
                               'inline-flex items-center justify-center rounded-md p-1.5 text-secondary',
@@ -602,7 +622,7 @@ export function UsersManagement({
                           >
                             <RotateCcw size={14} />
                           </button>
-                        )}
+                        ) : null}
                       </div>
                     </td>
                   </tr>

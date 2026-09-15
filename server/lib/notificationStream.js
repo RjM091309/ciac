@@ -39,20 +39,20 @@ function writeEvent(res, eventName, payload) {
   }
 }
 
-function publishToUser(userId, payload) {
+function publishToUser(userId, payload, eventName = "notification") {
   const uid = toInt(userId);
   if (!uid) return;
   const clients = clientsByUserId.get(uid);
   if (!clients || clients.size === 0) return;
   for (const res of clients) {
-    writeEvent(res, "notification", payload || {});
+    writeEvent(res, eventName, payload || {});
   }
 }
 
-function publishToUsers(userIds, payload) {
+function publishToUsers(userIds, payload, eventName = "notification") {
   const uniqueIds = Array.from(new Set((Array.isArray(userIds) ? userIds : []).map((value) => toInt(value)).filter(Boolean)));
   for (const uid of uniqueIds) {
-    publishToUser(uid, payload);
+    publishToUser(uid, payload, eventName);
   }
 }
 

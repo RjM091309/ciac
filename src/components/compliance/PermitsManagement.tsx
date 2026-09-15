@@ -8,6 +8,9 @@ import { AppSelect } from '../ui/AppSelect';
 import { TableSkeleton } from '../ui/Skeleton';
 import { EmptyState } from '../ui/EmptyState';
 import { useSessionStorageCachedResource } from '../../hooks/useSessionStorageCachedResource';
+import { useControlPanelAccess } from '../../context/ControlPanelAccessContext';
+
+const MENU_KEY = 'compliance:permits';
 
 const PERMIT_TYPES = [
   { value: 'ENVIRONMENTAL', label: 'Environmental' },
@@ -69,6 +72,11 @@ function dateInput(v: string | null) {
 }
 
 export function PermitsManagement() {
+  const { fullAccess, crudPermissions } = useControlPanelAccess();
+  const perm = crudPermissions[MENU_KEY] || { can_add: false, can_edit: false, can_delete: false };
+  const canAdd = fullAccess || perm.can_add;
+  const canEdit = fullAccess || perm.can_edit;
+  const canDelete = fullAccess || perm.can_delete;
   const [saving, setSaving] = useState(false);
   const [panelOpen, setPanelOpen] = useState(false);
   const [editing, setEditing] = useState<PermitRow | null>(null);
@@ -195,13 +203,15 @@ export function PermitsManagement() {
       <div className="glass-card p-4 sm:p-5 !border-transparent" style={{ backgroundColor: 'var(--surface)' }}>
         <div className="flex items-center justify-between mb-3 gap-2">
           <h3 className="text-sm font-bold tracking-tight" style={{ color: 'var(--text)' }}>Permits</h3>
-          <button
-            className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-semibold shadow-sm cursor-pointer"
-            style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
-            onClick={openCreate}
-          >
-            + New Permit
-          </button>
+          {canAdd ? (
+            <button
+              className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-semibold shadow-sm cursor-pointer"
+              style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
+              onClick={openCreate}
+            >
+              + New Permit
+            </button>
+          ) : null}
         </div>
 
         <div className="relative group w-full sm:w-72 mb-3">
@@ -248,12 +258,16 @@ export function PermitsManagement() {
                       </td>
                       <td className="px-3 py-2 pr-2">
                         <div className="flex items-center justify-end gap-2">
-                          <button className="rounded-md p-1.5 text-secondary cursor-pointer" onClick={() => openEdit(p)} title="Edit">
-                            <Pencil size={14} />
-                          </button>
-                          <button className="rounded-md p-1.5 text-secondary cursor-pointer" onClick={() => setConfirmDeleteId(p.id)} title="Remove">
-                            <Trash2 size={14} />
-                          </button>
+                          {canEdit ? (
+                            <button className="rounded-md p-1.5 text-secondary cursor-pointer" onClick={() => openEdit(p)} title="Edit">
+                              <Pencil size={14} />
+                            </button>
+                          ) : null}
+                          {canDelete ? (
+                            <button className="rounded-md p-1.5 text-secondary cursor-pointer" onClick={() => setConfirmDeleteId(p.id)} title="Remove">
+                              <Trash2 size={14} />
+                            </button>
+                          ) : null}
                         </div>
                       </td>
                     </tr>

@@ -9,9 +9,9 @@ import { Skeleton, TableSkeleton } from '../ui/Skeleton';
 import { EmptyState } from '../ui/EmptyState';
 import { useControlPanelAccess } from '../../context/ControlPanelAccessContext';
 
-const MENU_KEY = 'settings:compliance-types';
+const MENU_KEY = 'settings:application-types';
 
-type ComplianceTypeRow = {
+type ApplicationTypeRow = {
   id: number;
   code: string;
   name: string;
@@ -27,7 +27,11 @@ function api(path: string) {
   return path;
 }
 
-export function ComplianceTypesManagement() {
+// Backs the "Application Type" dropdown on New/Renewal Application (both the
+// staff-side ApplicationsWorkflow modal and the locator's own filing form in
+// ProponentApplications) — see src/lib/applicationTypes.ts for how those
+// consume this list.
+export function ApplicationTypesManagement() {
   const { fullAccess, crudPermissions } = useControlPanelAccess();
   const perm = crudPermissions[MENU_KEY] || { can_add: false, can_edit: false, can_delete: false };
   const canAdd = fullAccess || perm.can_add;
@@ -36,8 +40,8 @@ export function ComplianceTypesManagement() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [items, setItems] = useState<ComplianceTypeRow[]>([]);
-  const [editing, setEditing] = useState<ComplianceTypeRow | null>(null);
+  const [items, setItems] = useState<ApplicationTypeRow[]>([]);
+  const [editing, setEditing] = useState<ApplicationTypeRow | null>(null);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [confirmDeactivateId, setConfirmDeactivateId] = useState<number | null>(null);
   const [confirmReactivateId, setConfirmReactivateId] = useState<number | null>(null);
@@ -116,9 +120,9 @@ export function ComplianceTypesManagement() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(api('/api/compliance-types'), { credentials: 'include' });
+      const res = await fetch(api('/api/application-types'), { credentials: 'include' });
       const json = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(json?.message || 'Failed to load compliance types');
+      if (!res.ok) throw new Error(json?.message || 'Failed to load application types');
       setItems(
         (json.data || []).map((item: any) => ({
           ...item,
@@ -152,7 +156,7 @@ export function ComplianceTypesManagement() {
     setIsCreateOpen(true);
   }
 
-  function openEdit(item: ComplianceTypeRow) {
+  function openEdit(item: ApplicationTypeRow) {
     setIsCreateOpen(true);
     setEditing(item);
     setForm({
@@ -174,7 +178,7 @@ export function ComplianceTypesManagement() {
       if (!payload.code) throw new Error('Code is required');
       if (!payload.name) throw new Error('Name is required');
 
-      const res = await fetch(api(editing ? `/api/compliance-types/${editing.id}` : '/api/compliance-types'), {
+      const res = await fetch(api(editing ? `/api/application-types/${editing.id}` : '/api/application-types'), {
         method: editing ? 'PUT' : 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -185,7 +189,7 @@ export function ComplianceTypesManagement() {
 
       setIsCreateOpen(false);
       await loadAll();
-      toast.success(editing ? 'Compliance type updated successfully' : 'Compliance type created successfully');
+      toast.success(editing ? 'Application type updated successfully' : 'Application type created successfully');
     } catch (e: any) {
       const message = e?.message || 'Save failed';
       setError(message);
@@ -199,14 +203,14 @@ export function ComplianceTypesManagement() {
     setSaving(true);
     setError(null);
     try {
-      const res = await fetch(api(`/api/compliance-types/${id}/deactivate`), {
+      const res = await fetch(api(`/api/application-types/${id}/deactivate`), {
         method: 'PATCH',
         credentials: 'include',
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json?.message || 'Deactivate failed');
       await loadAll();
-      toast.success('Compliance type deactivated successfully');
+      toast.success('Application type deactivated successfully');
       setConfirmDeactivateId(null);
     } catch (e: any) {
       const message = e?.message || 'Deactivate failed';
@@ -221,14 +225,14 @@ export function ComplianceTypesManagement() {
     setSaving(true);
     setError(null);
     try {
-      const res = await fetch(api(`/api/compliance-types/${id}/reactivate`), {
+      const res = await fetch(api(`/api/application-types/${id}/reactivate`), {
         method: 'PATCH',
         credentials: 'include',
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json?.message || 'Reactivate failed');
       await loadAll();
-      toast.success('Compliance type reactivated successfully');
+      toast.success('Application type reactivated successfully');
     } catch (e: any) {
       const message = e?.message || 'Reactivate failed';
       setError(message);
@@ -249,7 +253,7 @@ export function ComplianceTypesManagement() {
       <div className="glass-card p-4 sm:p-5 !border-transparent" style={{ backgroundColor: 'var(--surface)' }}>
         <div className="flex items-center justify-between mb-3 gap-2">
           <h3 className="text-sm font-bold tracking-tight" style={{ color: 'var(--text)' }}>
-            Compliance Types List
+            Application Types List
           </h3>
           {canAdd ? (
             <button
@@ -274,11 +278,11 @@ export function ComplianceTypesManagement() {
           </div>
         ) : filteredItems.length === 0 ? (
           <EmptyState
-            title="No compliance types found"
+            title="No application types found"
             description={
-              searchQuery 
-                ? 'Try adjusting your search filters.' 
-                : 'There are no compliance types to show here yet. Create a new compliance type to get started.'
+              searchQuery
+                ? 'Try adjusting your search filters.'
+                : 'There are no application types to show here yet. Create a new application type to get started.'
             }
             action={
               !searchQuery && canAdd ? (
@@ -287,7 +291,7 @@ export function ComplianceTypesManagement() {
                   style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
                   onClick={openCreate}
                 >
-                  Create Compliance Type
+                  Create Application Type
                 </button>
               ) : undefined
             }
@@ -302,7 +306,7 @@ export function ComplianceTypesManagement() {
                 />
                 <input
                   type="text"
-                  placeholder="Search compliance types..."
+                  placeholder="Search application types..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   className="h-9 rounded-full pl-9 pr-3 text-xs w-full focus:outline-none focus:ring-1 focus:ring-[var(--border)] text-[var(--text)] placeholder:text-[var(--text-muted)] transition-all"
@@ -419,8 +423,8 @@ export function ComplianceTypesManagement() {
 
       <SidePanel
         open={isCreateOpen}
-        title={editing ? 'Edit Compliance Type' : 'New Compliance Type'}
-        subtitle="Compliance types master table"
+        title={editing ? 'Edit Application Type' : 'New Application Type'}
+        subtitle="Application types master table"
         onClose={() => setIsCreateOpen(false)}
         onSave={save}
         saving={saving}
@@ -433,6 +437,7 @@ export function ComplianceTypesManagement() {
               style={{ borderColor: 'var(--input-border)', color: 'var(--text)', backgroundColor: 'var(--input-bg)' }}
               value={form.code}
               onChange={(e) => setForm((p) => ({ ...p, code: e.target.value }))}
+              placeholder="e.g. DIRECT_LEASE"
             />
           </Field>
           <Field label="Name">
@@ -441,6 +446,7 @@ export function ComplianceTypesManagement() {
               style={{ borderColor: 'var(--input-border)', color: 'var(--text)', backgroundColor: 'var(--input-bg)' }}
               value={form.name}
               onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))}
+              placeholder="e.g. Direct Lease"
             />
           </Field>
           <Field label="Description">
@@ -456,8 +462,8 @@ export function ComplianceTypesManagement() {
 
       <ConfirmModal
         open={confirmDeactivateId !== null}
-        title="Deactivate compliance type?"
-        description="This type will be marked inactive. You can re-activate later."
+        title="Deactivate application type?"
+        description="Locators and staff will no longer be able to select this type when filing a new application. You can re-activate later."
         confirmText="Deactivate"
         danger
         loading={saving}
@@ -469,8 +475,8 @@ export function ComplianceTypesManagement() {
 
       <ConfirmModal
         open={confirmReactivateId !== null}
-        title="Reactivate compliance type?"
-        description="This type will be marked active again."
+        title="Reactivate application type?"
+        description="This type will be selectable again when filing a new application."
         confirmText="Reactivate"
         loading={saving}
         onCancel={() => setConfirmReactivateId(null)}

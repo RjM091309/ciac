@@ -1,6 +1,21 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
-import { CheckCircle2, Clock3, Eye, FileText, History, Loader2, Plus, RefreshCw, Search, Upload, XCircle } from 'lucide-react';
+import {
+  CheckCircle2,
+  Clock3,
+  Eye,
+  FileText,
+  History,
+  Loader2,
+  Mail,
+  MapPin,
+  Phone,
+  Plus,
+  RefreshCw,
+  Search,
+  Upload,
+  XCircle,
+} from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '../../lib/utils';
 import { SidePanel } from '../ui/SidePanel';
@@ -10,7 +25,6 @@ import { Skeleton, TableSkeleton } from '../ui/Skeleton';
 import { EmptyState } from '../ui/EmptyState';
 import { useSessionStorageCachedResource } from '../../hooks/useSessionStorageCachedResource';
 import { requestNotificationsRefresh } from '../../lib/notificationRefresh';
-import { APPLICATION_TYPES, applicationTypeLabel } from '../../lib/applicationTypes';
 import { DatePicker } from '../ui/DatePicker';
 import { TextField } from '@mui/material';
 
@@ -32,11 +46,22 @@ type ProponentRow = {
   id: number;
   business_name: string;
   is_active: number;
+  address?: string | null;
+  contact_no?: string | null;
+  email?: string | null;
+  contact_name?: string | null;
+  account_status?: string | null;
+};
+
+type ApplicationTypeOption = {
+  code: string;
+  name: string;
 };
 
 type ApplicationsBaseData = {
   applications: ApplicationRow[];
   proponents: ProponentRow[];
+  applicationTypes: ApplicationTypeOption[];
 };
 
 type AppRequirementRow = {
@@ -201,28 +226,36 @@ export function ApplicationsWorkflow({
   const [saving, setSaving] = useState(false);
   const [applications, setApplications] = useState<ApplicationRow[]>([]);
   const [proponents, setProponents] = useState<ProponentRow[]>([]);
+  const [applicationTypes, setApplicationTypes] = useState<ApplicationTypeOption[]>([]);
 
   const { data: baseData, isLoading: baseLoading, isRevalidating: baseRevalidating, refresh: refreshBase } =
     useSessionStorageCachedResource<ApplicationsBaseData>({
-      cacheKey: 'ciac.applications_base.v1',
+      cacheKey: 'ciac.applications_base.v2',
       ttlMs: 5 * 60 * 1000, // 5 minutes
       fetcher: async () => {
-        const [appsRes, propsRes] = await Promise.all([
+        const [appsRes, propsRes, typesRes] = await Promise.all([
           fetch(api('/api/applications'), { credentials: 'include' }),
           fetch(api('/api/proponents'), { credentials: 'include' }),
+          fetch(api('/api/application-types'), { credentials: 'include' }),
         ]);
 
-        const [appsJson, propsJson] = await Promise.all([appsRes.json(), propsRes.json()]);
+        const [appsJson, propsJson, typesJson] = await Promise.all([appsRes.json(), propsRes.json(), typesRes.json()]);
 
         if (!appsRes.ok) throw new Error(appsJson?.message || 'Failed to load applications');
         if (!propsRes.ok) throw new Error(propsJson?.message || 'Failed to load proponents');
+        if (!typesRes.ok) throw new Error(typesJson?.message || 'Failed to load application types');
 
         const applicationsRows: ApplicationRow[] = Array.isArray(appsJson?.data) ? appsJson.data : [];
         const proponentsRows: ProponentRow[] = Array.isArray(propsJson?.data)
           ? propsJson.data.filter((p: any) => Number(p?.is_active) === 1)
           : [];
+        const applicationTypeRows: ApplicationTypeOption[] = Array.isArray(typesJson?.data)
+          ? typesJson.data
+              .filter((t: any) => Number(t?.is_active) === 1)
+              .map((t: any) => ({ code: String(t.code), name: String(t.name) }))
+          : [];
 
-        return { applications: applicationsRows, proponents: proponentsRows };
+        return { applications: applicationsRows, proponents: proponentsRows, applicationTypes: applicationTypeRows };
       },
       onError: (e) => {
         const message = e instanceof Error ? e.message : 'Failed to load applications';
@@ -234,6 +267,7 @@ export function ApplicationsWorkflow({
     if (!baseData) return;
     setApplications(baseData.applications);
     setProponents(baseData.proponents);
+    setApplicationTypes(baseData.applicationTypes);
   }, [baseData]);
 
   const [selectedId, setSelectedId] = useState<number | null>(null);
@@ -295,6 +329,7 @@ export function ApplicationsWorkflow({
 
   const applicationsEffective = baseData?.applications ?? applications;
   const proponentsEffective = baseData?.proponents ?? proponents;
+  const applicationTypesEffective = baseData?.applicationTypes ?? applicationTypes;
 
   const createFormCanSubmit = useMemo(() => {
     const proponentId = Number(createForm.proponent_id);
@@ -319,6 +354,11 @@ export function ApplicationsWorkflow({
   const proponentSelectOptions = useMemo(
     () => proponentsEffective.map((p) => ({ value: String(p.id), label: p.business_name })),
     [proponentsEffective]
+  );
+
+  const selectedCreateProponent = useMemo(
+    () => proponentsEffective.find((p) => String(p.id) === createForm.proponent_id) || null,
+    [proponentsEffective, createForm.proponent_id]
   );
 
   const appsByType = useMemo(
@@ -734,6 +774,13 @@ export function ApplicationsWorkflow({
           ? `Draft saved as ${json?.data?.application_no}`
           : `Application ${json?.data?.application_no} created. Requirements auto-generated.`
       );
+      if (json?.locatorActivated) {
+        toast.success(
+          json?.locatorEmailSent
+            ? "Locator account activated — login was emailed to them."
+            : "Locator account activated, but the email could not be sent — check the server console for the temporary password."
+        );
+      }
       requestNotificationsRefresh();
       setIsCreateOpen(false);
       setCreateForm((p) => ({ ...p, save_as_draft: false }));
@@ -1657,18 +1704,46 @@ export function ApplicationsWorkflow({
             isDisabled={saving}
           />
 
+          {selectedCreateProponent ? (
+            <div
+              className="rounded-lg border px-3 py-2.5 text-xs space-y-1.5"
+              style={{ borderColor: 'var(--input-border)', backgroundColor: 'var(--surface-hover)' }}
+            >
+              {selectedCreateProponent.contact_name ? (
+                <div style={{ color: 'var(--text)' }} className="font-semibold">
+                  {selectedCreateProponent.contact_name}
+                </div>
+              ) : null}
+              <div className="flex items-center gap-1.5 text-secondary">
+                <Mail size={12} className="shrink-0" />
+                <span className="truncate">{selectedCreateProponent.email || 'No email on file'}</span>
+              </div>
+              <div className="flex items-center gap-1.5 text-secondary">
+                <Phone size={12} className="shrink-0" />
+                <span className="truncate">{selectedCreateProponent.contact_no || 'No contact number on file'}</span>
+              </div>
+              <div className="flex items-center gap-1.5 text-secondary">
+                <MapPin size={12} className="shrink-0" />
+                <span className="truncate">{selectedCreateProponent.address || 'No address on file'}</span>
+              </div>
+              {String(selectedCreateProponent.account_status || '').toUpperCase() === 'PENDING' ? (
+                <div className="pt-1 text-[11px]" style={{ color: '#f59e0b' }}>
+                  Account pending — submitting this application (not saving as draft) will activate it and email
+                  their login to {selectedCreateProponent.email || 'the address above'}.
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+
           <label className="text-xs font-semibold uppercase tracking-wider text-secondary">Application Type</label>
-          <select
-            className="app-form-control"
+          <AppSelect
+            options={applicationTypesEffective.map((t) => ({ value: t.code, label: t.name }))}
             value={createForm.application_type}
-            onChange={(e) => setCreateForm((p) => ({ ...p, application_type: e.target.value }))}
-          >
-            {APPLICATION_TYPES.map((t) => (
-              <option key={t} value={t}>
-                {applicationTypeLabel(t)}
-              </option>
-            ))}
-          </select>
+            onChange={(value) => setCreateForm((p) => ({ ...p, application_type: value }))}
+            placeholder="Select application type..."
+            isDisabled={saving}
+            isClearable={false}
+          />
 
           <label className="flex items-center gap-2 rounded-lg border px-3 py-2 text-xs cursor-pointer" style={{ borderColor: 'var(--input-border)' }}>
             <input

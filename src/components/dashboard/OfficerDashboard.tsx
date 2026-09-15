@@ -19,11 +19,18 @@ type DashboardApplicationRow = {
 };
 
 type AttentionItem = {
+  // Absent/'application' = a queued application (the original shape); 'permit'
+  // /'contract' are expiring/expired compliance records for the Account
+  // Officer's widget — application_id is then that record's own id (permit)
+  // or the application it belongs to (contract), used for the key and, for
+  // contracts, navigation.
+  kind?: 'application' | 'permit' | 'contract';
   application_id: number;
   application_no: string;
   proponent_name: string | null;
   status: string;
   is_renewal?: boolean;
+  is_expired?: boolean;
   days_waiting: number;
 };
 
@@ -128,7 +135,7 @@ export function OfficerDashboard({
         </div>
       )}
 
-      {canShowWidget('dashboard:attention') && attention.length > 0 && (
+      {canShowWidget('dashboard:attention') && (
         <div className="glass-card p-4 sm:p-5 !border-transparent" style={{ backgroundColor: 'var(--surface)' }}>
           <div className="flex items-center gap-2 mb-3">
             <AlertTriangle size={15} className="text-amber-500" />
@@ -136,23 +143,33 @@ export function OfficerDashboard({
               Needs Your Attention
             </h4>
           </div>
+          {attention.length === 0 ? (
+            <EmptyState
+              icon={<AlertTriangle size={32} className="opacity-40" />}
+              title="Nothing needs attention"
+              description="Nothing is currently waiting on you."
+            />
+          ) : (
           <div className="space-y-1.5">
-            {attention.map((item) => (
+            {attention.map((item) => {
+              const attentionTarget =
+                item.kind === 'permit'
+                  ? '/compliance/permits'
+                  : item.kind === 'contract'
+                    ? `/approval?applicationId=${item.application_id}`
+                    : `/applications/${item.is_renewal ? 'renewals' : 'new'}?applicationId=${item.application_id}`;
+              return (
               <div
-                key={item.application_id}
+                key={`${item.kind || 'application'}-${item.application_id}`}
                 role={navigate ? 'button' : undefined}
                 tabIndex={navigate ? 0 : undefined}
-                onClick={
-                  navigate
-                    ? () => navigate(`/applications/${item.is_renewal ? 'renewals' : 'new'}?applicationId=${item.application_id}`)
-                    : undefined
-                }
+                onClick={navigate ? () => navigate(attentionTarget) : undefined}
                 onKeyDown={
                   navigate
                     ? (e) => {
                         if (e.key === 'Enter' || e.key === ' ') {
                           e.preventDefault();
-                          navigate(`/applications/${item.is_renewal ? 'renewals' : 'new'}?applicationId=${item.application_id}`);
+                          navigate(attentionTarget);
                         }
                       }
                     : undefined
@@ -167,11 +184,17 @@ export function OfficerDashboard({
                   {item.application_no} — {item.proponent_name || 'Unknown'}
                 </span>
                 <span className="shrink-0 text-secondary">
-                  {item.status} · waiting {item.days_waiting}d
+                  {item.kind === 'permit' || item.kind === 'contract'
+                    ? item.is_expired
+                      ? `${item.status} · expired ${item.days_waiting}d ago`
+                      : `${item.status} · expires in ${item.days_waiting}d`
+                    : `${item.status} · waiting ${item.days_waiting}d`}
                 </span>
               </div>
-            ))}
+              );
+            })}
           </div>
+          )}
         </div>
       )}
 

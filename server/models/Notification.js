@@ -51,13 +51,24 @@ function normalizeEventType(value) {
 // Applications Management can still see a requirement get verified even
 // though Assessment Evaluation is the one that acts on it.
 const EVENT_TYPE_MENU_KEYS = {
-  application_status: ["applications:new", "applications:renewals", "assessment:queue", "approval:queue"],
+  // approval:queue is deliberately excluded here — the Account Officer would
+  // otherwise get a toast for every unrelated status change on every
+  // application (SUBMITTED, RETURNED, REJECTED, etc.). They should only be
+  // notified once an application is actually endorsed to them, which fires
+  // its own dedicated "approval_ready" event below (see
+  // createStatusChangeNotifications).
+  application_status: ["applications:new", "applications:renewals", "assessment:queue"],
   requirement: ["applications:new", "applications:renewals", "assessment:queue"],
   document: ["applications:new", "applications:renewals", "assessment:queue"],
   inspection: ["compliance:inspections"],
-  compliance: ["compliance:inspections", "compliance:permits", "compliance:bir"],
+  compliance: ["compliance:inspections", "compliance:permits"],
   assessment: ["assessment:queue"],
   approval: ["approval:queue"],
+  // The one moment Assessment hands an application to the Account Officer —
+  // kept distinct from the generic "approval" event (used for in-workflow
+  // activity like level progress/issuance) so the frontend can pop a toast
+  // for exactly this handoff and nothing else the Approval module does.
+  approval_ready: ["approval:queue"],
   contract: ["compliance:permits", "applications:new", "applications:renewals"],
 };
 

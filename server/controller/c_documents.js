@@ -2,12 +2,29 @@ const fs = require("fs");
 const path = require("path");
 const Workflow = require("../models/ApplicationWorkflow");
 const Proponent = require("../models/Proponent");
+const Role = require("../models/Role");
+const ControlPanelPermission = require("../models/ControlPanelPermission");
 const { resolveStoredPath } = require("../lib/fileStorage");
 
-const PRIVILEGED_ROLES = new Set(["admin", "administrator", "officer", "account officer"]);
+const APPLICATION_ACCESS_MENU_KEYS = ["applications:new", "applications:renewals", "assessment:queue", "approval:queue"];
 
-// Authenticated + ownership-checked download. Admins/officers may fetch any
-// document; a proponent may only fetch documents on their own applications.
+/** Same check as c_applications.js's hasStaffApplicationAccess — by Control
+ * Panel permission rather than a hardcoded role name, so a renamed or custom
+ * staff role (e.g. Assessment Officer) isn't wrongly treated as a proponent
+ * and 404'd out of documents on applications it's allowed to review. */
+async function hasStaffApplicationAccess(role) {
+  if (role === "admin") return true;
+  const roleId = await Role.getActiveRoleIdByName(role);
+  if (!roleId) return false;
+  const permissions = await ControlPanelPermission.getSidebarPermissions(roleId);
+  return permissions.some(
+    (p) => APPLICATION_ACCESS_MENU_KEYS.includes(p.menu_key) && (Number(p.is_enabled) === 1 || p.is_enabled === true)
+  );
+}
+
+// Authenticated + ownership-checked download. Staff with application access
+// may fetch any document; a proponent may only fetch documents on their own
+// applications.
 exports.download = async (req, res) => {
   try {
     if (!req.user) {
@@ -24,7 +41,7 @@ exports.download = async (req, res) => {
     }
 
     const role = String(req.user.role || "").toLowerCase();
-    if (!PRIVILEGED_ROLES.has(role)) {
+    if (!(await hasStaffApplicationAccess(role))) {
       const proponent = await Proponent.getProponentByUserId(req.user.id);
       if (!proponent || Number(document.proponent_id) !== Number(proponent.id)) {
         return res.status(404).json({ success: false, message: "Document not found" });

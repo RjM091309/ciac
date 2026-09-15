@@ -9,6 +9,9 @@ import { DataTableControls } from '../ui/DataTableControls';
 import { Skeleton, TableSkeleton } from '../ui/Skeleton';
 import { EmptyState } from '../ui/EmptyState';
 import { useSessionStorageCachedResource } from '../../hooks/useSessionStorageCachedResource';
+import { useControlPanelAccess } from '../../context/ControlPanelAccessContext';
+
+const MENU_KEY = 'settings:requirement-categories';
 
 type RequirementCategoryRow = {
   id: number;
@@ -26,6 +29,11 @@ function api(path: string) {
 }
 
 export function RequirementCategoriesManagement() {
+  const { fullAccess, crudPermissions } = useControlPanelAccess();
+  const perm = crudPermissions[MENU_KEY] || { can_add: false, can_edit: false, can_delete: false };
+  const canAdd = fullAccess || perm.can_add;
+  const canEdit = fullAccess || perm.can_edit;
+  const canDelete = fullAccess || perm.can_delete;
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<RequirementCategoryRow | null>(null);
@@ -238,14 +246,16 @@ export function RequirementCategoriesManagement() {
         <h3 className="text-base sm:text-lg font-bold tracking-tight" style={{ color: 'var(--text)' }}>
           Requirement Categories List
         </h3>
-        <button
-          className="rounded-lg px-3 py-2 text-sm font-semibold inline-flex items-center gap-1.5 shadow-sm cursor-pointer"
-          style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
-          onClick={openCreate}
-        >
-          <Plus size={15} />
-          New Category
-        </button>
+        {canAdd ? (
+          <button
+            className="rounded-lg px-3 py-2 text-sm font-semibold inline-flex items-center gap-1.5 shadow-sm cursor-pointer"
+            style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
+            onClick={openCreate}
+          >
+            <Plus size={15} />
+            New Category
+          </button>
+        ) : null}
       </div>
 
       <div className="glass-card p-4 sm:p-5 !border-transparent overflow-hidden" style={{ backgroundColor: 'var(--surface)' }}>
@@ -285,7 +295,7 @@ export function RequirementCategoriesManagement() {
                 : 'There are no requirement categories to show here yet. Create a new category to get started.'
             }
             action={
-              !searchQuery ? (
+              !searchQuery && canAdd ? (
                 <button
                   className="rounded-lg px-4 py-2 text-sm font-semibold shadow-sm transition-colors"
                   style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
@@ -335,19 +345,22 @@ export function RequirementCategoriesManagement() {
                     </td>
                     <td className="px-3 py-2 pr-2">
                       <div className="flex items-center justify-end gap-2">
-                        <button
-                          className={cn(
-                            'inline-flex items-center justify-center rounded-md p-1.5 text-secondary',
-                            saving ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer',
-                          )}
-                          onClick={() => openEdit(item)}
-                          disabled={saving}
-                          aria-label={`Edit ${item.name}`}
-                          title="Edit"
-                        >
-                          <Pencil size={14} />
-                        </button>
+                        {canEdit ? (
+                          <button
+                            className={cn(
+                              'inline-flex items-center justify-center rounded-md p-1.5 text-secondary',
+                              saving ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer',
+                            )}
+                            onClick={() => openEdit(item)}
+                            disabled={saving}
+                            aria-label={`Edit ${item.name}`}
+                            title="Edit"
+                          >
+                            <Pencil size={14} />
+                          </button>
+                        ) : null}
                         {item.is_active ? (
+                          canDelete ? (
                           <button
                             className={cn(
                               'inline-flex items-center justify-center rounded-md p-1.5 text-secondary',
@@ -360,7 +373,8 @@ export function RequirementCategoriesManagement() {
                           >
                             <UserX size={14} />
                           </button>
-                        ) : (
+                          ) : null
+                        ) : canEdit ? (
                           <button
                             className={cn(
                               'inline-flex items-center justify-center rounded-md p-1.5 text-secondary',
@@ -373,7 +387,7 @@ export function RequirementCategoriesManagement() {
                           >
                             <RotateCcw size={14} />
                           </button>
-                        )}
+                        ) : null}
                       </div>
                     </td>
                   </tr>

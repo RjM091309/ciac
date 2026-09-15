@@ -107,6 +107,35 @@ async function getByApplicationId(applicationId) {
   return rows?.[0] || null;
 }
 
+// System-wide, for the Account Officer's "Needs Your Attention" widget
+// (expiring/expired contracts) — everything else here is scoped to one
+// proponent or application.
+async function listAll() {
+  await ensureSchema();
+  const rows = await selectData(
+    `
+    SELECT
+      c.id,
+      c.application_id,
+      c.contract_no,
+      c.issue_date,
+      c.effective_start,
+      c.effective_end,
+      c.document_id,
+      c.created_at,
+      c.updated_at,
+      a.application_no,
+      a.is_renewal,
+      p.business_name AS proponent_name
+    FROM dbo.contracts c
+    INNER JOIN dbo.applications a ON a.id = c.application_id
+    LEFT JOIN dbo.proponents p ON p.id = a.proponent_id
+    ORDER BY c.id DESC
+    `
+  );
+  return rows;
+}
+
 async function listByProponentId(proponentId) {
   await ensureSchema();
   const rows = await selectData(
@@ -219,6 +248,7 @@ module.exports = {
   ensureSchema,
   getById,
   getByApplicationId,
+  listAll,
   listByProponentId,
   createContract,
   updateContract,
