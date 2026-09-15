@@ -18,6 +18,7 @@ const PERMIT_TYPES = [
   { value: 'OCCUPANCY', label: 'Occupancy' },
   { value: 'SANITARY', label: 'Sanitary' },
   { value: 'AUTHORITY_TO_OPERATE', label: 'Authority to Operate' },
+  { value: 'CONTRACT', label: 'Lease Contract' },
 ];
 const TYPE_LABEL: Record<string, string> = Object.fromEntries(PERMIT_TYPES.map((t) => [t.value, t.label]));
 
@@ -227,7 +228,7 @@ export function PermitsManagement() {
         </div>
 
         {isLoading ? (
-          <TableSkeleton columns={6} rows={5} />
+          <TableSkeleton columns={7} rows={5} />
         ) : filtered.length === 0 ? (
           <EmptyState title="No permits" description="Add a permit to get started." />
         ) : (
@@ -235,7 +236,7 @@ export function PermitsManagement() {
             <table className="min-w-full text-left text-xs">
               <thead>
                 <tr>
-                  {['Locator', 'Type', 'Permit No.', 'Authority', 'Expiry', 'Status', 'Actions'].map((c) => (
+                  {['Locator', 'Type', 'Permit No.', 'Authority', 'Issued', 'Expiry', 'Status', 'Actions'].map((c) => (
                     <th key={c} className={cn('px-3 py-2 font-semibold text-[10px] uppercase tracking-widest text-secondary border-b', c === 'Actions' && 'text-right pr-2')} style={{ borderColor: 'var(--border-subtle)' }}>
                       {c}
                     </th>
@@ -251,6 +252,7 @@ export function PermitsManagement() {
                       <td className="px-3 py-2 text-[11px] text-secondary">{TYPE_LABEL[p.permit_type] || p.permit_type}</td>
                       <td className="px-3 py-2 text-[11px] font-semibold" style={{ color: 'var(--text)' }}>{p.permit_no}</td>
                       <td className="px-3 py-2 text-[11px] text-secondary">{p.issuing_authority || '—'}</td>
+                      <td className="px-3 py-2 text-[11px] text-secondary">{fmt(p.issue_date)}</td>
                       <td className="px-3 py-2 text-[11px] text-secondary">{fmt(p.expiry_date)}</td>
                       <td className="px-3 py-2 text-[11px]">
                         <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold" style={{ backgroundColor: s.bg, color: s.color }}>

@@ -1,11 +1,10 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+﻿import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import {
   AlertTriangle,
   CheckCircle2,
   ClipboardCheck,
   Clock3,
-  Coins,
   FileText,
   Loader2,
   Plus,
@@ -40,12 +39,12 @@ const STAGE_ORDER = ['UNASSIGNED', 'ASSIGNED', 'IN_REVIEW', 'FOR_RECOMMENDATION'
 const FINDING_TYPES = ['FINDING', 'COMMENT', 'REMARK', 'DEFICIENCY', 'RECOMMENDATION'];
 const FINDING_CATEGORIES = ['DOCUMENTARY', 'REGULATORY', 'FINANCIAL', 'TECHNICAL', 'OTHER'];
 const FINDING_STATUSES = ['OPEN', 'RESOLVED', 'WAIVED'];
-const CHARGE_TYPES = ['RENTAL', 'PROCESSING_FEE', 'TAX', 'PENALTY', 'OTHER'];
 
 type AssessmentRow = {
   application_id: number;
   application_no: string;
   application_type: string;
+  application_type_name: string;
   is_renewal: number | boolean;
   application_status: string;
   proponent_name: string | null;
@@ -56,7 +55,7 @@ type AssessmentRow = {
   evaluator_username: string | null;
   assigned_at: string | null;
   recommendation: string | null;
-  charges_total: number;
+  recommended_at: string | null;
   days_in_assessment: number | null;
   total_findings: number;
   open_findings: number;
@@ -75,17 +74,6 @@ type FindingRow = {
   description: string;
   status: string;
   created_at: string | null;
-};
-
-type ChargeRow = {
-  id: number;
-  charge_type: string;
-  description: string;
-  rate_basis: string | null;
-  quantity: number | null;
-  unit_rate: number | null;
-  amount: number;
-  remarks: string | null;
 };
 
 type RequirementRow = {
@@ -110,7 +98,6 @@ type ActivityRow = {
 type DetailPayload = {
   assessment: AssessmentRow;
   findings: FindingRow[];
-  charges: ChargeRow[];
   activity: ActivityRow[];
   requirements: RequirementRow[];
   documents: {
@@ -134,11 +121,6 @@ type Summary = {
 };
 
 type Evaluator = { id: number; full_name: string | null; username: string };
-
-function peso(n: number | null | undefined) {
-  const v = Number(n || 0);
-  return `₱${v.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
 
 function fmtDate(v: string | null | undefined) {
   if (!v) return '—';
@@ -249,6 +231,7 @@ export function AssessmentEvaluation({
   const [pageSize, setPageSize] = useState(20);
 
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [completedOpen, setCompletedOpen] = useState(false);
 
   // One cached fetch of the whole queue + summary + evaluators, then filter
   // client-side. Revisits paint instantly from sessionStorage while revalidating,
@@ -285,9 +268,12 @@ export function AssessmentEvaluation({
     [evaluators]
   );
 
+  // Completed applications move to their own "Completed" popup instead of
+  // cluttering the working queue — the queue is for what's still in motion.
   const rows = useMemo(() => {
     const term = search.trim().toLowerCase();
     return allRows.filter((r) => {
+      if ((r.stage || 'UNASSIGNED') === 'COMPLETED') return false;
       if (stageFilter && (r.stage || 'UNASSIGNED') !== stageFilter) return false;
       if (evaluatorFilter && String(r.assigned_evaluator_id ?? '') !== evaluatorFilter) return false;
       if (term) {
@@ -297,6 +283,14 @@ export function AssessmentEvaluation({
       return true;
     });
   }, [allRows, stageFilter, evaluatorFilter, search]);
+
+  const completedRows = useMemo(
+    () =>
+      allRows
+        .filter((r) => (r.stage || 'UNASSIGNED') === 'COMPLETED')
+        .sort((a, b) => new Date(b.recommended_at || 0).getTime() - new Date(a.recommended_at || 0).getTime()),
+    [allRows]
+  );
 
   useEffect(() => {
     setPage(1);
@@ -341,7 +335,12 @@ export function AssessmentEvaluation({
         <StatTile label="Unassigned" value={summary?.by_stage?.UNASSIGNED ?? '—'} tone="#94a3b8" />
         <StatTile label="Active" value={summary?.active ?? '—'} tone="#3b82f6" />
         <StatTile label="Overdue" value={summary?.overdue ?? '—'} tone="#ef4444" />
-        <StatTile label="Completed" value={summary?.by_stage?.COMPLETED ?? '—'} tone="#10b981" />
+        <StatTile
+          label="Completed"
+          value={summary?.by_stage?.COMPLETED ?? '—'}
+          tone="#10b981"
+          onClick={() => setCompletedOpen(true)}
+        />
         <StatTile label="Returned" value={summary?.by_stage?.RETURNED ?? '—'} tone="#f59e0b" />
       </div>
 
@@ -349,6 +348,14 @@ export function AssessmentEvaluation({
         <h3 className="text-base sm:text-lg font-bold tracking-tight" style={{ color: 'var(--text)' }}>
           Evaluation Queue
         </h3>
+        <button
+          className="rounded-lg px-3 py-1.5 text-[12px] font-semibold border inline-flex items-center gap-1.5"
+          style={{ borderColor: 'var(--border)', color: 'var(--text)' }}
+          onClick={() => setCompletedOpen(true)}
+        >
+          <CheckCircle2 size={14} />
+          Completed ({summary?.by_stage?.COMPLETED ?? 0})
+        </button>
       </div>
 
       <div className="glass-card p-4 sm:p-5 !border-transparent overflow-hidden" style={{ backgroundColor: 'var(--surface)' }}>
@@ -372,7 +379,7 @@ export function AssessmentEvaluation({
               placeholder="All stages"
               value={stageFilter}
               onChange={setStageFilter}
-              options={STAGE_ORDER.map((s) => ({ value: s, label: STAGE_LABELS[s] }))}
+              options={STAGE_ORDER.filter((s) => s !== 'COMPLETED').map((s) => ({ value: s, label: STAGE_LABELS[s] }))}
             />
           </div>
           <div className="w-full sm:w-48">
@@ -388,7 +395,7 @@ export function AssessmentEvaluation({
 
         {loading ? (
           <div className="py-2">
-            <TableSkeleton columns={8} rows={6} />
+            <TableSkeleton columns={7} rows={6} />
           </div>
         ) : rows.length === 0 ? (
           <EmptyState
@@ -407,7 +414,6 @@ export function AssessmentEvaluation({
                   <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary">Evaluator</th>
                   <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary">Compliance</th>
                   <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary">Findings</th>
-                  <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary text-right">Charges</th>
                   <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary text-right">Days</th>
                 </tr>
               </thead>
@@ -422,7 +428,7 @@ export function AssessmentEvaluation({
                     <td className="px-3 py-2.5">
                       <div className="font-semibold" style={{ color: 'var(--text)' }}>{r.application_no}</div>
                       <div className="text-[11px] text-secondary">
-                        {r.is_renewal ? 'Renewal' : 'New'} · {r.application_type}
+                        {r.is_renewal ? 'Renewal' : 'New'} · {r.application_type_name}
                       </div>
                     </td>
                     <td className="px-3 py-2.5 text-[11px] text-secondary">{r.proponent_name || '—'}</td>
@@ -439,9 +445,6 @@ export function AssessmentEvaluation({
                       ) : (
                         <span className="text-secondary">{r.total_findings || 0}</span>
                       )}
-                    </td>
-                    <td className="px-3 py-2.5 text-right text-[11px] text-secondary tabular-nums">
-                      {r.charges_total ? peso(r.charges_total) : '—'}
                     </td>
                     <td className="px-3 py-2.5 text-right text-[11px] tabular-nums">
                       {r.days_in_assessment == null ? (
@@ -483,7 +486,137 @@ export function AssessmentEvaluation({
             onMutated={refreshAfterMutation}
           />
         ) : null}
+        {completedOpen ? (
+          <CompletedQueueModal
+            rows={completedRows}
+            onClose={() => setCompletedOpen(false)}
+            onSelect={(id) => {
+              setCompletedOpen(false);
+              setSelectedId(id);
+            }}
+          />
+        ) : null}
       </AnimatePresence>
+    </div>
+  );
+}
+
+function CompletedQueueModal({
+  rows,
+  onClose,
+  onSelect,
+}: {
+  rows: AssessmentRow[];
+  onClose: () => void;
+  onSelect: (applicationId: number) => void;
+}) {
+  const [search, setSearch] = useState('');
+  const filtered = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    if (!term) return rows;
+    return rows.filter((r) =>
+      `${r.application_no ?? ''} ${r.proponent_name ?? ''}`.toLowerCase().includes(term)
+    );
+  }, [rows, search]);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <motion.div
+        className="absolute inset-0"
+        style={{ backgroundColor: 'rgba(0,0,0,.45)' }}
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        transition={{ duration: 0.2 }}
+        onClick={onClose}
+      />
+      <motion.div
+        className="relative z-10 w-full max-w-2xl max-h-[80vh] rounded-2xl border shadow-2xl flex flex-col"
+        style={{ backgroundColor: 'var(--surface)', borderColor: 'var(--border)' }}
+        initial={{ opacity: 0, y: 12, scale: 0.98 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        exit={{ opacity: 0, y: 12, scale: 0.98 }}
+        transition={{ duration: 0.2 }}
+      >
+        <div className="px-4 py-3 border-b flex items-start justify-between gap-3" style={{ borderColor: 'var(--border)' }}>
+          <div>
+            <div className="text-sm font-bold flex items-center gap-1.5" style={{ color: 'var(--text)' }}>
+              <CheckCircle2 size={15} style={{ color: '#10b981' }} />
+              Completed Assessments
+            </div>
+            <div className="text-[11px] text-secondary">
+              Endorsed, returned, or disapproved applications that have finished this stage.
+            </div>
+          </div>
+          <button
+            className="rounded-lg p-1 border"
+            style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}
+            onClick={onClose}
+          >
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className="px-4 pt-3">
+          <div className="relative group">
+            <Search
+              size={14}
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)] group-focus-within:text-[var(--text)] transition-colors pointer-events-none"
+            />
+            <input
+              autoFocus
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search application / locator..."
+              className="h-9 rounded-full pl-9 pr-3 text-xs w-full focus:outline-none focus:ring-1 focus:ring-[var(--border)] text-[var(--text)] placeholder:text-[var(--text-muted)] transition-all"
+              style={{ backgroundColor: 'color-mix(in oklab, var(--control-bg) 70%, transparent)' }}
+            />
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-4">
+          {filtered.length === 0 ? (
+            <EmptyState
+              icon={<CheckCircle2 size={40} className="opacity-40" />}
+              title="No completed assessments"
+              description={rows.length === 0 ? 'Nothing has been endorsed yet.' : 'No match for that search.'}
+            />
+          ) : (
+            <div className="flex flex-col gap-2">
+              {filtered.map((r) => (
+                <button
+                  key={r.application_id}
+                  className="w-full text-left rounded-xl border p-2.5 hover:bg-[var(--selected-bg)] transition-colors"
+                  style={{ borderColor: 'var(--border)' }}
+                  onClick={() => onSelect(r.application_id)}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="font-semibold text-[13px] truncate" style={{ color: 'var(--text)' }}>
+                        {r.application_no}
+                      </div>
+                      <div className="text-[11px] text-secondary truncate">
+                        {r.proponent_name || '—'} · {r.is_renewal ? 'Renewal' : 'New'} {r.application_type_name}
+                      </div>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <Badge
+                        label={r.recommendation || 'ENDORSE'}
+                        styles={
+                          r.recommendation === 'DISAPPROVE'
+                            ? { bg: 'rgba(239,68,68,.14)', color: '#ef4444', border: 'rgba(239,68,68,.38)' }
+                            : { bg: 'rgba(16,185,129,.14)', color: '#10b981', border: 'rgba(16,185,129,.38)' }
+                        }
+                      />
+                      <div className="text-[10px] text-secondary mt-1">{fmtDate(r.recommended_at)}</div>
+                    </div>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      </motion.div>
     </div>
   );
 }
@@ -492,25 +625,32 @@ function StatTile({
   label,
   value,
   tone,
+  onClick,
 }: {
   label: string;
   value: React.ReactNode;
   tone?: string;
+  onClick?: () => void;
 }) {
+  const Tag = onClick ? 'button' : 'div';
   return (
-    <div
-      className="rounded-xl px-3 py-3 flex flex-col gap-1 shadow-sm"
+    <Tag
+      className={cn(
+        'rounded-xl px-3 py-3 flex flex-col gap-1 shadow-sm text-left',
+        onClick && 'cursor-pointer hover:ring-1 hover:ring-[var(--text)] transition-shadow'
+      )}
       style={{ backgroundColor: 'color-mix(in oklab, var(--surface) 94%, white 6%)' }}
+      onClick={onClick}
     >
       <span className="text-[10px] font-semibold text-secondary uppercase tracking-widest">{label}</span>
       <span className="text-base sm:text-lg font-bold leading-tight" style={{ color: tone || 'var(--text)' }}>
         {value}
       </span>
-    </div>
+    </Tag>
   );
 }
 
-const TABS = ['Overview', 'Compliance', 'Recommendation', 'Activity'] as const;
+const TABS = ['Overview', 'Compliance', 'Findings', 'Recommendation', 'Activity'] as const;
 type Tab = (typeof TABS)[number];
 
 function AssessmentDetail({
@@ -597,7 +737,7 @@ function AssessmentDetail({
               {a ? a.application_no : 'Assessment'}
             </div>
             <div className="text-[11px] text-secondary">
-              {a ? `${a.proponent_name || '—'} · ${a.is_renewal ? 'Renewal' : 'New'} ${a.application_type}` : ''}
+              {a ? `${a.proponent_name || '—'} · ${a.is_renewal ? 'Renewal' : 'New'} ${a.application_type_name}` : ''}
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -625,6 +765,7 @@ function AssessmentDetail({
               )}
             >
               {t}
+              {t === 'Findings' && data?.findings.length ? ` (${data.findings.length})` : ''}
             </button>
           ))}
         </div>
@@ -638,6 +779,8 @@ function AssessmentDetail({
             <OverviewTab data={data} evaluators={evaluators} perms={perms} busy={busy} run={run} />
           ) : tab === 'Compliance' ? (
             <ComplianceTab data={data} canEdit={perms.canEdit} busy={busy} run={run} />
+          ) : tab === 'Findings' ? (
+            <FindingsTab data={data} perms={perms} busy={busy} run={run} />
           ) : tab === 'Recommendation' ? (
             <RecommendationTab data={data} canEdit={perms.canEdit} busy={busy} run={run} />
           ) : (
@@ -678,7 +821,10 @@ function OverviewTab({
           label="Days in assessment"
           value={a.days_in_assessment == null ? '—' : String(a.days_in_assessment)}
         />
-        <InfoCell label="Charges total" value={peso(a.charges_total)} />
+        <InfoCell
+          label="Documents verified"
+          value={`${a.requirements_verified}/${a.requirements_total}`}
+        />
         <InfoCell label="Recommendation" value={a.recommendation || '—'} />
       </div>
 
@@ -939,199 +1085,6 @@ function ComplianceTab({
   );
 }
 
-function ChargesTab({
-  data,
-  perms,
-  busy,
-  run,
-}: {
-  data: DetailPayload;
-  perms: { canAdd: boolean; canEdit: boolean; canDelete: boolean };
-  busy: boolean;
-  run: RunFn;
-}) {
-  const appId = data.assessment.application_id;
-  const [form, setForm] = useState({
-    charge_type: 'RENTAL',
-    description: '',
-    quantity: '',
-    unit_rate: '',
-    amount: '',
-    rate_basis: '',
-    remarks: '',
-  });
-
-  const preview = useMemo(() => {
-    if (form.amount) return Number(form.amount) || 0;
-    const q = Number(form.quantity);
-    const r = Number(form.unit_rate);
-    if (Number.isFinite(q) && Number.isFinite(r) && form.quantity && form.unit_rate) return Math.round(q * r * 100) / 100;
-    return 0;
-  }, [form]);
-
-  const add = () =>
-    run(async () => {
-      await apiFetch(`/api/assessments/${appId}/charges`, {
-        method: 'POST',
-        body: JSON.stringify({
-          charge_type: form.charge_type,
-          description: form.description.trim(),
-          quantity: form.quantity ? Number(form.quantity) : null,
-          unit_rate: form.unit_rate ? Number(form.unit_rate) : null,
-          amount: form.amount ? Number(form.amount) : undefined,
-          rate_basis: form.rate_basis.trim() || null,
-          remarks: form.remarks.trim() || null,
-        }),
-      });
-      setForm({ charge_type: 'RENTAL', description: '', quantity: '', unit_rate: '', amount: '', rate_basis: '', remarks: '' });
-    }, 'Charge added');
-
-  return (
-    <div className="flex flex-col gap-3">
-      <div className="rounded-xl border" style={{ borderColor: 'var(--border)' }}>
-        <table className="w-full text-left text-[12px]">
-          <thead>
-            <tr className="text-[10px] uppercase tracking-wide text-secondary">
-              <th className="px-2.5 py-2">Type</th>
-              <th className="px-2.5 py-2">Description</th>
-              <th className="px-2.5 py-2 text-right">Qty</th>
-              <th className="px-2.5 py-2 text-right">Rate</th>
-              <th className="px-2.5 py-2 text-right">Amount</th>
-              {perms.canDelete ? <th className="px-2.5 py-2" /> : null}
-            </tr>
-          </thead>
-          <tbody>
-            {data.charges.length === 0 ? (
-              <tr>
-                <td colSpan={6} className="px-2.5 py-4 text-center text-secondary">
-                  No charges assessed yet.
-                </td>
-              </tr>
-            ) : (
-              data.charges.map((c) => (
-                <tr key={c.id} className="border-t" style={{ borderColor: 'var(--border)' }}>
-                  <td className="px-2.5 py-2">{c.charge_type.replace('_', ' ')}</td>
-                  <td className="px-2.5 py-2">
-                    {c.description}
-                    {c.rate_basis ? <div className="text-[10px] text-secondary">{c.rate_basis}</div> : null}
-                  </td>
-                  <td className="px-2.5 py-2 text-right tabular-nums">{c.quantity ?? '—'}</td>
-                  <td className="px-2.5 py-2 text-right tabular-nums">{c.unit_rate ?? '—'}</td>
-                  <td className="px-2.5 py-2 text-right tabular-nums font-semibold">{peso(c.amount)}</td>
-                  {perms.canDelete ? (
-                    <td className="px-2.5 py-2 text-right">
-                      <button
-                        className="text-secondary hover:text-red-500 disabled:opacity-40"
-                        disabled={busy}
-                        onClick={() =>
-                          run(
-                            () => apiFetch(`/api/assessments/charges/${c.id}`, { method: 'DELETE' }),
-                            'Charge removed'
-                          )
-                        }
-                      >
-                        <Trash2 size={13} />
-                      </button>
-                    </td>
-                  ) : null}
-                </tr>
-              ))
-            )}
-          </tbody>
-          <tfoot>
-            <tr className="border-t" style={{ borderColor: 'var(--border)' }}>
-              <td colSpan={4} className="px-2.5 py-2 text-right text-[11px] uppercase tracking-wide text-secondary">
-                Total assessed
-              </td>
-              <td className="px-2.5 py-2 text-right font-bold tabular-nums">{peso(data.assessment.charges_total)}</td>
-              {perms.canDelete ? <td /> : null}
-            </tr>
-          </tfoot>
-        </table>
-      </div>
-
-      {perms.canAdd ? (
-        <div className="rounded-xl border p-3 flex flex-col gap-2" style={{ borderColor: 'var(--border)' }}>
-          <div className="text-[11px] font-bold uppercase tracking-wide text-secondary flex items-center gap-1.5">
-            <Coins size={12} /> Add charge
-          </div>
-          <div className="grid grid-cols-2 gap-2">
-            <Field label="Type">
-              <AppSelect
-                compact
-                isClearable={false}
-                value={form.charge_type}
-                onChange={(v) => setForm((f) => ({ ...f, charge_type: v }))}
-                options={CHARGE_TYPES.map((t) => ({ value: t, label: t.replace('_', ' ') }))}
-              />
-            </Field>
-            <Field label="Basis (note)">
-              <input
-                className={inputCls}
-                style={inputStyle}
-                value={form.rate_basis}
-                onChange={(e) => setForm((f) => ({ ...f, rate_basis: e.target.value }))}
-                placeholder="e.g. 5000 sqm @ 120/sqm/mo"
-              />
-            </Field>
-          </div>
-          <Field label="Description">
-            <input
-              className={inputCls}
-              style={inputStyle}
-              value={form.description}
-              onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
-            />
-          </Field>
-          <div className="grid grid-cols-3 gap-2">
-            <Field label="Quantity">
-              <input
-                className={inputCls}
-                style={inputStyle}
-                inputMode="decimal"
-                value={form.quantity}
-                onChange={(e) => setForm((f) => ({ ...f, quantity: e.target.value }))}
-              />
-            </Field>
-            <Field label="Unit rate">
-              <input
-                className={inputCls}
-                style={inputStyle}
-                inputMode="decimal"
-                value={form.unit_rate}
-                onChange={(e) => setForm((f) => ({ ...f, unit_rate: e.target.value }))}
-              />
-            </Field>
-            <Field label="Amount (override)">
-              <input
-                className={inputCls}
-                style={inputStyle}
-                inputMode="decimal"
-                value={form.amount}
-                onChange={(e) => setForm((f) => ({ ...f, amount: e.target.value }))}
-                placeholder={preview ? String(preview) : ''}
-              />
-            </Field>
-          </div>
-          <div className="flex items-center justify-between">
-            <div className="text-[12px] text-secondary">
-              Line amount: <span className="font-semibold text-[var(--text)]">{peso(preview)}</span>
-            </div>
-            <button
-              className="rounded-lg px-3 py-1.5 text-[12px] font-semibold disabled:opacity-50"
-              style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
-              disabled={busy || !form.description.trim() || preview <= 0}
-              onClick={add}
-            >
-              <Plus size={13} className="inline mr-1" /> Add
-            </button>
-          </div>
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
 function FindingsTab({
   data,
   perms,
@@ -1317,10 +1270,6 @@ function RecommendationTab({
         style={{ borderColor: allVerified ? 'rgba(16,185,129,.4)' : 'var(--border)' }}
       >
         <div className="flex justify-between">
-          <span className="text-secondary">Charges assessed</span>
-          <span className="font-semibold">{peso(a.charges_total)}</span>
-        </div>
-        <div className="flex justify-between">
           <span className="text-secondary">Open findings</span>
           <span className="font-semibold" style={{ color: openFindings ? '#ef4444' : undefined }}>
             {openFindings}
@@ -1340,7 +1289,7 @@ function RecommendationTab({
           style={{ borderColor: 'rgba(16,185,129,.4)', backgroundColor: 'rgba(16,185,129,.1)', color: '#10b981' }}
         >
           <CheckCircle2 size={14} className="shrink-0" />
-          <span>All requirements verified — ready to endorse to the Account Officer (Approval Queue).</span>
+          <span>All requirements verified — ready to endorse to the Approval & Issuance workflow.</span>
         </div>
       ) : (
         <div
@@ -1364,9 +1313,13 @@ function RecommendationTab({
 
       <div className="flex flex-col gap-2">
         {[
-          { v: 'ENDORSE', label: 'Endorse to Approval', hint: 'Application moves to FOR_APPROVAL.' },
-          { v: 'RETURN', label: 'Return to Locator', hint: 'Application status becomes RETURNED; locator is notified.' },
-          { v: 'DISAPPROVE', label: 'Recommend Disapproval', hint: 'Application status becomes DISAPPROVED.' },
+          {
+            v: 'ENDORSE',
+            label: 'Endorse to Approval',
+            hint: 'Application moves to FOR_APPROVAL for multi-level review; the locator gets an email once their business status is decided.',
+          },
+          { v: 'RETURN', label: 'Return to Locator', hint: 'Application status becomes RETURNED; locator is notified by email.' },
+          { v: 'DISAPPROVE', label: 'Recommend Disapproval', hint: 'Application status becomes DISAPPROVED; locator is notified by email.' },
         ].map((o) => (
           <label
             key={o.v}

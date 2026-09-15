@@ -209,6 +209,59 @@ exports.downloadContractCertificate = async (req, res) => {
   }
 };
 
+exports.previewContractNo = async (req, res) => {
+  try {
+    const id = appIdParam(req, res);
+    if (id === null) return undefined;
+    const contractNo = await Approval.previewContractNo(id);
+    if (!contractNo) return res.status(404).json({ success: false, message: "Application not found" });
+    return res.json({ success: true, data: { contract_no: contractNo } });
+  } catch (error) {
+    return fail(res, error, "Preview contract number");
+  }
+};
+
+/* ---------------------------------- Charges -------------------------------- */
+
+exports.addCharge = async (req, res) => {
+  try {
+    const id = appIdParam(req, res);
+    if (id === null) return undefined;
+    if (!String(req.body?.description ?? "").trim()) {
+      return res.status(400).json({ success: false, message: "description is required" });
+    }
+    const data = await Approval.addCharge(id, req.body || {}, req.user?.id ?? null);
+    if (!data) return res.status(404).json({ success: false, message: "Application not found" });
+    return res.status(201).json({ success: true, data });
+  } catch (error) {
+    return fail(res, error, "Add charge");
+  }
+};
+
+exports.updateCharge = async (req, res) => {
+  try {
+    const id = idParam(req, res);
+    if (id === null) return undefined;
+    const data = await Approval.updateCharge(id, req.body || {}, req.user?.id ?? null);
+    if (!data) return res.status(404).json({ success: false, message: "Charge not found" });
+    return res.json({ success: true, data });
+  } catch (error) {
+    return fail(res, error, "Update charge");
+  }
+};
+
+exports.deleteCharge = async (req, res) => {
+  try {
+    const id = idParam(req, res);
+    if (id === null) return undefined;
+    const ok = await Approval.deleteCharge(id, req.user?.id ?? null);
+    if (!ok) return res.status(404).json({ success: false, message: "Charge not found" });
+    return res.json({ success: true });
+  } catch (error) {
+    return fail(res, error, "Delete charge");
+  }
+};
+
 /* --------------------------- Configurable levels ------------------------- */
 
 exports.listLevels = async (req, res) => {

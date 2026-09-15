@@ -1,9 +1,10 @@
 const { selectData, insertData, updateData, updateSchema } = require("../config/database");
 
-const PERMIT_TYPES = ["ENVIRONMENTAL", "FIRE", "OCCUPANCY", "SANITARY", "AUTHORITY_TO_OPERATE"];
+const PERMIT_TYPES = ["ENVIRONMENTAL", "FIRE", "OCCUPANCY", "SANITARY", "AUTHORITY_TO_OPERATE", "CONTRACT"];
 const EXPIRING_WINDOW_DAYS = 30;
 
 function toInt(v) {
+  if (v === null || v === undefined || v === "") return null;
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
 }

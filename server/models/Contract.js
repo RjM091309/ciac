@@ -1,5 +1,7 @@
-const { selectData, insertData, updateData, updateSchema } = require("../config/database");
+const { selectData, insertData, updateData, updateSchema, runInTransaction } = require("../config/database");
 const Notification = require("./Notification");
+const Permit = require("./Permit");
+const { sendMail } = require("../lib/mailer");
 
 function toInt(v) {
   // Number(null) is 0, not NaN — without this guard, an explicitly-absent
@@ -10,8 +12,33 @@ function toInt(v) {
   return Number.isFinite(n) ? n : null;
 }
 
+async function getLocatorContactByApplicationId(applicationId) {
+  const rows = await selectData(
+    `
+    SELECT TOP (1) u.email, u.full_name, a.application_no
+    FROM dbo.applications a
+    JOIN dbo.proponents p ON p.id = a.proponent_id
+    JOIN dbo.users u ON u.id = p.user_id
+    WHERE a.id = @param0 AND u.email IS NOT NULL AND u.email <> ''
+    `,
+    [toInt(applicationId)]
+  );
+  return rows?.[0] || null;
+}
+
 async function ensureSchema() {
   await updateSchema(`
+    -- Shared with application-number generation (ApplicationWorkflow.js) — a
+    -- plain counter_key/last_value table, reused here for contract numbers so
+    -- there's one generic sequence mechanism instead of two.
+    IF OBJECT_ID('dbo.application_no_counters', 'U') IS NULL
+    BEGIN
+      CREATE TABLE dbo.application_no_counters (
+        counter_key NVARCHAR(50) NOT NULL PRIMARY KEY,
+        last_value INT NOT NULL CONSTRAINT DF_app_no_counters_last_value_contracts DEFAULT (0)
+      );
+    END;
+
     IF OBJECT_ID('dbo.contracts', 'U') IS NULL
     BEGIN
       CREATE TABLE dbo.contracts (
@@ -65,8 +92,8 @@ async function getCertificatePath(id) {
 }
 
 async function createContractNotifications({ applicationId, contractNo, actorId, isUpdate }) {
+  const normalizedContractNo = String(contractNo || "").trim();
   try {
-    const normalizedContractNo = String(contractNo || "").trim();
     await Notification.createApplicationScopedNotifications({
       applicationId,
       actorId,
@@ -76,6 +103,33 @@ async function createContractNotifications({ applicationId, contractNo, actorId,
     });
   } catch (error) {
     console.error("Create contract notifications error:", error);
+  }
+
+  // Only email on the initial signing, not every later edit (e.g. attaching
+  // the scanned file afterward) — this is the "your business is now under
+  // contract" moment the locator actually needs pinged about.
+  if (isUpdate) return;
+  try {
+    const locator = await getLocatorContactByApplicationId(applicationId);
+    if (locator?.email) {
+      const loginUrl = `${String(process.env.FRONTEND_URL || "").replace(/\/+$/, "")}/`;
+      await sendMail({
+        to: locator.email,
+        subject: `Contract signed: ${locator.application_no || "your application"}`,
+        text:
+          `Hello ${locator.full_name || ""},\n\n` +
+          `Your business application ${locator.application_no || ""} now has a signed contract` +
+          `${normalizedContractNo ? ` (${normalizedContractNo})` : ""} on record.\n\n` +
+          `Sign in to the portal for details: ${loginUrl}\n`,
+        html:
+          `<p>Hello ${locator.full_name || ""},</p>` +
+          `<p>Your business application <b>${locator.application_no || ""}</b> now has a signed contract` +
+          `${normalizedContractNo ? ` (<b>${normalizedContractNo}</b>)` : ""} on record.</p>` +
+          `<p><a href="${loginUrl}" style="display:inline-block;padding:10px 18px;background:#111827;color:#fff;text-decoration:none;border-radius:6px;">Sign in to the portal</a></p>`,
+      });
+    }
+  } catch (error) {
+    console.error("Send contract-signed email error:", error);
   }
 }
 
@@ -192,10 +246,100 @@ async function listByProponentId(proponentId) {
   return rows.map(withHasCertificate);
 }
 
+/** Server-authoritative reference number: CTR-{APPLICATION_TYPE}-YYYY-00001,
+ * incrementing per type+year — mirrors generateApplicationNo in
+ * ApplicationWorkflow.js, sharing its counter table. Generated inside the
+ * same transaction as the contract insert so concurrent saves never race
+ * onto the same number. */
+function contractCounterKey(applicationType) {
+  const typeCode = String(applicationType || "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "") || "GEN";
+  const year = new Date().getFullYear();
+  return `CTR-${typeCode}-${year}`;
+}
+
+async function generateContractNo(tx, applicationType) {
+  const counterKey = contractCounterKey(applicationType);
+
+  const result = await tx.query(
+    `
+    MERGE dbo.application_no_counters WITH (HOLDLOCK) AS target
+    USING (SELECT @param0 AS counter_key) AS src
+    ON target.counter_key = src.counter_key
+    WHEN MATCHED THEN UPDATE SET last_value = target.last_value + 1
+    WHEN NOT MATCHED THEN INSERT (counter_key, last_value) VALUES (src.counter_key, 1)
+    OUTPUT INSERTED.last_value;
+    `,
+    [counterKey]
+  );
+  const seq = result?.recordset?.[0]?.last_value || 1;
+  return `${counterKey}-${String(seq).padStart(5, "0")}`;
+}
+
+/** Read-only look at what generateContractNo would hand out next, without
+ * reserving it — for showing the locator/officer the number before they
+ * actually save (the real save still runs generateContractNo transactionally,
+ * so this preview can't cause a collision, only be off if another contract
+ * of the same type+year is saved in between). */
+async function previewContractNo(applicationType) {
+  await ensureSchema();
+  const counterKey = contractCounterKey(applicationType);
+  const rows = await selectData(
+    `SELECT last_value FROM dbo.application_no_counters WHERE counter_key = @param0`,
+    [counterKey]
+  );
+  const nextSeq = Number(rows?.[0]?.last_value || 0) + 1;
+  return `${counterKey}-${String(nextSeq).padStart(5, "0")}`;
+}
+
+// Keeps a "CONTRACT"-type row in the Compliance/Permits module in step with
+// this contract, using the contract's actual validity window — effective
+// start/end, not the issue_date audit timestamp — so the Permits page's own
+// EXPIRING/EXPIRED logic (reads expiry_date) tracks when the lease itself
+// lapses. One permit row per application, created on first save and
+// refreshed on every later edit rather than duplicated.
+async function syncContractPermit({ applicationId, contractNo, effectiveStart, effectiveEnd, documentId, actorId }) {
+  try {
+    const appRows = await selectData(
+      `SELECT proponent_id FROM dbo.applications WHERE id = @param0`,
+      [toInt(applicationId)]
+    );
+    const proponentId = toInt(appRows?.[0]?.proponent_id);
+    if (!proponentId) return;
+
+    const existingRows = await selectData(
+      `SELECT id FROM dbo.permits WHERE application_id = @param0 AND permit_type = 'CONTRACT'`,
+      [toInt(applicationId)]
+    );
+    const existing = existingRows?.[0];
+
+    const payload = {
+      permit_type: "CONTRACT",
+      permit_no: contractNo,
+      issuing_authority: "CIAC",
+      issue_date: effectiveStart,
+      expiry_date: effectiveEnd,
+      document_id: documentId,
+      remarks: `Auto-synced from Contract ${contractNo}`,
+    };
+
+    if (existing) {
+      await Permit.update(existing.id, { ...payload, is_active: true, updated_by: actorId });
+    } else {
+      await Permit.create({
+        ...payload,
+        proponent_id: proponentId,
+        application_id: applicationId,
+        created_by: actorId,
+      });
+    }
+  } catch (error) {
+    console.error("Sync contract permit error:", error);
+  }
+}
+
 async function createContract({
   application_id,
-  contract_no,
-  issue_date,
+  application_type,
   effective_start,
   effective_end,
   document_id,
@@ -203,70 +347,80 @@ async function createContract({
 }) {
   await ensureSchema();
   await Notification.ensureSchema();
-  const result = await insertData(
-    `
-    INSERT INTO dbo.contracts
-      (application_id, contract_no, issue_date, effective_start, effective_end, document_id, created_by, updated_by, created_at, updated_at)
-    OUTPUT INSERTED.id
-    VALUES
-      (@param0, @param1, @param2, @param3, @param4, @param5, @param6, NULL, SYSUTCDATETIME(), NULL)
-    `,
-    [
-      toInt(application_id),
-      String(contract_no || "").trim(),
-      issue_date || null,
-      effective_start || null,
-      effective_end || null,
-      toInt(document_id),
-      toInt(created_by),
-    ]
-  );
 
-  const id = result?.recordset?.[0]?.id;
+  const id = await runInTransaction(async (tx) => {
+    const contractNo = await generateContractNo(tx, application_type);
+    const result = await tx.query(
+      `
+      INSERT INTO dbo.contracts
+        (application_id, contract_no, issue_date, effective_start, effective_end, document_id, created_by, updated_by, created_at, updated_at)
+      OUTPUT INSERTED.id
+      VALUES
+        (@param0, @param1, SYSUTCDATETIME(), @param2, @param3, @param4, @param5, NULL, SYSUTCDATETIME(), NULL)
+      `,
+      [
+        toInt(application_id),
+        contractNo,
+        effective_start || null,
+        effective_end || null,
+        toInt(document_id),
+        toInt(created_by),
+      ]
+    );
+    return result?.recordset?.[0]?.id;
+  });
+
   if (!id) return null;
+  const saved = await getById(id);
+  await syncContractPermit({
+    applicationId: application_id,
+    contractNo: saved?.contract_no,
+    effectiveStart: saved?.effective_start,
+    effectiveEnd: saved?.effective_end,
+    documentId: saved?.document_id,
+    actorId: created_by,
+  });
   await createContractNotifications({
     applicationId: application_id,
-    contractNo: contract_no,
+    contractNo: saved?.contract_no,
     actorId: created_by,
     isUpdate: false,
   });
-  return getById(id);
+  return saved;
 }
 
-async function updateContract(
-  id,
-  { contract_no, issue_date, effective_start, effective_end, document_id, updated_by }
-) {
+// contract_no and issue_date are the audit trail of when/what this contract
+// was first issued as — only effective dates and the executed file can
+// change afterward, never the number or the issue timestamp.
+async function updateContract(id, { effective_start, effective_end, document_id, updated_by }) {
   await ensureSchema();
   await Notification.ensureSchema();
   await updateData(
     `
     UPDATE dbo.contracts
     SET
-      contract_no = @param1,
-      issue_date = @param2,
-      effective_start = @param3,
-      effective_end = @param4,
-      document_id = @param5,
-      updated_by = @param6,
+      effective_start = @param1,
+      effective_end = @param2,
+      document_id = @param3,
+      updated_by = @param4,
       updated_at = SYSUTCDATETIME()
     WHERE id = @param0
     `,
-    [
-      toInt(id),
-      String(contract_no || "").trim(),
-      issue_date || null,
-      effective_start || null,
-      effective_end || null,
-      toInt(document_id),
-      toInt(updated_by),
-    ]
+    [toInt(id), effective_start || null, effective_end || null, toInt(document_id), toInt(updated_by)]
   );
 
   const current = await getById(id);
+  await syncContractPermit({
+    applicationId: current?.application_id,
+    contractNo: current?.contract_no,
+    effectiveStart: current?.effective_start,
+    effectiveEnd: current?.effective_end,
+    documentId: current?.document_id,
+    actorId: updated_by,
+  });
   await createContractNotifications({
     applicationId: current?.application_id,
-    contractNo: contract_no,
+    contractNo: current?.contract_no,
     actorId: updated_by,
     isUpdate: true,
   });
@@ -284,5 +438,6 @@ module.exports = {
   updateContract,
   setCertificatePath,
   getCertificatePath,
+  previewContractNo,
 };
 

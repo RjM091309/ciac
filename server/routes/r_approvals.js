@@ -25,10 +25,16 @@ router.patch("/steps/:id/act", requireMenuAccess(MENU_KEY, "edit"), controller.a
 router.patch("/steps/:id/endorse", requireMenuAccess(MENU_KEY, "edit"), controller.endorseStep);
 router.patch("/steps/:id/assign", requireMenuAccess(MENU_KEY, "edit"), controller.assignStep);
 
+// Charges — assessed by the Account Officer at Level 1 review
+router.post("/:applicationId/charges", requireMenuAccess(MENU_KEY, "add"), controller.addCharge);
+router.patch("/charges/:id", requireMenuAccess(MENU_KEY, "edit"), controller.updateCharge);
+router.delete("/charges/:id", requireMenuAccess(MENU_KEY, "delete"), controller.deleteCharge);
+
 // Issuance + contract
 router.post("/:applicationId/issuances", requireMenuAccess(MENU_KEY, "add"), controller.addIssuance);
 router.delete("/issuances/:id", requireMenuAccess(MENU_KEY, "delete"), controller.deleteIssuance);
 router.put("/:applicationId/contract", requireMenuAccess(MENU_KEY, "edit"), controller.saveContract);
 router.get("/contracts/:id/certificate", requireMenuAccess(MENU_KEY, "view"), controller.downloadContractCertificate);
+router.get("/:applicationId/contract/next-number", requireMenuAccess(MENU_KEY, "view"), controller.previewContractNo);
 
 module.exports = router;

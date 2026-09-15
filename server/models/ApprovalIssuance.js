@@ -73,8 +73,6 @@ const ISSUANCE_TYPES = ["APPROVAL_ORDER", "NOTICE_OF_AWARD", "CONTRACT", "PERMIT
 
 const DEFAULT_LEVELS = [
   { level_no: 1, name: "Account Officer Review", role_hint: "Account Officer" },
-  { level_no: 2, name: "Division Chief Endorsement", role_hint: "Division Chief" },
-  { level_no: 3, name: "Approving Authority", role_hint: "Manager / Department Head" },
 ];
 
 function pick(value, allowed, fallback = null) {
@@ -323,6 +321,7 @@ const LIST_SELECT = `
     a.id AS application_id,
     a.application_no,
     a.application_type,
+    ISNULL(at.name, a.application_type) AS application_type_name,
     a.is_renewal,
     a.status AS application_status,
     a.proponent_id,
@@ -334,6 +333,7 @@ const LIST_SELECT = `
     ap.decision,
     ap.decision_summary,
     ap.decided_at,
+    asm.id AS assessment_id,
     asm.recommendation AS assessment_recommendation,
     ISNULL(asm.charges_total, 0) AS charges_total,
     CASE WHEN ap.started_at IS NULL THEN NULL
@@ -346,6 +346,7 @@ const LIST_SELECT = `
     cu.username AS current_assignee_username
   FROM dbo.applications a
   LEFT JOIN dbo.proponents p ON p.id = a.proponent_id
+  LEFT JOIN dbo.application_types at ON at.code = a.application_type
   LEFT JOIN dbo.application_approvals ap ON ap.application_id = a.id
   LEFT JOIN dbo.application_assessments asm ON asm.application_id = a.id
   OUTER APPLY (
@@ -493,7 +494,51 @@ async function getApprovalDetail(applicationId) {
   const documents = await Workflow.listDocumentsByApplication(appId);
   const currentStep = steps.find((s) => s.decision === "PENDING") || null;
 
-  return { approval: header, steps, current_step: currentStep, issuances, activity, status_history: statusHistory, contract, documents };
+  // Charges are assessed by the Account Officer here (Level 1 of the routing
+  // ladder), against the same assessment_charges table Assessment Evaluation
+  // uses — reuse its rows rather than duplicating a second charges table.
+  const assessmentId = toInt(header.assessment_id);
+  const charges = assessmentId
+    ? await selectData(
+        `SELECT * FROM dbo.assessment_charges WHERE assessment_id = @param0 ORDER BY id ASC`,
+        [assessmentId]
+      )
+    : [];
+
+  return {
+    approval: header,
+    steps,
+    current_step: currentStep,
+    issuances,
+    activity,
+    status_history: statusHistory,
+    contract,
+    documents,
+    charges,
+  };
+}
+
+/* ---------------------------------- Charges -------------------------------- */
+// The Account Officer assesses charges after re-verifying documents (Level 1
+// of the routing ladder) — delegate to Assessment's charge storage/recompute
+// logic rather than duplicating it, and log the action on this module's own
+// activity feed too so it shows up in the approval History tab.
+
+async function addCharge(applicationId, payload, actorId) {
+  const row = await Assessment.addCharge(applicationId, payload, actorId);
+  const approval = await getOrCreateApproval(applicationId, actorId);
+  if (approval) {
+    await logActivity(approval.id, "CHARGE_ADDED", `${payload?.description || ""}`.slice(0, 200), actorId);
+  }
+  return row;
+}
+
+async function updateCharge(id, payload, actorId) {
+  return Assessment.updateCharge(id, payload, actorId);
+}
+
+async function deleteCharge(id, actorId) {
+  return Assessment.deleteCharge(id, actorId);
 }
 
 /** Snapshots the active configurable levels onto the approval as a routing ladder. */
@@ -778,36 +823,39 @@ async function deleteIssuance(id, actorId) {
   return true;
 }
 
+async function previewContractNo(applicationId) {
+  const app = await getApplicationRow(applicationId);
+  if (!app) return null;
+  return Contract.previewContractNo(app.application_type);
+}
+
 async function saveContract(applicationId, payload, actorId) {
   await ensureSchema();
   const appId = toInt(applicationId);
   if (!appId) return null;
-  const contractNo = String(payload?.contract_no ?? "").trim();
-  if (!contractNo) throw new Error("contract_no is required");
-  if (!payload?.issue_date) throw new Error("issue_date is required");
 
   const approval = await getOrCreateApproval(appId, actorId);
   const existing = await Contract.getByApplicationId(appId);
+  // contract_no and issue_date are server-generated / audit-trail only —
+  // never accepted from the client, and never touched once a contract
+  // exists. Only effective dates and the executed file stay editable.
   const saved = existing
     ? await Contract.updateContract(existing.id, {
-        contract_no: contractNo,
-        issue_date: payload.issue_date,
         effective_start: payload.effective_start ?? null,
         effective_end: payload.effective_end ?? null,
-        document_id: payload.document_id ?? null,
+        document_id: payload.document_id ?? existing.document_id ?? null,
         updated_by: toInt(actorId),
       })
     : await Contract.createContract({
         application_id: appId,
-        contract_no: contractNo,
-        issue_date: payload.issue_date,
+        application_type: (await getApplicationRow(appId))?.application_type,
         effective_start: payload.effective_start ?? null,
         effective_end: payload.effective_end ?? null,
         document_id: payload.document_id ?? null,
         created_by: toInt(actorId),
       });
   if (approval) {
-    await logActivity(approval.id, existing ? "CONTRACT_UPDATED" : "CONTRACT_RECORDED", contractNo, actorId);
+    await logActivity(approval.id, existing ? "CONTRACT_UPDATED" : "CONTRACT_RECORDED", saved?.contract_no, actorId);
   }
   if (saved) {
     // Regenerated on every save so the certificate always reflects the
@@ -841,4 +889,9 @@ module.exports = {
   addIssuance,
   deleteIssuance,
   saveContract,
+  previewContractNo,
+  CHARGE_TYPES: Assessment.CHARGE_TYPES,
+  addCharge,
+  updateCharge,
+  deleteCharge,
 };

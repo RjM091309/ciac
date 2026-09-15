@@ -146,6 +146,40 @@ async function createStatusChangeNotifications({ application, toStatus, remarks,
       console.error("Send approval-queue email error:", error);
     }
   }
+
+  // The locator's business only has a handful of moments worth emailing
+  // about rather than watching the portal for: the application was
+  // returned/rejected/disapproved, or it was finally approved (sign-contract
+  // follows from there). Everything in between (UNDER_REVIEW, FOR_APPROVAL,
+  // etc.) stays an in-app notification only.
+  const DECISION_STATUSES = ["APPROVED", "DISAPPROVED", "RETURNED", "REJECTED"];
+  if (DECISION_STATUSES.includes(String(toStatus || "").toUpperCase())) {
+    try {
+      const locator = await getLocatorContactByProponentId(application?.proponent_id);
+      if (locator?.email) {
+        const applicationNo = String(application?.application_no || "").trim();
+        const statusLabel = String(toStatus || "").trim();
+        const trimmedRemarks = String(remarks || "").trim();
+        const loginUrl = `${String(process.env.FRONTEND_URL || "").replace(/\/+$/, "")}/`;
+        await sendMail({
+          to: locator.email,
+          subject: `Business status update: ${applicationNo || "your application"} — ${statusLabel}`,
+          text:
+            `Hello ${locator.full_name || ""},\n\n` +
+            `The status of your business application ${applicationNo} is now: ${statusLabel}.\n\n` +
+            (trimmedRemarks ? `Remarks: ${trimmedRemarks}\n\n` : "") +
+            `Sign in to the portal for details: ${loginUrl}\n`,
+          html:
+            `<p>Hello ${locator.full_name || ""},</p>` +
+            `<p>The status of your business application <b>${applicationNo}</b> is now: <b>${statusLabel}</b>.</p>` +
+            (trimmedRemarks ? `<p><b>Remarks:</b> ${trimmedRemarks}</p>` : "") +
+            `<p><a href="${loginUrl}" style="display:inline-block;padding:10px 18px;background:#111827;color:#fff;text-decoration:none;border-radius:6px;">Sign in to the portal</a></p>`,
+        });
+      }
+    } catch (error) {
+      console.error("Send business status email error:", error);
+    }
+  }
 }
 
 async function createApplicationCreatedNotifications({ applicationId, applicationNo, isRenewal, status, createdBy }) {
@@ -864,24 +898,6 @@ async function updateApplicationStatus(id, { to_status, remarks, changed_by }) {
   }
   if (!isValidStatus(toStatus)) {
     throw new Error(`Invalid status "${toStatus}". Must be one of: ${APPLICATION_STATUSES.join(", ")}`);
-  }
-
-  if (toStatus === "APPROVED") {
-    const pendingRows = await selectData(
-      `
-      SELECT COUNT(1) AS pending_mandatory
-      FROM dbo.application_requirements ar
-      INNER JOIN dbo.requirements r ON r.id = ar.requirement_id
-      WHERE ar.application_id = @param0 AND r.is_mandatory = 1 AND ar.status <> 'VERIFIED'
-      `,
-      [id]
-    );
-    const pendingMandatory = Number(pendingRows?.[0]?.pending_mandatory || 0);
-    if (pendingMandatory > 0) {
-      throw new Error(
-        `Cannot approve: ${pendingMandatory} mandatory requirement(s) still not verified.`
-      );
-    }
   }
 
   const changedBy = toInt(changed_by);

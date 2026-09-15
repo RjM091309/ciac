@@ -224,6 +224,7 @@ const LIST_SELECT = `
     a.id AS application_id,
     a.application_no,
     a.application_type,
+    ISNULL(at.name, a.application_type) AS application_type_name,
     a.is_renewal,
     a.status AS application_status,
     a.proponent_id,
@@ -237,6 +238,7 @@ const LIST_SELECT = `
     ev.username AS evaluator_username,
     asm.assigned_at,
     asm.recommendation,
+    asm.recommended_at,
     ISNULL(asm.charges_total, 0) AS charges_total,
     CASE WHEN asm.assigned_at IS NULL THEN NULL
       ELSE DATEDIFF(DAY, asm.assigned_at, SYSUTCDATETIME()) END AS days_in_assessment,
@@ -246,6 +248,7 @@ const LIST_SELECT = `
     (SELECT COUNT(1) FROM dbo.application_requirements ar WHERE ar.application_id = a.id AND ar.status = 'VERIFIED') AS requirements_verified
   FROM dbo.applications a
   LEFT JOIN dbo.proponents p ON p.id = a.proponent_id
+  LEFT JOIN dbo.application_types at ON at.code = a.application_type
   LEFT JOIN dbo.application_assessments asm ON asm.application_id = a.id
   LEFT JOIN dbo.users ev ON ev.id = asm.assigned_evaluator_id
 `;
