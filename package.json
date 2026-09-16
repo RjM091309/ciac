@@ -42,6 +42,9 @@
     "tailwind-merge": "^3.5.0",
     "vite": "^6.2.0"
   },
+  "overrides": {
+    "qs": "^6.16.0"
+  },
   "devDependencies": {
     "@types/babel__core": "^7.20.5",
     "@types/babel__generator": "^7.27.0",

@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState, Suspense, lazy } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { AppLayout, AppView } from './layout/AppLayout';
 import { SubHeader, type DashboardPreviewRole } from './components/SubHeader';
-import { FileCheck, FolderTree, ShieldCheck, Users, CalendarClock, Loader2, Search, BarChart3 } from 'lucide-react';
+import { FileCheck, FolderTree, ShieldCheck, Users, Loader2, Search, BarChart3 } from 'lucide-react';
 import { LoginPage } from './components/auth/LoginPage';
 import { LocatorProfileSetup } from './components/proponent/LocatorProfileSetup';
 import { locatorSetupSkipKey } from './lib/locatorSetup';
@@ -16,7 +16,6 @@ const ProponentApplications = lazy(() => import('./components/proponent/Proponen
 const ProponentContractsPermits = lazy(() => import('./components/proponent/ProponentContractsPermits').then((m) => ({ default: m.ProponentContractsPermits })));
 const ProponentActivity = lazy(() => import('./components/proponent/ProponentActivity').then((m) => ({ default: m.ProponentActivity })));
 const PermitsManagement = lazy(() => import('./components/compliance/PermitsManagement').then((m) => ({ default: m.PermitsManagement })));
-const ExpiryCalendar = lazy(() => import('./components/compliance/ExpiryCalendar').then((m) => ({ default: m.ExpiryCalendar })));
 const UsersManagement = lazy(() => import('./components/settings/UsersManagement').then((m) => ({ default: m.UsersManagement })));
 const LocatorUsersManagement = lazy(() => import('./components/settings/LocatorUsersManagement').then((m) => ({ default: m.LocatorUsersManagement })));
 const ControlPanelManagement = lazy(() => import('./components/settings/ControlPanelManagement').then((m) => ({ default: m.ControlPanelManagement })));
@@ -59,7 +58,6 @@ const VIEW_TO_PATH: Record<AppView, string> = {
   'assessment:queue': '/assessment',
   'approval:queue': '/approval',
   'compliance:permits': '/compliance/permits',
-  'compliance:expiry': '/compliance/expiry',
   'compliance:inspections': '/compliance/inspections',
   'reports:analytics': '/reports/analytics',
   'settings:users': '/settings/users',
@@ -570,7 +568,7 @@ export default function App() {
               ) : view === 'settings:users' ? (
                 <UsersManagement navigate={navigate} />
               ) : view === 'settings:locator-users' ? (
-                <LocatorUsersManagement />
+                <LocatorUsersManagement locationSearch={locationSearch} />
               ) : view === 'applications:new' ? (
                 <ApplicationsWorkflow renewalMode={false} locationSearch={locationSearch} navigate={navigate} />
               ) : view === 'applications:renewals' ? (
@@ -599,8 +597,6 @@ export default function App() {
                 <ControlPanelManagement locationSearch={locationSearch} />
               ) : view === 'compliance:permits' ? (
                 <PermitsManagement />
-              ) : view === 'compliance:expiry' ? (
-                <ExpiryCalendar navigate={navigate} />
               ) : (
                 <SectionLanding view={view} />
               )}
@@ -744,25 +740,6 @@ const LANDING_CONFIG: Record<AppView, LandingConfig> = {
         ['HarborFresh Cold Storage', 'Occupancy', 'OCC-24-019', 'Mar 31, 2026', 'Expiring'],
         ['GreenFuel Terminals Corp.', 'Fire Safety', 'FSIC-26-088', 'Apr 12, 2026', 'Valid'],
         ['NorthGate Foods Corp.', 'Sanitary', 'SAN-25-103', 'Jan 10, 2026', 'Expired'],
-      ],
-    },
-  },
-  'compliance:expiry': {
-    title: 'Expiry Permits',
-    description: 'Calendar view of all upcoming permit expirations across locators.',
-    badge: 'Calendar',
-    icon: CalendarClock,
-    stats: [
-      { label: 'Expiring This Month', value: '14' },
-      { label: 'Next 90 Days', value: '29' },
-      { label: 'Overdue', value: '3' },
-    ],
-    table: {
-      columns: ['Date', 'Locator', 'Permit', 'Type', 'Days Left'],
-      rows: [
-        ['Mar 18, 2026', 'HarborFresh Cold Storage', 'Occupancy Permit', 'CDC', '6'],
-        ['Mar 22, 2026', 'Delta AeroTech', 'Fire Safety Inspection', 'CDC', '10'],
-        ['Apr 03, 2026', 'NorthGate Foods Corp.', 'Tax Clearance', 'BIR', '22'],
       ],
     },
   },

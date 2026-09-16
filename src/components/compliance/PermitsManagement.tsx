@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { FileSignature, FileText, Pencil, Search, Trash2 } from 'lucide-react';
+import { AlertTriangle, FileSignature, FileText, Pencil, Search, Trash2 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { toast } from 'sonner';
 import { SidePanel } from '../ui/SidePanel';
@@ -12,15 +12,11 @@ import { useControlPanelAccess } from '../../context/ControlPanelAccessContext';
 
 const MENU_KEY = 'compliance:permits';
 
-const PERMIT_TYPES = [
-  { value: 'ENVIRONMENTAL', label: 'Environmental' },
-  { value: 'FIRE', label: 'Fire Safety' },
-  { value: 'OCCUPANCY', label: 'Occupancy' },
-  { value: 'SANITARY', label: 'Sanitary' },
-  { value: 'AUTHORITY_TO_OPERATE', label: 'Authority to Operate' },
-  { value: 'CONTRACT', label: 'Lease Contract' },
-];
-const TYPE_LABEL: Record<string, string> = Object.fromEntries(PERMIT_TYPES.map((t) => [t.value, t.label]));
+// "CONTRACT" is system-generated only (Contract.js auto-syncs a permit row
+// of this type whenever a contract is issued — see server/models/Permit.js)
+// — kept as a fixed option alongside whatever Settings -> Compliance Types
+// has configured, not one of those configurable entries itself.
+const RESERVED_PERMIT_TYPE = { value: 'CONTRACT', label: 'Lease Contract' };
 
 const STATUS_STYLE: Record<string, { bg: string; color: string }> = {
   VALID: { bg: 'rgba(16,185,129,0.12)', color: '#10b981' },
@@ -49,12 +45,19 @@ type PermitRow = {
 
 type Option = { value: string; label: string };
 
-type Bundle = { permits: PermitRow[]; proponents: Option[]; applications: Option[] };
+type ApprovedApplication = { id: number; application_no: string; proponent_id: number; proponent_name: string | null };
+
+type Bundle = {
+  permits: PermitRow[];
+  proponents: Option[];
+  approvedApplications: ApprovedApplication[];
+  permitTypes: Option[];
+};
 
 const EMPTY_FORM = {
   proponent_id: '',
   application_id: '',
-  permit_type: 'ENVIRONMENTAL',
+  permit_type: '',
   permit_no: '',
   issuing_authority: '',
   issue_date: '',
@@ -73,6 +76,14 @@ function dateInput(v: string | null) {
   const d = new Date(v);
   return Number.isNaN(d.getTime()) ? '' : d.toISOString().slice(0, 10);
 }
+function daysUntil(v: string | null): number | null {
+  if (!v) return null;
+  const d = new Date(v);
+  if (Number.isNaN(d.getTime())) return null;
+  return Math.ceil((d.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+}
+
+type ExpiryFilter = 'THIS_MONTH' | 'NEXT_90' | 'OVERDUE' | null;
 
 export function PermitsManagement() {
   const { fullAccess, crudPermissions } = useControlPanelAccess();
@@ -86,25 +97,45 @@ export function PermitsManagement() {
   const [form, setForm] = useState(EMPTY_FORM);
   const [search, setSearch] = useState('');
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
+  const [expiryFilter, setExpiryFilter] = useState<ExpiryFilter>(null);
 
   const { data, isLoading, refresh } = useSessionStorageCachedResource<Bundle>({
-    cacheKey: 'ciac.permits_bundle.v1',
+    cacheKey: 'ciac.permits_bundle.v3',
     ttlMs: 3 * 60 * 1000,
     fetcher: async () => {
-      const [pRes, prRes, aRes] = await Promise.all([
+      const [pRes, prRes, aRes, ctRes] = await Promise.all([
         fetch('/api/permits', { credentials: 'include' }),
         fetch('/api/proponents', { credentials: 'include' }),
         fetch('/api/applications', { credentials: 'include' }),
+        fetch('/api/compliance-types', { credentials: 'include' }),
       ]);
-      const [pJson, prJson, aJson] = await Promise.all([pRes.json(), prRes.json(), aRes.json()]);
+      const [pJson, prJson, aJson, ctJson] = await Promise.all([pRes.json(), prRes.json(), aRes.json(), ctRes.json().catch(() => ({}))]);
       if (!pRes.ok) throw new Error(pJson?.message || 'Failed to load permits');
+      const complianceTypeOptions: Option[] = (ctRes.ok && Array.isArray(ctJson?.data) ? ctJson.data : [])
+        .filter((t: any) => Number(t?.is_active))
+        .map((t: any) => ({ value: String(t.code), label: String(t.name) }));
+
+      // Only an APPROVED application means the locator has actually cleared
+      // Assessment + Approval & Issuance — a permit shouldn't be issuable to
+      // a business that's still mid-review or was never approved.
+      const approvedApplications: ApprovedApplication[] = (Array.isArray(aJson?.data) ? aJson.data : [])
+        .filter((a: any) => String(a?.status || '').toUpperCase() === 'APPROVED')
+        .map((a: any) => ({
+          id: Number(a.id),
+          application_no: a.application_no,
+          proponent_id: Number(a.proponent_id),
+          proponent_name: a.proponent_name ?? null,
+        }));
+      const approvedProponentIds = new Set(approvedApplications.map((a) => a.proponent_id));
+      const proponents: Option[] = (prJson.data || [])
+        .filter((x: any) => approvedProponentIds.has(Number(x.id)))
+        .map((x: any) => ({ value: String(x.id), label: x.business_name }));
+
       return {
         permits: pJson.data || [],
-        proponents: (prJson.data || []).map((x: any) => ({ value: String(x.id), label: x.business_name })),
-        applications: (aJson.data || []).map((x: any) => ({
-          value: String(x.id),
-          label: `${x.application_no}${x.proponent_name ? ` — ${x.proponent_name}` : ''}`,
-        })),
+        proponents,
+        approvedApplications,
+        permitTypes: [...complianceTypeOptions, RESERVED_PERMIT_TYPE],
       };
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : 'Failed to load'),
@@ -112,17 +143,62 @@ export function PermitsManagement() {
 
   const permits = data?.permits ?? [];
   const proponentOptions = data?.proponents ?? [];
-  const applicationOptions = data?.applications ?? [];
+  const approvedApplications = data?.approvedApplications ?? [];
+  // Scoped to the currently selected locator (if any) — picking a business
+  // with only one approved application further down auto-fills it (see
+  // the Locator field's onChange below); with several, this just narrows
+  // the list to ones that actually belong to them.
+  const applicationOptions = useMemo(
+    () =>
+      approvedApplications
+        .filter((a) => !form.proponent_id || a.proponent_id === Number(form.proponent_id))
+        .map((a) => ({
+          value: String(a.id),
+          label: `${a.application_no}${a.proponent_name ? ` — ${a.proponent_name}` : ''}`,
+        })),
+    [approvedApplications, form.proponent_id]
+  );
+  const permitTypeOptions = data?.permitTypes ?? [];
+  const typeLabel = useMemo(
+    () => Object.fromEntries(permitTypeOptions.map((t) => [t.value, t.label])),
+    [permitTypeOptions]
+  );
+
+  const expiryStats = useMemo(() => {
+    let expiringThisMonth = 0;
+    let next90 = 0;
+    let overdue = 0;
+    for (const p of permits) {
+      if (p.effective_status === 'REVOKED') continue;
+      const days = daysUntil(p.expiry_date);
+      if (days === null) continue;
+      if (days < 0) overdue += 1;
+      else if (days <= 30) expiringThisMonth += 1;
+      if (days >= 0 && days <= 90) next90 += 1;
+    }
+    return { expiringThisMonth, next90, overdue };
+  }, [permits]);
 
   const filtered = useMemo(() => {
+    let base = permits;
+    if (expiryFilter) {
+      base = base.filter((p) => {
+        if (p.effective_status === 'REVOKED') return false;
+        const days = daysUntil(p.expiry_date);
+        if (days === null) return false;
+        if (expiryFilter === 'OVERDUE') return days < 0;
+        if (expiryFilter === 'THIS_MONTH') return days >= 0 && days <= 30;
+        return days >= 0 && days <= 90;
+      });
+    }
     const q = search.trim().toLowerCase();
-    if (!q) return permits;
-    return permits.filter((p) =>
-      [p.permit_no, p.proponent_name, TYPE_LABEL[p.permit_type], p.issuing_authority, p.effective_status]
+    if (!q) return base;
+    return base.filter((p) =>
+      [p.permit_no, p.proponent_name, typeLabel[p.permit_type], p.issuing_authority, p.effective_status]
         .filter(Boolean)
         .some((s) => String(s).toLowerCase().includes(q)),
     );
-  }, [permits, search]);
+  }, [permits, search, expiryFilter, typeLabel]);
 
   function openCreate() {
     setEditing(null);
@@ -148,6 +224,10 @@ export function PermitsManagement() {
   async function save() {
     if (!form.proponent_id) {
       toast.error('Locator is required');
+      return;
+    }
+    if (!form.permit_type) {
+      toast.error('Permit type is required');
       return;
     }
     if (!form.permit_no.trim()) {
@@ -203,6 +283,29 @@ export function PermitsManagement() {
 
   return (
     <div className="space-y-4 sm:space-y-5">
+      <div className="flex flex-wrap gap-3">
+        <ExpiryStatCard
+          label="Expiring This Month"
+          value={expiryStats.expiringThisMonth}
+          tone="warn"
+          active={expiryFilter === 'THIS_MONTH'}
+          onClick={() => setExpiryFilter((f) => (f === 'THIS_MONTH' ? null : 'THIS_MONTH'))}
+        />
+        <ExpiryStatCard
+          label="Next 90 Days"
+          value={expiryStats.next90}
+          active={expiryFilter === 'NEXT_90'}
+          onClick={() => setExpiryFilter((f) => (f === 'NEXT_90' ? null : 'NEXT_90'))}
+        />
+        <ExpiryStatCard
+          label="Overdue"
+          value={expiryStats.overdue}
+          tone="danger"
+          active={expiryFilter === 'OVERDUE'}
+          onClick={() => setExpiryFilter((f) => (f === 'OVERDUE' ? null : 'OVERDUE'))}
+        />
+      </div>
+
       <div className="glass-card p-4 sm:p-5 !border-transparent" style={{ backgroundColor: 'var(--surface)' }}>
         <div className="flex items-center justify-end mb-3 gap-2">
           {canAdd ? (
@@ -249,11 +352,27 @@ export function PermitsManagement() {
                   return (
                     <tr key={p.id} className="border-b last:border-b-0" style={{ borderColor: 'var(--border-subtle)' }}>
                       <td className="px-3 py-2 text-[11px]" style={{ color: 'var(--text)' }}>{p.proponent_name || `#${p.proponent_id}`}</td>
-                      <td className="px-3 py-2 text-[11px] text-secondary">{TYPE_LABEL[p.permit_type] || p.permit_type}</td>
+                      <td className="px-3 py-2 text-[11px] text-secondary">{typeLabel[p.permit_type] || p.permit_type}</td>
                       <td className="px-3 py-2 text-[11px] font-semibold" style={{ color: 'var(--text)' }}>{p.permit_no}</td>
                       <td className="px-3 py-2 text-[11px] text-secondary">{p.issuing_authority || '—'}</td>
                       <td className="px-3 py-2 text-[11px] text-secondary">{fmt(p.issue_date)}</td>
-                      <td className="px-3 py-2 text-[11px] text-secondary">{fmt(p.expiry_date)}</td>
+                      <td className="px-3 py-2 text-[11px] text-secondary">
+                        {fmt(p.expiry_date)}
+                        {p.effective_status !== 'REVOKED' && daysUntil(p.expiry_date) !== null ? (
+                          <div className="mt-0.5">
+                            {(() => {
+                              const days = daysUntil(p.expiry_date) as number;
+                              return days < 0 ? (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-semibold" style={{ color: '#fca5a5' }}>
+                                  <AlertTriangle size={10} /> {Math.abs(days)}d overdue
+                                </span>
+                              ) : (
+                                <span className="text-[10px] text-secondary">{days}d left</span>
+                              );
+                            })()}
+                          </div>
+                        ) : null}
+                      </td>
                       <td className="px-3 py-2 text-[11px]">
                         <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold" style={{ backgroundColor: s.bg, color: s.color }}>
                           {p.effective_status}
@@ -307,17 +426,40 @@ export function PermitsManagement() {
         onClose={() => setPanelOpen(false)}
         onSave={save}
         saving={saving}
-        saveDisabled={!form.proponent_id || !form.permit_no.trim()}
+        saveDisabled={!form.proponent_id || !form.permit_type || !form.permit_no.trim()}
       >
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <FieldLabel label="Locator">
-            <AppSelect options={proponentOptions} value={form.proponent_id} onChange={(v) => setForm((p) => ({ ...p, proponent_id: v }))} placeholder="Select locator..." isDisabled={saving} />
+            <AppSelect
+              options={proponentOptions}
+              value={form.proponent_id}
+              onChange={(v) => {
+                // Auto-fill the linked application when this locator has
+                // exactly one approved one — otherwise leave it for the
+                // officer to pick, and drop any prior pick that doesn't
+                // belong to the newly selected locator.
+                const matches = approvedApplications.filter((a) => String(a.proponent_id) === v);
+                setForm((p) => ({
+                  ...p,
+                  proponent_id: v,
+                  application_id: matches.length === 1 ? String(matches[0].id) : '',
+                }));
+              }}
+              placeholder="Select locator..."
+              isDisabled={saving}
+            />
           </FieldLabel>
           <FieldLabel label="Application (optional)">
             <AppSelect options={applicationOptions} value={form.application_id} onChange={(v) => setForm((p) => ({ ...p, application_id: v }))} placeholder="Link to application..." isClearable isDisabled={saving} />
           </FieldLabel>
           <FieldLabel label="Permit Type">
-            <AppSelect options={PERMIT_TYPES} value={form.permit_type} onChange={(v) => setForm((p) => ({ ...p, permit_type: v || 'ENVIRONMENTAL' }))} isDisabled={saving} />
+            <AppSelect
+              options={permitTypeOptions}
+              value={form.permit_type}
+              onChange={(v) => setForm((p) => ({ ...p, permit_type: v || '' }))}
+              placeholder="Select type..."
+              isDisabled={saving}
+            />
           </FieldLabel>
           <FieldLabel label="Permit No.">
             <Input value={form.permit_no} onChange={(v) => setForm((p) => ({ ...p, permit_no: v }))} />
@@ -385,5 +527,36 @@ function Input({ value, onChange, type = 'text' }: { value: string; onChange: (v
       value={value}
       onChange={(e) => onChange(e.target.value)}
     />
+  );
+}
+
+function ExpiryStatCard({
+  label,
+  value,
+  tone,
+  active,
+  onClick,
+}: {
+  label: string;
+  value: number;
+  tone?: 'warn' | 'danger';
+  active: boolean;
+  onClick: () => void;
+}) {
+  const color = tone === 'danger' ? '#fca5a5' : tone === 'warn' ? '#f59e0b' : 'var(--text)';
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="glass-card p-3.5 !border-transparent flex-1 min-w-[160px] text-left cursor-pointer transition-shadow"
+      style={{
+        backgroundColor: 'var(--surface)',
+        boxShadow: active ? `0 0 0 2px ${color}` : undefined,
+      }}
+      title={active ? 'Click again to clear this filter' : `Filter the table to ${label.toLowerCase()}`}
+    >
+      <div className="text-[10px] font-semibold uppercase tracking-widest text-secondary">{label}</div>
+      <div className="mt-1 text-2xl font-bold" style={{ color }}>{value}</div>
+    </button>
   );
 }

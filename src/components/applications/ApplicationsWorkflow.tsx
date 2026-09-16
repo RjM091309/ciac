@@ -14,6 +14,7 @@ import {
   RefreshCw,
   Search,
   Upload,
+  X,
   XCircle,
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -298,8 +299,15 @@ export function ApplicationsWorkflow({
   /** Loaded values for update mode — Save stays disabled until something changes. */
   const [contractInitialSnapshot, setContractInitialSnapshot] = useState<typeof contractForm | null>(null);
   const consumedNotificationQueryRef = useRef<string>('');
+  const consumedStatusQueryRef = useRef<string>('');
   const applicationRowRefs = useRef<Record<number, HTMLTableRowElement | null>>({});
   const [appsSearchQuery, setAppsSearchQuery] = useState('');
+  // Pre-applied when landing here from a dashboard stat card (e.g. "Rejected
+  // / Returned" -> ?status=REJECTED,RETURNED) so the list is already scoped
+  // instead of showing every status mixed together. Stays active (and in the
+  // URL) until the officer clears it — unlike the one-shot notification
+  // row-highlight below, a status filter is a standing view, not a flash.
+  const [statusFilterCodes, setStatusFilterCodes] = useState<string[]>([]);
   const [appsPageSize, setAppsPageSize] = useState(5);
   const [appsPage, setAppsPage] = useState(1);
   const [highlightedApplicationId, setHighlightedApplicationId] = useState<number | null>(null);
@@ -375,16 +383,19 @@ export function ApplicationsWorkflow({
     [applicationsEffective, renewalMode]
   );
   const filteredApps = useMemo(() => {
+    const base = statusFilterCodes.length
+      ? appsByType.filter((a) => statusFilterCodes.includes(String(a.status || '').toUpperCase()))
+      : appsByType;
     const q = appsSearchQuery.trim().toLowerCase();
-    if (!q) return appsByType;
-    return appsByType.filter((a) => {
+    if (!q) return base;
+    return base.filter((a) => {
       const appNo = String(a.application_no || '').toLowerCase();
       const proponent = String(a.proponent_name || '').toLowerCase();
       const status = String(a.status || '').toLowerCase();
       const type = String(a.application_type || '').toLowerCase();
       return appNo.includes(q) || proponent.includes(q) || status.includes(q) || type.includes(q);
     });
-  }, [appsByType, appsSearchQuery]);
+  }, [appsByType, appsSearchQuery, statusFilterCodes]);
   const appsTotalPages = useMemo(
     () => Math.max(1, Math.ceil(filteredApps.length / Math.max(1, appsPageSize))),
     [filteredApps.length, appsPageSize]
@@ -568,6 +579,23 @@ export function ApplicationsWorkflow({
     setShouldCleanNotificationQuery(true);
     highlightApplicationRow(rawId);
   }, [appsByType, appsPageSize, appsSearchQuery, filteredApps, highlightApplicationRow, locationSearch]);
+
+  useEffect(() => {
+    const search = String(locationSearch || '').trim();
+    if (!search || consumedStatusQueryRef.current === search) return;
+    const params = new URLSearchParams(search.startsWith('?') ? search : `?${search}`);
+    const raw = params.get('status');
+    if (!raw) return;
+    consumedStatusQueryRef.current = search;
+    const codes = raw
+      .split(',')
+      .map((s) => s.trim().toUpperCase())
+      .filter(Boolean);
+    if (codes.length) {
+      setStatusFilterCodes(codes);
+      setAppsPage(1);
+    }
+  }, [locationSearch]);
 
   useEffect(() => {
     if (!highlightedApplicationId) return;
@@ -926,6 +954,18 @@ export function ApplicationsWorkflow({
               }}
             />
           </div>
+          {statusFilterCodes.length > 0 ? (
+            <button
+              type="button"
+              onClick={() => setStatusFilterCodes([])}
+              className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[11px] font-semibold cursor-pointer shrink-0"
+              style={{ backgroundColor: 'rgba(59,130,246,.14)', color: '#3b82f6', border: '1px solid rgba(59,130,246,.38)' }}
+              title="Clear status filter"
+            >
+              Filtered: {statusFilterCodes.map((c) => c.replace(/_/g, ' ')).join(', ')}
+              <X size={12} />
+            </button>
+          ) : null}
         </div>
         {baseLoading ? (
           <div className="py-2">

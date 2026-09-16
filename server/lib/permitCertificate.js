@@ -1,30 +1,21 @@
 const crypto = require("crypto");
 const { fmtDate, buildCertificateHtml, renderHtmlToPdf, buildQrDataUrl } = require("./certificateRenderer");
 
-const PERMIT_TYPE_LABELS = {
-  ENVIRONMENTAL: "Environmental Permit",
-  FIRE: "Fire Safety Permit",
-  OCCUPANCY: "Occupancy Permit",
-  SANITARY: "Sanitary Permit",
-  AUTHORITY_TO_OPERATE: "Authority to Operate",
-};
+// "CONTRACT" is the one permit type that isn't a Settings -> Compliance
+// Types entry (see server/models/Permit.js) — everything else's display
+// name/title is driven by the configured compliance type's own name
+// (typeName, passed in by the caller via ComplianceType.getByCode) so a
+// newly added type just works without a code change here.
+const RESERVED_TYPE_LABELS = { CONTRACT: "Lease Contract" };
 
-// The certificate's own headline — the actual PH-style name each permit type
-// is issued under, not a generic "Certificate of Permit" for every kind.
-const CERTIFICATE_TITLES = {
-  ENVIRONMENTAL: "CERTIFICATE OF ENVIRONMENTAL COMPLIANCE",
-  FIRE: "FIRE SAFETY CERTIFICATE",
-  OCCUPANCY: "CERTIFICATE OF OCCUPANCY",
-  SANITARY: "SANITARY PERMIT",
-  AUTHORITY_TO_OPERATE: "AUTHORITY TO OPERATE",
-};
-
-function permitTypeLabel(type) {
-  return PERMIT_TYPE_LABELS[String(type || "").toUpperCase()] || String(type || "Permit");
+function permitTypeLabel(type, typeName) {
+  if (typeName) return typeName;
+  return RESERVED_TYPE_LABELS[String(type || "").toUpperCase()] || String(type || "Permit");
 }
 
-function certificateTitle(type) {
-  return CERTIFICATE_TITLES[String(type || "").toUpperCase()] || "CERTIFICATE OF COMPLIANCE";
+function certificateTitle(type, typeName) {
+  const label = permitTypeLabel(type, typeName);
+  return `CERTIFICATE OF ${label}`.toUpperCase();
 }
 
 /** Stable reference numbers derived from the permit itself — no extra DB
@@ -63,6 +54,7 @@ function verificationCode(permit) {
  */
 async function renderPermitCertificate({
   permit,
+  typeName,
   proponentName,
   proponentAddress,
   applicationNo,
@@ -82,7 +74,7 @@ async function renderPermitCertificate({
 
   const html = buildCertificateHtml({
     officeLine: "Office of Compliance & Permits — 3CORE Locator & Compliance System",
-    titleText: certificateTitle(permit.permit_type),
+    titleText: certificateTitle(permit.permit_type, typeName),
     certLabel: "CERTIFICATE NO",
     certNo: certificateNo(permit),
     businessName: proponentName,
@@ -90,7 +82,7 @@ async function renderPermitCertificate({
     statementHtml:
       `has duly complied with and fulfilled the mandatory criteria, documentary requirements, and ` +
       `operational standards for the above permit type, as administered under the applicable ` +
-      `compliance rules of this Office, and is hereby granted this ${permitTypeLabel(permit.permit_type)}.`,
+      `compliance rules of this Office, and is hereby granted this ${permitTypeLabel(permit.permit_type, typeName)}.`,
     metaRows,
     refCode,
     qrDataUrl,

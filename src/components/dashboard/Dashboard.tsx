@@ -531,7 +531,7 @@ export function Dashboard({ data, navigate }: { data: AdminDashboardData | null;
             icon={Building2}
             trend="up"
             trendValue={`${totals.totalBusinesses} on record`}
-            onClick={navigate ? () => navigate('/settings/proponents') : undefined}
+            onClick={navigate ? () => navigate('/settings/locator-users?hasBusiness=1') : undefined}
           />
           <MetricCard
             title="Pending Review"
@@ -545,7 +545,7 @@ export function Dashboard({ data, navigate }: { data: AdminDashboardData | null;
             title="Rejected / Returned"
             value={rejectedReturned}
             icon={XCircle}
-            onClick={navigate ? () => navigate('/approval') : undefined}
+            onClick={navigate ? () => navigate('/applications/new?status=REJECTED,RETURNED') : undefined}
             trend={rejectedReturned > 0 ? 'down' : 'up'}
             trendValue={`${statusBreakdown.rejected} rejected, ${statusBreakdown.returned} returned`}
           />

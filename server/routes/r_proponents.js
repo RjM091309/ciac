@@ -2,7 +2,7 @@ const express = require("express");
 const router = express.Router();
 const proponentsController = require("../controller/c_proponents");
 const portalController = require("../controller/c_proponent_portal");
-const { requireMenuAccess, requireProponentRole, requireProponentSelf, requireOwnApplication, isAuthenticated } = require("../middleware/m_auth");
+const { requireMenuAccess, requireProponentRole, requireProponentSelf, requireOwnApplication, requireStaffRole } = require("../middleware/m_auth");
 const { handleUpload } = require("../lib/fileStorage");
 
 const MENU_KEY = "settings:proponents";
@@ -45,8 +45,10 @@ router.patch("/change-requests/:id/reject", requireMenuAccess(MENU_KEY, "edit"),
 // Plain reference-data lookup (e.g. the locator dropdown on New
 // Applications/Renewal Tracking and Permits Management) — not gated behind
 // the settings:proponents CRUD menu, which no sidebar page grants access to
-// any more now that the standalone Locator Management page is gone.
-router.get("/", isAuthenticated, proponentsController.list);
+// any more now that the standalone Locator Management page is gone. Staff
+// only, though: this returns every business's contact info and decrypted
+// TIN, which a Locator account has no legitimate reason to enumerate.
+router.get("/", requireStaffRole, proponentsController.list);
 router.get("/:id", requireMenuAccess(MENU_KEY, "view"), proponentsController.getById);
 router.post("/", requireMenuAccess(MENU_KEY, "add"), proponentsController.create);
 router.put("/:id", requireMenuAccess(MENU_KEY, "edit"), proponentsController.update);

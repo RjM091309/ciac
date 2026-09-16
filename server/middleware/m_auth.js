@@ -246,6 +246,37 @@ async function requireProponentRole(req, res, next) {
 }
 
 /**
+ * Blocks the 'proponent' (Locator) role while letting every other
+ * authenticated role through — for shared reference-data lookups (e.g. the
+ * locator picker behind r_proponents.js's plain GET "/") that many staff
+ * screens use regardless of their own Control Panel menu permission, so
+ * requireMenuAccess isn't the right gate. The thing that actually needs
+ * blocking isn't "which staff screen unlocked this" — it's a Locator
+ * account calling the endpoint directly and enumerating every other
+ * registered business's contact info and (decrypted) TIN, which no
+ * locator-facing screen has any legitimate reason to need.
+ *
+ * Checks only the JWT's effective role (req.user.role), NOT
+ * Role.userHasRoleName — unlike requireProponentRole/requireProponentSelf,
+ * which OR in that live DB check as a permissive fallback (grant access if
+ * proponent is ANY of the caller's roles, handy for an admin account also
+ * holding 'proponent' to test self-service routes). Blocking is the
+ * opposite polarity: a multi-role admin/staff account whose effective role
+ * already resolves to something else (login prefers admin/staff over
+ * proponent when tie-breaking) must not get swept up as "a proponent"
+ * merely for also holding that role for preview/testing purposes.
+ */
+function requireStaffRole(req, res, next) {
+  if (!req.user) {
+    return res.status(401).json({ success: false, message: "Access token required" });
+  }
+  if (String(req.user.role || "").toLowerCase() === "proponent") {
+    return res.status(403).json({ success: false, message: "Forbidden" });
+  }
+  return next();
+}
+
+/**
  * Guards a proponent self-service route. Requires an authenticated user who
  * holds the 'proponent' role AND has a linked (active) proponent profile. On
  * success attaches `req.proponent`. Checks the JWT's primary role first
@@ -318,6 +349,7 @@ module.exports = {
   requireUserMenuAccess,
   requireApplicationsAccess,
   requireProponentRole,
+  requireStaffRole,
   requireProponentSelf,
   requireOwnApplication,
 };

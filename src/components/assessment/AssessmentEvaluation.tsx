@@ -344,16 +344,13 @@ export function AssessmentEvaluation({
         <StatTile label="Returned" value={summary?.by_stage?.RETURNED ?? '—'} tone="#f59e0b" />
       </div>
 
-      <div className="flex items-center justify-between gap-2">
-        <h3 className="text-base sm:text-lg font-bold tracking-tight" style={{ color: 'var(--text)' }}>
-          Evaluation Queue
-        </h3>
+      <div className="flex items-center justify-end gap-2">
         <button
-          className="rounded-lg px-3 py-1.5 text-[12px] font-semibold border inline-flex items-center gap-1.5"
-          style={{ borderColor: 'var(--border)', color: 'var(--text)' }}
+          className="rounded-lg px-3 py-2 text-sm font-semibold inline-flex items-center gap-1.5 shadow-sm cursor-pointer"
+          style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
           onClick={() => setCompletedOpen(true)}
         >
-          <CheckCircle2 size={14} />
+          <CheckCircle2 size={15} />
           Completed ({summary?.by_stage?.COMPLETED ?? 0})
         </button>
       </div>

@@ -41,6 +41,12 @@ function mapRow(row) {
   };
 }
 
+async function listActiveCodes() {
+  await ensureSchema();
+  const rows = await selectData(`SELECT code FROM dbo.compliance_types WHERE is_active = 1`);
+  return rows.map((r) => String(r.code || "").trim().toUpperCase());
+}
+
 async function listComplianceTypes() {
   await ensureSchema();
   const rows = await selectData(`
@@ -58,6 +64,20 @@ async function listComplianceTypes() {
     ORDER BY ct.id DESC
   `);
   return rows.map(mapRow);
+}
+
+// Used to give the permit certificate a proper "CERTIFICATE OF <NAME>"-style
+// title driven by the File Maintenance-configurable type name, instead of a
+// hardcoded label (see lib/permitCertificate.js) — same pattern as
+// ApplicationType.getByCode for contract certificates.
+async function getByCode(code) {
+  await ensureSchema();
+  const rows = await selectData(
+    `SELECT id, code, name, description, is_active FROM dbo.compliance_types WHERE UPPER(code) = UPPER(@param0)`,
+    [String(code || "").trim()]
+  );
+  const row = rows?.[0];
+  return row ? mapRow(row) : null;
 }
 
 async function getComplianceTypeById(id) {
@@ -150,6 +170,8 @@ async function reactivateComplianceType(id, updated_by) {
 
 module.exports = {
   ensureSchema,
+  listActiveCodes,
+  getByCode,
   listComplianceTypes,
   getComplianceTypeById,
   createComplianceType,

@@ -2,6 +2,7 @@ const express = require("express");
 const path = require("path");
 const cookieParser = require("cookie-parser");
 const cors = require("cors");
+const helmet = require("helmet");
 require("dotenv").config({ path: path.join(__dirname, ".env"), override: true });
 
 const { attachUserFromJwt } = require("./middleware/m_auth");
@@ -11,6 +12,14 @@ const Role = require("./models/Role");
 const User = require("./models/User");
 
 const app = express();
+
+// Baseline HTTP security headers (X-Frame-Options, X-Content-Type-Options,
+// Strict-Transport-Security, Referrer-Policy, etc.). CSP is left to helmet's
+// off-by-default here — this server only ever emits JSON plus a couple of
+// static assets under server/public, not the real SPA (that's Vite/the
+// frontend's own build), so a same-origin CSP tuned for a full app markup
+// isn't the right fit for what this process actually serves.
+app.use(helmet({ contentSecurityPolicy: false }));
 
 function collectAllowedOrigins() {
   const envOrigins = [

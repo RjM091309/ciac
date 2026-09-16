@@ -437,10 +437,7 @@ export function RequirementsManagement() {
         />
       </div>
 
-      <div className="flex items-center justify-between gap-2">
-        <h3 className="text-base sm:text-lg font-bold tracking-tight" style={{ color: 'var(--text)' }}>
-          Requirements List
-        </h3>
+      <div className="flex items-center justify-end gap-2">
         {canAdd ? (
           <button
             className="rounded-lg px-3 py-2 text-sm font-semibold inline-flex items-center gap-1.5 shadow-sm cursor-pointer"

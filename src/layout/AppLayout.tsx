@@ -16,7 +16,6 @@ export type AppView =
   | 'assessment:queue'
   | 'approval:queue'
   | 'compliance:permits'
-  | 'compliance:expiry'
   | 'compliance:inspections'
   | 'reports:analytics'
   | 'settings:users'

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Ban, Clock3, KeyRound, LogOut, Pencil, RotateCcw, Search, ShieldCheck, ShieldOff, Smartphone, UserX } from 'lucide-react';
+import { Ban, Clock3, KeyRound, LogOut, Pencil, RotateCcw, Search, ShieldCheck, ShieldOff, Smartphone, UserX, X } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { toast } from 'sonner';
 import { SidePanel } from '../ui/SidePanel';
@@ -22,6 +22,12 @@ type Role = {
 
 type AccountStatus = 'ACTIVE' | 'SUSPENDED' | 'DEACTIVATED' | 'PENDING';
 
+function effectiveStatus(u: { status?: AccountStatus; is_active: number }): AccountStatus {
+  if (u.status === 'PENDING') return 'PENDING';
+  if (u.status === 'SUSPENDED') return 'SUSPENDED';
+  return u.is_active === 1 ? 'ACTIVE' : 'DEACTIVATED';
+}
+
 type UserRow = {
   id: number;
   username: string;
@@ -39,6 +45,14 @@ type UserRow = {
 type UsersRolesData = {
   users: UserRow[];
   roles: Role[];
+  // user_ids with a linked, active business profile — "Registered
+  // Businesses" on the dashboard counts proponent (business) records, not
+  // locator login accounts, so filtering by account status alone doesn't
+  // reproduce that number (a Pending-login account can already have an
+  // active business on file, and an Active account can have none yet).
+  // Plain array, not a Set — useSessionStorageCachedResource round-trips
+  // this through JSON via sessionStorage, and JSON.stringify(Set) -> "{}".
+  activeBusinessUserIds: number[];
 };
 
 function api(path: string) {
@@ -52,7 +66,7 @@ function isLocatorRoleName(name: string) {
   return String(name || '').trim().toUpperCase() === 'PROPONENT';
 }
 
-export function LocatorUsersManagement() {
+export function LocatorUsersManagement({ locationSearch = '' }: { locationSearch?: string } = {}) {
   const { fullAccess, crudPermissions } = useControlPanelAccess();
   const perm = crudPermissions[MENU_KEY] || { can_add: false, can_edit: false, can_delete: false };
   const canAdd = fullAccess || perm.can_add;
@@ -63,6 +77,15 @@ export function LocatorUsersManagement() {
   const [editing, setEditing] = useState<UserRow | null>(null);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [confirmDeactivateId, setConfirmDeactivateId] = useState<number | null>(null);
+  // Pre-applied when landing here from the dashboard's "Registered
+  // Businesses" card (?status=ACTIVE) so the list is already scoped instead
+  // of showing every status (active/pending/suspended/deactivated) mixed
+  // together. Stays active until the officer clears it.
+  const [statusFilterCodes, setStatusFilterCodes] = useState<AccountStatus[]>([]);
+  // Separate dimension from statusFilterCodes: "has a registered business",
+  // matching the dashboard's "Registered Businesses" count (proponent
+  // records), not the locator's own login/account status.
+  const [hasBusinessFilter, setHasBusinessFilter] = useState(false);
   const [confirmReactivateId, setConfirmReactivateId] = useState<number | null>(null);
   const [confirmSuspendId, setConfirmSuspendId] = useState<number | null>(null);
   const [confirmRevokeId, setConfirmRevokeId] = useState<number | null>(null);
@@ -76,16 +99,26 @@ export function LocatorUsersManagement() {
     ttlMs: 5 * 60 * 1000, // 5 minutes — shares the cache key with UsersManagement since it's the same underlying data
     fetcher: async () => {
       setError(null);
-      const [uRes, rRes] = await Promise.all([
+      const [uRes, rRes, pRes] = await Promise.all([
         fetch(api('/api/users'), { credentials: 'include' }),
         fetch(api('/api/roles'), { credentials: 'include' }),
+        fetch(api('/api/proponents'), { credentials: 'include' }),
       ]);
 
       const uJson = await uRes.json();
       const rJson = await rRes.json();
+      const pJson = await pRes.json().catch(() => ({}));
 
       if (!uRes.ok) throw new Error(uJson?.message || 'Failed to load users');
       if (!rRes.ok) throw new Error(rJson?.message || 'Failed to load roles');
+
+      const activeBusinessUserIds = Array.from(
+        new Set<number>(
+          (pRes.ok && Array.isArray(pJson?.data) ? pJson.data : [])
+            .filter((p: any) => Number(p?.is_active) && p?.user_id != null)
+            .map((p: any) => Number(p.user_id))
+        )
+      );
 
       return {
         users: (uJson.data || []).map((u: any) => ({
@@ -94,6 +127,7 @@ export function LocatorUsersManagement() {
           totp_enabled: Number(u?.totp_enabled) ? 1 : 0,
         })),
         roles: rJson.data || [],
+        activeBusinessUserIds,
       };
     },
     onError: (e) => {
@@ -104,10 +138,19 @@ export function LocatorUsersManagement() {
   });
 
   const allRoles = usersRoles?.roles ?? [];
+  const activeBusinessUserIds = useMemo(
+    () => new Set<number>(usersRoles?.activeBusinessUserIds ?? []),
+    [usersRoles?.activeBusinessUserIds]
+  );
   const locatorRole = useMemo(() => allRoles.find((r) => isLocatorRoleName(r.name)) || null, [allRoles]);
 
-  const userRows = (Array.isArray(usersRoles?.users) ? usersRoles.users : []).filter((u) =>
-    (u.roles || []).some((r) => isLocatorRoleName(r.name))
+  // A genuine locator account always holds exactly one role (Locator) — the
+  // New Locator Account form only ever assigns that single role_id. Matching
+  // "holds Locator among possibly several roles" instead would also sweep in
+  // a multi-role staff account (e.g. admin also holding Proponent, for the
+  // dashboard role-preview switcher) that isn't really a locator.
+  const userRows = (Array.isArray(usersRoles?.users) ? usersRoles.users : []).filter(
+    (u) => (u.roles || []).length === 1 && isLocatorRoleName(u.roles[0].name)
   );
 
   const [form, setForm] = useState({
@@ -129,9 +172,15 @@ export function LocatorUsersManagement() {
   }, [userRows]);
 
   const filteredUsers = useMemo(() => {
+    let base = statusFilterCodes.length
+      ? userRows.filter((u) => statusFilterCodes.includes(effectiveStatus(u)))
+      : userRows;
+    if (hasBusinessFilter) {
+      base = base.filter((u) => activeBusinessUserIds.has(u.id));
+    }
     const q = searchQuery.trim().toLowerCase();
-    if (!q) return userRows;
-    return userRows.filter((u) => {
+    if (!q) return base;
+    return base.filter((u) => {
       const statusStr = u.status === 'SUSPENDED' ? 'suspended' : u.is_active === 1 ? 'active' : 'deactivated inactive';
       return (
         (u.username || '').toLowerCase().includes(q) ||
@@ -140,7 +189,25 @@ export function LocatorUsersManagement() {
         statusStr.includes(q)
       );
     });
-  }, [userRows, searchQuery]);
+  }, [userRows, searchQuery, statusFilterCodes, hasBusinessFilter, activeBusinessUserIds]);
+
+  useEffect(() => {
+    const search = String(locationSearch || '').trim();
+    if (!search) return;
+    const params = new URLSearchParams(search.startsWith('?') ? search : `?${search}`);
+    const raw = params.get('status');
+    if (raw) {
+      const codes = raw
+        .split(',')
+        .map((s) => s.trim().toUpperCase())
+        .filter((s): s is AccountStatus => ['ACTIVE', 'SUSPENDED', 'DEACTIVATED', 'PENDING'].includes(s));
+      if (codes.length) setStatusFilterCodes(codes);
+    }
+    if (params.get('hasBusiness') === '1') setHasBusinessFilter(true);
+    // Runs once on mount to consume the deep-link filter — intentionally not
+    // re-syncing on every locationSearch change so clearing the chip sticks.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const totalPages = useMemo(() => {
     const count = Math.max(1, Math.ceil(filteredUsers.length / Math.max(1, pageSize)));
@@ -496,6 +563,30 @@ export function LocatorUsersManagement() {
               }}
             />
           </div>
+          {statusFilterCodes.length > 0 ? (
+            <button
+              type="button"
+              onClick={() => setStatusFilterCodes([])}
+              className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[11px] font-semibold cursor-pointer shrink-0"
+              style={{ backgroundColor: 'rgba(59,130,246,.14)', color: '#3b82f6', border: '1px solid rgba(59,130,246,.38)' }}
+              title="Clear status filter"
+            >
+              Filtered: {statusFilterCodes.map((c) => c.charAt(0) + c.slice(1).toLowerCase()).join(', ')}
+              <X size={12} />
+            </button>
+          ) : null}
+          {hasBusinessFilter ? (
+            <button
+              type="button"
+              onClick={() => setHasBusinessFilter(false)}
+              className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[11px] font-semibold cursor-pointer shrink-0"
+              style={{ backgroundColor: 'rgba(59,130,246,.14)', color: '#3b82f6', border: '1px solid rgba(59,130,246,.38)' }}
+              title="Clear filter"
+            >
+              Filtered: Has registered business
+              <X size={12} />
+            </button>
+          ) : null}
         </div>
 
         {isLoading ? (

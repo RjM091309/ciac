@@ -5,6 +5,7 @@ const Proponent = require("../models/Proponent");
 const Workflow = require("../models/ApplicationWorkflow");
 const User = require("../models/User");
 const Contract = require("../models/Contract");
+const ComplianceType = require("../models/ComplianceType");
 const { renderPermitCertificate } = require("../lib/permitCertificate");
 const { STORAGE_ROOT, relativeStoragePath, resolveStoredPath } = require("../lib/fileStorage");
 
@@ -27,13 +28,15 @@ function titleCaseRoleName(name) {
 async function generateAndAttachCertificate(permit) {
   try {
     const approverId = permit.updated_by || permit.created_by;
-    const [proponent, application, approver] = await Promise.all([
+    const [proponent, application, approver, complianceType] = await Promise.all([
       Proponent.getProponentById(permit.proponent_id),
       permit.application_id ? Workflow.getApplicationById(permit.application_id) : Promise.resolve(null),
       approverId ? User.getUserById(approverId) : Promise.resolve(null),
+      ComplianceType.getByCode(permit.permit_type),
     ]);
     const pdfBuffer = await renderPermitCertificate({
       permit,
+      typeName: complianceType?.name || null,
       proponentName: proponent?.business_name || null,
       proponentAddress: proponent?.address || null,
       applicationNo: application?.application_no || null,

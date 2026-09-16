@@ -255,7 +255,16 @@ const LIST_SELECT = `
 
 async function listAssessments({ stage, evaluatorId, search } = {}) {
   await ensureSchema();
-  const where = [];
+  const where = [
+    // A DRAFT application was never submitted and shouldn't be reviewable
+    // yet; REJECTED is the pre-assessment screening decision (New
+    // Applications), an application rejected there never enters this queue.
+    // The LEFT JOIN's ISNULL(...'UNASSIGNED') default was showing both as
+    // phantom "unassigned" rows even though no real assessment row exists —
+    // asm.id IS NOT NULL still surfaces a genuine (historical) assessment
+    // record for either status, so nothing real gets hidden.
+    "(a.status NOT IN ('DRAFT', 'REJECTED') OR asm.id IS NOT NULL)",
+  ];
   const params = [];
   const stageFilter = pick(stage, STAGES);
   if (stageFilter) {
@@ -288,6 +297,7 @@ async function getSummary() {
     SELECT ISNULL(asm.stage, 'UNASSIGNED') AS stage, COUNT(1) AS total
     FROM dbo.applications a
     LEFT JOIN dbo.application_assessments asm ON asm.application_id = a.id
+    WHERE (a.status NOT IN ('DRAFT', 'REJECTED') OR asm.id IS NOT NULL)
     GROUP BY ISNULL(asm.stage, 'UNASSIGNED')
   `);
   const byStage = {};

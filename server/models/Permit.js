@@ -1,6 +1,10 @@
 const { selectData, insertData, updateData, updateSchema } = require("../config/database");
+const ComplianceType = require("./ComplianceType");
 
-const PERMIT_TYPES = ["ENVIRONMENTAL", "FIRE", "OCCUPANCY", "SANITARY", "AUTHORITY_TO_OPERATE", "CONTRACT"];
+// System-generated only — Contract.js auto-creates/syncs a permit row with
+// this exact type whenever a contract is issued (see keepContractPermitInSync
+// there); it is not one of the configurable Settings -> Compliance Types.
+const RESERVED_PERMIT_TYPE = "CONTRACT";
 const EXPIRING_WINDOW_DAYS = 30;
 
 function toInt(v) {
@@ -9,9 +13,23 @@ function toInt(v) {
   return Number.isFinite(n) ? n : null;
 }
 
-function normalizeType(v) {
-  const raw = String(v ?? "").trim().toUpperCase().replace(/[\s-]+/g, "_");
-  return PERMIT_TYPES.includes(raw) ? raw : "ENVIRONMENTAL";
+/** Permit "type" is now driven by Settings -> Compliance Types (File
+ * Maintenance) instead of a hardcoded enum, so a locator/staff-added type
+ * (e.g. a new "Fire Safety" or "Environmental Compliance" entry) is usable
+ * here immediately — same pattern as isValidApplicationType. */
+async function isValidPermitType(v) {
+  const raw = String(v ?? "").trim().toUpperCase();
+  if (raw === RESERVED_PERMIT_TYPE) return true;
+  const activeCodes = await ComplianceType.listActiveCodes();
+  return activeCodes.includes(raw);
+}
+
+async function normalizeType(v) {
+  const raw = String(v ?? "").trim().toUpperCase();
+  if (!(await isValidPermitType(raw))) {
+    throw new Error(`Invalid permit type: "${v}". Choose one of the active Compliance Types.`);
+  }
+  return raw;
 }
 
 /** Effective status: explicit REVOKED wins, otherwise derived from expiry_date. */
@@ -144,6 +162,7 @@ async function getById(id) {
 
 async function create(data) {
   await ensureSchema();
+  const permitType = await normalizeType(data.permit_type);
   const result = await insertData(
     `
     INSERT INTO dbo.permits
@@ -155,7 +174,7 @@ async function create(data) {
     [
       toInt(data.proponent_id),
       toInt(data.application_id),
-      normalizeType(data.permit_type),
+      permitType,
       String(data.permit_no || "").trim(),
       data.issuing_authority ? String(data.issuing_authority).trim() : null,
       data.issue_date || null,
@@ -178,7 +197,7 @@ async function update(id, data) {
     params.push(val);
   };
   if (data.application_id !== undefined) push("application_id = ?", toInt(data.application_id));
-  if (data.permit_type !== undefined) push("permit_type = ?", normalizeType(data.permit_type));
+  if (data.permit_type !== undefined) push("permit_type = ?", await normalizeType(data.permit_type));
   if (data.permit_no !== undefined) push("permit_no = ?", String(data.permit_no || "").trim());
   if (data.issuing_authority !== undefined) push("issuing_authority = ?", data.issuing_authority ? String(data.issuing_authority).trim() : null);
   if (data.issue_date !== undefined) push("issue_date = ?", data.issue_date || null);
@@ -223,7 +242,6 @@ async function getCertificatePath(id) {
 }
 
 module.exports = {
-  PERMIT_TYPES,
   ensureSchema,
   effectiveStatus,
   listAll,

@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import {
   BarChart3,
-  CalendarClock,
   ChevronRight,
   ClipboardCheck,
   ClipboardList,
@@ -309,8 +308,7 @@ export function AppSidebar({
     canView('approval:queue');
   const showComplianceInspection = canView('compliance:inspections');
   const showPermits = canView('compliance:permits');
-  const showExpiryCalendar = canView('compliance:expiry');
-  const showComplianceGroup = showComplianceInspection || showPermits || showExpiryCalendar;
+  const showComplianceGroup = showComplianceInspection || showPermits;
   const showReports = canView('reports:analytics');
   const showSystemSettings =
     canView('settings:users') ||
@@ -343,10 +341,6 @@ export function AppSidebar({
   const permitsItems: SidebarLeaf[] = !canView('compliance:permits') ? [] : [
     { key: 'compliance:permits', label: 'Environmental, Fire, Occupancy, Sanitary', active: view === 'compliance:permits', onClick: () => onViewChange('compliance:permits') },
   ];
-
-  const expiryCalendarItems: SidebarLeaf[] = [
-    canView('compliance:expiry') && { key: 'compliance:expiry', label: 'Expiring Permits', active: view === 'compliance:expiry', onClick: () => onViewChange('compliance:expiry') },
-  ].filter(Boolean) as SidebarLeaf[];
 
   const systemSettingsItems: SidebarLeaf[] = [
     canView('settings:users') && { key: 'settings:users', label: 'User Management', active: view === 'settings:users', onClick: () => onViewChange('settings:users') },
@@ -430,15 +424,6 @@ export function AppSidebar({
                 collapsed={collapsed}
                 isOpen={openDropdownId === 'permits'}
                 onToggle={() => toggleDropdown('permits')}
-              />
-              <SidebarSection
-                icon={CalendarClock}
-                label="Expiry Permits"
-                items={expiryCalendarItems}
-                flat={flat}
-                collapsed={collapsed}
-                isOpen={openDropdownId === 'expiry-calendar'}
-                onToggle={() => toggleDropdown('expiry-calendar')}
               />
             </div>
           </SidebarGroup>

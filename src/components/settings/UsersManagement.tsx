@@ -111,8 +111,14 @@ export function UsersManagement({
     },
   });
 
+  // Mirrors LocatorUsersManagement's "exactly one role" check: a genuine
+  // locator account only ever holds the single Locator role, so that's what
+  // "is a locator, not staff" should mean here too. Matching "holds Locator
+  // among possibly several roles" would incorrectly hide a multi-role staff
+  // account (e.g. admin also holding Proponent, for the dashboard
+  // role-preview switcher) from its own User Management list.
   const userRows = (Array.isArray(usersRoles?.users) ? usersRoles.users : []).filter(
-    (u) => !(u.roles || []).some((r) => isLocatorRoleName(r.name))
+    (u) => !((u.roles || []).length === 1 && isLocatorRoleName(u.roles[0].name))
   );
   const roles = (usersRoles?.roles ?? []).filter((r) => !isLocatorRoleName(r.name));
 

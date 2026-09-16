@@ -1,5 +1,5 @@
 import type { AppView } from '../layout/AppLayout';
-import { BarChart3, CalendarClock, FileCheck, FolderTree, Layers, ShieldCheck, Users } from 'lucide-react';
+import { BarChart3, FileCheck, FolderTree, Layers, ShieldCheck, Users } from 'lucide-react';
 
 export type LandingConfig = {
   title: string;
@@ -144,25 +144,6 @@ export const LANDING_CONFIG: Record<AppView, LandingConfig> = {
         ['HarborFresh Cold Storage', 'Occupancy', 'OCC-24-019', 'Mar 31, 2026', 'Expiring'],
         ['GreenFuel Terminals Corp.', 'Fire Safety', 'FSIC-26-088', 'Apr 12, 2026', 'Valid'],
         ['NorthGate Foods Corp.', 'Sanitary', 'SAN-25-103', 'Jan 10, 2026', 'Expired'],
-      ],
-    },
-  },
-  'compliance:expiry': {
-    title: 'Expiry Permits',
-    description: 'Calendar view of all upcoming permit expirations across locators.',
-    badge: 'Calendar',
-    icon: CalendarClock,
-    stats: [
-      { label: 'Expiring This Month', value: '14' },
-      { label: 'Next 90 Days', value: '29' },
-      { label: 'Overdue', value: '3' },
-    ],
-    table: {
-      columns: ['Date', 'Locator', 'Permit', 'Type', 'Days Left'],
-      rows: [
-        ['Mar 18, 2026', 'HarborFresh Cold Storage', 'Occupancy Permit', 'CDC', '6'],
-        ['Mar 22, 2026', 'Delta AeroTech', 'Fire Safety Inspection', 'CDC', '10'],
-        ['Apr 03, 2026', 'NorthGate Foods Corp.', 'Tax Clearance', 'BIR', '22'],
       ],
     },
   },
