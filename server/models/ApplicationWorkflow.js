@@ -243,33 +243,37 @@ async function createRequirementStatusNotifications({
     console.error("Create requirement notifications error:", error);
   }
 
-  if (String(nextStatus || "").toUpperCase() === "REJECTED") {
+  const upperStatus = String(nextStatus || "").toUpperCase();
+  if (upperStatus === "REJECTED" || upperStatus === "VERIFIED") {
     try {
       const locator = await getLocatorContactByProponentId(application?.proponent_id);
       if (locator?.email) {
         const applicationNo = String(application?.application_no || "").trim();
         const trimmedRemarks = String(remarks || "").trim();
         const loginUrl = `${String(process.env.FRONTEND_URL || "").replace(/\/+$/, "")}/`;
+        const isRejected = upperStatus === "REJECTED";
+        const actionLabel = isRejected ? "rejected" : "verified";
+        const callToAction = isRejected ? "review and resubmit" : "review your application";
         await sendMail({
           to: locator.email,
-          subject: `Requirement rejected for ${applicationNo || "your application"}`,
+          subject: `Requirement ${actionLabel} for ${applicationNo || "your application"}`,
           text:
             `Hello ${locator.full_name || ""},\n\n` +
-            `${requirementLabel || "A requirement"} for application ${applicationNo} was rejected.\n\n` +
+            `${requirementLabel || "A requirement"} for application ${applicationNo} was ${actionLabel}.\n\n` +
             (trimmedRemarks ? `Reason: ${trimmedRemarks}\n\n` : "") +
-            `Please sign in to the portal to review and resubmit: ${loginUrl}\n`,
+            `Please sign in to the portal to ${callToAction}: ${loginUrl}\n`,
           html:
             `<p>Hello ${locator.full_name || ""},</p>` +
-            `<p><b>${requirementLabel || "A requirement"}</b> for application <b>${applicationNo}</b> was rejected.</p>` +
+            `<p><b>${requirementLabel || "A requirement"}</b> for application <b>${applicationNo}</b> was ${actionLabel}.</p>` +
             (trimmedRemarks
               ? `<p><b>Reason:</b> ${trimmedRemarks}</p>`
               : "") +
-            `<p>Please sign in to review and resubmit.</p>` +
+            `<p>Please sign in to ${callToAction}.</p>` +
             `<p><a href="${loginUrl}" style="display:inline-block;padding:10px 18px;background:#111827;color:#fff;text-decoration:none;border-radius:6px;">Sign in to the portal</a></p>`,
         });
       }
     } catch (error) {
-      console.error("Send requirement rejection email error:", error);
+      console.error("Send requirement status email error:", error);
     }
   }
 }

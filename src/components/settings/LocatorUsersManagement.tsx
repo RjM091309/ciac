@@ -184,7 +184,12 @@ export function LocatorUsersManagement() {
     if ((form.address.trim() || form.contact_no.trim()) && !form.business_name.trim()) return false;
 
     if (!editing) {
-      return Boolean(username && email);
+      // A locator account created without a business profile lands the
+      // locator on the first-login setup wizard instead of the dashboard —
+      // requiring the profile up front here skips that extra step entirely.
+      return Boolean(
+        username && email && form.business_name.trim() && form.contact_no.trim() && form.address.trim()
+      );
     }
 
     if (!originalForm) return false;
@@ -275,6 +280,11 @@ export function LocatorUsersManagement() {
 
       if (!payload.username) throw new Error('Username is required');
       if (!payload.email) throw new Error('Email is required');
+      if (!editing) {
+        if (!payload.business_name) throw new Error('Business name is required');
+        if (!payload.contact_no) throw new Error('Contact number is required');
+        if (!payload.address) throw new Error('Business address is required');
+      }
 
       const res = await fetch(api(editing ? `/api/users/${editing.id}` : '/api/users'), {
         method: editing ? 'PUT' : 'POST',
@@ -759,16 +769,16 @@ export function LocatorUsersManagement() {
         </div>
 
         <div className="mt-4 pt-4 border-t" style={{ borderColor: 'var(--border-subtle)' }}>
-          <p className="text-xs font-bold uppercase tracking-widest text-secondary mb-1">Business profile (optional)</p>
+          <p className="text-xs font-bold uppercase tracking-widest text-secondary mb-1">Business profile</p>
           <p className="text-[11px] text-secondary mb-3">
             {editing
               ? loadingProfile
                 ? 'Loading current business profile…'
                 : "Edits here update the locator's business profile directly."
-              : "Fill this in and the locator's dashboard opens right after they set up their authenticator — otherwise they'll be asked to complete it themselves on first login."}
+              : "Required — the locator's dashboard opens right after they set up their authenticator, with their business profile already complete."}
           </p>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <Field label="Business name">
+            <Field label={editing ? 'Business name' : 'Business name *'}>
               <input
                 className="w-full rounded-md px-3 py-2 text-sm border focus:outline-none focus:border-[var(--nav-active-bg)]"
                 style={{ borderColor: 'var(--input-border)', color: 'var(--text)', backgroundColor: 'var(--input-bg)' }}
@@ -776,9 +786,10 @@ export function LocatorUsersManagement() {
                 onChange={(e) => setForm((p) => ({ ...p, business_name: e.target.value }))}
                 placeholder="e.g. SkyPort Logistics Inc."
                 disabled={loadingProfile}
+                required={!editing}
               />
             </Field>
-            <Field label="Contact number">
+            <Field label={editing ? 'Contact number' : 'Contact number *'}>
               <input
                 className="w-full rounded-md px-3 py-2 text-sm border focus:outline-none focus:border-[var(--nav-active-bg)]"
                 style={{ borderColor: 'var(--input-border)', color: 'var(--text)', backgroundColor: 'var(--input-bg)' }}
@@ -786,10 +797,11 @@ export function LocatorUsersManagement() {
                 onChange={(e) => setForm((p) => ({ ...p, contact_no: e.target.value }))}
                 placeholder="09XX XXX XXXX"
                 disabled={loadingProfile}
+                required={!editing}
               />
             </Field>
             <div className="sm:col-span-2">
-              <Field label="Business address">
+              <Field label={editing ? 'Business address' : 'Business address *'}>
                 <AddressAutocomplete
                   value={form.address}
                   onChange={(address) => setForm((p) => ({ ...p, address }))}

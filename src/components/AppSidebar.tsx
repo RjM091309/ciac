@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import {
+  BarChart3,
   CalendarClock,
   ChevronRight,
   ClipboardCheck,
@@ -200,6 +201,7 @@ const SidebarSection = ({
   collapsed,
   isOpen,
   onToggle,
+  singleItemIsGroup = true,
 }: {
   icon: any;
   label: string;
@@ -208,6 +210,16 @@ const SidebarSection = ({
   collapsed?: boolean;
   isOpen: boolean;
   onToggle: () => void;
+  /** Set false for an umbrella group whose items are genuinely different
+   * pages (System Settings: Users/Locator Accounts/Control Panel/Audit Log;
+   * File Maintenance: Requirement Categories/Inspection Types/...). When a
+   * restricted role only has one of those enabled, collapsing to the GROUP
+   * label (e.g. "System Settings") makes the sidebar say something
+   * different from the page actually open ("Locator Accounts") — so these
+   * groups keep the item's own label even at one item. Groups that are
+   * truly one page by nature (Assessment, Approval, Permits) keep the
+   * default group-label collapse below. */
+  singleItemIsGroup?: boolean;
 }) => {
   if (items.length === 0) return null;
 
@@ -218,7 +230,7 @@ const SidebarSection = ({
   // BOTH flat and dropdown mode — otherwise a restricted role (flat) sees a
   // raw descriptive sub-label ("Environmental, Fire, Occupancy, Sanitary")
   // where a full-access role sees the clean group name ("Permit & Contract").
-  if (items.length === 1) {
+  if (items.length === 1 && singleItemIsGroup) {
     const only = items[0];
     return <SidebarItem icon={icon} label={label} active={only.active} onClick={only.onClick} collapsed={collapsed} />;
   }
@@ -299,6 +311,7 @@ export function AppSidebar({
   const showPermits = canView('compliance:permits');
   const showExpiryCalendar = canView('compliance:expiry');
   const showComplianceGroup = showComplianceInspection || showPermits || showExpiryCalendar;
+  const showReports = canView('reports:analytics');
   const showSystemSettings =
     canView('settings:users') ||
     canView('settings:locator-users') ||
@@ -431,6 +444,20 @@ export function AppSidebar({
           </SidebarGroup>
           )}
 
+          {showReports && (
+          <SidebarGroup title="Reports" collapsed={collapsed}>
+            <div className="flex flex-col gap-1.5">
+              <SidebarItem
+                icon={BarChart3}
+                label="Reports & Analytics"
+                active={view === 'reports:analytics'}
+                onClick={() => onViewChange('reports:analytics')}
+                collapsed={collapsed}
+              />
+            </div>
+          </SidebarGroup>
+          )}
+
           {showSystemGroup && (
           <SidebarGroup title="System" collapsed={collapsed}>
             <div className="flex flex-col gap-1.5">
@@ -442,6 +469,7 @@ export function AppSidebar({
                 collapsed={collapsed}
                 isOpen={openDropdownId === 'system-settings'}
                 onToggle={() => toggleDropdown('system-settings')}
+                singleItemIsGroup={false}
               />
               <SidebarSection
                 icon={FileCheck}
@@ -451,6 +479,7 @@ export function AppSidebar({
                 collapsed={collapsed}
                 isOpen={openDropdownId === 'file-maintenance'}
                 onToggle={() => toggleDropdown('file-maintenance')}
+                singleItemIsGroup={false}
               />
             </div>
           </SidebarGroup>

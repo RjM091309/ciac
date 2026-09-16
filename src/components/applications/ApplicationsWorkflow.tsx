@@ -331,6 +331,15 @@ export function ApplicationsWorkflow({
   const proponentsEffective = baseData?.proponents ?? proponents;
   const applicationTypesEffective = baseData?.applicationTypes ?? applicationTypes;
 
+  // Code -> configured display name (Settings -> Application Types), so the
+  // list shows the actual type each application was filed under instead of
+  // a generic "New Lease"/"Renewal" label that ignored it entirely.
+  const applicationTypeNameByCode = useMemo(() => {
+    const map: Record<string, string> = {};
+    applicationTypesEffective.forEach((t) => { map[t.code] = t.name; });
+    return map;
+  }, [applicationTypesEffective]);
+
   const createFormCanSubmit = useMemo(() => {
     const proponentId = Number(createForm.proponent_id);
     if (!Number.isFinite(proponentId) || proponentId <= 0) return false;
@@ -1010,7 +1019,7 @@ export function ApplicationsWorkflow({
                             borderColor: renewalMode ? 'rgba(168,85,247,0.4)' : 'rgba(99,102,241,0.4)',
                           }}
                         >
-                          {renewalMode ? 'Renewal' : 'New Lease'}
+                          {applicationTypeNameByCode[row.application_type] || row.application_type}
                         </span>
                       </td>
                       <td className="px-3 py-2.5 min-w-[180px]">

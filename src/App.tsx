@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState, Suspense, lazy } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { AppLayout, AppView } from './layout/AppLayout';
 import { SubHeader, type DashboardPreviewRole } from './components/SubHeader';
-import { FileCheck, FolderTree, ShieldCheck, Users, CalendarClock, Loader2, Search } from 'lucide-react';
+import { FileCheck, FolderTree, ShieldCheck, Users, CalendarClock, Loader2, Search, BarChart3 } from 'lucide-react';
 import { LoginPage } from './components/auth/LoginPage';
 import { LocatorProfileSetup } from './components/proponent/LocatorProfileSetup';
 import { locatorSetupSkipKey } from './lib/locatorSetup';
@@ -30,6 +30,7 @@ const InspectionTypesManagement = lazy(() => import('./components/FileMaintenanc
 const ComplianceTypesManagement = lazy(() => import('./components/FileMaintenance/ComplianceTypes').then((m) => ({ default: m.ComplianceTypesManagement })));
 const ApplicationTypesManagement = lazy(() => import('./components/FileMaintenance/ApplicationTypes').then((m) => ({ default: m.ApplicationTypesManagement })));
 const AuditLog = lazy(() => import('./components/settings/AuditLog').then((m) => ({ default: m.AuditLog })));
+const ReportsAnalytics = lazy(() => import('./components/reports/ReportsAnalytics').then((m) => ({ default: m.ReportsAnalytics })));
 
 // --- Types ---
 type Role = 'admin' | 'officer' | 'proponent';
@@ -60,6 +61,7 @@ const VIEW_TO_PATH: Record<AppView, string> = {
   'compliance:permits': '/compliance/permits',
   'compliance:expiry': '/compliance/expiry',
   'compliance:inspections': '/compliance/inspections',
+  'reports:analytics': '/reports/analytics',
   'settings:users': '/settings/users',
   'settings:locator-users': '/settings/locator-users',
   'settings:requirement-categories': '/settings/requirement-categories',
@@ -581,6 +583,8 @@ export default function App() {
                 <ApprovalIssuance locationSearch={locationSearch} navigate={navigate} />
               ) : view === 'compliance:inspections' ? (
                 <ComplianceInspections locationSearch={locationSearch} navigate={navigate} />
+              ) : view === 'reports:analytics' ? (
+                <ReportsAnalytics />
               ) : view === 'settings:requirement-categories' ? (
                 <RequirementCategoriesManagement />
               ) : view === 'settings:inspection-types' ? (
@@ -780,6 +784,14 @@ const LANDING_CONFIG: Record<AppView, LandingConfig> = {
         ['Performance Commitment', 'Metro Agro Trading', 'Perf. Commitment', 'Scheduled', '—'],
       ],
     },
+  },
+  'reports:analytics': {
+    title: 'Reports & Analytics',
+    description: 'Statistical overview of applications, permits, and inspections with printable and exportable reports.',
+    badge: 'Reports',
+    icon: BarChart3,
+    stats: [],
+    table: { columns: [], rows: [] },
   },
   'settings:users': {
     title: 'User Management',

@@ -1,5 +1,5 @@
 import type { AppView } from '../layout/AppLayout';
-import { CalendarClock, FileCheck, FolderTree, Layers, ShieldCheck, Users } from 'lucide-react';
+import { BarChart3, CalendarClock, FileCheck, FolderTree, Layers, ShieldCheck, Users } from 'lucide-react';
 
 export type LandingConfig = {
   title: string;
@@ -183,6 +183,25 @@ export const LANDING_CONFIG: Record<AppView, LandingConfig> = {
         ['Annual Safety Audit', 'SkyPort Logistics Inc.', 'Safety', 'In Progress', '—'],
         ['Engineering Check', 'Delta AeroTech', 'Engineering', 'Completed', 'Passed w/ Findings'],
         ['Performance Commitment', 'Metro Agro Trading', 'Perf. Commitment', 'Scheduled', '—'],
+      ],
+    },
+  },
+  'reports:analytics': {
+    title: 'Reports & Analytics',
+    description: 'Statistical overview of applications, permits, and inspections with printable and exportable reports.',
+    badge: 'Reports',
+    icon: BarChart3,
+    stats: [
+      { label: 'Total Applications', value: '—' },
+      { label: 'Approved', value: '—' },
+      { label: 'In Process', value: '—' },
+    ],
+    table: {
+      columns: ['Application', 'Locator', 'Type', 'Status', 'Submitted'],
+      rows: [
+        ['APP-2026-00001', 'SkyPort Logistics Inc.', 'Direct Lease', 'Approved', 'Mar 10, 2026'],
+        ['REN-2026-00007', 'Delta AeroTech', 'Warehouse Lease', 'Under Review', 'Mar 09, 2026'],
+        ['APP-2026-00012', 'Metro Agro Trading', 'Sublease', 'Submitted', 'Mar 05, 2026'],
       ],
     },
   },

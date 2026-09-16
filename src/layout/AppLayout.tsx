@@ -18,6 +18,7 @@ export type AppView =
   | 'compliance:permits'
   | 'compliance:expiry'
   | 'compliance:inspections'
+  | 'reports:analytics'
   | 'settings:users'
   | 'settings:locator-users'
   | 'settings:requirement-categories'

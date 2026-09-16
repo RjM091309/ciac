@@ -45,6 +45,7 @@ module.exports = function pageRouter(app) {
   app.use("/api/audit-logs", require("./r_audit_logs"));
   app.use("/api/documents", require("./r_documents"));
   app.use("/api/permits", require("./r_permits"));
+  app.use("/api/reports", require("./r_reports"));
   app.use("/", router);
 };
 
