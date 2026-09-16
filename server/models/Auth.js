@@ -100,16 +100,23 @@ async function loginViaDatabase(username, password, totpCode, newPassword) {
       }
       return { success: false, message: "Your account has been deactivated. Contact the administrator." };
     }
-    return { success: false, message: "User not found" };
+    // Same message as a wrong password below — a distinct "User not found"
+    // here would let a caller enumerate valid usernames/emails one at a time.
+    return { success: false, message: "Username and Password incorrect!" };
   }
 
   const id = row.id ?? row.user_id ?? 0;
+  // Known this early because the row query above already joins roles — used
+  // to exempt admin from the failed-attempt lockout below. The IP-based rate
+  // limit on /api/auth/login (r_auth.js) still throttles brute-forcing this
+  // account either way, so this isn't a bare/unprotected exemption.
+  const isAdminRow = String(row.role_name || row.role || "").toLowerCase() === "admin";
 
   // Locked out from repeated failed attempts — reject before touching the
   // password at all, so a locked account never leaks whether the *current*
   // guess would have been right.
   const lockedUntil = row.locked_until ? new Date(row.locked_until) : null;
-  if (lockedUntil && lockedUntil.getTime() > Date.now()) {
+  if (!isAdminRow && lockedUntil && lockedUntil.getTime() > Date.now()) {
     const minutesLeft = Math.max(1, Math.ceil((lockedUntil.getTime() - Date.now()) / 60000));
     return {
       success: false,
@@ -131,6 +138,9 @@ async function loginViaDatabase(username, password, totpCode, newPassword) {
   }
   const matches = await bcrypt.compare(pass, stored);
   if (!matches) {
+    if (isAdminRow) {
+      return { success: false, message: "Username and Password incorrect!" };
+    }
     const { maxAttempts, lockoutMinutes } = getLockoutConfig();
     await User.registerFailedLogin(id, maxAttempts, lockoutMinutes);
     const attemptsSoFar = Number(row.failed_login_attempts || 0) + 1;

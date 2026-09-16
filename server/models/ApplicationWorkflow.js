@@ -687,13 +687,22 @@ async function createApplication({
           OR
           (@param2 = 0 AND r.for_new = 1)
         )
+        AND (
+          -- No rows in requirement_application_types for this requirement
+          -- means it applies to every application type (historical default).
+          NOT EXISTS (SELECT 1 FROM dbo.requirement_application_types rat WHERE rat.requirement_id = r.id)
+          OR EXISTS (
+            SELECT 1 FROM dbo.requirement_application_types rat
+            WHERE rat.requirement_id = r.id AND rat.application_type = @param3
+          )
+        )
         AND NOT EXISTS (
           SELECT 1
           FROM dbo.application_requirements ar
           WHERE ar.application_id = @param0 AND ar.requirement_id = r.id
         )
       `,
-      [newId, createdBy, renewalBit]
+      [newId, createdBy, renewalBit, normalizedType]
     );
 
     await tx.query(
@@ -819,15 +828,19 @@ async function updateDraftApplication(id, { application_type, is_renewal, change
   const nextRenewal =
     is_renewal === undefined || is_renewal === null ? currentRenewal : toBit(is_renewal);
   const renewalChanged = nextRenewal !== currentRenewal;
+  // A requirement can now be restricted to specific application types, so
+  // switching types (e.g. Direct Lease -> Sublease) needs the same checklist
+  // rebuild as switching New <-> Renewal used to trigger alone.
+  const typeChanged = nextType !== String(application.application_type || "").trim().toUpperCase();
   const changedBy = toInt(changed_by);
 
-  if (renewalChanged) {
+  if (renewalChanged || typeChanged) {
     const docRows = await selectData(
       `SELECT COUNT(1) AS n FROM dbo.documents WHERE application_id = @param0`,
       [id]
     );
     if (Number(docRows?.[0]?.n || 0) > 0) {
-      throw new Error("Remove the uploaded documents before switching between New and Renewal.");
+      throw new Error("Remove the uploaded documents before switching between New and Renewal, or changing the application type.");
     }
   }
 
@@ -841,7 +854,7 @@ async function updateDraftApplication(id, { application_type, is_renewal, change
       [id, nextType, nextRenewal, changedBy]
     );
 
-    if (renewalChanged) {
+    if (renewalChanged || typeChanged) {
       await tx.query(`DELETE FROM dbo.application_requirements WHERE application_id = @param0`, [id]);
       await tx.query(
         `
@@ -851,8 +864,15 @@ async function updateDraftApplication(id, { application_type, is_renewal, change
         FROM dbo.requirements r
         WHERE r.is_active = 1
           AND ((@param2 = 1 AND r.for_renewal = 1) OR (@param2 = 0 AND r.for_new = 1))
+          AND (
+            NOT EXISTS (SELECT 1 FROM dbo.requirement_application_types rat WHERE rat.requirement_id = r.id)
+            OR EXISTS (
+              SELECT 1 FROM dbo.requirement_application_types rat
+              WHERE rat.requirement_id = r.id AND rat.application_type = @param3
+            )
+          )
         `,
-        [id, changedBy, nextRenewal]
+        [id, changedBy, nextRenewal, nextType]
       );
     }
   });

@@ -618,8 +618,12 @@ export function LocatorUsersManagement() {
                             )}
                             onClick={() => setConfirmResetPasswordId(u.id)}
                             disabled={saving}
-                            aria-label={`Reset password for ${u.username}`}
-                            title="Reset password (emails a new temporary password)"
+                            aria-label={u.status === 'PENDING' ? `Resend account email for ${u.username}` : `Reset password for ${u.username}`}
+                            title={
+                              u.status === 'PENDING'
+                                ? 'Resend account email (new temporary password)'
+                                : 'Reset password (emails a new temporary password)'
+                            }
                           >
                             <KeyRound size={14} />
                           </button>

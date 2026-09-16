@@ -25,6 +25,9 @@ type RequirementRow = {
   for_renewal: number;
   is_mandatory: number;
   is_active: number;
+  // Application type codes this requirement is restricted to. Empty = applies
+  // to every application type (the historical, unrestricted default).
+  application_types: string[];
   created_by: number | null;
   updated_by: number | null;
   created_at?: string | null;
@@ -37,9 +40,16 @@ type CategoryRow = {
   is_active: number;
 };
 
+type ApplicationTypeRow = {
+  code: string;
+  name: string;
+  is_active: number;
+};
+
 type RequirementsData = {
   items: RequirementRow[];
   categories: CategoryRow[];
+  applicationTypes: ApplicationTypeRow[];
 };
 
 function api(path: string) {
@@ -71,16 +81,19 @@ export function RequirementsManagement() {
       cacheKey: 'ciac.requirements.categories_and_items.v1',
       ttlMs: 5 * 60 * 1000, // 5 minutes
       fetcher: async () => {
-        const [rRes, cRes] = await Promise.all([
+        const [rRes, cRes, atRes] = await Promise.all([
           fetch(api('/api/requirements'), { credentials: 'include' }),
           fetch(api('/api/requirement-categories'), { credentials: 'include' }),
+          fetch(api('/api/application-types'), { credentials: 'include' }),
         ]);
 
         const rJson = await rRes.json().catch(() => ({}));
         const cJson = await cRes.json().catch(() => ({}));
+        const atJson = await atRes.json().catch(() => ({}));
 
         if (!rRes.ok) throw new Error(rJson?.message || 'Failed to load requirements');
         if (!cRes.ok) throw new Error(cJson?.message || 'Failed to load requirement categories');
+        if (!atRes.ok) throw new Error(atJson?.message || 'Failed to load application types');
 
         return {
           items: (rJson.data || []).map((item: any) => ({
@@ -89,10 +102,16 @@ export function RequirementsManagement() {
             for_renewal: Number(item?.for_renewal) ? 1 : 0,
             is_mandatory: Number(item?.is_mandatory) ? 1 : 0,
             is_active: Number(item?.is_active) ? 1 : 0,
+            application_types: Array.isArray(item?.application_types) ? item.application_types : [],
           })),
           categories: (cJson.data || []).map((c: any) => ({
             ...c,
             is_active: Number(c?.is_active) ? 1 : 0,
+          })),
+          applicationTypes: (atJson.data || []).map((t: any) => ({
+            code: t.code,
+            name: t.name,
+            is_active: Number(t?.is_active) ? 1 : 0,
           })),
         };
       },
@@ -105,6 +124,7 @@ export function RequirementsManagement() {
 
   const items = requirementsData?.items ?? [];
   const categories = requirementsData?.categories ?? [];
+  const applicationTypes = requirementsData?.applicationTypes ?? [];
 
   const [form, setForm] = useState({
     code: '',
@@ -114,12 +134,29 @@ export function RequirementsManagement() {
     for_new: true,
     for_renewal: true,
     is_mandatory: true,
+    application_types: [] as string[],
   });
 
   const categoryOptions = useMemo(
     () => categories.map((c) => ({ value: String(c.id), label: c.name })),
     [categories]
   );
+
+  const activeApplicationTypes = useMemo(
+    () => applicationTypes.filter((t) => t.is_active === 1),
+    [applicationTypes]
+  );
+
+  const applicationTypeNameByCode = useMemo(() => {
+    const map: Record<string, string> = {};
+    applicationTypes.forEach((t) => { map[t.code] = t.name; });
+    return map;
+  }, [applicationTypes]);
+
+  function applicationTypesLabel(codes: string[]) {
+    if (!codes || codes.length === 0) return 'All types';
+    return codes.map((c) => applicationTypeNameByCode[c] || c).join(', ');
+  }
 
   const stats = useMemo(() => {
     const active = items.filter((i) => i.is_active === 1).length;
@@ -140,7 +177,8 @@ export function RequirementsManagement() {
         (i.name || '').toLowerCase().includes(q) ||
         (i.description || '').toLowerCase().includes(q) ||
         (i.category_name || '').toLowerCase().includes(q) ||
-        flags.includes(q)
+        flags.includes(q) ||
+        applicationTypesLabel(i.application_types).toLowerCase().includes(q)
       );
     });
   }, [activeItems, searchQuery]);
@@ -155,7 +193,8 @@ export function RequirementsManagement() {
         (i.name || '').toLowerCase().includes(q) ||
         (i.description || '').toLowerCase().includes(q) ||
         (i.category_name || '').toLowerCase().includes(q) ||
-        flags.includes(q)
+        flags.includes(q) ||
+        applicationTypesLabel(i.application_types).toLowerCase().includes(q)
       );
     });
   }, [deactivatedItems, recoverySearch]);
@@ -182,6 +221,8 @@ export function RequirementsManagement() {
     const originalForNew = Number(editing.for_new) === 1;
     const originalForRenewal = Number(editing.for_renewal) === 1;
     const originalMandatory = Number(editing.is_mandatory) === 1;
+    const originalTypes = [...(editing.application_types || [])].sort().join(',');
+    const currentTypes = [...form.application_types].sort().join(',');
 
     return (
       code !== originalCode ||
@@ -190,9 +231,10 @@ export function RequirementsManagement() {
       categoryId !== originalCategoryId ||
       forNew !== originalForNew ||
       forRenewal !== originalForRenewal ||
-      mandatory !== originalMandatory
+      mandatory !== originalMandatory ||
+      currentTypes !== originalTypes
     );
-  }, [editing, form.category_id, form.code, form.description, form.for_new, form.for_renewal, form.is_mandatory, form.name]);
+  }, [editing, form.category_id, form.code, form.description, form.for_new, form.for_renewal, form.is_mandatory, form.name, form.application_types]);
 
   const totalPages = useMemo(() => Math.max(1, Math.ceil(filteredItems.length / Math.max(1, pageSize))), [filteredItems.length, pageSize]);
 
@@ -273,6 +315,7 @@ export function RequirementsManagement() {
       for_new: true,
       for_renewal: true,
       is_mandatory: true,
+      application_types: [],
     });
     setIsCreateOpen(true);
   }
@@ -287,8 +330,18 @@ export function RequirementsManagement() {
       for_new: Number(item.for_new) === 1,
       for_renewal: Number(item.for_renewal) === 1,
       is_mandatory: Number(item.is_mandatory) === 1,
+      application_types: [...(item.application_types || [])],
     });
     setIsCreateOpen(true);
+  }
+
+  function toggleApplicationType(code: string) {
+    setForm((p) => ({
+      ...p,
+      application_types: p.application_types.includes(code)
+        ? p.application_types.filter((c) => c !== code)
+        : [...p.application_types, code],
+    }));
   }
 
   async function save() {
@@ -303,6 +356,7 @@ export function RequirementsManagement() {
         for_new: form.for_new ? 1 : 0,
         for_renewal: form.for_renewal ? 1 : 0,
         is_mandatory: form.is_mandatory ? 1 : 0,
+        application_types: form.application_types,
       };
       if (!payload.code) throw new Error('Code is required');
       if (!payload.name) throw new Error('Name is required');
@@ -472,9 +526,12 @@ export function RequirementsManagement() {
                     <td className="px-3 py-2 text-[11px]" style={{ color: 'var(--text)' }}>{item.name}</td>
                     <td className="px-3 py-2 text-[11px] text-secondary">{item.category_name || '-'}</td>
                     <td className="px-3 py-2 text-[11px] text-secondary">
-                      {[item.for_new ? 'New' : null, item.for_renewal ? 'Renewal' : null, item.is_mandatory ? 'Mandatory' : 'Optional']
-                        .filter(Boolean)
-                        .join(', ')}
+                      <div>
+                        {[item.for_new ? 'New' : null, item.for_renewal ? 'Renewal' : null, item.is_mandatory ? 'Mandatory' : 'Optional']
+                          .filter(Boolean)
+                          .join(', ')}
+                      </div>
+                      <div className="text-[10px] mt-0.5 opacity-80">{applicationTypesLabel(item.application_types)}</div>
                     </td>
                     <td className="px-3 py-2 pr-2">
                       <div className="flex items-center justify-end gap-2">
@@ -586,6 +643,29 @@ export function RequirementsManagement() {
               checked={form.is_mandatory}
               onChange={(checked) => setForm((p) => ({ ...p, is_mandatory: checked }))}
             />
+          </div>
+          <div className="sm:col-span-2">
+            <Field label="Application Types">
+              {activeApplicationTypes.length === 0 ? (
+                <p className="text-[11px] text-secondary">No active application types configured yet.</p>
+              ) : (
+                <>
+                  <p className="text-[11px] text-secondary mb-2">
+                    Leave all unchecked to apply this requirement to every application type.
+                  </p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {activeApplicationTypes.map((t) => (
+                      <CheckToggle
+                        key={t.code}
+                        label={t.name}
+                        checked={form.application_types.includes(t.code)}
+                        onChange={() => toggleApplicationType(t.code)}
+                      />
+                    ))}
+                  </div>
+                </>
+              )}
+            </Field>
           </div>
         </div>
       </SidePanel>
@@ -709,9 +789,12 @@ export function RequirementsManagement() {
                             <td className="px-3 py-2 text-[11px]" style={{ color: 'var(--text)' }}>{item.name}</td>
                             <td className="px-3 py-2 text-[11px] text-secondary">{item.category_name || '-'}</td>
                             <td className="px-3 py-2 text-[11px] text-secondary">
-                              {[item.for_new ? 'New' : null, item.for_renewal ? 'Renewal' : null, item.is_mandatory ? 'Mandatory' : 'Optional']
-                                .filter(Boolean)
-                                .join(', ')}
+                              <div>
+                                {[item.for_new ? 'New' : null, item.for_renewal ? 'Renewal' : null, item.is_mandatory ? 'Mandatory' : 'Optional']
+                                  .filter(Boolean)
+                                  .join(', ')}
+                              </div>
+                              <div className="text-[10px] mt-0.5 opacity-80">{applicationTypesLabel(item.application_types)}</div>
                             </td>
                             <td className="px-3 py-2 pr-2">
                               <div className="flex items-center justify-end gap-2">

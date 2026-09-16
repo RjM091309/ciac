@@ -1,4 +1,4 @@
-const { selectData, insertData, updateData, updateSchema } = require("../config/database");
+const { selectData, insertData, updateData, updateSchema, runInTransaction } = require("../config/database");
 
 function toInt(v) {
   const n = Number(v);
@@ -33,6 +33,19 @@ async function ensureSchema() {
       CREATE INDEX IX_requirements_name ON dbo.requirements(name);
       CREATE INDEX IX_requirements_category_id ON dbo.requirements(category_id);
     END
+
+    -- No rows for a requirement here = it applies to every application type
+    -- (matches the historical behavior, before types could be restricted).
+    -- Any row(s) present restrict it to just those types.
+    IF OBJECT_ID('dbo.requirement_application_types', 'U') IS NULL
+    BEGIN
+      CREATE TABLE dbo.requirement_application_types (
+        requirement_id INT NOT NULL,
+        application_type NVARCHAR(50) NOT NULL,
+        CONSTRAINT PK_requirement_application_types PRIMARY KEY (requirement_id, application_type),
+        CONSTRAINT FK_req_app_types_requirement FOREIGN KEY (requirement_id) REFERENCES dbo.requirements(id)
+      );
+    END
   `);
 }
 
@@ -52,7 +65,47 @@ function mapRow(row) {
     updated_by: row.updated_by ?? null,
     created_at: row.created_at ?? null,
     updated_at: row.updated_at ?? null,
+    // Populated by the caller (listRequirements/getRequirementById) from a
+    // second query — empty array means "applies to every application type".
+    application_types: [],
   };
+}
+
+/** Attaches each row's linked application_types in one extra query instead
+ * of N+1 — mutates and returns the same array for convenience. */
+async function attachApplicationTypes(rows) {
+  if (!rows.length) return rows;
+  const ids = rows.map((r) => r.id);
+  const placeholders = ids.map((_, i) => `@param${i}`).join(", ");
+  const linkRows = await selectData(
+    `SELECT requirement_id, application_type FROM dbo.requirement_application_types WHERE requirement_id IN (${placeholders})`,
+    ids
+  );
+  const byRequirement = new Map();
+  linkRows.forEach((r) => {
+    const list = byRequirement.get(r.requirement_id) || [];
+    list.push(r.application_type);
+    byRequirement.set(r.requirement_id, list);
+  });
+  rows.forEach((r) => {
+    r.application_types = byRequirement.get(r.id) || [];
+  });
+  return rows;
+}
+
+async function setApplicationTypes(requirementId, applicationTypes) {
+  const types = Array.isArray(applicationTypes)
+    ? [...new Set(applicationTypes.map((t) => String(t).trim().toUpperCase()).filter(Boolean))]
+    : [];
+  await runInTransaction(async (tx) => {
+    await tx.query(`DELETE FROM dbo.requirement_application_types WHERE requirement_id = @param0`, [requirementId]);
+    for (const type of types) {
+      await tx.query(
+        `INSERT INTO dbo.requirement_application_types (requirement_id, application_type) VALUES (@param0, @param1)`,
+        [requirementId, type]
+      );
+    }
+  });
 }
 
 async function listRequirements() {
@@ -77,7 +130,8 @@ async function listRequirements() {
     LEFT JOIN dbo.requirement_categories rc ON rc.id = r.category_id
     ORDER BY r.id DESC
   `);
-  return rows.map(mapRow);
+  const mapped = rows.map(mapRow);
+  return attachApplicationTypes(mapped);
 }
 
 async function getRequirementById(id) {
@@ -106,7 +160,9 @@ async function getRequirementById(id) {
     [id]
   );
   const row = rows?.[0];
-  return row ? mapRow(row) : null;
+  if (!row) return null;
+  const [mapped] = await attachApplicationTypes([mapRow(row)]);
+  return mapped;
 }
 
 async function createRequirement({
@@ -118,6 +174,7 @@ async function createRequirement({
   for_renewal,
   is_mandatory,
   is_active = 1,
+  application_types,
   created_by,
 }) {
   await ensureSchema();
@@ -134,12 +191,13 @@ async function createRequirement({
     [code, name, description ?? null, categoryId, toBit(for_new), toBit(for_renewal), toBit(is_mandatory), toBit(is_active), createdBy]
   );
   const id = result?.recordset?.[0]?.id;
+  if (application_types !== undefined) await setApplicationTypes(id, application_types);
   return getRequirementById(id);
 }
 
 async function updateRequirement(
   id,
-  { code, name, description, category_id, for_new, for_renewal, is_mandatory, is_active, updated_by }
+  { code, name, description, category_id, for_new, for_renewal, is_mandatory, is_active, application_types, updated_by }
 ) {
   await ensureSchema();
   const sets = [];
@@ -170,6 +228,8 @@ async function updateRequirement(
     params.push(id);
     await updateData(query, params);
   }
+
+  if (application_types !== undefined) await setApplicationTypes(id, application_types);
 
   return getRequirementById(id);
 }
