@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, ChevronRight, ClipboardList, FileText, History, Loader2, ScrollText, Send, Table2, Upload } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, ChevronRight, ClipboardList, FileText, History, Loader2, MessageSquare, ScrollText, Send, Table2, Upload, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { EmptyState } from '../ui/EmptyState';
 import { getStatusBadgeStyles } from '../dashboard/statusBadge';
@@ -31,6 +31,19 @@ type RequirementRow = {
   status: string;
   remarks: string | null;
   is_mandatory: number | boolean;
+  acknowledged_at?: string | null;
+  acknowledged_by?: number | null;
+};
+
+type RequirementComment = {
+  id: number;
+  application_requirement_id: number;
+  author_id: number;
+  author_role: string | null;
+  message: string;
+  created_at: string;
+  author_name?: string | null;
+  author_username?: string | null;
 };
 
 type DocumentRow = {
@@ -333,7 +346,15 @@ function Info({ label, value }: { label: string; value: React.ReactNode }) {
   );
 }
 
-function ApplicationDetail({ applicationId, navigate }: { applicationId: number; navigate: Navigate }) {
+function ApplicationDetail({
+  applicationId,
+  navigate,
+  focusRequirementId,
+}: {
+  applicationId: number;
+  navigate: Navigate;
+  focusRequirementId?: number | null;
+}) {
   const [data, setData] = useState<DetailData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -341,6 +362,7 @@ function ApplicationDetail({ applicationId, navigate }: { applicationId: number;
   const [uploading, setUploading] = useState(false);
   const [uploadRequirementId, setUploadRequirementId] = useState('');
   const [busy, setBusy] = useState<'submit' | null>(null);
+  const [threadRequirement, setThreadRequirement] = useState<RequirementRow | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const load = useCallback(async () => {
@@ -377,6 +399,22 @@ function ApplicationDetail({ applicationId, navigate }: { applicationId: number;
   useEffect(() => {
     load();
   }, [load]);
+
+  // Deep-link from a notification: jump straight to the Requirements tab
+  // and open that row's thread instead of leaving the locator to hunt for
+  // which one it was about.
+  useEffect(() => {
+    if (!focusRequirementId || !data) return;
+    const target = data.requirements.find((r) => r.id === focusRequirementId);
+    if (target) {
+      setTab('requirements');
+      setThreadRequirement(target);
+    }
+    // Only run once per (applicationId, focusRequirementId) landing — the
+    // effect deliberately excludes `data` from deps beyond this initial run
+    // so re-fetches (e.g. after acknowledging) don't reopen the modal.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusRequirementId, Boolean(data)]);
 
   // After an upload, the requirement it's attached to (and the application's
   // overall progress count on the Overview tab) can change status server-side
@@ -712,32 +750,37 @@ function ApplicationDetail({ applicationId, navigate }: { applicationId: number;
                         </div>
                       ) : null}
 
-                      {doc || r.status !== 'VERIFIED' ? (
-                        <div className="mt-2.5 flex items-center gap-2 pt-2.5 border-t" style={{ borderColor: 'var(--border-subtle)' }}>
-                          {doc ? (
-                            <button
-                              onClick={() => window.open(`/api/documents/${doc.id}/download?view=1`, '_blank')}
-                              className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-semibold cursor-pointer border"
-                              style={{ color: 'var(--text)', borderColor: 'var(--border-subtle)' }}
-                            >
-                              <FileText size={13} /> View
-                            </button>
-                          ) : null}
-                          {r.status !== 'VERIFIED' ? (
-                            <button
-                              onClick={() => {
-                                setUploadRequirementId(String(r.requirement_id));
-                                fileInputRef.current?.click();
-                              }}
-                              disabled={uploading}
-                              className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-semibold cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed border"
-                              style={{ color: 'var(--nav-active-bg)', borderColor: 'var(--border-subtle)' }}
-                            >
-                              <Upload size={13} /> {doc ? 'Reupload' : 'Upload'}
-                            </button>
-                          ) : null}
-                        </div>
-                      ) : null}
+                      <div className="mt-2.5 flex items-center gap-2 pt-2.5 border-t flex-wrap" style={{ borderColor: 'var(--border-subtle)' }}>
+                        {doc ? (
+                          <button
+                            onClick={() => window.open(`/api/documents/${doc.id}/download?view=1`, '_blank')}
+                            className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-semibold cursor-pointer border"
+                            style={{ color: 'var(--text)', borderColor: 'var(--border-subtle)' }}
+                          >
+                            <FileText size={13} /> View
+                          </button>
+                        ) : null}
+                        {r.status !== 'VERIFIED' ? (
+                          <button
+                            onClick={() => {
+                              setUploadRequirementId(String(r.requirement_id));
+                              fileInputRef.current?.click();
+                            }}
+                            disabled={uploading}
+                            className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-semibold cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed border"
+                            style={{ color: 'var(--nav-active-bg)', borderColor: 'var(--border-subtle)' }}
+                          >
+                            <Upload size={13} /> {doc ? 'Reupload' : 'Upload'}
+                          </button>
+                        ) : null}
+                        <button
+                          onClick={() => setThreadRequirement(r)}
+                          className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-semibold cursor-pointer border"
+                          style={{ color: 'var(--text)', borderColor: 'var(--border-subtle)' }}
+                        >
+                          <MessageSquare size={13} /> Discuss
+                        </button>
+                      </div>
                     </div>
                   );
                 })}
@@ -813,6 +856,15 @@ function ApplicationDetail({ applicationId, navigate }: { applicationId: number;
                                   <Upload size={14} />
                                 </button>
                               ) : null}
+                              <button
+                                onClick={() => setThreadRequirement(r)}
+                                className="cursor-pointer"
+                                style={{ color: 'var(--text)' }}
+                                title="Discuss this requirement"
+                                aria-label="Discuss this requirement"
+                              >
+                                <MessageSquare size={14} />
+                              </button>
                             </div>
                           </td>
                         </tr>
@@ -961,6 +1013,192 @@ function ApplicationDetail({ applicationId, navigate }: { applicationId: number;
         </div>
       )}
 
+      {threadRequirement ? (
+        <RequirementThreadModal
+          requirement={threadRequirement}
+          onClose={() => setThreadRequirement(null)}
+          onAcknowledged={(updated) => {
+            setData((prev) =>
+              prev
+                ? { ...prev, requirements: prev.requirements.map((r) => (r.id === updated.id ? { ...r, ...updated } : r)) }
+                : prev
+            );
+            setThreadRequirement((prev) => (prev ? { ...prev, ...updated } : prev));
+          }}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+/** Per-requirement reply thread + "mark as addressed" — the only in-system
+ * two-way channel between a Locator and staff (previously a Locator could
+ * only ever receive a one-line `remarks` string, never respond to it). */
+function RequirementThreadModal({
+  requirement,
+  onClose,
+  onAcknowledged,
+}: {
+  requirement: RequirementRow;
+  onClose: () => void;
+  onAcknowledged: (updated: RequirementRow) => void;
+}) {
+  const [comments, setComments] = useState<RequirementComment[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [message, setMessage] = useState('');
+  const [sending, setSending] = useState(false);
+  const [acking, setAcking] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/applications/requirements/${requirement.id}/comments`, { credentials: 'include' });
+      const json = await res.json().catch(() => ({}));
+      setComments(res.ok && Array.isArray(json.data) ? json.data : []);
+    } catch {
+      setComments([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [requirement.id]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  async function sendReply() {
+    const trimmed = message.trim();
+    if (!trimmed || sending) return;
+    setSending(true);
+    try {
+      const res = await fetch(`/api/applications/requirements/${requirement.id}/comments`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: trimmed }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.message || 'Failed to send reply');
+      setComments(Array.isArray(json.data) ? json.data : []);
+      setMessage('');
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to send reply');
+    } finally {
+      setSending(false);
+    }
+  }
+
+  async function acknowledge() {
+    if (acking) return;
+    setAcking(true);
+    try {
+      const res = await fetch(`/api/applications/requirements/${requirement.id}/acknowledge`, {
+        method: 'PATCH',
+        credentials: 'include',
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.message || 'Failed to acknowledge');
+      onAcknowledged(json.data);
+      toast.success('Marked as addressed');
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to acknowledge');
+    } finally {
+      setAcking(false);
+    }
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-4"
+      style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}
+      onClick={onClose}
+    >
+      <div
+        className="w-full sm:max-w-lg sm:rounded-2xl rounded-t-2xl flex flex-col max-h-[85vh]"
+        style={{ backgroundColor: 'var(--surface)' }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-start justify-between gap-2 p-4 border-b" style={{ borderColor: 'var(--border-subtle)' }}>
+          <div className="min-w-0">
+            <div className="text-[10px] font-semibold uppercase tracking-widest text-secondary">Requirement thread</div>
+            <div className="text-sm font-semibold truncate" style={{ color: 'var(--text)' }}>
+              {requirement.requirement_code ? `${requirement.requirement_code} — ` : ''}{requirement.requirement_name || 'Requirement'}
+            </div>
+          </div>
+          <button onClick={onClose} className="cursor-pointer shrink-0" style={{ color: 'var(--text-muted)' }} aria-label="Close">
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-4 space-y-3">
+          {requirement.remarks ? (
+            <div className="text-[11px] rounded-lg p-2.5" style={{ backgroundColor: 'color-mix(in oklab, var(--control-bg) 88%, transparent)' }}>
+              <span className="font-semibold" style={{ color: 'var(--text)' }}>Latest remarks:</span> {requirement.remarks}
+            </div>
+          ) : null}
+
+          {loading ? (
+            <div className="flex items-center justify-center py-6 text-secondary text-xs gap-2">
+              <Loader2 size={14} className="animate-spin" /> Loading…
+            </div>
+          ) : comments.length === 0 ? (
+            <div className="text-[11px] text-secondary text-center py-4">No replies yet. Say something below.</div>
+          ) : (
+            comments.map((c) => {
+              const isMine = String(c.author_role || '').toLowerCase() === 'proponent';
+              return (
+                <div key={c.id} className={`flex ${isMine ? 'justify-end' : 'justify-start'}`}>
+                  <div
+                    className="max-w-[85%] rounded-xl px-3 py-2"
+                    style={{
+                      backgroundColor: isMine ? 'var(--nav-active-bg)' : 'color-mix(in oklab, var(--control-bg) 88%, transparent)',
+                      color: isMine ? 'var(--nav-active-text)' : 'var(--text)',
+                    }}
+                  >
+                    <div className="text-[10px] opacity-70 mb-0.5">{isMine ? 'You' : c.author_name || 'Staff'}</div>
+                    <div className="text-[12px] whitespace-pre-wrap">{c.message}</div>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+
+        <div className="p-3 border-t space-y-2" style={{ borderColor: 'var(--border-subtle)' }}>
+          {requirement.status === 'REJECTED' ? (
+            <button
+              onClick={acknowledge}
+              disabled={acking || Boolean(requirement.acknowledged_at)}
+              className="w-full inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-semibold cursor-pointer border disabled:opacity-60 disabled:cursor-not-allowed"
+              style={{ color: 'var(--text)', borderColor: 'var(--border-subtle)' }}
+            >
+              <CheckCircle2 size={13} />
+              {requirement.acknowledged_at ? 'Marked as addressed' : acking ? 'Marking…' : 'Mark as addressed'}
+            </button>
+          ) : null}
+          <div className="flex items-center gap-2">
+            <input
+              value={message}
+              onChange={(e) => setMessage(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') void sendReply();
+              }}
+              placeholder="Type a reply…"
+              className="flex-1 rounded-lg border px-3 py-2 text-[12px] bg-transparent outline-none"
+              style={{ borderColor: 'var(--border-subtle)', color: 'var(--text)' }}
+            />
+            <button
+              onClick={sendReply}
+              disabled={sending || !message.trim()}
+              className="inline-flex items-center justify-center rounded-lg p-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+              style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
+              aria-label="Send reply"
+            >
+              {sending ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -974,8 +1212,17 @@ export function ProponentApplications({ locationSearch, navigate }: { locationSe
     return raw && Number.isFinite(n) ? n : null;
   }, [locationSearch]);
 
+  // A "your requirement was rejected/replied to" notification deep-links
+  // here with &requirementId=... so the exact row opens pre-focused instead
+  // of dumping the user on the application's Overview tab to go hunting.
+  const focusRequirementId = useMemo(() => {
+    const raw = new URLSearchParams(locationSearch || '').get('requirementId');
+    const n = Number(raw);
+    return raw && Number.isFinite(n) ? n : null;
+  }, [locationSearch]);
+
   return applicationId ? (
-    <ApplicationDetail applicationId={applicationId} navigate={navigate} />
+    <ApplicationDetail applicationId={applicationId} navigate={navigate} focusRequirementId={focusRequirementId} />
   ) : (
     <ApplicationsList navigate={navigate} />
   );

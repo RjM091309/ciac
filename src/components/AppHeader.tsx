@@ -430,8 +430,9 @@ export function AppHeader({
   function handleNotificationClick(item: NotificationItem) {
     if (!item.targetPath || !item.applicationId) return;
     if (!item.isRead) markOneAsRead(item.id);
+    const requirementParam = item.requirementId ? `&requirementId=${item.requirementId}` : '';
     navigate(
-      `${item.targetPath}?applicationId=${item.applicationId}&notificationId=${encodeURIComponent(item.id)}&focus=${Date.now()}`
+      `${item.targetPath}?applicationId=${item.applicationId}${requirementParam}&notificationId=${encodeURIComponent(item.id)}&focus=${Date.now()}`
     );
     setNotificationOpen(false);
   }

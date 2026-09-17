@@ -81,6 +81,11 @@ async function ensureSchema() {
 
       IF COL_LENGTH('dbo.notifications', 'event_type') IS NULL
         ALTER TABLE dbo.notifications ADD event_type NVARCHAR(50) NULL;
+
+      -- Lets a "your requirement was rejected" notification deep-link
+      -- straight to that requirement row instead of just the application.
+      IF COL_LENGTH('dbo.notifications', 'requirement_id') IS NULL
+        ALTER TABLE dbo.notifications ADD requirement_id INT NULL;
     END;
   `);
 }
@@ -178,7 +183,11 @@ async function resolveApplicationRecipients(application, actorId, eventType) {
     }
   }
 
-  if (normalizedActorId) recipients.add(normalizedActorId);
+  // Don't notify someone of their own action — an Assessment Officer who
+  // just verified/rejected a requirement (or any other actor) doesn't need
+  // an in-app notice about it landing in their own bell, even though they
+  // qualify as a recipient via createdBy/assignedOfficer/staff-permission.
+  if (normalizedActorId) recipients.delete(normalizedActorId);
   return Array.from(recipients);
 }
 
@@ -193,6 +202,7 @@ async function createNotification({
   updatedBy = null,
   applicationId = null,
   eventType = null,
+  requirementId = null,
 }) {
   const recipientUserId = toInt(userId);
   if (!recipientUserId) return;
@@ -200,9 +210,9 @@ async function createNotification({
   await insertData(
     `
     INSERT INTO dbo.notifications
-      (user_id, channel, subject, body, status, error_message, created_by, updated_by, created_at, updated_at, application_id, event_type)
+      (user_id, channel, subject, body, status, error_message, created_by, updated_by, created_at, updated_at, application_id, event_type, requirement_id)
     VALUES
-      (@param0, @param1, @param2, @param3, @param4, @param5, @param6, @param7, SYSUTCDATETIME(), NULL, @param8, @param9)
+      (@param0, @param1, @param2, @param3, @param4, @param5, @param6, @param7, SYSUTCDATETIME(), NULL, @param8, @param9, @param10)
     `,
     [
       recipientUserId,
@@ -215,6 +225,7 @@ async function createNotification({
       toInt(updatedBy),
       toInt(applicationId),
       eventType ? normalizeEventType(eventType) : null,
+      toInt(requirementId),
     ]
   );
 
@@ -231,6 +242,7 @@ async function createApplicationScopedNotifications({
   eventType,
   subject,
   body,
+  requirementId = null,
 }) {
   const application = await getApplicationContext(applicationId);
   if (!application) return;
@@ -245,6 +257,7 @@ async function createApplicationScopedNotifications({
         createdBy: actorId,
         applicationId: application.id,
         eventType,
+        requirementId,
       });
     } catch (error) {
       console.error("Create scoped notification error:", {
@@ -279,6 +292,7 @@ async function listForUser(userId, limit = 50) {
       n.updated_at,
       n.application_id,
       n.event_type,
+      n.requirement_id,
       a.application_no,
       a.is_renewal AS application_is_renewal,
       actor_role.role_name AS actor_role
@@ -310,6 +324,7 @@ async function listForUser(userId, limit = 50) {
     created_at: row.created_at ?? null,
     updated_at: row.updated_at ?? null,
     application_id: row.application_id ?? null,
+    requirement_id: row.requirement_id ?? null,
     application_no: row.application_no ?? null,
     application_is_renewal: row.application_is_renewal ?? null,
     event_type: normalizeEventType(row.event_type),

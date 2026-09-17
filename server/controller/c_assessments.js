@@ -142,6 +142,64 @@ exports.updateRequirementStatus = async (req, res) => {
   }
 };
 
+// Documentary compliance thread — proxy to the same requirement-comment
+// workflow the Locator's own portal posts/reads, gated by assessment access
+// rather than requireApplicationsAccess (an Assessment Officer may not hold
+// applications:new/renewals, only assessment:queue).
+exports.listRequirementComments = async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ success: false, message: "Invalid id" });
+    const rows = await Workflow.listRequirementComments(id);
+    return res.json({ success: true, data: rows });
+  } catch (error) {
+    return fail(res, error, "List requirement comments (assessment)");
+  }
+};
+
+exports.addRequirementComment = async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ success: false, message: "Invalid id" });
+    const { message } = req.body || {};
+    if (!message || !String(message).trim()) {
+      return res.status(400).json({ success: false, message: "message is required" });
+    }
+    await Workflow.addRequirementComment({
+      applicationRequirementId: id,
+      authorId: req.user?.id ?? null,
+      authorRole: req.user?.role ?? null,
+      message: String(message).trim(),
+    });
+    const rows = await Workflow.listRequirementComments(id);
+    return res.status(201).json({ success: true, data: rows });
+  } catch (error) {
+    return fail(res, error, "Add requirement comment (assessment)");
+  }
+};
+
+/** Attaches a one-off requirement to just this application (see
+ * Workflow.addCustomRequirementToApplication) — for asking the Locator for
+ * something outside the pre-seeded catalog checklist. */
+exports.addCustomRequirement = async (req, res) => {
+  try {
+    const id = appIdParam(req, res);
+    if (id === null) return undefined;
+    const { name, description, is_mandatory } = req.body || {};
+    const row = await Workflow.addCustomRequirementToApplication({
+      applicationId: id,
+      name,
+      description,
+      isMandatory: is_mandatory,
+      createdBy: req.user?.id ?? null,
+    });
+    if (!row) return res.status(404).json({ success: false, message: "Application not found" });
+    return res.status(201).json({ success: true, data: row });
+  } catch (error) {
+    return fail(res, error, "Add custom requirement (assessment)");
+  }
+};
+
 exports.addFinding = async (req, res) => {
   try {
     const id = appIdParam(req, res);

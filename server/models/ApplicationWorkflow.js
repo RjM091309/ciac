@@ -1,6 +1,7 @@
 const { selectData, insertData, updateData, updateSchema, runInTransaction } = require("../config/database");
 const Notification = require("./Notification");
 const ApplicationType = require("./ApplicationType");
+const Requirement = require("./Requirement");
 const { sendMail } = require("../lib/mailer");
 
 function toInt(v) {
@@ -182,11 +183,18 @@ async function createStatusChangeNotifications({ application, toStatus, remarks,
   }
 }
 
-async function createApplicationCreatedNotifications({ applicationId, applicationNo, isRenewal, status, createdBy }) {
+async function createApplicationCreatedNotifications({
+  applicationId,
+  applicationNo,
+  proponentId,
+  isRenewal,
+  status,
+  createdBy,
+}) {
+  const entryLabel = Number(isRenewal) ? "Renewal" : "New application";
+  const appNo = String(applicationNo || "").trim();
+  const currentStatus = String(status || "SUBMITTED").trim();
   try {
-    const entryLabel = Number(isRenewal) ? "Renewal" : "New application";
-    const appNo = String(applicationNo || "").trim();
-    const currentStatus = String(status || "SUBMITTED").trim();
     await Notification.createApplicationScopedNotifications({
       applicationId,
       actorId: createdBy,
@@ -196,6 +204,31 @@ async function createApplicationCreatedNotifications({ applicationId, applicatio
     });
   } catch (error) {
     console.error("Create application notifications error:", error);
+  }
+
+  // Staff files this on the locator's behalf, so they may not be watching
+  // the portal — email them the same moment the in-app notice above fires
+  // (SUBMITTED only; a DRAFT is private until submitted, same as elsewhere
+  // in this file).
+  try {
+    const locator = await getLocatorContactByProponentId(proponentId);
+    if (locator?.email) {
+      const loginUrl = `${String(process.env.FRONTEND_URL || "").replace(/\/+$/, "")}/`;
+      await sendMail({
+        to: locator.email,
+        subject: `${entryLabel} filed: ${appNo}`,
+        text:
+          `Hello ${locator.full_name || ""},\n\n` +
+          `${entryLabel} ${appNo} was filed on your behalf and is now ${currentStatus}.\n\n` +
+          `Sign in to the portal to track it and upload requirements: ${loginUrl}\n`,
+        html:
+          `<p>Hello ${locator.full_name || ""},</p>` +
+          `<p>${entryLabel} <b>${appNo}</b> was filed on your behalf and is now <b>${currentStatus}</b>.</p>` +
+          `<p><a href="${loginUrl}" style="display:inline-block;padding:10px 18px;background:#111827;color:#fff;text-decoration:none;border-radius:6px;">Sign in to the portal</a></p>`,
+      });
+    }
+  } catch (error) {
+    console.error("Send application-created email error:", error);
   }
 }
 
@@ -219,6 +252,7 @@ async function getLocatorContactByProponentId(proponentId) {
 
 async function createRequirementStatusNotifications({
   application,
+  applicationRequirementId,
   requirementCode,
   requirementName,
   nextStatus,
@@ -238,6 +272,7 @@ async function createRequirementStatusNotifications({
       eventType: "requirement",
       subject,
       body,
+      requirementId: applicationRequirementId,
     });
   } catch (error) {
     console.error("Create requirement notifications error:", error);
@@ -343,6 +378,35 @@ async function ensureSchema() {
       CREATE INDEX IX_app_req_application_id ON dbo.application_requirements(application_id);
       CREATE INDEX IX_app_req_requirement_id ON dbo.application_requirements(requirement_id);
       CREATE UNIQUE INDEX UX_app_req_app_req ON dbo.application_requirements(application_id, requirement_id);
+    END;
+
+    -- Lets a Locator mark a rejection remark as read/addressed without that
+    -- being the same thing as re-uploading a document — a lightweight
+    -- handshake distinct from the staff-only assessment_findings status.
+    IF COL_LENGTH('dbo.application_requirements', 'acknowledged_at') IS NULL
+      ALTER TABLE dbo.application_requirements ADD acknowledged_at DATETIME2(3) NULL;
+    IF COL_LENGTH('dbo.application_requirements', 'acknowledged_by') IS NULL
+      ALTER TABLE dbo.application_requirements ADD acknowledged_by INT NULL;
+
+    -- Per-requirement two-way thread: the only in-system reply channel
+    -- between a Locator and the staff reviewing their documents (previously
+    -- the only "communication" was the one-line, one-shot 'remarks' field
+    -- on a status change).
+    IF OBJECT_ID('dbo.application_requirement_comments', 'U') IS NULL
+    BEGIN
+      CREATE TABLE dbo.application_requirement_comments (
+        id INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+        application_requirement_id INT NOT NULL,
+        application_id INT NOT NULL,
+        author_id INT NOT NULL,
+        author_role NVARCHAR(50) NULL,
+        message NVARCHAR(2000) NOT NULL,
+        created_at DATETIME2(3) NOT NULL CONSTRAINT DF_app_req_comments_created_at DEFAULT (SYSUTCDATETIME()),
+        CONSTRAINT FK_app_req_comments_requirement FOREIGN KEY (application_requirement_id)
+          REFERENCES dbo.application_requirements(id)
+      );
+      CREATE INDEX IX_app_req_comments_requirement_id ON dbo.application_requirement_comments(application_requirement_id);
+      CREATE INDEX IX_app_req_comments_application_id ON dbo.application_requirement_comments(application_id);
     END;
 
     IF OBJECT_ID('dbo.documents', 'U') IS NULL
@@ -727,6 +791,7 @@ async function createApplication({
     await createApplicationCreatedNotifications({
       applicationId: id,
       applicationNo: application?.application_no,
+      proponentId: application?.proponent_id,
       isRenewal: renewalBit,
       status: normalizedStatus,
       createdBy,
@@ -1038,14 +1103,257 @@ async function updateApplicationRequirementStatus(id, { status, remarks, updated
     const application = await getApplicationById(row.application_id);
     await createRequirementStatusNotifications({
       application,
+      applicationRequirementId: row.id,
       requirementCode: row.requirement_code,
       requirementName: row.requirement_name,
       nextStatus: status,
       remarks,
       actorId: updated_by,
     });
+
+    const requirementLabel = [String(row.requirement_code || "").trim(), String(row.requirement_name || "").trim()]
+      .filter(Boolean)
+      .join(" - ") || `Requirement #${row.id}`;
+    const upperStatus = String(status || "").toUpperCase();
+    try {
+      // Lazy require: AssessmentEvaluation.js requires this module at the
+      // top, so requiring it back at module-load time would be circular.
+      const Assessment = require("./AssessmentEvaluation");
+      await Assessment.logRequirementActivity(row.application_id, {
+        action: upperStatus === "VERIFIED" ? "REQUIREMENT_VERIFIED" : upperStatus === "REJECTED" ? "REQUIREMENT_REJECTED" : "REQUIREMENT_STATUS_CHANGED",
+        detail: remarks ? `${requirementLabel} — ${String(remarks).trim()}` : requirementLabel,
+        actorId: updated_by,
+      });
+    } catch (error) {
+      console.error("Log requirement activity error:", error);
+    }
   }
   return updated;
+}
+
+/** Bare row lookup used by the comments/acknowledge endpoints to resolve
+ * which application a requirement belongs to (for the access check) without
+ * pulling in the full requirement-catalog join listApplicationRequirements
+ * does. */
+async function getApplicationRequirementById(id) {
+  await ensureSchema();
+  const rows = await selectData(
+    `
+    SELECT TOP (1)
+      ar.id,
+      ar.application_id,
+      ar.requirement_id,
+      ar.status,
+      ar.remarks,
+      ar.acknowledged_at,
+      ar.acknowledged_by,
+      r.code AS requirement_code,
+      r.name AS requirement_name
+    FROM dbo.application_requirements ar
+    LEFT JOIN dbo.requirements r ON r.id = ar.requirement_id
+    WHERE ar.id = @param0
+    `,
+    [id]
+  );
+  return rows?.[0] || null;
+}
+
+async function listRequirementComments(applicationRequirementId) {
+  await ensureSchema();
+  const rows = await selectData(
+    `
+    SELECT
+      c.id,
+      c.application_requirement_id,
+      c.application_id,
+      c.author_id,
+      c.author_role,
+      c.message,
+      c.created_at,
+      u.full_name AS author_name,
+      u.username AS author_username
+    FROM dbo.application_requirement_comments c
+    LEFT JOIN dbo.users u ON u.id = c.author_id
+    WHERE c.application_requirement_id = @param0
+    ORDER BY c.id ASC
+    `,
+    [applicationRequirementId]
+  );
+  return rows;
+}
+
+/** Posts a reply on a requirement's thread and notifies whichever side
+ * didn't write it — a Locator's reply pings staff (same menu-permission
+ * fan-out as any other requirement event), a staff reply pings the Locator
+ * in-app AND by email, since they may not be watching the portal. */
+async function addRequirementComment({ applicationRequirementId, authorId, authorRole, message }) {
+  const trimmed = String(message || "").trim();
+  if (!trimmed) throw new Error("message is required");
+
+  const requirement = await getApplicationRequirementById(applicationRequirementId);
+  if (!requirement) return null;
+
+  await insertData(
+    `
+    INSERT INTO dbo.application_requirement_comments
+      (application_requirement_id, application_id, author_id, author_role, message, created_at)
+    VALUES
+      (@param0, @param1, @param2, @param3, @param4, SYSUTCDATETIME())
+    `,
+    [applicationRequirementId, requirement.application_id, toInt(authorId), authorRole ? String(authorRole).slice(0, 50) : null, trimmed]
+  );
+
+  const application = await getApplicationById(requirement.application_id);
+  const requirementLabel = [String(requirement.requirement_code || "").trim(), String(requirement.requirement_name || "").trim()]
+    .filter(Boolean)
+    .join(" - ");
+  const applicationNo = String(application?.application_no || "").trim();
+  const isProponentAuthor = String(authorRole || "").toLowerCase() === "proponent";
+
+  try {
+    await Notification.createApplicationScopedNotifications({
+      applicationId: requirement.application_id,
+      actorId: authorId,
+      eventType: "requirement",
+      subject: `New reply on ${requirementLabel || "a requirement"} for ${applicationNo}`,
+      body: trimmed,
+      requirementId: applicationRequirementId,
+    });
+  } catch (error) {
+    console.error("Create requirement comment notification error:", error);
+  }
+
+  if (isProponentAuthor) {
+    // Staff already got the in-app notice above (they hold the relevant
+    // menu permission); nothing further to send by email for a locator's
+    // own reply.
+    return true;
+  }
+
+  try {
+    const locator = await getLocatorContactByProponentId(application?.proponent_id);
+    if (locator?.email) {
+      const loginUrl = `${String(process.env.FRONTEND_URL || "").replace(/\/+$/, "")}/`;
+      await sendMail({
+        to: locator.email,
+        subject: `New reply on ${requirementLabel || "a requirement"} for ${applicationNo || "your application"}`,
+        text:
+          `Hello ${locator.full_name || ""},\n\n` +
+          `${requirementLabel || "A requirement"} for application ${applicationNo} has a new reply:\n\n"${trimmed}"\n\n` +
+          `Sign in to the portal to view and reply: ${loginUrl}\n`,
+        html:
+          `<p>Hello ${locator.full_name || ""},</p>` +
+          `<p><b>${requirementLabel || "A requirement"}</b> for application <b>${applicationNo}</b> has a new reply:</p>` +
+          `<blockquote>${trimmed}</blockquote>` +
+          `<p><a href="${loginUrl}" style="display:inline-block;padding:10px 18px;background:#111827;color:#fff;text-decoration:none;border-radius:6px;">Sign in to reply</a></p>`,
+      });
+    }
+  } catch (error) {
+    console.error("Send requirement comment email error:", error);
+  }
+
+  return true;
+}
+
+/** Locator-only handshake: marks a requirement's current remarks as
+ * seen/addressed. Distinct from re-uploading a document — a Locator may
+ * want to acknowledge a REJECTED reason (e.g. "will comply on renewal")
+ * without necessarily having a new file to attach yet. */
+async function acknowledgeRequirement(applicationRequirementId, { acknowledgedBy }) {
+  await ensureSchema();
+  const requirement = await getApplicationRequirementById(applicationRequirementId);
+  if (!requirement) return null;
+
+  await updateData(
+    `
+    UPDATE dbo.application_requirements
+    SET acknowledged_at = SYSUTCDATETIME(), acknowledged_by = @param1
+    WHERE id = @param0
+    `,
+    [applicationRequirementId, toInt(acknowledgedBy)]
+  );
+
+  return getApplicationRequirementById(applicationRequirementId);
+}
+
+/** Attaches a one-off ask to THIS application only — the normal checklist
+ * is rebuilt wholesale from the shared `requirements` catalog (see
+ * createApplication/updateDraftApplication), which has no room for
+ * "please also submit X" scoped to a single applicant. Modeled instead as a
+ * catalog row with for_new/for_renewal both 0 (so the bulk auto-seed never
+ * pulls it into any OTHER application) and is_ad_hoc = 1 (so it's filtered
+ * out of the shared Requirements file-maintenance screen). */
+async function addCustomRequirementToApplication({ applicationId, name, description, isMandatory, createdBy }) {
+  const trimmedName = String(name || "").trim();
+  if (!trimmedName) throw new Error("name is required");
+
+  const application = await getApplicationById(applicationId);
+  if (!application) return null;
+
+  const code = `ADHOC-${applicationId}-${Date.now()}`;
+  const catalogRequirement = await Requirement.createRequirement({
+    code,
+    name: trimmedName,
+    description: description ?? null,
+    category_id: null,
+    for_new: 0,
+    for_renewal: 0,
+    is_mandatory: isMandatory ? 1 : 0,
+    is_active: 1,
+    created_by: createdBy,
+  });
+  await Requirement.markAdHoc(catalogRequirement.id);
+
+  const result = await insertData(
+    `
+    INSERT INTO dbo.application_requirements
+      (application_id, requirement_id, status, remarks, created_by, updated_by, created_at, updated_at)
+    OUTPUT INSERTED.id
+    VALUES
+      (@param0, @param1, 'PENDING', NULL, @param2, NULL, SYSUTCDATETIME(), NULL)
+    `,
+    [applicationId, catalogRequirement.id, toInt(createdBy)]
+  );
+  const newRowId = result?.recordset?.[0]?.id;
+
+  try {
+    await Notification.createApplicationScopedNotifications({
+      applicationId,
+      actorId: createdBy,
+      eventType: "requirement",
+      subject: `New requirement requested for ${String(application.application_no || "").trim()}`,
+      body: `${trimmedName} was added to your requirement checklist and is now pending.`,
+      requirementId: newRowId,
+    });
+  } catch (error) {
+    console.error("Create ad-hoc requirement notification error:", error);
+  }
+
+  try {
+    const locator = await getLocatorContactByProponentId(application.proponent_id);
+    if (locator?.email) {
+      const applicationNo = String(application.application_no || "").trim();
+      const loginUrl = `${String(process.env.FRONTEND_URL || "").replace(/\/+$/, "")}/`;
+      await sendMail({
+        to: locator.email,
+        subject: `New requirement requested for ${applicationNo || "your application"}`,
+        text:
+          `Hello ${locator.full_name || ""},\n\n` +
+          `A new requirement was requested for application ${applicationNo}: ${trimmedName}` +
+          (description ? ` — ${String(description).trim()}` : "") +
+          `\n\nSign in to the portal to upload it: ${loginUrl}\n`,
+        html:
+          `<p>Hello ${locator.full_name || ""},</p>` +
+          `<p>A new requirement was requested for application <b>${applicationNo}</b>:</p>` +
+          `<p><b>${trimmedName}</b>${description ? ` — ${String(description).trim()}` : ""}</p>` +
+          `<p><a href="${loginUrl}" style="display:inline-block;padding:10px 18px;background:#111827;color:#fff;text-decoration:none;border-radius:6px;">Sign in to the portal</a></p>`,
+      });
+    }
+  } catch (error) {
+    console.error("Send ad-hoc requirement email error:", error);
+  }
+
+  return getApplicationRequirementById(newRowId);
 }
 
 async function listDocumentsByApplication(applicationId) {
@@ -1284,6 +1592,11 @@ module.exports = {
   updateApplicationStatus,
   listApplicationRequirements,
   updateApplicationRequirementStatus,
+  getApplicationRequirementById,
+  listRequirementComments,
+  addRequirementComment,
+  acknowledgeRequirement,
+  addCustomRequirementToApplication,
   listDocumentsByApplication,
   getDocumentById,
   createDocument,

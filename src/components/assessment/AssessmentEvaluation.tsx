@@ -7,9 +7,11 @@ import {
   Clock3,
   FileText,
   Loader2,
+  MessageSquare,
   Plus,
   RotateCcw,
   Search,
+  Send,
   Trash2,
   UserCheck,
   X,
@@ -84,6 +86,18 @@ type RequirementRow = {
   status: string;
   remarks: string | null;
   is_mandatory?: number | boolean;
+  acknowledged_at?: string | null;
+};
+
+type RequirementComment = {
+  id: number;
+  application_requirement_id: number;
+  author_id: number;
+  author_role: string | null;
+  message: string;
+  created_at: string;
+  author_name?: string | null;
+  author_username?: string | null;
 };
 
 type ActivityRow = {
@@ -129,6 +143,13 @@ function fmtDate(v: string | null | undefined) {
   return d.toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' });
 }
 
+function fmtDateTime(v: string | null | undefined) {
+  if (!v) return '—';
+  const d = new Date(v);
+  if (Number.isNaN(d.getTime())) return '—';
+  return d.toLocaleString('en-PH', { year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+}
+
 function stageBadge(stage: string) {
   switch (stage) {
     case 'COMPLETED':
@@ -149,6 +170,20 @@ function findingBadge(type: string) {
   if (type === 'DEFICIENCY') return { bg: 'rgba(239,68,68,.14)', color: '#ef4444', border: 'rgba(239,68,68,.38)' };
   if (type === 'RECOMMENDATION') return { bg: 'rgba(59,130,246,.14)', color: '#3b82f6', border: 'rgba(59,130,246,.38)' };
   return { bg: 'rgba(148,163,184,.14)', color: '#94a3b8', border: 'rgba(148,163,184,.28)' };
+}
+
+function severityBadge(severity: string | null) {
+  if (severity === 'HIGH') return { bg: 'rgba(239,68,68,.14)', color: '#ef4444', border: 'rgba(239,68,68,.38)' };
+  if (severity === 'MEDIUM') return { bg: 'rgba(245,158,11,.14)', color: '#f59e0b', border: 'rgba(245,158,11,.38)' };
+  return { bg: 'rgba(148,163,184,.14)', color: '#94a3b8', border: 'rgba(148,163,184,.28)' };
+}
+
+function findingStatusBadge(status: string) {
+  return status === 'RESOLVED'
+    ? { bg: 'rgba(16,185,129,.14)', color: '#10b981', border: 'rgba(16,185,129,.38)' }
+    : status === 'WAIVED'
+      ? { bg: 'rgba(148,163,184,.14)', color: '#94a3b8', border: 'rgba(148,163,184,.28)' }
+      : { bg: 'rgba(245,158,11,.14)', color: '#f59e0b', border: 'rgba(245,158,11,.38)' };
 }
 
 async function apiFetch(path: string, init?: RequestInit) {
@@ -411,7 +446,7 @@ export function AssessmentEvaluation({
                   <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary">Evaluator</th>
                   <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary">Compliance</th>
                   <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary">Findings</th>
-                  <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary text-right">Days</th>
+                  <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary text-right">Working Days</th>
                 </tr>
               </thead>
               <tbody>
@@ -647,7 +682,7 @@ function StatTile({
   );
 }
 
-const TABS = ['Overview', 'Compliance', 'Findings', 'Recommendation', 'Activity'] as const;
+const TABS = ['Overview', 'Compliance', 'Findings', 'Recommendation', 'Activity Log'] as const;
 type Tab = (typeof TABS)[number];
 
 function AssessmentDetail({
@@ -807,6 +842,10 @@ function OverviewTab({
   const a = data.assessment;
   const [evaluatorId, setEvaluatorId] = useState(a.assigned_evaluator_id ? String(a.assigned_evaluator_id) : '');
   const isAdminReopen = perms.canEdit; // reopen also server-guarded to admin
+  // Once COMPLETED/RETURNED, Reopen is the one deliberate way back in — the
+  // evaluator assignment and raw stage buttons must not offer a side door
+  // around it (same gate as the Recommendation and Findings tabs).
+  const isClosed = a.stage === 'COMPLETED' || a.stage === 'RETURNED';
 
   return (
     <div className="flex flex-col gap-4">
@@ -815,7 +854,7 @@ function OverviewTab({
         <InfoCell label="Stage" value={STAGE_LABELS[a.stage] || a.stage} />
         <InfoCell label="Assigned" value={fmtDate(a.assigned_at)} />
         <InfoCell
-          label="Days in assessment"
+          label="Working days"
           value={a.days_in_assessment == null ? '—' : String(a.days_in_assessment)}
         />
         <InfoCell
@@ -834,13 +873,14 @@ function OverviewTab({
               placeholder="Select evaluator…"
               value={evaluatorId}
               onChange={setEvaluatorId}
+              isDisabled={isClosed}
               options={evaluators.map((e) => ({ value: String(e.id), label: e.full_name || e.username }))}
             />
           </div>
           <button
             className="rounded-lg px-3 py-1.5 text-[12px] font-semibold disabled:opacity-50"
             style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
-            disabled={busy || !perms.canEdit || !evaluatorId}
+            disabled={busy || !perms.canEdit || !evaluatorId || isClosed}
             onClick={() =>
               run(
                 () =>
@@ -867,7 +907,7 @@ function OverviewTab({
               a.stage === s && 'ring-1 ring-[var(--text)]'
             )}
             style={{ borderColor: 'var(--border)', color: 'var(--text)' }}
-            disabled={busy || !perms.canEdit || a.stage === s}
+            disabled={busy || !perms.canEdit || a.stage === s || isClosed}
             onClick={() =>
               run(
                 () =>
@@ -924,6 +964,8 @@ function ComplianceTab({
 }) {
   const [confirmTarget, setConfirmTarget] = useState<{ id: number; status: 'VERIFIED' | 'REJECTED'; label: string } | null>(null);
   const [rejectRemarks, setRejectRemarks] = useState('');
+  const [threadRequirement, setThreadRequirement] = useState<RequirementRow | null>(null);
+  const [addingRequirement, setAddingRequirement] = useState(false);
 
   const setReq = (id: number, status: string, remarks?: string) =>
     run(
@@ -937,8 +979,19 @@ function ComplianceTab({
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="text-[11px] text-secondary">
-        Documentary requirements pulled from the application. Regulatory items are captured under Findings.
+      <div className="flex items-center justify-between gap-2">
+        <div className="text-[11px] text-secondary">
+          Documentary requirements pulled from the application. Regulatory items are captured under Findings.
+        </div>
+        {canEdit ? (
+          <button
+            className="shrink-0 inline-flex items-center gap-1.5 rounded px-2.5 py-1.5 text-[11px] font-semibold border cursor-pointer"
+            style={{ borderColor: 'var(--border)' }}
+            onClick={() => setAddingRequirement(true)}
+          >
+            <Plus size={13} /> Request additional requirement
+          </button>
+        ) : null}
       </div>
       {data.requirements.length === 0 ? (
         <EmptyState
@@ -1000,7 +1053,8 @@ function ComplianceTab({
                     <button
                       className="rounded px-2 py-1 text-[11px] border cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                       style={{ borderColor: 'var(--border)' }}
-                      disabled={busy || r.status === 'VERIFIED'}
+                      disabled={busy || r.status === 'VERIFIED' || r.status === 'REJECTED'}
+                      title={r.status === 'REJECTED' ? 'Waiting for the locator to reupload — this auto-returns to Pending once they do' : undefined}
                       onClick={() =>
                         setConfirmTarget({
                           id: r.id,
@@ -1028,12 +1082,35 @@ function ComplianceTab({
                     </button>
                   </>
                 ) : null}
+                <button
+                  className="rounded px-2 py-1 text-[11px] border cursor-pointer inline-flex items-center gap-1"
+                  style={{ borderColor: 'var(--border)' }}
+                  onClick={() => setThreadRequirement(r)}
+                  title="Discuss with the Locator"
+                >
+                  <MessageSquare size={12} /> Discuss
+                </button>
               </div>
             </div>
             );
           })}
         </div>
       )}
+
+      {threadRequirement ? (
+        <RequirementThreadModal requirement={threadRequirement} onClose={() => setThreadRequirement(null)} />
+      ) : null}
+
+      {addingRequirement ? (
+        <AddCustomRequirementModal
+          applicationId={data.assessment.application_id}
+          onClose={() => setAddingRequirement(false)}
+          onAdded={() => {
+            setAddingRequirement(false);
+            void run(async () => {}, 'Requirement requested');
+          }}
+        />
+      ) : null}
 
       <ConfirmModal
         open={confirmTarget !== null}
@@ -1082,6 +1159,218 @@ function ComplianceTab({
   );
 }
 
+/** Per-requirement reply thread — proxies to the same comments workflow the
+ * Locator's own portal reads/posts, so both sides see the same messages. */
+function RequirementThreadModal({ requirement, onClose }: { requirement: RequirementRow; onClose: () => void }) {
+  const [comments, setComments] = useState<RequirementComment[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [message, setMessage] = useState('');
+  const [sending, setSending] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const json = await apiFetch(`/api/assessments/requirements/${requirement.id}/comments`);
+      setComments(Array.isArray(json.data) ? json.data : []);
+    } catch (err) {
+      toast.error((err as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  }, [requirement.id]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  async function sendReply() {
+    const trimmed = message.trim();
+    if (!trimmed || sending) return;
+    setSending(true);
+    try {
+      const json = await apiFetch(`/api/assessments/requirements/${requirement.id}/comments`, {
+        method: 'POST',
+        body: JSON.stringify({ message: trimmed }),
+      });
+      setComments(Array.isArray(json.data) ? json.data : []);
+      setMessage('');
+    } catch (err) {
+      toast.error((err as Error).message);
+    } finally {
+      setSending(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }} onClick={onClose}>
+      <div
+        className="w-full max-w-lg rounded-2xl flex flex-col max-h-[80vh]"
+        style={{ backgroundColor: 'var(--surface)', border: '1px solid var(--border)' }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-start justify-between gap-2 p-4 border-b" style={{ borderColor: 'var(--border)' }}>
+          <div className="min-w-0">
+            <div className="text-[10px] font-semibold uppercase tracking-widest text-secondary">Requirement thread</div>
+            <div className="text-sm font-semibold truncate">
+              {requirement.requirement_code ? `${requirement.requirement_code} · ` : ''}
+              {requirement.requirement_name || `Requirement #${requirement.id}`}
+            </div>
+          </div>
+          <button onClick={onClose} className="cursor-pointer shrink-0" aria-label="Close">
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-4 space-y-3">
+          {loading ? (
+            <div className="flex items-center justify-center py-6 text-secondary text-xs gap-2">
+              <Loader2 size={14} className="animate-spin" /> Loading…
+            </div>
+          ) : comments.length === 0 ? (
+            <div className="text-[11px] text-secondary text-center py-4">No replies yet.</div>
+          ) : (
+            comments.map((c) => {
+              const isStaff = String(c.author_role || '').toLowerCase() !== 'proponent';
+              return (
+                <div key={c.id} className={`flex ${isStaff ? 'justify-end' : 'justify-start'}`}>
+                  <div
+                    className="max-w-[85%] rounded-xl px-3 py-2"
+                    style={{
+                      backgroundColor: isStaff ? 'var(--nav-active-bg, #111827)' : 'var(--control-bg, #1f2937)',
+                      color: isStaff ? 'var(--nav-active-text, #fff)' : 'var(--text)',
+                    }}
+                  >
+                    <div className="text-[10px] opacity-70 mb-0.5">
+                      {isStaff ? c.author_name || 'Staff' : c.author_name || 'Locator'}
+                    </div>
+                    <div className="text-[12px] whitespace-pre-wrap">{c.message}</div>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+
+        <div className="p-3 border-t flex items-center gap-2" style={{ borderColor: 'var(--border)' }}>
+          <input
+            value={message}
+            onChange={(e) => setMessage(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') void sendReply();
+            }}
+            placeholder="Reply to the locator…"
+            className="flex-1 rounded-lg border px-3 py-2 text-[12px] bg-transparent outline-none"
+            style={{ borderColor: 'var(--border)' }}
+          />
+          <button
+            onClick={sendReply}
+            disabled={sending || !message.trim()}
+            className="inline-flex items-center justify-center rounded-lg p-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed border"
+            style={{ borderColor: 'var(--border)' }}
+            aria-label="Send reply"
+          >
+            {sending ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Attaches a one-off requirement to just this application, outside the
+ * pre-seeded catalog checklist (e.g. "please also submit an updated fire
+ * safety certificate") — see Workflow.addCustomRequirementToApplication. */
+function AddCustomRequirementModal({
+  applicationId,
+  onClose,
+  onAdded,
+}: {
+  applicationId: number;
+  onClose: () => void;
+  onAdded: () => void;
+}) {
+  const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
+  const [isMandatory, setIsMandatory] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  async function submit() {
+    const trimmed = name.trim();
+    if (!trimmed || saving) return;
+    setSaving(true);
+    try {
+      await apiFetch(`/api/assessments/${applicationId}/requirements/custom`, {
+        method: 'POST',
+        body: JSON.stringify({ name: trimmed, description: description.trim() || null, is_mandatory: isMandatory }),
+      });
+      onAdded();
+    } catch (err) {
+      toast.error((err as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }} onClick={onClose}>
+      <div
+        className="w-full max-w-md rounded-2xl p-4 space-y-3"
+        style={{ backgroundColor: 'var(--surface)', border: '1px solid var(--border)' }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-start justify-between gap-2">
+          <div className="text-sm font-semibold">Request additional requirement</div>
+          <button onClick={onClose} className="cursor-pointer" aria-label="Close">
+            <X size={18} />
+          </button>
+        </div>
+        <p className="text-[11px] text-secondary">
+          Attaches a one-off item to this application's checklist only — it won't appear on any other application.
+        </p>
+        <div>
+          <label className="text-[11px] font-medium text-secondary">Name *</label>
+          <input
+            autoFocus
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="e.g. Updated Fire Safety Certificate"
+            className="mt-1 w-full rounded-lg border px-2.5 py-2 text-xs"
+            style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'var(--surface)', color: 'var(--text)' }}
+          />
+        </div>
+        <div>
+          <label className="text-[11px] font-medium text-secondary">Description</label>
+          <textarea
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            rows={3}
+            placeholder="Optional details for the locator"
+            className="mt-1 w-full rounded-lg border px-2.5 py-2 text-xs resize-none"
+            style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'var(--surface)', color: 'var(--text)' }}
+          />
+        </div>
+        <label className="flex items-center gap-2 text-[11px] text-secondary">
+          <input type="checkbox" checked={isMandatory} onChange={(e) => setIsMandatory(e.target.checked)} />
+          Mandatory
+        </label>
+        <div className="flex items-center justify-end gap-2 pt-1">
+          <button className="rounded px-3 py-1.5 text-[12px] border cursor-pointer" style={{ borderColor: 'var(--border)' }} onClick={onClose}>
+            Cancel
+          </button>
+          <button
+            className="rounded px-3 py-1.5 text-[12px] font-semibold cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+            style={{ backgroundColor: 'var(--nav-active-bg, #111827)', color: 'var(--nav-active-text, #fff)' }}
+            disabled={saving || !name.trim()}
+            onClick={submit}
+          >
+            {saving ? 'Sending…' : 'Send request'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function FindingsTab({
   data,
   perms,
@@ -1094,6 +1383,10 @@ function FindingsTab({
   run: RunFn;
 }) {
   const appId = data.assessment.application_id;
+  // Once the assessment is COMPLETED (recommendation submitted) or RETURNED,
+  // it's no longer "open" — new findings shouldn't be added until an admin
+  // reopens it (same gate as the Recommendation tab's own form).
+  const isClosed = data.assessment.stage === 'COMPLETED' || data.assessment.stage === 'RETURNED';
   const [form, setForm] = useState({
     finding_type: 'FINDING',
     category: 'DOCUMENTARY',
@@ -1126,27 +1419,13 @@ function FindingsTab({
       ) : (
         <div className="flex flex-col gap-2">
           {data.findings.map((f) => (
-            <div key={f.id} className="rounded-xl border p-2.5" style={{ borderColor: 'var(--border)' }}>
-              <div className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-1.5 flex-wrap">
-                  <Badge label={f.finding_type} styles={findingBadge(f.finding_type)} />
-                  <span className="text-[10px] text-secondary">{f.category}</span>
-                  {f.severity ? <span className="text-[10px] text-secondary">· {f.severity}</span> : null}
-                  <Badge
-                    label={f.status}
-                    styles={
-                      f.status === 'RESOLVED'
-                        ? { bg: 'rgba(16,185,129,.14)', color: '#10b981', border: 'rgba(16,185,129,.38)' }
-                        : f.status === 'WAIVED'
-                          ? { bg: 'rgba(148,163,184,.14)', color: '#94a3b8', border: 'rgba(148,163,184,.28)' }
-                          : { bg: 'rgba(245,158,11,.14)', color: '#f59e0b', border: 'rgba(245,158,11,.38)' }
-                    }
-                  />
-                </div>
-                <div className="flex items-center gap-1.5 shrink-0">
-                  {perms.canEdit && f.status === 'OPEN' ? (
+            <div key={f.id} className="rounded-xl border p-3" style={{ borderColor: 'var(--border)' }}>
+              <div className="flex items-start justify-between gap-3">
+                <div className="text-[13px] flex-1 min-w-0">{f.description}</div>
+                <div className="flex items-center gap-2 shrink-0">
+                  {perms.canEdit && f.status === 'OPEN' && !isClosed ? (
                     <button
-                      className="rounded px-2 py-0.5 text-[11px] border disabled:opacity-40"
+                      className="rounded px-2 py-0.5 text-[11px] border disabled:opacity-40 whitespace-nowrap"
                       style={{ borderColor: 'var(--border)' }}
                       disabled={busy}
                       onClick={() =>
@@ -1163,7 +1442,7 @@ function FindingsTab({
                       Resolve
                     </button>
                   ) : null}
-                  {perms.canDelete ? (
+                  {perms.canDelete && !isClosed ? (
                     <button
                       className="text-secondary hover:text-red-500 disabled:opacity-40"
                       disabled={busy}
@@ -1176,13 +1455,21 @@ function FindingsTab({
                   ) : null}
                 </div>
               </div>
-              <div className="text-[13px] mt-1">{f.description}</div>
+              <div className="flex items-center justify-between gap-2 flex-wrap mt-2.5 pt-2.5 border-t" style={{ borderColor: 'var(--border)' }}>
+                <div className="flex items-center gap-1.5 flex-wrap min-w-0">
+                  <Badge label={f.finding_type} styles={findingBadge(f.finding_type)} />
+                  <Badge label={f.category} styles={{ bg: 'rgba(148,163,184,.14)', color: '#94a3b8', border: 'rgba(148,163,184,.38)' }} />
+                  {f.severity ? <Badge label={f.severity} styles={severityBadge(f.severity)} /> : null}
+                  <Badge label={f.status} styles={findingStatusBadge(f.status)} />
+                </div>
+                <span className="text-[10px] text-secondary shrink-0 whitespace-nowrap">{fmtDateTime(f.created_at)}</span>
+              </div>
             </div>
           ))}
         </div>
       )}
 
-      {perms.canAdd ? (
+      {perms.canAdd && !isClosed ? (
         <div className="rounded-xl border p-3 flex flex-col gap-2" style={{ borderColor: 'var(--border)' }}>
           <div className="text-[11px] font-bold uppercase tracking-wide text-secondary">Add finding</div>
           <div className="grid grid-cols-3 gap-2">
@@ -1253,6 +1540,10 @@ function RecommendationTab({
   const a = data.assessment;
   const [rec, setRec] = useState(a.recommendation || 'ENDORSE');
   const [summary, setSummary] = useState('');
+  // A recommendation, once submitted, is final until an admin explicitly
+  // reopens the assessment (which clears a.recommendation back to null) —
+  // the form must not look editable in between.
+  const alreadySubmitted = Boolean(a.recommendation);
   const openFindings = data.findings.filter((f) => f.status === 'OPEN').length;
   const totalReq = data.requirements.length;
   const verifiedReq = data.requirements.filter((r) => r.status === 'VERIFIED').length;
@@ -1321,12 +1612,20 @@ function RecommendationTab({
           <label
             key={o.v}
             className={cn(
-              'rounded-xl border p-2.5 flex gap-2 cursor-pointer',
-              rec === o.v && 'ring-1 ring-[var(--text)]'
+              'rounded-xl border p-2.5 flex gap-2',
+              rec === o.v && 'ring-1 ring-[var(--text)]',
+              alreadySubmitted ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
             )}
             style={{ borderColor: 'var(--border)' }}
           >
-            <input type="radio" name="rec" checked={rec === o.v} onChange={() => setRec(o.v)} className="mt-0.5" />
+            <input
+              type="radio"
+              name="rec"
+              checked={rec === o.v}
+              onChange={() => setRec(o.v)}
+              disabled={alreadySubmitted}
+              className="mt-0.5"
+            />
             <div>
               <div className="text-[13px] font-semibold">{o.label}</div>
               <div className="text-[11px] text-secondary">{o.hint}</div>
@@ -1337,10 +1636,11 @@ function RecommendationTab({
 
       <Field label="Summary / basis">
         <textarea
-          className={cn(inputCls, 'min-h-[80px] resize-y')}
+          className={cn(inputCls, 'min-h-[80px] resize-y disabled:opacity-60 disabled:cursor-not-allowed')}
           style={inputStyle}
           value={summary}
           onChange={(e) => setSummary(e.target.value)}
+          disabled={alreadySubmitted}
           placeholder="State the basis for this recommendation…"
         />
       </Field>
@@ -1348,7 +1648,8 @@ function RecommendationTab({
       <button
         className="rounded-lg px-3 py-2 text-[13px] font-semibold disabled:opacity-50"
         style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
-        disabled={busy || !canEdit}
+        disabled={busy || !canEdit || alreadySubmitted}
+        title={alreadySubmitted ? 'Already submitted — an admin must reopen the assessment to change it' : undefined}
         onClick={() =>
           run(
             () =>
@@ -1360,7 +1661,7 @@ function RecommendationTab({
           )
         }
       >
-        Submit recommendation
+        {alreadySubmitted ? 'Recommendation submitted' : 'Submit recommendation'}
       </button>
     </div>
   );
@@ -1382,7 +1683,7 @@ function ActivityTab({ data }: { data: DetailPayload }) {
         <li key={act.id} className="rounded-lg border px-3 py-2 text-[12px]" style={{ borderColor: 'var(--border)' }}>
           <div className="flex justify-between">
             <span className="font-semibold">{act.action.replace(/_/g, ' ')}</span>
-            <span className="text-secondary">{fmtDate(act.created_at)}</span>
+            <span className="text-secondary">{fmtDateTime(act.created_at)}</span>
           </div>
           {act.detail ? <div className="text-secondary mt-0.5">{act.detail}</div> : null}
           <div className="text-[10px] text-secondary mt-0.5">

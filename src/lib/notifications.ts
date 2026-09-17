@@ -21,6 +21,7 @@ export interface NotificationItem {
   isRead: boolean;
   applicationId?: number;
   applicationNumber?: string;
+  requirementId?: number;
   targetPath?: string;
   ownerUserId?: number;
   /** Role of whoever triggered this notification (from the actor's own

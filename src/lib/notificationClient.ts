@@ -23,6 +23,8 @@ function mapNotificationRows(rows: any[], userRole: Role, userId?: number | null
           : 'application_status';
     const applicationId = Number(row?.application_id);
     const hasApplicationId = Number.isFinite(applicationId) && applicationId > 0;
+    const requirementId = Number(row?.requirement_id);
+    const hasRequirementId = Number.isFinite(requirementId) && requirementId > 0;
     // Route to whichever module actually owns this event, not always
     // Applications — an assessment/compliance/approval notification should
     // deep-link back into that module's own detail view, not dump the user
@@ -59,6 +61,7 @@ function mapNotificationRows(rows: any[], userRole: Role, userId?: number | null
       isRead,
       applicationId: hasApplicationId ? applicationId : undefined,
       applicationNumber: row?.application_no ? String(row.application_no) : undefined,
+      requirementId: hasRequirementId ? requirementId : undefined,
       targetPath,
       ownerUserId: Number(userId || 0),
       actorRole,

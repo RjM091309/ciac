@@ -17,6 +17,13 @@ router.get("/:id/requirements", requireApplicationsAccess({ allowProponent: true
 router.get("/:id/documents", requireApplicationsAccess({ allowProponent: true }), controller.listDocuments);
 router.get("/:id/status-history", requireApplicationsAccess({ allowProponent: true }), controller.listStatusHistory);
 
+// Per-requirement reply thread + Locator acknowledge — staff + proponent,
+// ownership enforced in the controller (loadRequirementWithAccess), same
+// pattern as the application-level routes above.
+router.get("/requirements/:id/comments", requireApplicationsAccess({ allowProponent: true }), controller.listRequirementComments);
+router.post("/requirements/:id/comments", requireApplicationsAccess({ allowProponent: true }), controller.addRequirementComment);
+router.patch("/requirements/:id/acknowledge", requireApplicationsAccess({ allowProponent: true }), controller.acknowledgeRequirement);
+
 // Filing a new application is staff-only now (Assessment Officer creates it
 // on the locator's behalf) — a locator's only self-service actions are
 // viewing their own applications and uploading documents against them.

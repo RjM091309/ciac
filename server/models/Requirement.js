@@ -1,6 +1,10 @@
 const { selectData, insertData, updateData, updateSchema, runInTransaction } = require("../config/database");
 
 function toInt(v) {
+  // Number(null) is 0, not NaN — without this guard, an explicitly-passed
+  // null/undefined optional FK (e.g. category_id) silently became 0 instead
+  // of staying NULL and violated the foreign key.
+  if (v === null || v === undefined || v === "") return null;
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
 }
@@ -33,6 +37,14 @@ async function ensureSchema() {
       CREATE INDEX IX_requirements_name ON dbo.requirements(name);
       CREATE INDEX IX_requirements_category_id ON dbo.requirements(category_id);
     END
+
+    -- A one-off requirement an Assessment Officer attaches to a single
+    -- application (see ApplicationWorkflow.addCustomRequirementToApplication)
+    -- is still stored as a catalog row (for_new/for_renewal both 0, so the
+    -- bulk auto-seed never reuses it elsewhere) — this flag just keeps it out
+    -- of the shared Requirements file-maintenance screen.
+    IF COL_LENGTH('dbo.requirements', 'is_ad_hoc') IS NULL
+      ALTER TABLE dbo.requirements ADD is_ad_hoc BIT NOT NULL CONSTRAINT DF_requirements_is_ad_hoc DEFAULT (0);
 
     -- No rows for a requirement here = it applies to every application type
     -- (matches the historical behavior, before types could be restricted).
@@ -128,6 +140,7 @@ async function listRequirements() {
       r.updated_at
     FROM dbo.requirements r
     LEFT JOIN dbo.requirement_categories rc ON rc.id = r.category_id
+    WHERE r.is_ad_hoc = 0
     ORDER BY r.id DESC
   `);
   const mapped = rows.map(mapRow);
@@ -262,6 +275,11 @@ async function reactivateRequirement(id, updated_by) {
   return getRequirementById(id);
 }
 
+async function markAdHoc(id) {
+  await ensureSchema();
+  await updateData(`UPDATE dbo.requirements SET is_ad_hoc = 1 WHERE id = @param0`, [id]);
+}
+
 module.exports = {
   ensureSchema,
   listRequirements,
@@ -270,4 +288,5 @@ module.exports = {
   updateRequirement,
   deactivateRequirement,
   reactivateRequirement,
+  markAdHoc,
 };

@@ -7,6 +7,7 @@ const {
 } = require("../config/database");
 const Notification = require("./Notification");
 const Workflow = require("./ApplicationWorkflow");
+const ControlPanelPermission = require("./ControlPanelPermission");
 
 function toInt(v) {
   const n = Number(v);
@@ -150,6 +151,22 @@ async function logActivity(assessmentId, action, detail, actorId) {
   }
 }
 
+/** Entry point for activity that originates outside this module (e.g. a
+ * requirement verify/reject, which lives in ApplicationWorkflow.js) — same
+ * assessment_activity feed, just resolved by applicationId instead of an
+ * already-known assessmentId. Lazily creates the assessment row if this is
+ * somehow the first assessment-related action for the application, same as
+ * every other write path here. */
+async function logRequirementActivity(applicationId, { action, detail, actorId }) {
+  try {
+    const asm = await getOrCreateAssessment(applicationId, actorId);
+    if (!asm) return;
+    await logActivity(asm.id, action, detail, actorId);
+  } catch (error) {
+    console.error("Log requirement activity error:", error);
+  }
+}
+
 async function notify({ applicationId, actorId, subject, body }) {
   try {
     await Notification.createApplicationScopedNotifications({
@@ -240,8 +257,11 @@ const LIST_SELECT = `
     asm.recommendation,
     asm.recommended_at,
     ISNULL(asm.charges_total, 0) AS charges_total,
+    -- Freezes at recommended_at once a recommendation is submitted (COMPLETED
+    -- or RETURNED both set it) so a finished assessment stops looking like
+    -- it's still aging every day it sits in the list after that.
     CASE WHEN asm.assigned_at IS NULL THEN NULL
-      ELSE DATEDIFF(DAY, asm.assigned_at, SYSUTCDATETIME()) END AS days_in_assessment,
+      ELSE DATEDIFF(DAY, asm.assigned_at, ISNULL(asm.recommended_at, SYSUTCDATETIME())) END AS days_in_assessment,
     (SELECT COUNT(1) FROM dbo.assessment_findings f WHERE f.assessment_id = asm.id) AS total_findings,
     (SELECT COUNT(1) FROM dbo.assessment_findings f WHERE f.assessment_id = asm.id AND f.status = 'OPEN') AS open_findings,
     (SELECT COUNT(1) FROM dbo.application_requirements ar WHERE ar.application_id = a.id) AS requirements_total,
@@ -331,15 +351,24 @@ async function getSummary() {
   };
 }
 
+/** Who can be assigned to do an assessment — any role with Control Panel
+ * sidebar access to assessment:queue (conventionally "Assessment Officer"),
+ * plus admin. Driven by permission rather than a hardcoded role name so it
+ * survives a rename and extends to any future custom role automatically,
+ * same reasoning as hasStaffApplicationAccess/getApprovalQueueStaffEmails
+ * elsewhere in this app. */
 async function listAssignableEvaluators() {
   await ensureSchema();
+  await ControlPanelPermission.ensureSchema();
   return selectData(`
     SELECT DISTINCT u.id, u.full_name, u.username
     FROM dbo.users u
     INNER JOIN dbo.user_roles ur ON ur.user_id = u.id
     INNER JOIN dbo.roles r ON r.id = ur.role_id
+    LEFT JOIN dbo.role_sidebar_menu_permissions p
+      ON p.role_id = r.id AND p.menu_key = 'assessment:queue' AND p.is_enabled = 1
     WHERE u.is_active = 1
-      AND LOWER(LTRIM(RTRIM(r.name))) IN ('admin', 'administrator', 'officer', 'account officer')
+      AND (LOWER(LTRIM(RTRIM(r.name))) = 'admin' OR p.role_id IS NOT NULL)
     ORDER BY u.full_name
   `);
 }
@@ -388,6 +417,34 @@ async function getAssessmentDetail(applicationId) {
   const documents = await Workflow.listDocumentsByApplication(appId);
 
   return { assessment: header, findings, charges, activity, requirements, documents };
+}
+
+/** Read-only findings feed for the Locator's own application — the fuller
+ * getAssessmentDetail() above (charges, activity log, evaluator assignment)
+ * stays staff-only via assessment:queue; this just exposes the
+ * finding_type/category/severity/status rows so a proponent can see WHY
+ * something was flagged, not just the one-line requirement remarks. */
+async function listFindingsForApplication(applicationId) {
+  await ensureSchema();
+  const appId = toInt(applicationId);
+  if (!appId) return [];
+  const asmRows = await selectData(
+    `SELECT TOP (1) id FROM dbo.application_assessments WHERE application_id = @param0`,
+    [appId]
+  );
+  const assessmentId = toInt(asmRows?.[0]?.id);
+  if (!assessmentId) return [];
+  return selectData(
+    `
+    SELECT f.id, f.finding_type, f.category, f.severity, f.requirement_id, f.description, f.status, f.created_at,
+      r.code AS requirement_code, r.name AS requirement_name
+    FROM dbo.assessment_findings f
+    LEFT JOIN dbo.requirements r ON r.id = f.requirement_id
+    WHERE f.assessment_id = @param0
+    ORDER BY f.id DESC
+    `,
+    [assessmentId]
+  );
 }
 
 async function assignEvaluator(applicationId, { evaluatorId, actorId }) {
@@ -703,10 +760,12 @@ module.exports = {
   CHARGE_TYPES,
   RECOMMENDATIONS,
   getOrCreateAssessment,
+  logRequirementActivity,
   listAssessments,
   getSummary,
   listAssignableEvaluators,
   getAssessmentDetail,
+  listFindingsForApplication,
   assignEvaluator,
   setStage,
   reopen,

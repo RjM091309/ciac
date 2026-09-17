@@ -288,6 +288,79 @@ exports.updateRequirementStatus = async (req, res) => {
   }
 };
 
+/** Resolves a requirement row plus its parent application's access check in
+ * one call — the comment thread and acknowledge endpoints are reached by
+ * requirement id, not application id, so they need this extra hop before
+ * loadWithAccess's ownership check applies. */
+async function loadRequirementWithAccess(req, requirementId) {
+  const requirement = await Workflow.getApplicationRequirementById(requirementId);
+  if (!requirement) return { requirement: null, application: null, forbidden: false };
+  const { application, forbidden } = await loadWithAccess(req, requirement.application_id);
+  return { requirement, application, forbidden };
+}
+
+exports.listRequirementComments = async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ success: false, message: "Invalid id" });
+    const { requirement, forbidden } = await loadRequirementWithAccess(req, id);
+    if (forbidden) return res.status(403).json({ success: false, message: "Forbidden" });
+    if (!requirement) return res.status(404).json({ success: false, message: "Application requirement not found" });
+    const rows = await Workflow.listRequirementComments(id);
+    return res.json({ success: true, data: rows });
+  } catch (error) {
+    console.error("List requirement comments error:", error);
+    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+  }
+};
+
+exports.addRequirementComment = async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ success: false, message: "Invalid id" });
+    const { message } = req.body || {};
+    if (!message || !String(message).trim()) {
+      return res.status(400).json({ success: false, message: "message is required" });
+    }
+    const { requirement, forbidden } = await loadRequirementWithAccess(req, id);
+    if (forbidden) return res.status(403).json({ success: false, message: "Forbidden" });
+    if (!requirement) return res.status(404).json({ success: false, message: "Application requirement not found" });
+
+    await Workflow.addRequirementComment({
+      applicationRequirementId: id,
+      authorId: req.user?.id ?? null,
+      authorRole: req.user?.role ?? null,
+      message: String(message).trim(),
+    });
+    const rows = await Workflow.listRequirementComments(id);
+    return res.status(201).json({ success: true, data: rows });
+  } catch (error) {
+    console.error("Add requirement comment error:", error);
+    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+  }
+};
+
+/** Locator-only: staff already know the outcome of their own decision, so
+ * there's nothing for them to acknowledge here. */
+exports.acknowledgeRequirement = async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ success: false, message: "Invalid id" });
+    const role = String(req.user?.role || "").toLowerCase();
+    if (role !== "proponent") return res.status(403).json({ success: false, message: "Forbidden" });
+
+    const { requirement, forbidden } = await loadRequirementWithAccess(req, id);
+    if (forbidden) return res.status(403).json({ success: false, message: "Forbidden" });
+    if (!requirement) return res.status(404).json({ success: false, message: "Application requirement not found" });
+
+    const updated = await Workflow.acknowledgeRequirement(id, { acknowledgedBy: req.user?.id ?? null });
+    return res.json({ success: true, data: updated });
+  } catch (error) {
+    console.error("Acknowledge requirement error:", error);
+    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+  }
+};
+
 exports.listDocuments = async (req, res) => {
   try {
     const applicationId = Number(req.params.id);
