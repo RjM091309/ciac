@@ -327,7 +327,7 @@ export function AppSidebar({
   const flat = Boolean(permissionOverride) || !fullAccess;
 
   const applicationsItems: SidebarLeaf[] = [
-    canView('applications:new') && { key: 'applications:new', label: 'New Applications', active: view === 'applications:new', onClick: () => onViewChange('applications:new'), icon: FilePlus2 },
+    canView('applications:new') && { key: 'applications:new', label: 'Applications', active: view === 'applications:new', onClick: () => onViewChange('applications:new'), icon: FilePlus2 },
     canView('applications:renewals') && { key: 'applications:renewals', label: 'Renewal Tracking', active: view === 'applications:renewals', onClick: () => onViewChange('applications:renewals'), icon: RefreshCw },
     canView('applications:requirements') && { key: 'applications:requirements', label: 'Requirements', active: view === 'applications:requirements', onClick: () => onViewChange('applications:requirements'), icon: ClipboardList },
     canView('assessment:queue') && { key: 'assessment:queue', label: 'Evaluation Queue', active: view === 'assessment:queue', onClick: () => onViewChange('assessment:queue'), icon: ClipboardCheck },

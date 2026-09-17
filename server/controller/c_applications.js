@@ -202,8 +202,10 @@ exports.submit = async (req, res) => {
   }
 };
 
-/** Edit an unsubmitted (DRAFT) application — the caller's own, or any for
- * staff. Only application_type / is_renewal, and only while DRAFT. */
+/** Fixes a filing mistake — application_type / is_renewal (through
+ * Assessment, see Workflow.TYPE_EDITABLE_STATUSES) and proponent_id
+ * (DRAFT-only). Refused once documents are attached and the type/renewal
+ * actually changes, or once past Assessment. */
 exports.updateDraft = async (req, res) => {
   try {
     const id = Number(req.params.id);
@@ -212,10 +214,11 @@ exports.updateDraft = async (req, res) => {
     if (forbidden) return res.status(403).json({ success: false, message: "Forbidden" });
     if (!application) return res.status(404).json({ success: false, message: "Application not found" });
 
-    const { application_type, is_renewal } = req.body || {};
+    const { application_type, is_renewal, proponent_id } = req.body || {};
     const row = await Workflow.updateDraftApplication(id, {
       application_type,
       is_renewal,
+      proponent_id,
       changed_by: req.user?.id ?? null,
     });
     return res.json({ success: true, data: row });

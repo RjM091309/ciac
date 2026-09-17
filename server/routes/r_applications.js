@@ -29,7 +29,9 @@ router.patch("/requirements/:id/acknowledge", requireApplicationsAccess({ allowP
 // viewing their own applications and uploading documents against them.
 router.post("/", requireApplicationsAccess(), controller.create);
 router.patch("/:id/submit", requireApplicationsAccess({ allowProponent: true }), controller.submit);
-// Editing/deleting a draft is staff-only too (Assessment Officer's call).
+// Fixing application_type/is_renewal is staff-only, allowed through the
+// Assessment stage (see Workflow.TYPE_EDITABLE_STATUSES); deleting stays
+// DRAFT-only (see Workflow.deleteDraftApplication).
 router.patch("/:id", requireApplicationsAccess(), controller.updateDraft);
 router.delete("/:id", requireApplicationsAccess(), controller.remove);
 router.post("/documents", requireApplicationsAccess({ allowProponent: true }), upload.single("file"), controller.createDocument);

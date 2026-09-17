@@ -266,6 +266,7 @@ export function AssessmentEvaluation({
   const [pageSize, setPageSize] = useState(20);
 
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [openTab, setOpenTab] = useState<Tab | undefined>(undefined);
   const [completedOpen, setCompletedOpen] = useState(false);
 
   // One cached fetch of the whole queue + summary + evaluators, then filter
@@ -344,9 +345,12 @@ export function AssessmentEvaluation({
     if (!Number.isFinite(rawId) || rawId <= 0) return;
     consumedNotificationQueryRef.current = search;
     setSelectedId(rawId);
+    const requestedTab = params.get('tab');
+    setOpenTab(requestedTab && (TABS as readonly string[]).includes(requestedTab) ? (requestedTab as Tab) : undefined);
     params.delete('applicationId');
     params.delete('notificationId');
     params.delete('focus');
+    params.delete('tab');
     const cleaned = params.toString();
     navigate(`/assessment${cleaned ? `?${cleaned}` : ''}`, { replace: true });
   }, [locationSearch, navigate]);
@@ -512,9 +516,13 @@ export function AssessmentEvaluation({
         {selectedId != null ? (
           <AssessmentDetail
             applicationId={selectedId}
+            initialTab={openTab}
             evaluators={evaluators}
             perms={{ canAdd, canEdit, canDelete }}
-            onClose={() => setSelectedId(null)}
+            onClose={() => {
+              setSelectedId(null);
+              setOpenTab(undefined);
+            }}
             onMutated={refreshAfterMutation}
           />
         ) : null}
@@ -687,12 +695,14 @@ type Tab = (typeof TABS)[number];
 
 function AssessmentDetail({
   applicationId,
+  initialTab,
   evaluators,
   perms,
   onClose,
   onMutated,
 }: {
   applicationId: number;
+  initialTab?: Tab;
   evaluators: Evaluator[];
   perms: { canAdd: boolean; canEdit: boolean; canDelete: boolean };
   onClose: () => void;
@@ -700,7 +710,7 @@ function AssessmentDetail({
 }) {
   const [data, setData] = useState<DetailPayload | null>(null);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState<Tab>('Overview');
+  const [tab, setTab] = useState<Tab>(initialTab || 'Overview');
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {

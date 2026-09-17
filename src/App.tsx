@@ -630,8 +630,8 @@ const LANDING_CONFIG: Record<AppView, LandingConfig> = {
     table: { columns: [], rows: [] },
   },
   'applications:new': {
-    title: 'New Applications Directory',
-    description: 'Recently submitted direct lease applications waiting for initial review.',
+    title: 'Applications',
+    description: 'File, track, and manage lease applications for locators.',
     badge: 'Applications',
     icon: FileCheck,
     stats: [

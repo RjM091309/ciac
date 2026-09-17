@@ -14,8 +14,6 @@ import {
   SunMedium,
   Zap,
 } from 'lucide-react';
-import { useGlobalDate } from '../state/GlobalDateContext';
-import { DatePicker } from './ui/DatePicker';
 import { ChangePasswordModal } from './ChangePasswordModal';
 import {
   countUnread,
@@ -37,6 +35,16 @@ import { NOTIFICATIONS_REFRESH_EVENT, requestNotificationsRefresh } from '../lib
 import { requestPermissionsRefresh } from '../lib/permissionsRefresh';
 import { roleDisplayName } from '../lib/roleDisplay';
 import { toast } from 'sonner';
+
+type SearchResult = {
+  id: number;
+  application_no: string;
+  application_type: string;
+  is_renewal: boolean;
+  status: string;
+  proponent_name: string | null;
+  target_path: string;
+};
 
 function getNotificationTypeMeta(item: NotificationItem) {
   switch (item.category) {
@@ -141,7 +149,6 @@ export function AppHeader({
   backendUrl: string;
   navigate: (to: string, opts?: { replace?: boolean }) => void;
 }) {
-  const { range, setRange } = useGlobalDate();
   const [currentUser, setCurrentUser] = useState<{ username: string; role: string } | null>(null);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [notificationOpen, setNotificationOpen] = useState(false);
@@ -186,6 +193,18 @@ export function AppHeader({
   const [notificationFilter, setNotificationFilter] = useState<NotificationFilter>('all');
   const notificationWrapRef = useRef<HTMLDivElement | null>(null);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+
+  // Global "jump to" search — staff only (a Locator has just their own
+  // handful of applications, already in their own self-service list, so
+  // there's nothing cross-module for them to search). Results are already
+  // scoped server-side to whichever queues the caller's role can open (see
+  // c_search.js), so every result here is guaranteed clickable.
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const searchWrapRef = useRef<HTMLDivElement | null>(null);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
   const userMenuWrapRef = useRef<HTMLDivElement | null>(null);
   const [changePasswordOpen, setChangePasswordOpen] = useState(false);
   const latestLoadIdRef = useRef(0);
@@ -381,11 +400,15 @@ export function AppHeader({
       if (userMenuWrapRef.current && !userMenuWrapRef.current.contains(event.target as Node)) {
         setUserMenuOpen(false);
       }
+      if (searchWrapRef.current && !searchWrapRef.current.contains(event.target as Node)) {
+        setSearchOpen(false);
+      }
     }
     function onEsc(event: KeyboardEvent) {
       if (event.key === 'Escape') {
         setNotificationOpen(false);
         setUserMenuOpen(false);
+        setSearchOpen(false);
       }
     }
     document.addEventListener('mousedown', onDocumentClick);
@@ -395,6 +418,50 @@ export function AppHeader({
       document.removeEventListener('keydown', onEsc);
     };
   }, []);
+
+  // Ctrl/Cmd+K focuses the search box from anywhere, matching the shortcut
+  // hint already shown inside it.
+  useEffect(() => {
+    if (userRole === 'proponent') return;
+    function onKeyDown(event: KeyboardEvent) {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault();
+        searchInputRef.current?.focus();
+      }
+    }
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [userRole]);
+
+  useEffect(() => {
+    if (userRole === 'proponent') return;
+    const term = searchQuery.trim();
+    if (term.length < 2) {
+      setSearchResults([]);
+      setSearchLoading(false);
+      return;
+    }
+    setSearchLoading(true);
+    const handle = window.setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/search?q=${encodeURIComponent(term)}`, { credentials: 'include' });
+        const json = await res.json().catch(() => ({}));
+        setSearchResults(res.ok && Array.isArray(json?.data) ? json.data : []);
+      } catch {
+        setSearchResults([]);
+      } finally {
+        setSearchLoading(false);
+      }
+    }, 300);
+    return () => window.clearTimeout(handle);
+  }, [searchQuery, userRole]);
+
+  function goToSearchResult(result: SearchResult) {
+    navigate(`${result.target_path}?applicationId=${result.id}`);
+    setSearchOpen(false);
+    setSearchQuery('');
+    setSearchResults([]);
+  }
 
   function markOneAsRead(id: string) {
     setNotifications((prev) => prev.map((item) => (item.id === id ? { ...item, isRead: true } : item)));
@@ -479,39 +546,72 @@ export function AppHeader({
 
         {/* Right: search (desktop) + actions + profile */}
         <div className="flex items-center gap-1 sm:gap-2 md:gap-2.5 flex-shrink min-w-0">
-          <div className="relative group hidden sm:block w-full sm:w-36 md:w-44 lg:w-64 xl:w-72 max-w-[170px] lg:max-w-none">
-            <Search
-              className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)] group-focus-within:text-[var(--text)] transition-colors pointer-events-none"
-              size={14}
-            />
-            <input
-              type="text"
-              placeholder="Search..."
-              className="h-9 rounded-full pl-9 pr-10 lg:pr-16 text-xs w-full focus:outline-none focus:ring-1 focus:ring-[var(--border)] text-[var(--text)] placeholder:text-[var(--text-muted)] transition-all"
-              style={{
-                backgroundColor: 'color-mix(in oklab, var(--control-bg) 70%, transparent)',
-              }}
-            />
+          {userRole === 'proponent' ? null : (
             <div
-              className="absolute right-2 top-1/2 -translate-y-1/2 hidden lg:flex items-center gap-1 px-2 py-1 rounded-full"
-              style={{
-                backgroundColor: 'color-mix(in oklab, var(--surface-hover) 80%, transparent)',
-              }}
+              ref={searchWrapRef}
+              className="relative group hidden sm:block w-full sm:w-36 md:w-44 lg:w-64 xl:w-72 max-w-[170px] lg:max-w-none"
             >
-              <span className="text-[9px] text-[var(--text-muted)] font-bold tracking-tight">
-                Ctrl
-              </span>
-              <span className="text-[9px] text-[var(--text-muted)] font-bold">K</span>
+              <Search
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)] group-focus-within:text-[var(--text)] transition-colors pointer-events-none"
+                size={14}
+              />
+              <input
+                ref={searchInputRef}
+                type="text"
+                placeholder="Search application, locator…"
+                value={searchQuery}
+                onChange={(e) => {
+                  setSearchQuery(e.target.value);
+                  setSearchOpen(true);
+                }}
+                onFocus={() => setSearchOpen(true)}
+                className="h-9 rounded-full pl-9 pr-10 lg:pr-16 text-xs w-full focus:outline-none focus:ring-1 focus:ring-[var(--border)] text-[var(--text)] placeholder:text-[var(--text-muted)] transition-all"
+                style={{
+                  backgroundColor: 'color-mix(in oklab, var(--control-bg) 70%, transparent)',
+                }}
+              />
+              <div
+                className="absolute right-2 top-1/2 -translate-y-1/2 hidden lg:flex items-center gap-1 px-2 py-1 rounded-full"
+                style={{
+                  backgroundColor: 'color-mix(in oklab, var(--surface-hover) 80%, transparent)',
+                }}
+              >
+                <span className="text-[9px] text-[var(--text-muted)] font-bold tracking-tight">
+                  Ctrl
+                </span>
+                <span className="text-[9px] text-[var(--text-muted)] font-bold">K</span>
+              </div>
+
+              {searchOpen && searchQuery.trim().length >= 2 ? (
+                <div
+                  className="absolute left-0 right-0 top-full mt-1.5 rounded-xl border shadow-lg z-50 max-h-80 overflow-y-auto overflow-x-hidden custom-scrollbar"
+                  style={{ backgroundColor: 'var(--surface)', borderColor: 'var(--border-subtle)' }}
+                >
+                  {searchLoading ? (
+                    <div className="px-3 py-3 text-[11px] text-secondary">Searching…</div>
+                  ) : searchResults.length === 0 ? (
+                    <div className="px-3 py-3 text-[11px] text-secondary">No matches.</div>
+                  ) : (
+                    searchResults.map((r) => (
+                      <button
+                        key={r.id}
+                        onClick={() => goToSearchResult(r)}
+                        className="w-full text-left px-3 py-2 text-xs hover:opacity-80 cursor-pointer border-b last:border-b-0"
+                        style={{ borderColor: 'var(--border-subtle)' }}
+                      >
+                        <div className="font-semibold" style={{ color: 'var(--text)' }}>
+                          {r.application_no}
+                        </div>
+                        <div className="text-[10px] text-secondary">
+                          {r.proponent_name || 'Unknown locator'} · {r.status}
+                        </div>
+                      </button>
+                    ))
+                  )}
+                </div>
+              ) : null}
             </div>
-          </div>
-
-          <div className="block xl:hidden shrink-0">
-            <DatePicker value={range} onChange={setRange} compact showPresets />
-          </div>
-
-          <div className="hidden xl:block shrink-0 max-w-[190px] lg:max-w-none">
-            <DatePicker value={range} onChange={setRange} showPresets />
-          </div>
+          )}
 
           <div
             className="hidden sm:flex items-center gap-1.5 pl-2 pr-2.5 h-9 rounded-full cursor-pointer transition-colors shrink-0 text-[var(--text-muted)] hover:text-[var(--text)]"

@@ -519,7 +519,6 @@ async function listApplications() {
       ) AS requirements_count
     FROM dbo.applications a
     LEFT JOIN dbo.proponents p ON p.id = a.proponent_id
-    WHERE a.status <> 'DRAFT'
     ORDER BY a.id DESC
   `);
   return rows;
@@ -869,16 +868,41 @@ async function submitApplication(id, { changed_by }) {
   return getApplicationById(id);
 }
 
-/** Edit a still-unsubmitted application. Only DRAFT is editable, and only the
- * two fields a proponent sets at filing time: application_type and is_renewal.
- * Flipping is_renewal rebuilds the requirement checklist for the other track,
- * so it's refused once any document is attached (a doc would be orphaned). */
-async function updateDraftApplication(id, { application_type, is_renewal, changed_by }) {
+// Fixing a wrong application_type/is_renewal (a filing mistake) is allowed
+// for as long as the application is still somewhere in Assessment — once it
+// has an Assessment decision behind it (FOR_APPROVAL onward) or a terminal
+// outcome (REJECTED), the type is locked in for good.
+const TYPE_EDITABLE_STATUSES = ["DRAFT", "SUBMITTED", "UNDER_REVIEW", "RESUBMITTED", "RETURNED"];
+
+/** Edits application_type/is_renewal — the two fields set at filing time —
+ * for as long as the application hasn't moved past Assessment (see
+ * TYPE_EDITABLE_STATUSES). Flipping either rebuilds the requirement
+ * checklist for the other track, so it's refused once any document is
+ * attached (a doc would be orphaned) — remove uploads first. proponent_id
+ * is also editable, but DRAFT-only (see the check below) and never
+ * triggers a notification/email either way — a draft is unfinished
+ * filing, not an event worth telling anyone about yet. */
+async function updateDraftApplication(id, { application_type, is_renewal, proponent_id, changed_by }) {
   await ensureSchema();
   const application = await getApplicationById(id);
   if (!application) return null;
-  if (String(application.status || "").toUpperCase() !== "DRAFT") {
-    throw new Error("Only draft applications can be edited.");
+  const currentStatus = String(application.status || "").toUpperCase();
+  if (!TYPE_EDITABLE_STATUSES.includes(currentStatus)) {
+    throw new Error("This application's type can no longer be edited at its current stage.");
+  }
+
+  // Reassigning the locator is only safe while still DRAFT — nothing has
+  // been filed/notified yet, so there's no one else's record of "who this
+  // application belongs to" to contradict. Once submitted, the locator is
+  // locked in the same way application_type/is_renewal stay locked once
+  // documents exist.
+  let nextProponentId = application.proponent_id;
+  if (proponent_id !== undefined && proponent_id !== null) {
+    if (currentStatus !== "DRAFT") {
+      throw new Error("The locator can only be changed while this application is still a draft.");
+    }
+    nextProponentId = toInt(proponent_id);
+    if (!nextProponentId) throw new Error("Invalid proponent_id.");
   }
 
   const nextType =
@@ -913,10 +937,10 @@ async function updateDraftApplication(id, { application_type, is_renewal, change
     await tx.query(
       `
       UPDATE dbo.applications
-      SET application_type = @param1, is_renewal = @param2, updated_by = @param3, updated_at = SYSUTCDATETIME()
+      SET application_type = @param1, is_renewal = @param2, proponent_id = @param3, updated_by = @param4, updated_at = SYSUTCDATETIME()
       WHERE id = @param0
       `,
-      [id, nextType, nextRenewal, changedBy]
+      [id, nextType, nextRenewal, nextProponentId, changedBy]
     );
 
     if (renewalChanged || typeChanged) {

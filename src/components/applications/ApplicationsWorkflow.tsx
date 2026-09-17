@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import {
+  ArrowRight,
   CheckCircle2,
   Clock3,
   Eye,
@@ -9,9 +10,9 @@ import {
   Loader2,
   Mail,
   MapPin,
+  Pencil,
   Phone,
   Plus,
-  RefreshCw,
   Search,
   Upload,
   X,
@@ -30,6 +31,11 @@ import { DatePicker } from '../ui/DatePicker';
 import { TextField } from '@mui/material';
 
 const NOTIFICATION_HIGHLIGHT_DURATION_MS = 5000;
+
+// Mirrors server/models/ApplicationWorkflow.js's TYPE_EDITABLE_STATUSES —
+// fixing a wrong application_type/is_renewal is allowed for as long as the
+// application hasn't moved past Assessment.
+const TYPE_EDITABLE_STATUSES = ['DRAFT', 'SUBMITTED', 'UNDER_REVIEW', 'RESUBMITTED', 'RETURNED'];
 
 type ApplicationRow = {
   id: number;
@@ -115,9 +121,6 @@ function api(path: string) {
   return path;
 }
 
-// Mirrors server/models/ApplicationWorkflow.js APPLICATION_STATUSES. DRAFT is
-// excluded here — staff move a draft forward via "Submit", not this dropdown.
-const STAFF_SETTABLE_STATUSES = ['SUBMITTED', 'UNDER_REVIEW', 'RESUBMITTED', 'RETURNED', 'REJECTED', 'APPROVED'];
 
 type ProgressSummary = {
   total: number;
@@ -282,22 +285,13 @@ export function ApplicationsWorkflow({
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [documentEditorOpen, setDocumentEditorOpen] = useState(false);
   const [documentEditorMode, setDocumentEditorMode] = useState<'insert' | 'update'>('insert');
-  const [statusEditorOpen, setStatusEditorOpen] = useState(false);
-  const [contractOpen, setContractOpen] = useState(false);
-  const [contractApp, setContractApp] = useState<ApplicationRow | null>(null);
-  const [contractDocuments, setContractDocuments] = useState<DocumentRow[]>([]);
-  const [contractLoading, setContractLoading] = useState(false);
-  const [contractMode, setContractMode] = useState<'insert' | 'update'>('insert');
-  const [contractExistingId, setContractExistingId] = useState<number | null>(null);
-  const [contractForm, setContractForm] = useState({
-    contract_no: '',
-    issue_date: '',
-    effective_start: '',
-    effective_end: '',
-    document_id: '',
-  });
-  /** Loaded values for update mode — Save stays disabled until something changes. */
-  const [contractInitialSnapshot, setContractInitialSnapshot] = useState<typeof contractForm | null>(null);
+  // Editing an application's own type/renewal flag (locator stays fixed —
+  // the backend only accepts application_type/is_renewal, never a proponent
+  // change) is only ever allowed while it's still DRAFT, same rule the
+  // backend enforces.
+  const [editOpen, setEditOpen] = useState(false);
+  const [editApp, setEditApp] = useState<ApplicationRow | null>(null);
+  const [editForm, setEditForm] = useState({ application_type: '', is_renewal: false });
   const consumedNotificationQueryRef = useRef<string>('');
   const consumedStatusQueryRef = useRef<string>('');
   const applicationRowRefs = useRef<Record<number, HTMLTableRowElement | null>>({});
@@ -323,11 +317,11 @@ export function ApplicationsWorkflow({
     application_type: 'DIRECT_LEASE',
     save_as_draft: false,
   });
-
-  const [statusForm, setStatusForm] = useState({
-    to_status: 'UNDER_REVIEW',
-    remarks: '',
-  });
+  // Set while resuming an existing DRAFT (see openContinueDraft) instead of
+  // filing a brand new one — same New Application panel, but Save patches
+  // this draft's own row (and submits it, unless "Save as draft" is still
+  // checked) rather than POSTing a new application.
+  const [continuingDraftId, setContinuingDraftId] = useState<number | null>(null);
 
   const [documentForm, setDocumentForm] = useState<{ requirement_id: string; file: File | null }>({
     requirement_id: '',
@@ -353,20 +347,6 @@ export function ApplicationsWorkflow({
     if (!Number.isFinite(proponentId) || proponentId <= 0) return false;
     return true;
   }, [createForm.proponent_id]);
-
-  const contractFormCanSave = useMemo(() => {
-    if (!contractForm.contract_no.trim() || !contractForm.issue_date) return false;
-    if (contractMode === 'insert') return true;
-    if (!contractInitialSnapshot) return false;
-    const s = contractInitialSnapshot;
-    return (
-      contractForm.contract_no.trim() !== s.contract_no.trim() ||
-      contractForm.issue_date !== s.issue_date ||
-      contractForm.effective_start !== s.effective_start ||
-      contractForm.effective_end !== s.effective_end ||
-      contractForm.document_id !== s.document_id
-    );
-  }, [contractForm, contractMode, contractInitialSnapshot]);
 
   const proponentSelectOptions = useMemo(
     () => proponentsEffective.map((p) => ({ value: String(p.id), label: p.business_name })),
@@ -644,6 +624,19 @@ export function ApplicationsWorkflow({
     if (checklistPage > checklistTotalPages) setChecklistPage(checklistTotalPages);
   }, [checklistPage, checklistTotalPages]);
 
+  // This page is Locator/Assessment territory only — it never routes into
+  // Approval & Issuance (that's the Account Officer's own module, reached
+  // through the Approval Queue or Search, not from here). Every non-draft
+  // row opens straight to Assessment's Compliance tab; DRAFT instead
+  // resumes filing, since there's no assessment record for it yet.
+  function goToApplication(row: ApplicationRow) {
+    if (toUpper(row.status) === 'DRAFT') {
+      openContinueDraft(row);
+      return;
+    }
+    navigate(`/assessment?applicationId=${row.id}&tab=Compliance`);
+  }
+
   async function openDetails(applicationId: number) {
     consumedNotificationQueryRef.current = '';
     if (applicationId !== selectedId) {
@@ -660,103 +653,43 @@ export function ApplicationsWorkflow({
     await loadDetails(applicationId);
   }
 
-  function openStatusEditor(applicationId: number, currentStatus?: string) {
-    setSelectedId(applicationId);
-    setStatusForm((prev) => ({
-      ...prev,
-      to_status: String(currentStatus || prev.to_status || 'UNDER_REVIEW'),
-    }));
-    setStatusEditorOpen(true);
+  function openEditApplication(row: ApplicationRow) {
+    setEditApp(row);
+    setEditForm({ application_type: row.application_type, is_renewal: Boolean(row.is_renewal) });
+    setEditOpen(true);
   }
 
-  async function openContractEditor(application: ApplicationRow) {
-    const applicationId = application.id;
-    setContractApp(application);
-    setContractOpen(true);
-    setContractLoading(true);
-    setContractMode('insert');
-    setContractExistingId(null);
-    setContractInitialSnapshot(null);
-    setContractForm({
-      contract_no: '',
-      issue_date: '',
-      effective_start: '',
-      effective_end: '',
-      document_id: '',
+  /** Resumes a DRAFT in the same "New Application" panel used to file one —
+   * a draft is unfinished filing, not a separate record to "edit", so it
+   * gets the create flow back with its own data pre-filled, not the
+   * generic Edit Application form. */
+  function openContinueDraft(row: ApplicationRow) {
+    setContinuingDraftId(row.id);
+    setCreateForm({
+      proponent_id: String(row.proponent_id),
+      application_type: row.application_type,
+      save_as_draft: true,
     });
-    setContractDocuments([]);
-
-    try {
-      const [contractRes, docsRes] = await Promise.all([
-        fetch(api(`/api/contracts/application/${applicationId}`), { credentials: 'include' }),
-        fetch(api(`/api/applications/${applicationId}/documents`), { credentials: 'include' }),
-      ]);
-      const [contractJson, docsJson] = await Promise.all([contractRes.json(), docsRes.json()]);
-      const existing: ContractRow | null = contractJson?.data || null;
-
-      setContractDocuments(Array.isArray(docsJson?.data) ? docsJson.data : []);
-
-      if (existing && Number.isFinite(Number(existing.id))) {
-        setContractMode('update');
-        setContractExistingId(Number(existing.id));
-        const loaded = {
-          contract_no: existing.contract_no ? String(existing.contract_no) : '',
-          issue_date: toDateInputValue(existing.issue_date),
-          effective_start: toDateInputValue(existing.effective_start),
-          effective_end: toDateInputValue(existing.effective_end),
-          document_id: existing.document_id ? String(existing.document_id) : '',
-        };
-        setContractForm(loaded);
-        setContractInitialSnapshot(loaded);
-      }
-    } catch (error: any) {
-      toast.error(error?.message || 'Failed to load contract');
-      setContractOpen(false);
-    } finally {
-      setContractLoading(false);
-    }
+    setIsCreateOpen(true);
   }
 
-  async function saveContract() {
-    if (!contractApp) return;
-    if (!contractForm.contract_no.trim()) {
-      toast.error('Contract no. is required');
-      return;
-    }
-    if (!contractForm.issue_date) {
-      toast.error('Issue date is required');
-      return;
-    }
-
-    const payload = {
-      application_id: contractApp.id,
-      contract_no: contractForm.contract_no.trim(),
-      issue_date: contractForm.issue_date || null,
-      effective_start: contractForm.effective_start || null,
-      effective_end: contractForm.effective_end || null,
-      document_id: contractForm.document_id ? Number(contractForm.document_id) : null,
-    };
-
+  async function saveEditApplication() {
+    if (!editApp) return;
     setSaving(true);
     try {
-      const isInsert = contractMode === 'insert';
-      const url = isInsert ? api('/api/contracts') : api(`/api/contracts/${contractExistingId}`);
-      const method = isInsert ? 'POST' : 'PUT';
-
-      const res = await fetch(url, {
-        method,
+      const res = await fetch(api(`/api/applications/${editApp.id}`), {
+        method: 'PATCH',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({ application_type: editForm.application_type, is_renewal: editForm.is_renewal ? 1 : 0 }),
       });
       const json = await res.json().catch(() => ({}));
-      if (!res.ok || !json?.success) throw new Error(json?.message || 'Failed to save contract');
-
-      toast.success(isInsert ? 'Contract created' : 'Contract updated');
-      requestNotificationsRefresh();
-      setContractOpen(false);
+      if (!res.ok || !json?.success) throw new Error(json?.message || 'Failed to update application');
+      toast.success('Application updated');
+      setEditOpen(false);
+      await refreshBase({ showLoading: false });
     } catch (error: any) {
-      toast.error(error?.message || 'Failed to save contract');
+      toast.error(error?.message || 'Failed to update application');
     } finally {
       setSaving(false);
     }
@@ -787,6 +720,42 @@ export function ApplicationsWorkflow({
     const proponentId = Number(createForm.proponent_id);
     if (!Number.isFinite(proponentId)) {
       toast.error('Locator is required');
+      return;
+    }
+
+    if (continuingDraftId) {
+      setSaving(true);
+      try {
+        const res = await fetch(api(`/api/applications/${continuingDraftId}`), {
+          method: 'PATCH',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            application_type: createForm.application_type.trim() || 'DIRECT_LEASE',
+            is_renewal: renewalMode ? 1 : 0,
+            proponent_id: proponentId,
+          }),
+        });
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok || !json?.success) throw new Error(json?.message || 'Failed to update draft');
+
+        const draftId = continuingDraftId;
+        setIsCreateOpen(false);
+        setContinuingDraftId(null);
+        if (createForm.save_as_draft) {
+          toast.success(`Draft ${json?.data?.application_no || ''} updated`);
+          requestNotificationsRefresh();
+          await refreshBase({ showLoading: false });
+        } else {
+          // submitApplication() covers its own toast/refresh/notification.
+          await submitApplication(draftId);
+        }
+        setSelectedId(draftId);
+      } catch (error: any) {
+        toast.error(error?.message || 'Failed to update draft');
+      } finally {
+        setSaving(false);
+      }
       return;
     }
 
@@ -865,37 +834,6 @@ export function ApplicationsWorkflow({
       toast.error(error?.message || 'Failed to upload document');
     } finally {
       setUploading(false);
-    }
-  }
-
-  async function updateStatus() {
-    if (!selectedId) return;
-    if (!statusForm.to_status.trim()) {
-      toast.error('Status is required');
-      return;
-    }
-
-    setSaving(true);
-    try {
-      const res = await fetch(api(`/api/applications/${selectedId}/status`), {
-        method: 'PATCH',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          to_status: statusForm.to_status.trim(),
-          remarks: statusForm.remarks.trim() || null,
-        }),
-      });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok || !json?.success) throw new Error(json?.message || 'Failed to update status');
-      toast.success('Application status updated');
-      requestNotificationsRefresh();
-      await refreshBase({ showLoading: false });
-      await loadDetails(selectedId);
-    } catch (error: any) {
-      toast.error(error?.message || 'Failed to update status');
-    } finally {
-      setSaving(false);
     }
   }
 
@@ -1023,11 +961,12 @@ export function ApplicationsWorkflow({
                       ref={(node) => {
                         applicationRowRefs.current[row.id] = node;
                       }}
-                      className="transition-[background-color,box-shadow] duration-500"
+                      className="transition-[background-color,box-shadow] duration-500 cursor-pointer hover:bg-[var(--selected-bg)]"
                       style={{
                         borderTop: '1px solid var(--border-subtle)',
                         ...highlightStyle,
                       }}
+                      onClick={() => goToApplication(row)}
                     >
                       <td className="px-3 py-2.5">
                         <div className="font-semibold" style={{ color: 'var(--text)' }}>
@@ -1078,50 +1017,43 @@ export function ApplicationsWorkflow({
                           {row.status}
                         </span>
                       </td>
-                      <td className="px-3 py-2.5 text-right">
+                      <td className="px-3 py-2.5 text-right" onClick={(e) => e.stopPropagation()}>
                         <div className="inline-flex items-center gap-1.5">
-                          <button
-                            className="inline-flex items-center justify-center rounded-lg border h-8 w-8 text-xs font-semibold"
-                            style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'var(--control-bg)' }}
-                            onClick={() => openDetails(row.id)}
-                            disabled={saving}
-                            title="View Compliance"
-                            aria-label="View Compliance"
-                          >
-                            {detailsLoading && selectedId === row.id ? <Loader2 size={14} className="animate-spin" /> : <Eye size={14} />}
-                          </button>
-                          <button
-                            className="inline-flex items-center justify-center rounded-lg border h-8 w-8 text-xs font-semibold"
-                            style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'var(--control-bg)' }}
-                            onClick={() => openContractEditor(row)}
-                            disabled={saving || contractOpen}
-                            title="Contract"
-                            aria-label="Contract"
-                          >
-                            {contractLoading && contractApp?.id === row.id ? <Loader2 size={14} className="animate-spin" /> : <FileText size={14} />}
-                          </button>
-                          {['DRAFT', 'RETURNED'].includes(toUpper(row.status)) ? (
+                          {toUpper(row.status) === 'DRAFT' ? (
+                            <button
+                              className="inline-flex items-center justify-center gap-1 rounded-lg h-8 px-2.5 text-[10px] font-bold uppercase tracking-wide"
+                              style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
+                              onClick={() => openContinueDraft(row)}
+                              disabled={saving}
+                              title="Continue Draft"
+                              aria-label="Continue Draft"
+                            >
+                              Draft <ArrowRight size={12} />
+                            </button>
+                          ) : toUpper(row.status) === 'RETURNED' ? (
                             <button
                               className="inline-flex items-center justify-center rounded-lg h-8 w-8 text-xs font-semibold"
                               style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
                               onClick={() => submitApplication(row.id)}
                               disabled={saving}
-                              title={toUpper(row.status) === 'DRAFT' ? 'Submit' : 'Resubmit'}
-                              aria-label={toUpper(row.status) === 'DRAFT' ? 'Submit' : 'Resubmit'}
+                              title="Resubmit"
+                              aria-label="Resubmit"
                             >
                               <Upload size={14} />
                             </button>
                           ) : null}
-                          <button
-                            className="inline-flex items-center justify-center rounded-lg border h-8 w-8 text-xs font-semibold"
-                            style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'var(--control-bg)' }}
-                            onClick={() => openStatusEditor(row.id, row.status)}
-                            disabled={saving}
-                            title="Update Status"
-                            aria-label="Update Status"
-                          >
-                            <RefreshCw size={14} />
-                          </button>
+                          {TYPE_EDITABLE_STATUSES.includes(toUpper(row.status)) && toUpper(row.status) !== 'DRAFT' ? (
+                            <button
+                              className="inline-flex items-center justify-center rounded-lg border h-8 w-8 text-xs font-semibold"
+                              style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'var(--control-bg)' }}
+                              onClick={() => openEditApplication(row)}
+                              disabled={saving}
+                              title="Edit Application"
+                              aria-label="Edit Application"
+                            >
+                              <Pencil size={14} />
+                            </button>
+                          ) : null}
                         </div>
                       </td>
                     </tr>
@@ -1558,186 +1490,18 @@ export function ApplicationsWorkflow({
       ) : null}
       </AnimatePresence>
 
-      <AnimatePresence>
-      {statusEditorOpen ? (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center px-3">
-          <motion.div
-            className="absolute inset-0"
-            style={{ backgroundColor: 'rgba(0,0,0,.45)' }}
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.2, ease: 'easeOut' }}
-            onClick={() => setStatusEditorOpen(false)}
-          />
-          <motion.div
-            className="w-full max-w-lg rounded-2xl border p-4 sm:p-5 relative z-10"
-            style={{ backgroundColor: 'var(--surface)', borderColor: 'var(--border-subtle)' }}
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.95 }}
-            transition={{ duration: 0.2, ease: 'easeOut' }}
-          >
-            <div className="flex items-start justify-between gap-3 border-b pb-3" style={{ borderColor: 'var(--input-border)' }}>
-              <div>
-                <div className="text-sm font-bold" style={{ color: 'var(--text)' }}>Update Application Status</div>
-                <div className="text-xs text-secondary mt-0.5">
-                  {selectedApp ? `${selectedApp.proponent_name || 'Application'} • ${selectedApp.application_no}` : 'Selected application'}
-                </div>
-              </div>
-              <button
-                className="rounded-lg px-2 py-1 text-xs border"
-                style={{ borderColor: 'var(--border-subtle)', color: 'var(--text-muted)' }}
-                onClick={() => setStatusEditorOpen(false)}
-              >
-                Close
-              </button>
-            </div>
-            <div className="pt-3 grid grid-cols-1 gap-2.5">
-              <select
-                className="app-form-control"
-                value={statusForm.to_status}
-                onChange={(e) => setStatusForm((p) => ({ ...p, to_status: e.target.value }))}
-              >
-                {STAFF_SETTABLE_STATUSES.map((s) => (
-                  <option key={s} value={s}>
-                    {s}
-                  </option>
-                ))}
-              </select>
-              <input
-                className="app-form-control"
-                value={statusForm.remarks}
-                onChange={(e) => setStatusForm((p) => ({ ...p, remarks: e.target.value }))}
-                placeholder="Remarks (optional)"
-              />
-              <button
-                className={cn('rounded-lg px-3 py-2 text-sm font-semibold', saving && 'opacity-60 cursor-not-allowed')}
-                style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
-                disabled={saving}
-                onClick={async () => {
-                  await updateStatus();
-                  setStatusEditorOpen(false);
-                }}
-              >
-                Update
-              </button>
-            </div>
-          </motion.div>
-        </div>
-      ) : null}
-      </AnimatePresence>
-
-      <SidePanel
-        open={contractOpen}
-        title={contractMode === 'insert' ? 'Create Contract' : 'Update Contract'}
-        subtitle={
-          contractApp ? `${contractApp.proponent_name || 'Application'} • ${contractApp.application_no}` : 'Selected application'
-        }
-        onClose={() => setContractOpen(false)}
-        onSave={saveContract}
-        saving={saving || contractLoading}
-        saveDisabled={!contractFormCanSave}
-        saveLabel={contractMode === 'insert' ? 'Save Contract' : 'Save Changes'}
-        widthClassName="max-w-2xl"
-      >
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          <div className="md:col-span-2">
-            <label className="text-xs font-semibold uppercase tracking-wider text-secondary">Contract No.</label>
-            <TextField
-              size="small"
-              value={contractForm.contract_no}
-              onChange={(e) => setContractForm((p) => ({ ...p, contract_no: e.target.value }))}
-              placeholder="e.g. CN-2026-0001"
-              sx={{
-                width: '100%',
-                '& .MuiOutlinedInput-root': {
-                  backgroundColor: 'transparent',
-                  borderRadius: '1.5rem',
-                  boxShadow: 'none',
-                  height: '40px',
-                },
-                '& .MuiOutlinedInput-notchedOutline': {
-                  borderColor: 'var(--input-border)',
-                  borderWidth: '1px',
-                },
-                '&:hover .MuiOutlinedInput-notchedOutline': {
-                  borderColor: 'var(--nav-active-bg)',
-                  borderWidth: '1px',
-                },
-                '& .MuiOutlinedInput-root.Mui-focused .MuiOutlinedInput-notchedOutline': {
-                  borderColor: 'var(--nav-active-bg)',
-                  borderWidth: '1px',
-                },
-                '& .MuiInputBase-input': {
-                  color: 'var(--text)',
-                },
-                '& .MuiInputBase-input::placeholder': {
-                  color: 'var(--text-muted)',
-                  opacity: 1,
-                },
-              }}
-            />
-          </div>
-
-          <div>
-            <label className="text-xs font-semibold uppercase tracking-wider text-secondary block mb-1">Issue Date</label>
-            <DatePicker
-              mode="single"
-              fullWidth
-              value={toDatePickerValue(contractForm.issue_date)}
-              onChange={(newValue) => setContractForm((p) => ({ ...p, issue_date: formatDatePickerValue(newValue) }))}
-              placeholder="YYYY-MM-DD"
-            />
-          </div>
-
-          <div>
-            <label className="text-xs font-semibold uppercase tracking-wider text-secondary block mb-1">Effective Start</label>
-            <DatePicker
-              mode="single"
-              fullWidth
-              value={toDatePickerValue(contractForm.effective_start)}
-              onChange={(newValue) => setContractForm((p) => ({ ...p, effective_start: formatDatePickerValue(newValue) }))}
-              placeholder="YYYY-MM-DD"
-            />
-          </div>
-
-          <div>
-            <label className="text-xs font-semibold uppercase tracking-wider text-secondary block mb-1">Effective End</label>
-            <DatePicker
-              mode="single"
-              fullWidth
-              value={toDatePickerValue(contractForm.effective_end)}
-              onChange={(newValue) => setContractForm((p) => ({ ...p, effective_end: formatDatePickerValue(newValue) }))}
-              placeholder="YYYY-MM-DD"
-            />
-          </div>
-
-          <div className="md:col-span-2">
-            <label className="text-xs font-semibold uppercase tracking-wider text-secondary">Contract Document</label>
-            <AppSelect
-              options={[
-                { value: '', label: 'No document' },
-                ...contractDocuments.map((d) => ({
-                  value: String(d.id),
-                  label: `${d.file_name}${d.requirement_code ? ` (${d.requirement_code})` : ''}`,
-                })),
-              ]}
-              value={contractForm.document_id}
-              onChange={(value) => setContractForm((p) => ({ ...p, document_id: value }))}
-              placeholder="Select contract document..."
-              isDisabled={contractLoading}
-              isClearable={false}
-            />
-          </div>
-        </div>
-      </SidePanel>
-
       <SidePanel
         open={isCreateOpen}
-        title={renewalMode ? 'New Renewal Application' : 'New Application'}
-        subtitle="A reference number is generated automatically on save."
-        onClose={() => setIsCreateOpen(false)}
+        title={continuingDraftId ? 'Continue Application' : renewalMode ? 'New Renewal Application' : 'New Application'}
+        subtitle={
+          continuingDraftId
+            ? 'Finish filing this draft — uncheck "Save as draft" to submit it now.'
+            : 'A reference number is generated automatically on save.'
+        }
+        onClose={() => {
+          setIsCreateOpen(false);
+          setContinuingDraftId(null);
+        }}
         onSave={createApplication}
         saving={saving}
         saveDisabled={!createFormCanSubmit}
@@ -1752,6 +1516,9 @@ export function ApplicationsWorkflow({
             placeholder="Select locator..."
             isDisabled={saving}
           />
+          {continuingDraftId ? (
+            <div className="text-[10px] text-secondary -mt-2">Still a draft, so the locator can still be changed if this was filed under the wrong one.</div>
+          ) : null}
 
           {selectedCreateProponent ? (
             <div
@@ -1803,6 +1570,38 @@ export function ApplicationsWorkflow({
             />
             <span style={{ color: 'var(--text)' }}>Save as draft — finish and submit later</span>
           </label>
+        </div>
+      </SidePanel>
+
+      <SidePanel
+        open={editOpen}
+        title="Edit Application"
+        subtitle={editApp ? `${editApp.proponent_name || 'Application'} • ${editApp.application_no}` : 'Selected application'}
+        onClose={() => setEditOpen(false)}
+        onSave={saveEditApplication}
+        saving={saving}
+        saveDisabled={!editForm.application_type}
+        saveLabel="Save Changes"
+      >
+        <div className="grid grid-cols-1 gap-3">
+          <label className="text-xs font-semibold uppercase tracking-wider text-secondary">Locator</label>
+          <div
+            className="rounded-lg border px-3 py-2.5 text-xs"
+            style={{ borderColor: 'var(--input-border)', backgroundColor: 'var(--surface-hover)', color: 'var(--text-muted)' }}
+          >
+            {editApp?.proponent_name || '—'}
+            <span className="block text-[10px] mt-0.5 opacity-70">Locator can't be changed after filing.</span>
+          </div>
+
+          <label className="text-xs font-semibold uppercase tracking-wider text-secondary">Application Type</label>
+          <AppSelect
+            options={applicationTypesEffective.map((t) => ({ value: t.code, label: t.name }))}
+            value={editForm.application_type}
+            onChange={(value) => setEditForm((p) => ({ ...p, application_type: value }))}
+            placeholder="Select application type..."
+            isDisabled={saving}
+            isClearable={false}
+          />
         </div>
       </SidePanel>
     </div>

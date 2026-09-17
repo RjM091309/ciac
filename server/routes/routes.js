@@ -46,6 +46,7 @@ module.exports = function pageRouter(app) {
   app.use("/api/documents", require("./r_documents"));
   app.use("/api/permits", require("./r_permits"));
   app.use("/api/reports", require("./r_reports"));
+  app.use("/api/search", require("./r_search"));
   app.use("/", router);
 };
 
