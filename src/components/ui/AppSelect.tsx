@@ -40,6 +40,7 @@ const createStyles = (compact: boolean): StylesConfig<AppSelectOption, false> =>
   input: (base) => ({
     ...base,
     color: 'var(--text)',
+    cursor: 'pointer',
   }),
   placeholder: (base) => ({
     ...base,

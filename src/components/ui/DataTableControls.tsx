@@ -85,7 +85,7 @@ export function DataTableControls({
               type="button"
               className={cn(
                 'h-7 min-w-7 px-2 inline-flex items-center justify-center rounded-md text-[11px] font-semibold',
-                p === page ? 'text-white cursor-default' : 'text-secondary cursor-pointer hover:bg-[var(--surface-hover)]'
+                p === page ? 'text-white' : 'text-secondary hover:bg-[var(--surface-hover)]'
               )}
               style={p === page ? { backgroundColor: 'var(--nav-active-bg)' } : undefined}
               onClick={() => onPageChange(p)}

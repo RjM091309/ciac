@@ -169,6 +169,71 @@
     border-color 180ms ease-out;
 }
 
+  /* Pointer on clickable controls; I-beam on typed/search fields. */
+  button:not(:disabled),
+  [type="button"]:not(:disabled),
+  [type="submit"]:not(:disabled),
+  [type="reset"]:not(:disabled),
+  [type="checkbox"]:not(:disabled),
+  [type="radio"]:not(:disabled),
+  [type="file"]:not(:disabled),
+  [type="color"]:not(:disabled),
+  [type="range"]:not(:disabled),
+  [type="date"]:not(:disabled),
+  [type="datetime-local"]:not(:disabled),
+  [type="month"]:not(:disabled),
+  [type="time"]:not(:disabled),
+  [type="week"]:not(:disabled),
+  select:not(:disabled),
+  summary,
+  a[href],
+  label:has([type="checkbox"]:not(:disabled)),
+  label:has([type="radio"]:not(:disabled)),
+  [role="button"]:not([aria-disabled="true"]),
+  [role="tab"]:not([aria-disabled="true"]),
+  [role="menuitem"]:not([aria-disabled="true"]),
+  [role="option"]:not([aria-disabled="true"]),
+  [role="switch"]:not([aria-disabled="true"]),
+  [role="checkbox"]:not([aria-disabled="true"]),
+  [role="radio"]:not([aria-disabled="true"]),
+  [role="combobox"]:not([aria-disabled="true"]),
+  [role="listbox"],
+  .sidebar-item,
+  .control-btn,
+  .app-select__control:not(.app-select__control--is-disabled),
+  .app-select__option,
+  .app-select__dropdown-indicator,
+  .app-select__clear-indicator,
+  .MuiButtonBase-root:not(.Mui-disabled) {
+    cursor: pointer;
+  }
+
+  button:disabled,
+  [disabled],
+  [aria-disabled="true"],
+  .app-select__control--is-disabled,
+  .Mui-disabled {
+    cursor: not-allowed;
+  }
+
+  input:not([type]):not(:disabled),
+  input[type="text"]:not([readonly]):not(:disabled),
+  input[type="search"]:not(:disabled),
+  input[type="email"]:not(:disabled),
+  input[type="password"]:not(:disabled),
+  input[type="number"]:not(:disabled),
+  input[type="tel"]:not(:disabled),
+  input[type="url"]:not(:disabled),
+  textarea:not(:disabled),
+  [role="searchbox"]:not([aria-disabled="true"]),
+  [contenteditable="true"] {
+    cursor: text;
+  }
+
+  input[type="text"][readonly]:not(:disabled) {
+    cursor: pointer;
+  }
+
   .text-secondary {
     color: var(--text-secondary);
   }
@@ -508,4 +573,26 @@ select.input-field:-webkit-autofill:focus {
    (header is z-40) the rest of the time. */
 .locator-events-toaster[data-sonner-toaster] {
   z-index: 50 !important;
+}
+
+/* Native date/time fields: Chromium paints the calendar glyph as
+   ::-webkit-calendar-picker-indicator with its own UA cursor (default).
+   The OS/browser calendar popup is not in the page DOM, so it cannot
+   be restyled; in-app MUI calendars (header date range) can. */
+input[type='date']:not(:disabled)::-webkit-calendar-picker-indicator,
+input[type='datetime-local']:not(:disabled)::-webkit-calendar-picker-indicator,
+input[type='month']:not(:disabled)::-webkit-calendar-picker-indicator,
+input[type='time']:not(:disabled)::-webkit-calendar-picker-indicator,
+input[type='week']:not(:disabled)::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+}
+
+.MuiPickersDay-root:not(.Mui-disabled),
+.MuiPickersCalendarHeader-switchViewButton,
+.MuiPickersArrowSwitcher-button,
+.MuiYearCalendar-button,
+.MuiMonthCalendar-button,
+.MuiPickersYear-yearButton,
+.MuiPickersMonth-monthButton {
+  cursor: pointer;
 }

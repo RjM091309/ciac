@@ -172,6 +172,14 @@ export function AppLayout({
         },
         shape: { borderRadius: 12 },
         components: {
+          MuiButtonBase: {
+            styleOverrides: {
+              root: {
+                '&:not(.Mui-disabled)': { cursor: 'pointer' },
+                '&.Mui-disabled': { cursor: 'not-allowed' },
+              },
+            },
+          },
           MuiOutlinedInput: {
             styleOverrides: {
               root: {
