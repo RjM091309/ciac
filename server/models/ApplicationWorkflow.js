@@ -20,8 +20,11 @@ function toBit(v) {
 // Fixed application lifecycle. Kept as a flat list (rather than a strict
 // per-from-status transition table) because staff need to move an
 // application backward (e.g. APPROVED -> RETURNED on a later audit finding)
-// as well as forward — the meaningful gate is the mandatory-document check
-// on APPROVED, enforced separately in updateApplicationStatus.
+// as well as forward — updateApplicationStatus itself is a bare transition
+// with no business-rule gate; the mandatory-document check on the normal
+// APPROVED path lives in ApprovalIssuance.settleApproval() instead, so the
+// admin-only raw status override (r_applications.js) isn't collaterally
+// blocked by it.
 const APPLICATION_STATUSES = [
   "DRAFT",
   "SUBMITTED",
@@ -1055,32 +1058,13 @@ async function updateApplicationStatus(id, { to_status, remarks, changed_by }) {
     throw new Error(`Invalid status "${toStatus}". Must be one of: ${APPLICATION_STATUSES.join(", ")}`);
   }
 
-  // The "meaningful gate on APPROVED" this file's top comment refers to —
-  // previously described but never actually implemented, which meant an
-  // application with zero verified mandatory requirements could be endorsed
-  // straight through to APPROVED and a contract issued off of it. Approval's
-  // settleApproval() already has a catch block written to roll the ladder
-  // back to IN_PROGRESS on exactly this thrown error.
-  if (toStatus === "APPROVED") {
-    const unverifiedRows = await selectData(
-      `
-      SELECT COUNT(1) AS n
-      FROM dbo.application_requirements ar
-      INNER JOIN dbo.requirements r ON r.id = ar.requirement_id
-      WHERE ar.application_id = @param0
-        AND r.is_mandatory = 1
-        AND ar.status <> 'VERIFIED'
-      `,
-      [id]
-    );
-    const unverified = Number(unverifiedRows?.[0]?.n || 0);
-    if (unverified > 0) {
-      throw new Error(
-        `Cannot approve — ${unverified} mandatory requirement${unverified === 1 ? "" : "s"} ${unverified === 1 ? "is" : "are"} not yet verified.`
-      );
-    }
-  }
-
+  // Deliberately no mandatory-requirement gate here — this function is
+  // shared by the approval-ladder's settleApproval() AND the raw
+  // requireRole("admin") status-override endpoint (see r_applications.js),
+  // and that admin escape hatch exists precisely to let someone force a
+  // correction through without re-litigating business rules. The mandatory-
+  // document check for the normal APPROVED path lives in settleApproval()
+  // instead, scoped to only the caller it's meant for.
   const changedBy = toInt(changed_by);
 
   await updateData(

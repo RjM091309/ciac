@@ -216,7 +216,7 @@ async function createRequirement({
     [code, name, description ?? null, categoryId, toBit(for_new), toBit(for_renewal), toBit(is_mandatory), toBit(is_active), createdBy]
   );
   const id = result?.recordset?.[0]?.id;
-  if (application_types !== undefined) await setApplicationTypes(id, application_types);
+  if (application_types !== undefined && application_types !== null) await setApplicationTypes(id, application_types);
   return getRequirementById(id);
 }
 
@@ -254,7 +254,7 @@ async function updateRequirement(
     await updateData(query, params);
   }
 
-  if (application_types !== undefined) await setApplicationTypes(id, application_types);
+  if (application_types !== undefined && application_types !== null) await setApplicationTypes(id, application_types);
 
   return getRequirementById(id);
 }

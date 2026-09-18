@@ -1436,7 +1436,7 @@ export function RequirementsManagement() {
       <ConfirmModal
         open={confirmDeactivateTypeId !== null}
         title="Deactivate application type?"
-        description="Locators and staff will no longer be able to select this type when filing a new application. You can re-activate it later from Application Types settings."
+        description="Locators and staff will no longer be able to select this type when filing a new application. Any category wired only to this type (and its requirements) will be deactivated along with it, and reactivated automatically if you reactivate this type later."
         confirmText="Deactivate"
         danger
         loading={saving}
@@ -1497,7 +1497,7 @@ export function RequirementsManagement() {
       <ConfirmModal
         open={confirmDeactivateCategoryId !== null}
         title="Deactivate requirement category?"
-        description="Requirements under this category keep their assignment, but this category will no longer be selectable. You can re-activate it later from Requirement Categories settings."
+        description="Every active requirement under this category will be deactivated along with it. Reactivating this category later will automatically reactivate the ones that were only deactivated because of it."
         confirmText="Deactivate"
         danger
         loading={saving}

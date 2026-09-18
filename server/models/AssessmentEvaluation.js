@@ -14,6 +14,13 @@ function toInt(v) {
   return Number.isFinite(n) ? n : null;
 }
 
+// Tags a deliberate business-rule rejection with .status = 400 so the
+// controller's fail() helper reports it as a client error instead of a 500
+// — see the matching comment on fail() in c_assessments.js.
+function businessError(message) {
+  return Object.assign(new Error(message), { status: 400 });
+}
+
 function toDecimal(v) {
   if (v === null || v === undefined || v === "") return null;
   const n = Number(v);
@@ -491,16 +498,23 @@ async function setStage(applicationId, { stage, actorId }) {
   // recommendation set (Submit stays disabled) with no Reopen button left
   // to show (it only renders for COMPLETED/RETURNED) — a stuck dead end.
   if (asm.stage === "COMPLETED" || asm.stage === "RETURNED") {
-    throw new Error("This assessment is closed — use Reopen (admin) to move it out of a closed stage.");
+    throw businessError("This assessment is closed — use Reopen (admin) to move it out of a closed stage.");
   }
-  await updateData(
+  // The check above reads a stale snapshot — closing this with the same
+  // compare-and-swap technique as actOnStep's decision write, so a
+  // concurrent request can't sneak a stage change through between the read
+  // and this write.
+  const result = await updateData(
     `
     UPDATE dbo.application_assessments
     SET stage = @param1, updated_by = @param2, updated_at = SYSUTCDATETIME()
-    WHERE id = @param0
+    WHERE id = @param0 AND stage NOT IN ('COMPLETED', 'RETURNED')
     `,
     [asm.id, next, toInt(actorId)]
   );
+  if (!result?.rowsAffected?.[0]) {
+    throw businessError("This assessment is closed — use Reopen (admin) to move it out of a closed stage.");
+  }
   await logActivity(asm.id, "STAGE_CHANGED", `${asm.stage} → ${next}`, actorId);
   return getAssessmentDetail(applicationId);
 }
@@ -508,19 +522,23 @@ async function setStage(applicationId, { stage, actorId }) {
 async function reopen(applicationId, actorId) {
   const asm = await getOrCreateAssessment(applicationId, actorId);
   if (!asm) return null;
-  // If Approval already reached a terminal decision (a contract may already
-  // be issued off of it), reopening the assessment is a dead end anyway —
-  // resubmitting a fresh recommendation would try to restart that already-
-  // decided approval, which startApproval() now refuses to do. Surface the
-  // conflict here instead of leaving the officer stuck one step later.
+  // If Approval already reached a real decision (APPROVED/DISAPPROVED — a
+  // contract may already be issued off of it), reopening the assessment is a
+  // dead end anyway: resubmitting a fresh recommendation would try to
+  // restart that already-decided approval, which startApproval() now
+  // refuses to do. Surface the conflict here instead of leaving the officer
+  // stuck one step later. RETURNED is deliberately excluded — it's the
+  // routine "approver kicked it back" outcome with no decision to protect,
+  // and reopening the assessment to redo the recommendation is exactly the
+  // normal way to handle it.
   {
     // Lazy require — ApprovalIssuance.js requires this module too (see the
     // matching comment in submitRecommendation).
     const ApprovalIssuance = require("./ApprovalIssuance");
     const detail = await ApprovalIssuance.getApprovalDetail(applicationId);
     const approvalStatus = detail?.approval?.approval_status;
-    if (["APPROVED", "DISAPPROVED", "RETURNED"].includes(approvalStatus)) {
-      throw new Error(
+    if (["APPROVED", "DISAPPROVED"].includes(approvalStatus)) {
+      throw businessError(
         "This application's approval has already been decided — reopening the assessment won't restart it. Use the Approval module if you need to revisit the decision."
       );
     }
@@ -740,22 +758,27 @@ async function submitRecommendation(applicationId, { recommendation, summary, ac
   // no longer agrees with. Only Reopen (which clears recommendation) can
   // legitimately re-open this.
   if (asm.recommendation) {
-    throw new Error("A recommendation has already been submitted for this assessment. An admin must reopen it first.");
+    throw businessError("A recommendation has already been submitted for this assessment. An admin must reopen it first.");
   }
   const rec = pick(recommendation, RECOMMENDATIONS);
   if (!rec) throw new Error("Invalid recommendation");
   const note = String(summary ?? "").trim();
 
   const nextStage = rec === "RETURN" ? "RETURNED" : "COMPLETED";
-  await updateData(
+  // Same compare-and-swap reasoning as setStage — the recommendation===null
+  // check above is a stale read, so the write itself re-checks it.
+  const result = await updateData(
     `
     UPDATE dbo.application_assessments
     SET recommendation = @param1, recommendation_summary = @param2, recommended_by = @param3,
         recommended_at = SYSUTCDATETIME(), stage = @param4, updated_by = @param3, updated_at = SYSUTCDATETIME()
-    WHERE id = @param0
+    WHERE id = @param0 AND recommendation IS NULL
     `,
     [asm.id, rec, note || null, toInt(actorId), nextStage]
   );
+  if (!result?.rowsAffected?.[0]) {
+    throw businessError("A recommendation has already been submitted for this assessment. An admin must reopen it first.");
+  }
   await logActivity(asm.id, "RECOMMENDED", `${rec}${note ? `: ${note.slice(0, 200)}` : ""}`, actorId);
 
   const targetStatus = rec === "RETURN" ? "RETURNED" : rec === "DISAPPROVE" ? "DISAPPROVED" : "FOR_APPROVAL";

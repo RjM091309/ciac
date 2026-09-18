@@ -166,7 +166,7 @@ async function createRequirementCategory({ name, description, created_by, is_act
   );
 
   const id = result?.recordset?.[0]?.id;
-  if (application_types !== undefined) await setApplicationTypes(id, application_types);
+  if (application_types !== undefined && application_types !== null) await setApplicationTypes(id, application_types);
   return getRequirementCategoryById(id);
 }
 
@@ -197,7 +197,7 @@ async function updateRequirementCategory(id, { name, description, is_active, app
     await updateData(query, params);
   }
 
-  if (application_types !== undefined) await setApplicationTypes(id, application_types);
+  if (application_types !== undefined && application_types !== null) await setApplicationTypes(id, application_types);
 
   return getRequirementCategoryById(id);
 }

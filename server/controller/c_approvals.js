@@ -5,7 +5,12 @@ const { resolveStoredPath } = require("../lib/fileStorage");
 
 function fail(res, error, label) {
   console.error(`${label} error:`, error);
-  return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+  // Deliberate business-rule rejections (e.g. "mandatory requirements not
+  // verified", "already decided") tag their own Error with .status = 400 at
+  // the throw site — everything else defaults to 500 so a genuine crash
+  // still shows up as one in logs/monitoring instead of being masked as a
+  // routine validation failure.
+  return res.status(error.status || 500).json({ success: false, message: error.message || "Internal server error" });
 }
 
 function appIdParam(req, res) {

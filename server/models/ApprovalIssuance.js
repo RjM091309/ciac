@@ -18,6 +18,13 @@ const ControlPanelPermission = require("./ControlPanelPermission");
 const { renderContractCertificate } = require("../lib/contractCertificate");
 const { STORAGE_ROOT, relativeStoragePath } = require("../lib/fileStorage");
 
+// Tags a deliberate business-rule rejection with .status = 400 so the
+// controller's fail() helper reports it as a client error instead of a 500
+// — see the matching comment on fail() in c_approvals.js.
+function businessError(message) {
+  return Object.assign(new Error(message), { status: 400 });
+}
+
 function titleCaseRoleName(name) {
   return String(name || "")
     .toLowerCase()
@@ -561,17 +568,36 @@ async function startApproval(applicationId, actorId) {
   const approval = await getOrCreateApproval(applicationId, actorId);
   if (!approval) return null;
   if (approval.status === "IN_PROGRESS") return getApprovalDetail(applicationId);
-  // A settled approval (contract possibly already issued off of it) must
-  // never be silently wiped and restarted — only IN_PROGRESS short-circuits
-  // above; everything else used to fall through to the DELETE below.
-  if (["APPROVED", "DISAPPROVED", "RETURNED"].includes(approval.status)) {
-    throw new Error("This application's approval has already been decided — its routing history can't be restarted automatically.");
+  // A settled approval with an actual decision on record (a contract may
+  // already be issued off of an APPROVED one) must never be silently wiped
+  // and restarted — only IN_PROGRESS short-circuits above. RETURNED is
+  // deliberately NOT in this list: it's the routine "kicked back, redo the
+  // recommendation" outcome with no decision/contract to protect, and the
+  // ENDORSE -> FOR_APPROVAL -> here path needs to be able to restart it.
+  if (["APPROVED", "DISAPPROVED"].includes(approval.status)) {
+    throw businessError("This application's approval has already been decided — its routing history can't be restarted automatically.");
   }
 
   const levels = await listLevels();
   if (levels.length === 0) throw new Error("No active approval levels configured. Set up the workflow first.");
 
   await runInTransaction(async (tx) => {
+    // The status checks above read a stale snapshot — this UPDATE re-checks
+    // the same condition atomically (excluding IN_PROGRESS/APPROVED/
+    // DISAPPROVED) before anything destructive runs, so a concurrent
+    // start/settle can't race past the checks and still wipe the ladder.
+    const guard = await tx.query(
+      `UPDATE dbo.application_approvals
+       SET status = 'IN_PROGRESS', current_level_no = @param2, decision = NULL, decision_summary = NULL,
+           decided_by = NULL, decided_at = NULL, started_by = @param1, started_at = SYSUTCDATETIME(),
+           updated_by = @param1, updated_at = SYSUTCDATETIME()
+       WHERE id = @param0 AND status NOT IN ('IN_PROGRESS', 'APPROVED', 'DISAPPROVED')`,
+      [approval.id, toInt(actorId), levels[0].level_no]
+    );
+    if (!guard?.rowsAffected?.[0]) {
+      throw businessError("This application's approval can't be restarted right now — it may have just been acted on elsewhere.");
+    }
+
     await tx.query(`DELETE FROM dbo.approval_steps WHERE approval_id = @param0`, [approval.id]);
     for (const lvl of levels) {
       await tx.query(
@@ -580,14 +606,6 @@ async function startApproval(applicationId, actorId) {
         [approval.id, lvl.level_no, String(lvl.name).slice(0, 150)]
       );
     }
-    await tx.query(
-      `UPDATE dbo.application_approvals
-       SET status = 'IN_PROGRESS', current_level_no = @param1, decision = NULL, decision_summary = NULL,
-           decided_by = NULL, decided_at = NULL, started_by = @param2, started_at = SYSUTCDATETIME(),
-           updated_by = @param2, updated_at = SYSUTCDATETIME()
-       WHERE id = @param0`,
-      [approval.id, levels[0].level_no, toInt(actorId)]
-    );
   });
 
   await logActivity(approval.id, "STARTED", `Routed through ${levels.length} level(s)`, actorId);
@@ -623,7 +641,7 @@ async function endorseStep(stepId, { office, note, assignToUserId, actorId }) {
   const rows = await selectData(`SELECT * FROM dbo.approval_steps WHERE id = @param0`, [toInt(stepId)]);
   const step = rows?.[0];
   if (!step) return null;
-  if (step.decision !== "PENDING") throw new Error("This level has already been decided.");
+  if (step.decision !== "PENDING") throw businessError("This level has already been decided.");
   const officeText = String(office ?? "").trim();
   if (!officeText) throw new Error("Endorsement office is required");
 
@@ -666,12 +684,12 @@ async function actOnStep(stepId, { action, remarks, actorId }) {
   const stepRows = await selectData(`SELECT * FROM dbo.approval_steps WHERE id = @param0`, [toInt(stepId)]);
   const step = stepRows?.[0];
   if (!step) return null;
-  if (step.decision !== "PENDING") throw new Error("This level has already been decided.");
+  if (step.decision !== "PENDING") throw businessError("This level has already been decided.");
 
   const apRows = await selectData(`SELECT * FROM dbo.application_approvals WHERE id = @param0`, [step.approval_id]);
   const approval = apRows?.[0];
   if (!approval) return null;
-  if (approval.status !== "IN_PROGRESS") throw new Error("Approval is not in progress.");
+  if (approval.status !== "IN_PROGRESS") throw businessError("Approval is not in progress.");
 
   // Enforce order: the acted step must be the earliest still-pending level.
   const pendingRows = await selectData(
@@ -679,7 +697,22 @@ async function actOnStep(stepId, { action, remarks, actorId }) {
     [step.approval_id]
   );
   if (Number(pendingRows?.[0]?.id) !== Number(step.id)) {
-    throw new Error("An earlier approval level is still pending.");
+    throw businessError("An earlier approval level is still pending.");
+  }
+
+  // If this APPROVE would clear the last pending level (settling the whole
+  // approval to APPROVED), check mandatory requirements BEFORE writing the
+  // step's decision below — checking only inside settleApproval (after the
+  // step is already committed as APPROVED) would leave the step stuck
+  // "decided" with no way back to PENDING if the check then rejects it.
+  if (act === "APPROVE") {
+    const otherPendingRows = await selectData(
+      `SELECT COUNT(1) AS n FROM dbo.approval_steps WHERE approval_id = @param0 AND decision = 'PENDING' AND id <> @param1`,
+      [step.approval_id, step.id]
+    );
+    if (Number(otherPendingRows?.[0]?.n || 0) === 0) {
+      await assertMandatoryRequirementsVerified(approval.application_id);
+    }
   }
 
   const note = String(remarks ?? "").trim();
@@ -697,7 +730,7 @@ async function actOnStep(stepId, { action, remarks, actorId }) {
     [toInt(stepId), stepDecision, act, note || null, toInt(actorId)]
   );
   if (!result?.rowsAffected?.[0]) {
-    throw new Error("This level has already been decided.");
+    throw businessError("This level has already been decided.");
   }
   await logActivity(step.approval_id, `LEVEL_${stepDecision}`, `${step.level_name}${note ? `: ${note.slice(0, 200)}` : ""}`, actorId);
 
@@ -733,7 +766,41 @@ async function actOnStep(stepId, { action, remarks, actorId }) {
   return getApprovalDetail(applicationId);
 }
 
+// The one meaningful business-rule gate on reaching APPROVED: every
+// mandatory requirement must be verified first. Called from actOnStep
+// BEFORE it writes a final-level APPROVE decision (so a rejection never
+// leaves a step stuck "decided" with nothing to roll back to), and again
+// from settleApproval as a defensive second check for any other caller.
+// `r.is_active = 1` matters: a mandatory requirement that was later
+// deactivated (directly, or via an ApplicationType/RequirementCategory
+// cascade) must not permanently block approval — there's no longer any way
+// to verify something that's been hidden from the catalog.
+async function assertMandatoryRequirementsVerified(applicationId) {
+  const unverifiedRows = await selectData(
+    `
+    SELECT COUNT(1) AS n
+    FROM dbo.application_requirements ar
+    INNER JOIN dbo.requirements r ON r.id = ar.requirement_id
+    WHERE ar.application_id = @param0
+      AND r.is_mandatory = 1
+      AND r.is_active = 1
+      AND ar.status <> 'VERIFIED'
+    `,
+    [toInt(applicationId)]
+  );
+  const unverified = Number(unverifiedRows?.[0]?.n || 0);
+  if (unverified > 0) {
+    throw businessError(
+      `Cannot approve — ${unverified} mandatory requirement${unverified === 1 ? "" : "s"} ${unverified === 1 ? "is" : "are"} not yet verified.`
+    );
+  }
+}
+
 async function settleApproval(approvalId, applicationId, outcome, note, actorId) {
+  if (outcome === "APPROVED") {
+    await assertMandatoryRequirementsVerified(applicationId);
+  }
+
   const headerStatus = outcome === "APPROVED" ? "APPROVED" : outcome === "DISAPPROVED" ? "DISAPPROVED" : "RETURNED";
   await updateData(
     `UPDATE dbo.application_approvals
