@@ -1,4 +1,7 @@
 const { selectData, insertData, updateData, updateSchema } = require("../config/database");
+// Cross-model require to ensure the category->type link table exists before
+// the deactivate guard below queries it (see deactivateApplicationType).
+const RequirementCategory = require("./RequirementCategory");
 
 function toInt(v) {
   const n = Number(v);
@@ -154,6 +157,32 @@ async function updateApplicationType(id, { code, name, description, is_active, u
 
 async function deactivateApplicationType(id, updated_by) {
   await ensureSchema();
+  await RequirementCategory.ensureSchema();
+
+  const current = await getApplicationTypeById(id);
+  if (!current) return null;
+
+  // Block deactivation while active Requirement Categories are still wired
+  // to this type — deactivating out from under them would silently orphan
+  // the catalog's sorting instead of surfacing the conflict up front.
+  const dependentRows = await selectData(
+    `
+    SELECT COUNT(1) AS n
+    FROM dbo.requirement_category_application_types rcat
+    INNER JOIN dbo.requirement_categories rc ON rc.id = rcat.category_id
+    WHERE rcat.application_type = @param0 AND rc.is_active = 1
+    `,
+    [current.code]
+  );
+  const dependentCount = Number(dependentRows?.[0]?.n || 0);
+  if (dependentCount > 0) {
+    throw new Error(
+      `Cannot deactivate "${current.name}" — ${dependentCount} active requirement categor${
+        dependentCount === 1 ? "y is" : "ies are"
+      } still assigned to it. Reassign or deactivate ${dependentCount === 1 ? "it" : "them"} first.`
+    );
+  }
+
   const updatedBy = toInt(updated_by);
   await updateData(
     `

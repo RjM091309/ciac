@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Ban, Pencil, Plus, RotateCcw, Search, X } from 'lucide-react';
+import { Ban, Folder, FolderOpen, Minus, Pencil, Plus, RotateCcw, Search, X } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { cn } from '../../lib/utils';
 import { toast } from 'sonner';
@@ -13,6 +13,8 @@ import { useSessionStorageCachedResource } from '../../hooks/useSessionStorageCa
 import { useControlPanelAccess } from '../../context/ControlPanelAccessContext';
 
 const MENU_KEY = 'applications:requirements';
+const MENU_KEY_TYPES = 'settings:application-types';
+const MENU_KEY_CATEGORIES = 'settings:requirement-categories';
 
 type RequirementRow = {
   id: number;
@@ -37,12 +39,18 @@ type RequirementRow = {
 type CategoryRow = {
   id: number;
   name: string;
+  description?: string | null;
   is_active: number;
+  // Application type codes this category is restricted to. Empty = applies
+  // to every application type (same convention as RequirementRow above).
+  application_types?: string[];
 };
 
 type ApplicationTypeRow = {
+  id: number;
   code: string;
   name: string;
+  description?: string | null;
   is_active: number;
 };
 
@@ -62,6 +70,14 @@ export function RequirementsManagement() {
   const canAdd = fullAccess || perm.can_add;
   const canEdit = fullAccess || perm.can_edit;
   const canDelete = fullAccess || perm.can_delete;
+  const permTypes = crudPermissions[MENU_KEY_TYPES] || { can_add: false, can_edit: false, can_delete: false };
+  const canAddTypes = fullAccess || permTypes.can_add;
+  const canEditTypes = fullAccess || permTypes.can_edit;
+  const canDeleteTypes = fullAccess || permTypes.can_delete;
+  const permCategories = crudPermissions[MENU_KEY_CATEGORIES] || { can_add: false, can_edit: false, can_delete: false };
+  const canAddCategories = fullAccess || permCategories.can_add;
+  const canEditCategories = fullAccess || permCategories.can_edit;
+  const canDeleteCategories = fullAccess || permCategories.can_delete;
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<RequirementRow | null>(null);
@@ -107,10 +123,13 @@ export function RequirementsManagement() {
           categories: (cJson.data || []).map((c: any) => ({
             ...c,
             is_active: Number(c?.is_active) ? 1 : 0,
+            application_types: Array.isArray(c?.application_types) ? c.application_types : [],
           })),
           applicationTypes: (atJson.data || []).map((t: any) => ({
+            id: t.id,
             code: t.code,
             name: t.name,
+            description: t.description ?? null,
             is_active: Number(t?.is_active) ? 1 : 0,
           })),
         };
@@ -137,6 +156,19 @@ export function RequirementsManagement() {
     application_types: [] as string[],
   });
 
+  // --- Inline CRUD for Application Type / Requirement Category, launched
+  // directly from the tree so managing the catalog doesn't require leaving
+  // this page for the dedicated settings screens. ---
+  const [editingType, setEditingType] = useState<ApplicationTypeRow | null>(null);
+  const [isTypePanelOpen, setIsTypePanelOpen] = useState(false);
+  const [confirmDeactivateTypeId, setConfirmDeactivateTypeId] = useState<number | null>(null);
+  const [typeForm, setTypeForm] = useState({ code: '', name: '', description: '' });
+
+  const [editingCategory, setEditingCategory] = useState<CategoryRow | null>(null);
+  const [isCategoryPanelOpen, setIsCategoryPanelOpen] = useState(false);
+  const [confirmDeactivateCategoryId, setConfirmDeactivateCategoryId] = useState<number | null>(null);
+  const [categoryForm, setCategoryForm] = useState({ name: '', description: '', application_types: [] as string[] });
+
   const categoryOptions = useMemo(
     () => categories.map((c) => ({ value: String(c.id), label: c.name })),
     [categories]
@@ -153,6 +185,18 @@ export function RequirementsManagement() {
     return map;
   }, [applicationTypes]);
 
+  const applicationTypeByCode = useMemo(() => {
+    const map = new Map<string, ApplicationTypeRow>();
+    applicationTypes.forEach((t) => map.set(t.code, t));
+    return map;
+  }, [applicationTypes]);
+
+  const categoryById = useMemo(() => {
+    const map = new Map<string, CategoryRow>();
+    categories.forEach((c) => map.set(String(c.id), c));
+    return map;
+  }, [categories]);
+
   function applicationTypesLabel(codes: string[]) {
     if (!codes || codes.length === 0) return 'All types';
     return codes.map((c) => applicationTypeNameByCode[c] || c).join(', ');
@@ -167,10 +211,105 @@ export function RequirementsManagement() {
   const activeItems = useMemo(() => items.filter((i) => i.is_active === 1), [items]);
   const deactivatedItems = useMemo(() => items.filter((i) => i.is_active === 0), [items]);
 
+  // --- 3-panel dynamic browser: Application Type -> Requirement Category -> Requirements ---
+  // Browsing here uses explicit tagging only — a requirement/category with an
+  // empty application_types array ("unrestricted", applies everywhere when
+  // actually filing an application) still shows up under "All Types", but
+  // does NOT auto-count toward a specific type's node until it's explicitly
+  // tagged to it. Otherwise a brand-new type would immediately inherit every
+  // unrestricted item's count, which looked like a bug to a non-technical
+  // user even though the underlying filing logic was working correctly.
+  const [selectedTypeCode, setSelectedTypeCode] = useState<string | null>(null);
+  const [selectedCategoryKey, setSelectedCategoryKey] = useState<string | null>(null);
+  // Which type folders are expanded in the tree — independent of selection,
+  // so more than one can stay open at once (matches a normal file-tree feel).
+  const [expandedTypeCodes, setExpandedTypeCodes] = useState<Set<string>>(new Set());
+
+  function appliesToType(item: RequirementRow, code: string) {
+    return item.application_types.includes(code);
+  }
+
+  const itemsForSelectedType = useMemo(() => {
+    if (!selectedTypeCode) return [];
+    if (selectedTypeCode === '__all__') return activeItems;
+    return activeItems.filter((i) => appliesToType(i, selectedTypeCode));
+  }, [activeItems, selectedTypeCode]);
+
+  function categoryAppliesToType(category: CategoryRow, code: string) {
+    return (category.application_types || []).includes(code);
+  }
+
+  // Built together so a Type's badge always matches exactly what its
+  // expanded category list shows (same membership rule, computed once).
+  // A category counts under a type if EITHER it's explicitly tagged to that
+  // type (the new wiring, lets a freshly-created empty category sort in
+  // immediately) OR it already has requirements filed under that type (the
+  // legacy signal — keeps pre-existing categories, none of which have ever
+  // been manually tagged yet, from vanishing out of every type's tree).
+  const { typePanelOptions, categoryOptionsByType } = useMemo(() => {
+    const activeCategories = categories.filter((c) => c.is_active === 1);
+    const typesToWalk = [
+      { code: '__all__', name: 'All Types' },
+      ...activeApplicationTypes.map((t) => ({ code: t.code, name: t.name })),
+    ];
+
+    const categoryMap = new Map<string, { key: string; name: string; count: number }[]>();
+    const typeOptions: { code: string; name: string; count: number }[] = [];
+
+    for (const t of typesToWalk) {
+      const itemsForType = t.code === '__all__' ? activeItems : activeItems.filter((i) => appliesToType(i, t.code));
+      const countByCategoryId = new Map<string, number>();
+      let uncategorized = 0;
+      for (const item of itemsForType) {
+        if (item.category_id == null) {
+          uncategorized += 1;
+          continue;
+        }
+        const key = String(item.category_id);
+        countByCategoryId.set(key, (countByCategoryId.get(key) || 0) + 1);
+      }
+      const relevantCategories =
+        t.code === '__all__'
+          ? activeCategories
+          : activeCategories.filter((c) => categoryAppliesToType(c, t.code) || countByCategoryId.has(String(c.id)));
+      const sorted = relevantCategories
+        .map((c) => ({ key: String(c.id), name: c.name, count: countByCategoryId.get(String(c.id)) || 0 }))
+        .sort((a, b) => a.name.localeCompare(b.name));
+      const options = [{ key: '__all__', name: 'All Categories', count: itemsForType.length }, ...sorted];
+      if (uncategorized > 0) options.push({ key: '__uncategorized__', name: 'Uncategorized', count: uncategorized });
+      categoryMap.set(t.code, options);
+      typeOptions.push({ code: t.code, name: t.name, count: sorted.length });
+    }
+
+    return { typePanelOptions: typeOptions, categoryOptionsByType: categoryMap };
+  }, [activeApplicationTypes, activeItems, categories]);
+
+  const panelFilteredItems = useMemo(() => {
+    if (!selectedTypeCode) return activeItems;
+    if (!selectedCategoryKey || selectedCategoryKey === '__all__') return itemsForSelectedType;
+    if (selectedCategoryKey === '__uncategorized__') return itemsForSelectedType.filter((i) => i.category_id == null);
+    return itemsForSelectedType.filter((i) => String(i.category_id) === selectedCategoryKey);
+  }, [activeItems, itemsForSelectedType, selectedCategoryKey, selectedTypeCode]);
+
+  function toggleTypeExpand(code: string) {
+    setExpandedTypeCodes((prev) => {
+      const next = new Set(prev);
+      if (next.has(code)) next.delete(code);
+      else next.add(code);
+      return next;
+    });
+  }
+
+  function selectCategory(typeCode: string, key: string) {
+    setSelectedTypeCode(typeCode);
+    setSelectedCategoryKey(key);
+    setExpandedTypeCodes((prev) => new Set(prev).add(typeCode));
+  }
+
   const filteredItems = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
-    if (!q) return activeItems;
-    return activeItems.filter((i) => {
+    if (!q) return panelFilteredItems;
+    return panelFilteredItems.filter((i) => {
       const flags = [i.for_new ? 'new' : '', i.for_renewal ? 'renewal' : '', i.is_mandatory ? 'mandatory' : 'optional'].join(' ');
       return (
         (i.code || '').toLowerCase().includes(q) ||
@@ -181,7 +320,7 @@ export function RequirementsManagement() {
         applicationTypesLabel(i.application_types).toLowerCase().includes(q)
       );
     });
-  }, [activeItems, searchQuery]);
+  }, [panelFilteredItems, searchQuery]);
 
   const filteredDeactivatedItems = useMemo(() => {
     const q = recoverySearch.trim().toLowerCase();
@@ -263,7 +402,7 @@ export function RequirementsManagement() {
 
   useEffect(() => {
     setPage(1);
-  }, [searchQuery, pageSize]);
+  }, [searchQuery, pageSize, selectedTypeCode, selectedCategoryKey]);
 
   useEffect(() => {
     if (page > totalPages) setPage(totalPages);
@@ -311,11 +450,17 @@ export function RequirementsManagement() {
       code: '',
       name: '',
       description: '',
-      category_id: '',
+      // Pre-fill from whatever's picked in Panel 1/2 so adding a new
+      // requirement while browsing a specific type/category doesn't force
+      // re-selecting the same combination in the form.
+      category_id:
+        selectedCategoryKey && selectedCategoryKey !== '__all__' && selectedCategoryKey !== '__uncategorized__'
+          ? selectedCategoryKey
+          : '',
       for_new: true,
       for_renewal: true,
       is_mandatory: true,
-      application_types: [],
+      application_types: selectedTypeCode && selectedTypeCode !== '__all__' ? [selectedTypeCode] : [],
     });
     setIsCreateOpen(true);
   }
@@ -425,6 +570,184 @@ export function RequirementsManagement() {
     }
   }
 
+  function openCreateType() {
+    setEditingType(null);
+    setTypeForm({ code: '', name: '', description: '' });
+    setIsTypePanelOpen(true);
+  }
+
+  function openEditType(row: ApplicationTypeRow) {
+    setEditingType(row);
+    setTypeForm({ code: row.code || '', name: row.name || '', description: row.description || '' });
+    setIsTypePanelOpen(true);
+  }
+
+  async function saveType() {
+    setSaving(true);
+    setError(null);
+    try {
+      const payload: any = {
+        code: typeForm.code.trim(),
+        name: typeForm.name.trim(),
+        description: typeForm.description.trim() || null,
+      };
+      if (!payload.code) throw new Error('Code is required');
+      if (!payload.name) throw new Error('Name is required');
+
+      const res = await fetch(api(editingType ? `/api/application-types/${editingType.id}` : '/api/application-types'), {
+        method: editingType ? 'PUT' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(payload),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.message || 'Save failed');
+      setIsTypePanelOpen(false);
+      setError(null);
+      await refresh({ showLoading: false });
+      toast.success(editingType ? 'Application type updated successfully' : 'Application type created successfully');
+    } catch (e: any) {
+      const message = e?.message || 'Save failed';
+      setError(message);
+      toast.error(message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function deactivateType(id: number) {
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await fetch(api(`/api/application-types/${id}/deactivate`), { method: 'PATCH', credentials: 'include' });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.message || 'Deactivate failed');
+      setError(null);
+      await refresh({ showLoading: false });
+      toast.success('Application type deactivated successfully');
+      setConfirmDeactivateTypeId(null);
+    } catch (e: any) {
+      const message = e?.message || 'Deactivate failed';
+      setError(message);
+      toast.error(message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function openCreateCategory() {
+    setEditingCategory(null);
+    // Wire in the type currently being browsed so the new category sorts
+    // under it immediately instead of landing unsorted.
+    setCategoryForm({
+      name: '',
+      description: '',
+      application_types: selectedTypeCode && selectedTypeCode !== '__all__' ? [selectedTypeCode] : [],
+    });
+    setIsCategoryPanelOpen(true);
+  }
+
+  function openEditCategory(row: CategoryRow) {
+    setEditingCategory(row);
+    setCategoryForm({
+      name: row.name || '',
+      description: row.description || '',
+      application_types: [...(row.application_types || [])],
+    });
+    setIsCategoryPanelOpen(true);
+  }
+
+  function toggleCategoryApplicationType(code: string) {
+    setCategoryForm((p) => ({
+      ...p,
+      application_types: p.application_types.includes(code)
+        ? p.application_types.filter((c) => c !== code)
+        : [...p.application_types, code],
+    }));
+  }
+
+  async function saveCategory() {
+    setSaving(true);
+    setError(null);
+    try {
+      const payload: any = {
+        name: categoryForm.name.trim(),
+        description: categoryForm.description.trim() || null,
+        application_types: categoryForm.application_types,
+      };
+      if (!payload.name) throw new Error('Category name is required');
+
+      const res = await fetch(
+        api(editingCategory ? `/api/requirement-categories/${editingCategory.id}` : '/api/requirement-categories'),
+        {
+          method: editingCategory ? 'PUT' : 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify(payload),
+        }
+      );
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.message || 'Save failed');
+      setIsCategoryPanelOpen(false);
+      setError(null);
+      await refresh({ showLoading: false });
+      toast.success(editingCategory ? 'Category updated successfully' : 'Category created successfully');
+    } catch (e: any) {
+      const message = e?.message || 'Save failed';
+      setError(message);
+      toast.error(message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function deactivateCategory(id: number) {
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await fetch(api(`/api/requirement-categories/${id}/deactivate`), { method: 'PATCH', credentials: 'include' });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.message || 'Deactivate failed');
+      setError(null);
+      await refresh({ showLoading: false });
+      toast.success('Category deactivated successfully');
+      setConfirmDeactivateCategoryId(null);
+    } catch (e: any) {
+      const message = e?.message || 'Deactivate failed';
+      setError(message);
+      toast.error(message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const canSubmitType = useMemo(() => {
+    const code = typeForm.code.trim();
+    const name = typeForm.name.trim();
+    if (!code || !name) return false;
+    if (!editingType) return true;
+    const description = typeForm.description.trim();
+    return (
+      code !== (editingType.code || '').trim() ||
+      name !== (editingType.name || '').trim() ||
+      description !== (editingType.description || '').trim()
+    );
+  }, [editingType, typeForm]);
+
+  const canSubmitCategory = useMemo(() => {
+    const name = categoryForm.name.trim();
+    if (!name) return false;
+    if (!editingCategory) return true;
+    const description = categoryForm.description.trim();
+    const originalTypes = [...(editingCategory.application_types || [])].sort().join(',');
+    const currentTypes = [...categoryForm.application_types].sort().join(',');
+    return (
+      name !== (editingCategory.name || '').trim() ||
+      description !== (editingCategory.description || '').trim() ||
+      currentTypes !== originalTypes
+    );
+  }, [editingCategory, categoryForm]);
+
   return (
     <div className="space-y-4 sm:space-y-5">
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4 mt-3">
@@ -450,12 +773,194 @@ export function RequirementsManagement() {
         ) : null}
       </div>
 
-      <div className="glass-card p-4 sm:p-5 !border-transparent overflow-hidden" style={{ backgroundColor: 'var(--surface)' }}>
+      {/* Tree browser: Application Types expand inline to reveal their
+          Requirement Categories (several can stay open at once); picking a
+          category filters the Requirements table beside it. */}
+      <div className="flex flex-col lg:flex-row gap-4 items-start">
+        {/* Type/Category tree */}
+        <div className="glass-card p-3 w-full lg:w-72 shrink-0 !border-transparent" style={{ backgroundColor: 'var(--surface)' }}>
+          {(canAddTypes || canAddCategories) ? (
+            <div className="flex items-center gap-1.5 mb-2">
+              {canAddTypes ? (
+                <button
+                  onClick={openCreateType}
+                  className="flex-1 inline-flex items-center justify-center gap-1 rounded-md px-2 py-1.5 text-[10px] font-semibold cursor-pointer"
+                  style={{ backgroundColor: 'var(--control-bg)', color: 'var(--text)' }}
+                >
+                  <Plus size={11} /> Type
+                </button>
+              ) : null}
+              {canAddCategories ? (
+                <button
+                  onClick={openCreateCategory}
+                  className="flex-1 inline-flex items-center justify-center gap-1 rounded-md px-2 py-1.5 text-[10px] font-semibold cursor-pointer"
+                  style={{ backgroundColor: 'var(--control-bg)', color: 'var(--text)' }}
+                >
+                  <Plus size={11} /> Category
+                </button>
+              ) : null}
+            </div>
+          ) : null}
+
+          <div className="flex flex-col gap-0.5">
+            {typePanelOptions.map((t) => {
+              const expanded = expandedTypeCodes.has(t.code);
+              const typeCategories = categoryOptionsByType.get(t.code) || [];
+              const typeRow = t.code !== '__all__' ? applicationTypeByCode.get(t.code) : null;
+              return (
+                <div key={t.code}>
+                  <div className="group rounded-lg flex items-center gap-0.5 hover:bg-white/5">
+                    <button
+                      onClick={() => toggleTypeExpand(t.code)}
+                      className="flex-1 min-w-0 px-2 py-1.5 text-xs font-semibold cursor-pointer transition-colors flex items-center gap-2"
+                    >
+                      {expanded ? (
+                        <FolderOpen size={15} className="shrink-0 text-secondary" />
+                      ) : (
+                        <Folder size={15} className="shrink-0 text-secondary" />
+                      )}
+                      <span className="flex-1 text-left truncate" style={{ color: 'var(--text)' }}>
+                        {t.name}
+                      </span>
+                    </button>
+
+                    {/* Count badge and hover actions share this slot so the
+                        row width never jumps between the two states. */}
+                    <div className="relative shrink-0 w-12 h-6 mr-1">
+                      <div
+                        className={cn('absolute inset-0 flex items-center justify-end transition-opacity', typeRow && 'group-hover:opacity-0')}
+                      >
+                        <span
+                          className="rounded-full px-1.5 text-[10px]"
+                          style={{ backgroundColor: 'var(--control-bg)', color: 'var(--text-muted)' }}
+                        >
+                          {t.count}
+                        </span>
+                      </div>
+                      {typeRow ? (
+                        <div className="absolute inset-0 flex items-center justify-end gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                          {canEditTypes ? (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openEditType(typeRow);
+                              }}
+                              className="inline-flex items-center justify-center rounded-md p-1 text-secondary cursor-pointer hover:bg-white/10"
+                              title="Edit type"
+                              aria-label={`Edit ${typeRow.name}`}
+                            >
+                              <Pencil size={12} />
+                            </button>
+                          ) : null}
+                          {canDeleteTypes ? (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setConfirmDeactivateTypeId(typeRow.id);
+                              }}
+                              className="inline-flex items-center justify-center rounded-md p-1 text-secondary cursor-pointer hover:bg-white/10"
+                              title="Deactivate type"
+                              aria-label={`Deactivate ${typeRow.name}`}
+                            >
+                              <Ban size={12} />
+                            </button>
+                          ) : null}
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+
+                  {expanded ? (
+                    <div className="flex flex-col gap-0.5 mt-0.5 mb-1 ml-[18px] pl-2 border-l" style={{ borderColor: 'var(--border-subtle)' }}>
+                      {typeCategories.map((c) => {
+                        const active = selectedTypeCode === t.code && selectedCategoryKey === c.key;
+                        const catRow = c.key !== '__all__' && c.key !== '__uncategorized__' ? categoryById.get(c.key) : null;
+                        return (
+                          <div
+                            key={c.key}
+                            className="group rounded-md flex items-center gap-0.5"
+                            style={{ backgroundColor: active ? 'var(--nav-active-bg)' : 'transparent' }}
+                          >
+                            <button
+                              onClick={() => selectCategory(t.code, c.key)}
+                              className="flex-1 min-w-0 px-2 py-1.5 text-xs cursor-pointer transition-colors flex items-center gap-2"
+                              style={{ color: active ? 'var(--nav-active-text)' : 'var(--text)' }}
+                            >
+                              <Minus size={12} className="shrink-0 opacity-60" />
+                              <span className="flex-1 text-left truncate">{c.name}</span>
+                            </button>
+
+                            {/* Count badge and hover actions share this slot so the
+                                row width never jumps between the two states. */}
+                            <div className="relative shrink-0 w-11 h-6 mr-1">
+                              <div
+                                className={cn('absolute inset-0 flex items-center justify-end transition-opacity', catRow && 'group-hover:opacity-0')}
+                              >
+                                <span
+                                  className="rounded-full px-1.5 text-[10px]"
+                                  style={{
+                                    backgroundColor: active ? 'color-mix(in oklab, var(--nav-active-text) 20%, transparent)' : 'var(--control-bg)',
+                                    color: active ? 'var(--nav-active-text)' : 'var(--text-muted)',
+                                  }}
+                                >
+                                  {c.count}
+                                </span>
+                              </div>
+                              {catRow ? (
+                                <div className="absolute inset-0 flex items-center justify-end gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                                  {canEditCategories ? (
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        openEditCategory(catRow);
+                                      }}
+                                      className="inline-flex items-center justify-center rounded-md p-1 cursor-pointer hover:bg-white/10"
+                                      style={{ color: active ? 'var(--nav-active-text)' : 'var(--text-muted)' }}
+                                      title="Edit category"
+                                      aria-label={`Edit ${catRow.name}`}
+                                    >
+                                      <Pencil size={11} />
+                                    </button>
+                                  ) : null}
+                                  {canDeleteCategories ? (
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setConfirmDeactivateCategoryId(catRow.id);
+                                      }}
+                                      className="inline-flex items-center justify-center rounded-md p-1 cursor-pointer hover:bg-white/10"
+                                      style={{ color: active ? 'var(--nav-active-text)' : 'var(--text-muted)' }}
+                                      title="Deactivate category"
+                                      aria-label={`Deactivate ${catRow.name}`}
+                                    >
+                                      <Ban size={11} />
+                                    </button>
+                                  ) : null}
+                                </div>
+                              ) : null}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Requirements table, filtered by whatever's picked in the tree */}
+        <div className="glass-card p-4 sm:p-5 flex-1 w-full min-w-0 !border-transparent overflow-hidden" style={{ backgroundColor: 'var(--surface)' }}>
         {error && (
           <div className="mb-3 rounded-lg border px-3 py-2 text-xs" style={{ borderColor: 'var(--border-subtle)', color: '#fca5a5' }}>
             {error}
           </div>
         )}
+
+        <div className="flex items-center gap-1.5 mb-3 text-[11px] font-semibold uppercase tracking-widest text-secondary">
+          Requirements
+        </div>
 
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-3">
           <div className="relative group w-full sm:w-72">
@@ -484,7 +989,7 @@ export function RequirementsManagement() {
             description={
               searchQuery
                 ? 'Try adjusting your search filters.'
-                : 'There are no requirements to show here yet. Create a new requirement to get started.'
+                : 'No requirements match this type/category combination yet. Create one to get started.'
             }
             action={
               !searchQuery && canAdd ? (
@@ -581,6 +1086,7 @@ export function RequirementsManagement() {
             />
           </div>
         )}
+        </div>
       </div>
 
       <SidePanel
@@ -689,6 +1195,116 @@ export function RequirementsManagement() {
         onCancel={() => setConfirmReactivateId(null)}
         onConfirm={() => {
           if (confirmReactivateId !== null) void reactivate(confirmReactivateId);
+        }}
+      />
+
+      <SidePanel
+        open={isTypePanelOpen}
+        title={editingType ? 'Edit Application Type' : 'New Application Type'}
+        subtitle="Application types master table"
+        onClose={() => setIsTypePanelOpen(false)}
+        onSave={saveType}
+        saving={saving}
+        saveDisabled={!canSubmitType}
+      >
+        <div className="grid grid-cols-1 gap-3">
+          <Field label="Code">
+            <input
+              className="app-form-control"
+              value={typeForm.code}
+              onChange={(e) => setTypeForm((p) => ({ ...p, code: e.target.value }))}
+              placeholder="e.g. DIRECT_LEASE"
+            />
+          </Field>
+          <Field label="Name">
+            <input
+              className="app-form-control"
+              value={typeForm.name}
+              onChange={(e) => setTypeForm((p) => ({ ...p, name: e.target.value }))}
+              placeholder="e.g. Direct Lease"
+            />
+          </Field>
+          <Field label="Description">
+            <input
+              className="app-form-control"
+              value={typeForm.description}
+              onChange={(e) => setTypeForm((p) => ({ ...p, description: e.target.value }))}
+            />
+          </Field>
+        </div>
+      </SidePanel>
+
+      <ConfirmModal
+        open={confirmDeactivateTypeId !== null}
+        title="Deactivate application type?"
+        description="Locators and staff will no longer be able to select this type when filing a new application. You can re-activate it later from Application Types settings."
+        confirmText="Deactivate"
+        danger
+        loading={saving}
+        onCancel={() => setConfirmDeactivateTypeId(null)}
+        onConfirm={() => {
+          if (confirmDeactivateTypeId !== null) void deactivateType(confirmDeactivateTypeId);
+        }}
+      />
+
+      <SidePanel
+        open={isCategoryPanelOpen}
+        title={editingCategory ? 'Edit Requirement Category' : 'New Requirement Category'}
+        subtitle="Requirement categories master table"
+        onClose={() => setIsCategoryPanelOpen(false)}
+        onSave={saveCategory}
+        saving={saving}
+        saveDisabled={!canSubmitCategory}
+      >
+        <div className="grid grid-cols-1 gap-3">
+          <Field label="Name">
+            <input
+              className="app-form-control"
+              value={categoryForm.name}
+              onChange={(e) => setCategoryForm((p) => ({ ...p, name: e.target.value }))}
+            />
+          </Field>
+          <Field label="Description">
+            <input
+              className="app-form-control"
+              value={categoryForm.description}
+              onChange={(e) => setCategoryForm((p) => ({ ...p, description: e.target.value }))}
+            />
+          </Field>
+          <Field label="Application Types">
+            {activeApplicationTypes.length === 0 ? (
+              <p className="text-[11px] text-secondary">No active application types configured yet.</p>
+            ) : (
+              <>
+                <p className="text-[11px] text-secondary mb-2">
+                  Leave all unchecked to sort this category under every application type.
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {activeApplicationTypes.map((t) => (
+                    <CheckToggle
+                      key={t.code}
+                      label={t.name}
+                      checked={categoryForm.application_types.includes(t.code)}
+                      onChange={() => toggleCategoryApplicationType(t.code)}
+                    />
+                  ))}
+                </div>
+              </>
+            )}
+          </Field>
+        </div>
+      </SidePanel>
+
+      <ConfirmModal
+        open={confirmDeactivateCategoryId !== null}
+        title="Deactivate requirement category?"
+        description="Requirements under this category keep their assignment, but this category will no longer be selectable. You can re-activate it later from Requirement Categories settings."
+        confirmText="Deactivate"
+        danger
+        loading={saving}
+        onCancel={() => setConfirmDeactivateCategoryId(null)}
+        onConfirm={() => {
+          if (confirmDeactivateCategoryId !== null) void deactivateCategory(confirmDeactivateCategoryId);
         }}
       />
 
