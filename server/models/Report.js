@@ -1,4 +1,5 @@
 const { selectData } = require("../config/database");
+const { effectiveStatus } = require("./Permit");
 
 function toDateOrNull(v) {
   if (!v) return null;
@@ -10,7 +11,7 @@ function toDateOrNull(v) {
  * query (overview charts + the exportable list) filters the same way, so
  * status/type/date-range stay consistent between the dashboard numbers and
  * whatever a user then exports. */
-function buildApplicationsFilter({ dateFrom, dateTo, applicationType, status } = {}) {
+function buildApplicationsFilter({ dateFrom, dateTo, applicationType, status, isRenewal } = {}) {
   const where = ["a.status <> 'DRAFT'"];
   const params = [];
   const from = toDateOrNull(dateFrom);
@@ -31,11 +32,43 @@ function buildApplicationsFilter({ dateFrom, dateTo, applicationType, status } =
     where.push(`a.status = @param${params.length}`);
     params.push(status);
   }
+  if (isRenewal === "new" || isRenewal === "renewal") {
+    where.push(`a.is_renewal = @param${params.length}`);
+    params.push(isRenewal === "renewal" ? 1 : 0);
+  }
   return { whereSql: `WHERE ${where.join(" AND ")}`, params };
+}
+
+/** Filter builder for permits/inspections, which don't carry their own
+ * status/type — only date range (on the record's own created_at) and
+ * application type (via a join back to dbo.applications) apply. The
+ * applications `status` filter is deliberately not applied here: permit
+ * and inspection status vocabularies (VALID/EXPIRED/… , SCHEDULED/COMPLETED/…)
+ * don't correspond to application statuses (SUBMITTED/APPROVED/…). */
+function buildLinkedFilter({ dateFrom, dateTo, applicationType } = {}, alias) {
+  const where = [];
+  const params = [];
+  const from = toDateOrNull(dateFrom);
+  const to = toDateOrNull(dateTo);
+  if (from) {
+    where.push(`${alias}.created_at >= @param${params.length}`);
+    params.push(from);
+  }
+  if (to) {
+    where.push(`${alias}.created_at <= @param${params.length}`);
+    params.push(to);
+  }
+  if (applicationType) {
+    where.push(`a.application_type = @param${params.length}`);
+    params.push(applicationType);
+  }
+  return { whereSql: where.length ? `WHERE ${where.join(" AND ")}` : "", params };
 }
 
 async function getOverview(filters = {}) {
   const { whereSql, params } = buildApplicationsFilter(filters);
+  const permitFilter = buildLinkedFilter(filters, "p");
+  const inspectionFilter = buildLinkedFilter(filters, "i");
 
   const [statusRows, typeRows, renewalRows, trendRows, totalRow, permitStatusRows, inspectionStatusRows, inspectionResultRows, contractRows] =
     await Promise.all([
@@ -68,12 +101,44 @@ async function getOverview(filters = {}) {
         params
       ),
       selectData(`SELECT COUNT(1) AS total FROM dbo.applications a ${whereSql}`, params),
-      selectData(`SELECT status, COUNT(1) AS total FROM dbo.permits GROUP BY status`),
-      selectData(`SELECT status, COUNT(1) AS total FROM dbo.inspections GROUP BY status`),
       selectData(
-        `SELECT result, COUNT(1) AS total FROM dbo.inspections WHERE result IS NOT NULL GROUP BY result`
+        `
+        SELECT p.status, p.expiry_date
+        FROM dbo.permits p
+        LEFT JOIN dbo.applications a ON a.id = p.application_id
+        ${permitFilter.whereSql}
+        `,
+        permitFilter.params
       ),
-      selectData(`SELECT COUNT(1) AS total FROM dbo.contracts`),
+      selectData(
+        `
+        SELECT i.status, COUNT(1) AS total
+        FROM dbo.inspections i
+        LEFT JOIN dbo.applications a ON a.id = i.application_id
+        ${inspectionFilter.whereSql}
+        GROUP BY i.status
+        `,
+        inspectionFilter.params
+      ),
+      selectData(
+        `
+        SELECT i.result, COUNT(1) AS total
+        FROM dbo.inspections i
+        LEFT JOIN dbo.applications a ON a.id = i.application_id
+        ${inspectionFilter.whereSql ? `${inspectionFilter.whereSql} AND i.result IS NOT NULL` : "WHERE i.result IS NOT NULL"}
+        GROUP BY i.result
+        `,
+        inspectionFilter.params
+      ),
+      selectData(
+        `
+        SELECT COUNT(1) AS total
+        FROM dbo.contracts c
+        INNER JOIN dbo.applications a ON a.id = c.application_id
+        ${whereSql}
+        `,
+        params
+      ),
     ]);
 
   const byStatus = {};
@@ -93,8 +158,14 @@ async function getOverview(filters = {}) {
 
   const monthlyTrend = trendRows.map((r) => ({ month: r.ym, total: Number(r.total || 0) }));
 
+  // Effective status (VALID/EXPIRING/EXPIRED/REVOKED) is derived from expiry_date
+  // at read time, not stored on the row — tally with the same function the
+  // Permit & Contract page uses so this breakdown matches what staff see there.
   const permitsByStatus = {};
-  permitStatusRows.forEach((r) => { permitsByStatus[String(r.status)] = Number(r.total || 0); });
+  permitStatusRows.forEach((r) => {
+    const s = effectiveStatus(r);
+    permitsByStatus[s] = (permitsByStatus[s] || 0) + 1;
+  });
 
   const inspectionsByStatus = {};
   inspectionStatusRows.forEach((r) => { inspectionsByStatus[String(r.status)] = Number(r.total || 0); });

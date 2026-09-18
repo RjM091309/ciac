@@ -11,6 +11,7 @@ function filtersFromQuery(req) {
     dateTo: req.query.dateTo || null,
     applicationType: req.query.applicationType || null,
     status: req.query.status || null,
+    isRenewal: req.query.isRenewal || null,
   };
 }
 

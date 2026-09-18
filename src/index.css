@@ -40,6 +40,9 @@
     --input-border: #d4d4d8;
     --input-bg: #ffffff;
     --selected-bg: #e5e5ff40;
+    /* Chart tooltip surface: same as --surface/--border in light mode (unchanged). */
+    --tooltip-bg: var(--surface);
+    --tooltip-border: var(--border);
     --background: #f4f4f5;
     --foreground: #09090b;
     --primaryColor: #18181b;
@@ -83,6 +86,13 @@
     --input-border: #3a3a3a;
     --input-bg: #191919;
     --selected-bg: #f0f0f02e;
+    /* --surface/--border are nearly indistinguishable from a chart card's own
+       --surface background here, so a tooltip using them barely separates from
+       its own card. --control-bg/--input-border are a deliberately distinct
+       elevated shade (already used for inputs/dropdowns) — use those instead,
+       just for dark mode. */
+    --tooltip-bg: var(--control-bg);
+    --tooltip-border: var(--input-border);
     --background: #0b0b0b;
     --foreground: #f5f5f5;
     --primaryColor: #e5e5e5;

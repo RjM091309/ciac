@@ -582,7 +582,7 @@ export default function App() {
               ) : view === 'compliance:inspections' ? (
                 <ComplianceInspections locationSearch={locationSearch} navigate={navigate} />
               ) : view === 'reports:analytics' ? (
-                <ReportsAnalytics />
+                <ReportsAnalytics navigate={navigate} />
               ) : view === 'settings:requirement-categories' ? (
                 <RequirementCategoriesManagement />
               ) : view === 'settings:inspection-types' ? (
