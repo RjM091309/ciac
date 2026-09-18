@@ -14,6 +14,7 @@ const Assessment = require("./AssessmentEvaluation");
 const Proponent = require("./Proponent");
 const User = require("./User");
 const ApplicationType = require("./ApplicationType");
+const ControlPanelPermission = require("./ControlPanelPermission");
 const { renderContractCertificate } = require("../lib/contractCertificate");
 const { STORAGE_ROOT, relativeStoragePath } = require("../lib/fileStorage");
 
@@ -413,15 +414,22 @@ async function getSummary() {
   };
 }
 
+// Driven by sidebar access to approval:queue, plus admin — same
+// permission-based reasoning as listAssignableEvaluators() in
+// AssessmentEvaluation.js, instead of a hardcoded role-name list that a
+// renamed or custom role granted approval:queue would fall through.
 async function listApprovers() {
   await ensureSchema();
+  await ControlPanelPermission.ensureSchema();
   return selectData(`
     SELECT DISTINCT u.id, u.full_name, u.username
     FROM dbo.users u
     INNER JOIN dbo.user_roles ur ON ur.user_id = u.id
     INNER JOIN dbo.roles r ON r.id = ur.role_id
+    LEFT JOIN dbo.role_sidebar_menu_permissions p
+      ON p.role_id = r.id AND p.menu_key = 'approval:queue' AND p.is_enabled = 1
     WHERE u.is_active = 1
-      AND LOWER(LTRIM(RTRIM(r.name))) IN ('admin', 'administrator', 'officer', 'account officer', 'division chief', 'manager')
+      AND (LOWER(LTRIM(RTRIM(r.name))) = 'admin' OR p.role_id IS NOT NULL)
     ORDER BY u.full_name
   `);
 }
@@ -553,6 +561,12 @@ async function startApproval(applicationId, actorId) {
   const approval = await getOrCreateApproval(applicationId, actorId);
   if (!approval) return null;
   if (approval.status === "IN_PROGRESS") return getApprovalDetail(applicationId);
+  // A settled approval (contract possibly already issued off of it) must
+  // never be silently wiped and restarted — only IN_PROGRESS short-circuits
+  // above; everything else used to fall through to the DELETE below.
+  if (["APPROVED", "DISAPPROVED", "RETURNED"].includes(approval.status)) {
+    throw new Error("This application's approval has already been decided — its routing history can't be restarted automatically.");
+  }
 
   const levels = await listLevels();
   if (levels.length === 0) throw new Error("No active approval levels configured. Set up the workflow first.");
@@ -671,12 +685,20 @@ async function actOnStep(stepId, { action, remarks, actorId }) {
   const note = String(remarks ?? "").trim();
   const stepDecision = act === "APPROVE" ? "APPROVED" : act === "DISAPPROVE" ? "DISAPPROVED" : "RETURNED";
 
-  await updateData(
+  // The PENDING check above is a separate read, so two concurrent requests
+  // for the same step could both pass it before either writes — this WHERE
+  // clause makes the actual write the atomic compare-and-swap: only the
+  // first one to reach the DB actually flips the row, and whoever loses the
+  // race gets rowsAffected=0 here instead of silently double-deciding it.
+  const result = await updateData(
     `UPDATE dbo.approval_steps
      SET decision = @param1, action = @param2, remarks = @param3, acted_by = @param4, acted_at = SYSUTCDATETIME()
-     WHERE id = @param0`,
+     WHERE id = @param0 AND decision = 'PENDING'`,
     [toInt(stepId), stepDecision, act, note || null, toInt(actorId)]
   );
+  if (!result?.rowsAffected?.[0]) {
+    throw new Error("This level has already been decided.");
+  }
   await logActivity(step.approval_id, `LEVEL_${stepDecision}`, `${step.level_name}${note ? `: ${note.slice(0, 200)}` : ""}`, actorId);
 
   const applicationId = approval.application_id;

@@ -1,7 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const controller = require("../controller/c_assessments");
-const { requireMenuAccess } = require("../middleware/m_auth");
+const { requireMenuAccess, requireRole } = require("../middleware/m_auth");
 
 const MENU_KEY = "assessment:queue";
 
@@ -14,7 +14,7 @@ router.get("/:applicationId", requireMenuAccess(MENU_KEY, "view"), controller.de
 // Assessment header actions
 router.patch("/:applicationId/assign", requireMenuAccess(MENU_KEY, "edit"), controller.assign);
 router.patch("/:applicationId/stage", requireMenuAccess(MENU_KEY, "edit"), controller.setStage);
-router.patch("/:applicationId/reopen", requireMenuAccess(MENU_KEY, "edit"), controller.reopen);
+router.patch("/:applicationId/reopen", requireRole("admin"), controller.reopen);
 router.post("/:applicationId/recommendation", requireMenuAccess(MENU_KEY, "edit"), controller.recommendation);
 
 // Documentary compliance — proxy to the application requirement workflow, gated by assessment access

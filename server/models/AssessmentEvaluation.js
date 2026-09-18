@@ -484,6 +484,15 @@ async function setStage(applicationId, { stage, actorId }) {
   if (!asm) return null;
   const next = pick(stage, STAGES);
   if (!next) throw new Error("Invalid stage");
+  // A closed assessment (COMPLETED/RETURNED) only leaves that state through
+  // the admin-gated reopen() — which also clears the stale recommendation.
+  // Without this, any evaluator with ordinary edit rights could move it
+  // straight back to e.g. IN_REVIEW via this endpoint, leaving
+  // recommendation set (Submit stays disabled) with no Reopen button left
+  // to show (it only renders for COMPLETED/RETURNED) — a stuck dead end.
+  if (asm.stage === "COMPLETED" || asm.stage === "RETURNED") {
+    throw new Error("This assessment is closed — use Reopen (admin) to move it out of a closed stage.");
+  }
   await updateData(
     `
     UPDATE dbo.application_assessments
@@ -499,6 +508,23 @@ async function setStage(applicationId, { stage, actorId }) {
 async function reopen(applicationId, actorId) {
   const asm = await getOrCreateAssessment(applicationId, actorId);
   if (!asm) return null;
+  // If Approval already reached a terminal decision (a contract may already
+  // be issued off of it), reopening the assessment is a dead end anyway —
+  // resubmitting a fresh recommendation would try to restart that already-
+  // decided approval, which startApproval() now refuses to do. Surface the
+  // conflict here instead of leaving the officer stuck one step later.
+  {
+    // Lazy require — ApprovalIssuance.js requires this module too (see the
+    // matching comment in submitRecommendation).
+    const ApprovalIssuance = require("./ApprovalIssuance");
+    const detail = await ApprovalIssuance.getApprovalDetail(applicationId);
+    const approvalStatus = detail?.approval?.approval_status;
+    if (["APPROVED", "DISAPPROVED", "RETURNED"].includes(approvalStatus)) {
+      throw new Error(
+        "This application's approval has already been decided — reopening the assessment won't restart it. Use the Approval module if you need to revisit the decision."
+      );
+    }
+  }
   await updateData(
     `
     UPDATE dbo.application_assessments
@@ -707,6 +733,15 @@ async function deleteCharge(id, actorId) {
 async function submitRecommendation(applicationId, { recommendation, summary, actorId }) {
   const asm = await getOrCreateAssessment(applicationId, actorId);
   if (!asm) return null;
+  // The frontend disables the Submit button once a.recommendation is set,
+  // but that's client-side only — without this, a direct API call can
+  // overwrite an already-endorsed (and already-routed-to-Approval)
+  // recommendation, leaving Approval's ladder going on a decision Assessment
+  // no longer agrees with. Only Reopen (which clears recommendation) can
+  // legitimately re-open this.
+  if (asm.recommendation) {
+    throw new Error("A recommendation has already been submitted for this assessment. An admin must reopen it first.");
+  }
   const rec = pick(recommendation, RECOMMENDATIONS);
   if (!rec) throw new Error("Invalid recommendation");
   const note = String(summary ?? "").trim();

@@ -1055,6 +1055,32 @@ async function updateApplicationStatus(id, { to_status, remarks, changed_by }) {
     throw new Error(`Invalid status "${toStatus}". Must be one of: ${APPLICATION_STATUSES.join(", ")}`);
   }
 
+  // The "meaningful gate on APPROVED" this file's top comment refers to —
+  // previously described but never actually implemented, which meant an
+  // application with zero verified mandatory requirements could be endorsed
+  // straight through to APPROVED and a contract issued off of it. Approval's
+  // settleApproval() already has a catch block written to roll the ladder
+  // back to IN_PROGRESS on exactly this thrown error.
+  if (toStatus === "APPROVED") {
+    const unverifiedRows = await selectData(
+      `
+      SELECT COUNT(1) AS n
+      FROM dbo.application_requirements ar
+      INNER JOIN dbo.requirements r ON r.id = ar.requirement_id
+      WHERE ar.application_id = @param0
+        AND r.is_mandatory = 1
+        AND ar.status <> 'VERIFIED'
+      `,
+      [id]
+    );
+    const unverified = Number(unverifiedRows?.[0]?.n || 0);
+    if (unverified > 0) {
+      throw new Error(
+        `Cannot approve — ${unverified} mandatory requirement${unverified === 1 ? "" : "s"} ${unverified === 1 ? "is" : "are"} not yet verified.`
+      );
+    }
+  }
+
   const changedBy = toInt(changed_by);
 
   await updateData(

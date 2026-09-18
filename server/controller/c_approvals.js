@@ -90,11 +90,9 @@ exports.start = async (req, res) => {
   }
 };
 
+// Admin-only — enforced by requireRole("admin") on this route, not here.
 exports.reopen = async (req, res) => {
   try {
-    if (String(req.user?.role || "").toLowerCase() !== "admin") {
-      return res.status(403).json({ success: false, message: "Only an admin can reopen an approval" });
-    }
     const id = appIdParam(req, res);
     if (id === null) return undefined;
     const data = await Approval.reopenApproval(id, req.user?.id ?? null);

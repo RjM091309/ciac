@@ -718,6 +718,11 @@ function OverviewTab({
 }) {
   const a = data.approval;
   const settled = ['APPROVED', 'DISAPPROVED', 'RETURNED'].includes(a.approval_status);
+  // Reopen is requireRole("admin")-gated server-side — perms.canEdit (any
+  // role with ordinary edit rights on approval:queue) isn't the same thing,
+  // so gate the button on fullAccess (this app's existing "is admin" signal)
+  // instead of showing it to everyone and having it 403.
+  const { fullAccess: isAdminReopen } = useControlPanelAccess();
 
   return (
     <div className="flex flex-col gap-4">
@@ -742,7 +747,7 @@ function OverviewTab({
         </div>
       ) : null}
 
-      {settled && perms.canEdit ? (
+      {settled && isAdminReopen ? (
         <div className="rounded-xl border p-3 flex flex-wrap items-center gap-2" style={{ borderColor: 'var(--border-subtle)' }}>
           <button
             className="rounded-lg px-3 py-1.5 text-[12px] font-semibold border disabled:opacity-40"
@@ -1322,10 +1327,10 @@ function HistoryTab({ data }: { data: DetailPayload }) {
   return (
     <ol className="flex flex-col gap-2">
       {merged.map((m) => (
-        <li key={m.key} className="rounded-lg border px-3 py-2 text-[12px]" style={{ borderColor: 'var(--border-subtle)' }}>
+        <li key={m.key} className="rounded-lg border px-3 py-2 text-[12px]" style={{ borderColor: 'var(--border)' }}>
           <div className="flex justify-between">
             <span className="font-semibold">{m.title}</span>
-            <span className="text-secondary">{fmtDate(m.when)}</span>
+            <span className="text-secondary">{fmtDateTime(m.when)}</span>
           </div>
           {m.detail ? <div className="text-secondary mt-0.5">{m.detail}</div> : null}
           <div className="text-[10px] text-secondary mt-0.5">{m.who}</div>

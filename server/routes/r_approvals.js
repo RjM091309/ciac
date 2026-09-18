@@ -1,7 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const controller = require("../controller/c_approvals");
-const { requireMenuAccess } = require("../middleware/m_auth");
+const { requireMenuAccess, requireRole } = require("../middleware/m_auth");
 
 const MENU_KEY = "approval:queue";
 
@@ -20,7 +20,7 @@ router.get("/:applicationId", requireMenuAccess(MENU_KEY, "view"), controller.de
 
 // Header / routing ladder
 router.post("/:applicationId/start", requireMenuAccess(MENU_KEY, "edit"), controller.start);
-router.patch("/:applicationId/reopen", requireMenuAccess(MENU_KEY, "edit"), controller.reopen);
+router.patch("/:applicationId/reopen", requireRole("admin"), controller.reopen);
 router.patch("/steps/:id/act", requireMenuAccess(MENU_KEY, "edit"), controller.actOnStep);
 router.patch("/steps/:id/endorse", requireMenuAccess(MENU_KEY, "edit"), controller.endorseStep);
 router.patch("/steps/:id/assign", requireMenuAccess(MENU_KEY, "edit"), controller.assignStep);

@@ -851,7 +851,11 @@ function OverviewTab({
 }) {
   const a = data.assessment;
   const [evaluatorId, setEvaluatorId] = useState(a.assigned_evaluator_id ? String(a.assigned_evaluator_id) : '');
-  const isAdminReopen = perms.canEdit; // reopen also server-guarded to admin
+  // Reopen is requireRole("admin")-gated server-side — showing it to anyone
+  // with ordinary edit rights (perms.canEdit) meant a click always 403'd for
+  // everyone except a real admin. fullAccess is this app's existing "is
+  // admin" signal (same one canEdit/canAdd/canDelete bypass through).
+  const { fullAccess: isAdminReopen } = useControlPanelAccess();
   // Once COMPLETED/RETURNED, Reopen is the one deliberate way back in — the
   // evaluator assignment and raw stage buttons must not offer a side door
   // around it (same gate as the Recommendation and Findings tabs).
