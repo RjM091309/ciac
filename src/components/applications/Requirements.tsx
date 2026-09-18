@@ -246,15 +246,16 @@ export function RequirementsManagement() {
   // immediately) OR it already has requirements filed under that type (the
   // legacy signal — keeps pre-existing categories, none of which have ever
   // been manually tagged yet, from vanishing out of every type's tree).
+  // Inactive types/categories stay IN the tree (faded, see JSX below) rather
+  // than disappearing, so a deactivate is easy to spot and undo right there.
   const { typePanelOptions, categoryOptionsByType } = useMemo(() => {
-    const activeCategories = categories.filter((c) => c.is_active === 1);
     const typesToWalk = [
-      { code: '__all__', name: 'All Types' },
-      ...activeApplicationTypes.map((t) => ({ code: t.code, name: t.name })),
+      { code: '__all__', name: 'All Types', is_active: 1 },
+      ...applicationTypes.map((t) => ({ code: t.code, name: t.name, is_active: t.is_active })),
     ];
 
-    const categoryMap = new Map<string, { key: string; name: string; count: number }[]>();
-    const typeOptions: { code: string; name: string; count: number }[] = [];
+    const categoryMap = new Map<string, { key: string; name: string; count: number; is_active: number }[]>();
+    const typeOptions: { code: string; name: string; count: number; is_active: number }[] = [];
 
     for (const t of typesToWalk) {
       const itemsForType = t.code === '__all__' ? activeItems : activeItems.filter((i) => appliesToType(i, t.code));
@@ -268,21 +269,32 @@ export function RequirementsManagement() {
         const key = String(item.category_id);
         countByCategoryId.set(key, (countByCategoryId.get(key) || 0) + 1);
       }
+      // Inactive categories only surface here via an explicit tag to this
+      // type (how a cascade-deactivate got them here in the first place) —
+      // the "has items" fallback stays active-only since it's a legacy
+      // signal for categories that were never tagged to begin with.
       const relevantCategories =
         t.code === '__all__'
-          ? activeCategories
-          : activeCategories.filter((c) => categoryAppliesToType(c, t.code) || countByCategoryId.has(String(c.id)));
+          ? categories
+          : categories.filter(
+              (c) =>
+                (c.is_active === 1 && (categoryAppliesToType(c, t.code) || countByCategoryId.has(String(c.id)))) ||
+                (c.is_active === 0 && categoryAppliesToType(c, t.code))
+            );
       const sorted = relevantCategories
-        .map((c) => ({ key: String(c.id), name: c.name, count: countByCategoryId.get(String(c.id)) || 0 }))
+        .map((c) => ({ key: String(c.id), name: c.name, count: countByCategoryId.get(String(c.id)) || 0, is_active: c.is_active }))
         .sort((a, b) => a.name.localeCompare(b.name));
-      const options = [{ key: '__all__', name: 'All Categories', count: itemsForType.length }, ...sorted];
-      if (uncategorized > 0) options.push({ key: '__uncategorized__', name: 'Uncategorized', count: uncategorized });
+      const options = [
+        { key: '__all__', name: 'All Categories', count: itemsForType.length, is_active: 1 },
+        ...sorted,
+      ];
+      if (uncategorized > 0) options.push({ key: '__uncategorized__', name: 'Uncategorized', count: uncategorized, is_active: 1 });
       categoryMap.set(t.code, options);
-      typeOptions.push({ code: t.code, name: t.name, count: sorted.length });
+      typeOptions.push({ code: t.code, name: t.name, count: sorted.filter((c) => c.is_active === 1).length, is_active: t.is_active });
     }
 
     return { typePanelOptions: typeOptions, categoryOptionsByType: categoryMap };
-  }, [activeApplicationTypes, activeItems, categories]);
+  }, [applicationTypes, activeItems, categories]);
 
   const panelFilteredItems = useMemo(() => {
     if (!selectedTypeCode) return activeItems;
@@ -635,6 +647,25 @@ export function RequirementsManagement() {
     }
   }
 
+  async function reactivateType(id: number) {
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await fetch(api(`/api/application-types/${id}/reactivate`), { method: 'PATCH', credentials: 'include' });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.message || 'Reactivate failed');
+      setError(null);
+      await refresh({ showLoading: false });
+      toast.success('Application type reactivated successfully');
+    } catch (e: any) {
+      const message = e?.message || 'Reactivate failed';
+      setError(message);
+      toast.error(message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
   function openCreateCategory() {
     setEditingCategory(null);
     // Wire in the type currently being browsed so the new category sorts
@@ -714,6 +745,25 @@ export function RequirementsManagement() {
       setConfirmDeactivateCategoryId(null);
     } catch (e: any) {
       const message = e?.message || 'Deactivate failed';
+      setError(message);
+      toast.error(message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function reactivateCategory(id: number) {
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await fetch(api(`/api/requirement-categories/${id}/reactivate`), { method: 'PATCH', credentials: 'include' });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.message || 'Reactivate failed');
+      setError(null);
+      await refresh({ showLoading: false });
+      toast.success('Category reactivated successfully');
+    } catch (e: any) {
+      const message = e?.message || 'Reactivate failed';
       setError(message);
       toast.error(message);
     } finally {
@@ -807,114 +857,163 @@ export function RequirementsManagement() {
               const expanded = expandedTypeCodes.has(t.code);
               const typeCategories = categoryOptionsByType.get(t.code) || [];
               const typeRow = t.code !== '__all__' ? applicationTypeByCode.get(t.code) : null;
+              const typeInactive = t.is_active !== 1;
               return (
-                <div key={t.code}>
-                  <div className="group rounded-lg flex items-center gap-0.5 hover:bg-white/5">
-                    <button
-                      onClick={() => toggleTypeExpand(t.code)}
-                      className="flex-1 min-w-0 px-2 py-1.5 text-xs font-semibold cursor-pointer transition-colors flex items-center gap-2"
-                    >
-                      {expanded ? (
-                        <FolderOpen size={15} className="shrink-0 text-secondary" />
-                      ) : (
+                <div key={t.code} className={cn(typeInactive && 'opacity-50')}>
+                  <div className="group rounded-lg flex items-center gap-0.5 hover:bg-[var(--surface-hover)]">
+                    {typeInactive ? (
+                      <div className="flex-1 min-w-0 px-2 py-1.5 text-xs font-semibold flex items-center gap-2">
                         <Folder size={15} className="shrink-0 text-secondary" />
-                      )}
-                      <span className="flex-1 text-left truncate" style={{ color: 'var(--text)' }}>
-                        {t.name}
-                      </span>
-                    </button>
+                        <span className="flex-1 text-left truncate" style={{ color: 'var(--text)' }}>
+                          {t.name}
+                        </span>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => toggleTypeExpand(t.code)}
+                        className="flex-1 min-w-0 px-2 py-1.5 text-xs font-semibold cursor-pointer transition-colors flex items-center gap-2"
+                      >
+                        {expanded ? (
+                          <FolderOpen size={15} className="shrink-0 text-secondary" />
+                        ) : (
+                          <Folder size={15} className="shrink-0 text-secondary" />
+                        )}
+                        <span className="flex-1 text-left truncate" style={{ color: 'var(--text)' }}>
+                          {t.name}
+                        </span>
+                      </button>
+                    )}
 
                     {/* Count badge and hover actions share this slot so the
                         row width never jumps between the two states. */}
                     <div className="relative shrink-0 w-12 h-6 mr-1">
-                      <div
-                        className={cn('absolute inset-0 flex items-center justify-end transition-opacity', typeRow && 'group-hover:opacity-0')}
-                      >
-                        <span
-                          className="rounded-full px-1.5 text-[10px]"
-                          style={{ backgroundColor: 'var(--control-bg)', color: 'var(--text-muted)' }}
+                      {!typeInactive ? (
+                        <div
+                          className={cn('absolute inset-0 flex items-center justify-end transition-opacity', typeRow && 'group-hover:opacity-0')}
                         >
-                          {t.count}
-                        </span>
-                      </div>
+                          <span
+                            className="rounded-full px-1.5 text-[10px]"
+                            style={{ backgroundColor: 'var(--control-bg)', color: 'var(--text-muted)' }}
+                          >
+                            {t.count}
+                          </span>
+                        </div>
+                      ) : null}
                       {typeRow ? (
-                        <div className="absolute inset-0 flex items-center justify-end gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                          {canEditTypes ? (
+                        <div
+                          className={cn(
+                            'absolute inset-0 flex items-center justify-end gap-0.5 transition-opacity',
+                            typeInactive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                          )}
+                        >
+                          {!typeInactive && canEditTypes ? (
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
                                 openEditType(typeRow);
                               }}
-                              className="inline-flex items-center justify-center rounded-md p-1 text-secondary cursor-pointer hover:bg-white/10"
+                              className="inline-flex items-center justify-center rounded-md p-1 text-secondary cursor-pointer hover:bg-[var(--control-bg-hover)]"
                               title="Edit type"
                               aria-label={`Edit ${typeRow.name}`}
                             >
                               <Pencil size={12} />
                             </button>
                           ) : null}
-                          {canDeleteTypes ? (
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setConfirmDeactivateTypeId(typeRow.id);
-                              }}
-                              className="inline-flex items-center justify-center rounded-md p-1 text-secondary cursor-pointer hover:bg-white/10"
-                              title="Deactivate type"
-                              aria-label={`Deactivate ${typeRow.name}`}
-                            >
-                              <Ban size={12} />
-                            </button>
-                          ) : null}
+                          {typeInactive
+                            ? canDeleteTypes ? (
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    reactivateType(typeRow.id);
+                                  }}
+                                  className="inline-flex items-center justify-center rounded-md p-1 text-secondary cursor-pointer hover:bg-[var(--control-bg-hover)]"
+                                  title="Reactivate type"
+                                  aria-label={`Reactivate ${typeRow.name}`}
+                                >
+                                  <RotateCcw size={12} />
+                                </button>
+                              ) : null
+                            : canDeleteTypes ? (
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setConfirmDeactivateTypeId(typeRow.id);
+                                  }}
+                                  className="inline-flex items-center justify-center rounded-md p-1 text-secondary cursor-pointer hover:bg-[var(--control-bg-hover)]"
+                                  title="Deactivate type"
+                                  aria-label={`Deactivate ${typeRow.name}`}
+                                >
+                                  <Ban size={12} />
+                                </button>
+                              ) : null}
                         </div>
                       ) : null}
                     </div>
                   </div>
 
-                  {expanded ? (
+                  {expanded && !typeInactive ? (
                     <div className="flex flex-col gap-0.5 mt-0.5 mb-1 ml-[18px] pl-2 border-l" style={{ borderColor: 'var(--border-subtle)' }}>
                       {typeCategories.map((c) => {
                         const active = selectedTypeCode === t.code && selectedCategoryKey === c.key;
                         const catRow = c.key !== '__all__' && c.key !== '__uncategorized__' ? categoryById.get(c.key) : null;
+                        const catInactive = c.is_active !== 1;
                         return (
                           <div
                             key={c.key}
-                            className="group rounded-md flex items-center gap-0.5"
-                            style={{ backgroundColor: active ? 'var(--nav-active-bg)' : 'transparent' }}
+                            className={cn(
+                              'group rounded-md flex items-center gap-0.5',
+                              catInactive && 'opacity-50',
+                              active ? 'bg-[var(--nav-active-bg)]' : 'hover:bg-[var(--surface-hover)]'
+                            )}
                           >
-                            <button
-                              onClick={() => selectCategory(t.code, c.key)}
-                              className="flex-1 min-w-0 px-2 py-1.5 text-xs cursor-pointer transition-colors flex items-center gap-2"
-                              style={{ color: active ? 'var(--nav-active-text)' : 'var(--text)' }}
-                            >
-                              <Minus size={12} className="shrink-0 opacity-60" />
-                              <span className="flex-1 text-left truncate">{c.name}</span>
-                            </button>
+                            {catInactive ? (
+                              <div className="flex-1 min-w-0 px-2 py-1.5 text-xs flex items-center gap-2" style={{ color: 'var(--text)' }}>
+                                <Minus size={12} className="shrink-0 opacity-60" />
+                                <span className="flex-1 text-left truncate">{c.name}</span>
+                              </div>
+                            ) : (
+                              <button
+                                onClick={() => selectCategory(t.code, c.key)}
+                                className="flex-1 min-w-0 px-2 py-1.5 text-xs cursor-pointer transition-colors flex items-center gap-2"
+                                style={{ color: active ? 'var(--nav-active-text)' : 'var(--text)' }}
+                              >
+                                <Minus size={12} className="shrink-0 opacity-60" />
+                                <span className="flex-1 text-left truncate">{c.name}</span>
+                              </button>
+                            )}
 
                             {/* Count badge and hover actions share this slot so the
                                 row width never jumps between the two states. */}
                             <div className="relative shrink-0 w-11 h-6 mr-1">
-                              <div
-                                className={cn('absolute inset-0 flex items-center justify-end transition-opacity', catRow && 'group-hover:opacity-0')}
-                              >
-                                <span
-                                  className="rounded-full px-1.5 text-[10px]"
-                                  style={{
-                                    backgroundColor: active ? 'color-mix(in oklab, var(--nav-active-text) 20%, transparent)' : 'var(--control-bg)',
-                                    color: active ? 'var(--nav-active-text)' : 'var(--text-muted)',
-                                  }}
+                              {!catInactive ? (
+                                <div
+                                  className={cn('absolute inset-0 flex items-center justify-end transition-opacity', catRow && 'group-hover:opacity-0')}
                                 >
-                                  {c.count}
-                                </span>
-                              </div>
+                                  <span
+                                    className="rounded-full px-1.5 text-[10px]"
+                                    style={{
+                                      backgroundColor: active ? 'color-mix(in oklab, var(--nav-active-text) 20%, transparent)' : 'var(--control-bg)',
+                                      color: active ? 'var(--nav-active-text)' : 'var(--text-muted)',
+                                    }}
+                                  >
+                                    {c.count}
+                                  </span>
+                                </div>
+                              ) : null}
                               {catRow ? (
-                                <div className="absolute inset-0 flex items-center justify-end gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                                  {canEditCategories ? (
+                                <div
+                                  className={cn(
+                                    'absolute inset-0 flex items-center justify-end gap-0.5 transition-opacity',
+                                    catInactive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                                  )}
+                                >
+                                  {!catInactive && canEditCategories ? (
                                     <button
                                       onClick={(e) => {
                                         e.stopPropagation();
                                         openEditCategory(catRow);
                                       }}
-                                      className="inline-flex items-center justify-center rounded-md p-1 cursor-pointer hover:bg-white/10"
+                                      className="inline-flex items-center justify-center rounded-md p-1 cursor-pointer hover:bg-[var(--control-bg-hover)]"
                                       style={{ color: active ? 'var(--nav-active-text)' : 'var(--text-muted)' }}
                                       title="Edit category"
                                       aria-label={`Edit ${catRow.name}`}
@@ -922,20 +1021,35 @@ export function RequirementsManagement() {
                                       <Pencil size={11} />
                                     </button>
                                   ) : null}
-                                  {canDeleteCategories ? (
-                                    <button
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        setConfirmDeactivateCategoryId(catRow.id);
-                                      }}
-                                      className="inline-flex items-center justify-center rounded-md p-1 cursor-pointer hover:bg-white/10"
-                                      style={{ color: active ? 'var(--nav-active-text)' : 'var(--text-muted)' }}
-                                      title="Deactivate category"
-                                      aria-label={`Deactivate ${catRow.name}`}
-                                    >
-                                      <Ban size={11} />
-                                    </button>
-                                  ) : null}
+                                  {catInactive
+                                    ? canDeleteCategories ? (
+                                        <button
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            reactivateCategory(catRow.id);
+                                          }}
+                                          className="inline-flex items-center justify-center rounded-md p-1 cursor-pointer hover:bg-[var(--control-bg-hover)]"
+                                          style={{ color: 'var(--text-muted)' }}
+                                          title="Reactivate category"
+                                          aria-label={`Reactivate ${catRow.name}`}
+                                        >
+                                          <RotateCcw size={11} />
+                                        </button>
+                                      ) : null
+                                    : canDeleteCategories ? (
+                                        <button
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            setConfirmDeactivateCategoryId(catRow.id);
+                                          }}
+                                          className="inline-flex items-center justify-center rounded-md p-1 cursor-pointer hover:bg-[var(--control-bg-hover)]"
+                                          style={{ color: active ? 'var(--nav-active-text)' : 'var(--text-muted)' }}
+                                          title="Deactivate category"
+                                          aria-label={`Deactivate ${catRow.name}`}
+                                        >
+                                          <Ban size={11} />
+                                        </button>
+                                      ) : null}
                                 </div>
                               ) : null}
                             </div>
@@ -1023,7 +1137,7 @@ export function RequirementsManagement() {
               </thead>
               <tbody>
                 {pagedItems.map((item) => (
-                  <tr key={item.id} style={{ borderTop: '1px solid var(--border-subtle)' }}>
+                  <tr key={item.id} className="hover:bg-[var(--surface-hover)]" style={{ borderTop: '1px solid var(--border-subtle)' }}>
                     <td className="px-3 py-2 text-[11px]" style={{ color: 'var(--text)' }}>{item.code}</td>
                     <td className="px-3 py-2 text-[11px]" style={{ color: 'var(--text)' }}>{item.name}</td>
                     <td className="px-3 py-2 text-[11px] text-secondary">{item.category_name || '-'}</td>
@@ -1214,7 +1328,15 @@ export function RequirementsManagement() {
               value={typeForm.code}
               onChange={(e) => setTypeForm((p) => ({ ...p, code: e.target.value }))}
               placeholder="e.g. DIRECT_LEASE"
+              disabled={!!editingType}
+              readOnly={!!editingType}
+              style={editingType ? { opacity: 0.6, cursor: 'not-allowed' } : undefined}
             />
+            {editingType ? (
+              <p className="text-[11px] text-secondary mt-1">
+                Code can't be changed after creation — it's referenced by filed applications and by requirement/category wiring.
+              </p>
+            ) : null}
           </Field>
           <Field label="Name">
             <input
@@ -1340,7 +1462,7 @@ export function RequirementsManagement() {
                   <p className="text-xs text-secondary">Recover a requirement to make it active again.</p>
                 </div>
                 <button
-                  className="inline-flex items-center justify-center rounded-md p-1.5 text-secondary cursor-pointer hover:bg-white/5"
+                  className="inline-flex items-center justify-center rounded-md p-1.5 text-secondary cursor-pointer hover:bg-[var(--control-bg-hover)]"
                   onClick={() => {
                     setIsRecoveryOpen(false);
                     setRecoverySearch('');
@@ -1414,7 +1536,7 @@ export function RequirementsManagement() {
                                 <button
                                   className={cn(
                                     'inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-semibold text-secondary',
-                                    saving ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer hover:bg-white/5'
+                                    saving ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer hover:bg-[var(--control-bg-hover)]'
                                   )}
                                   onClick={() => setConfirmReactivateId(item.id)}
                                   disabled={saving}
@@ -1461,7 +1583,7 @@ function StatCard({ label, value, onClick }: { label: string; value: string; onC
       onClick={onClick}
       className={cn(
         'rounded-xl px-3 py-3 flex flex-col gap-1 shadow-sm text-left w-full transition-colors',
-        onClick && 'cursor-pointer hover:bg-white/5'
+        onClick && 'cursor-pointer hover:bg-[var(--surface-hover)]'
       )}
       style={{
         backgroundColor: 'color-mix(in oklab, var(--surface) 94%, white 6%)',
@@ -1488,7 +1610,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 function CheckToggle({ label, checked, onChange }: { label: string; checked: boolean; onChange: (v: boolean) => void }) {
   return (
     <label
-      className="flex items-center gap-2 rounded-lg border border-solid border-[var(--input-border)] px-3 py-2 text-xs cursor-pointer transition-all hover:border-[var(--nav-active-bg)] hover:bg-white/5"
+      className="flex items-center gap-2 rounded-lg border border-solid border-[var(--input-border)] px-3 py-2 text-xs cursor-pointer transition-all hover:border-[var(--nav-active-bg)] hover:bg-[var(--surface-hover)]"
     >
       <input 
       type="checkbox" 

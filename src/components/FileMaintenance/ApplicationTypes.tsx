@@ -434,11 +434,24 @@ export function ApplicationTypesManagement() {
           <Field label="Code">
             <input
               className="w-full rounded-md px-3 py-2 text-sm border focus:outline-none focus:border-[var(--nav-active-bg)]"
-              style={{ borderColor: 'var(--input-border)', color: 'var(--text)', backgroundColor: 'var(--input-bg)' }}
+              style={{
+                borderColor: 'var(--input-border)',
+                color: 'var(--text)',
+                backgroundColor: 'var(--input-bg)',
+                opacity: editing ? 0.6 : 1,
+                cursor: editing ? 'not-allowed' : 'text',
+              }}
               value={form.code}
               onChange={(e) => setForm((p) => ({ ...p, code: e.target.value }))}
               placeholder="e.g. DIRECT_LEASE"
+              disabled={!!editing}
+              readOnly={!!editing}
             />
+            {editing ? (
+              <p className="text-[11px] text-secondary mt-1">
+                Code can't be changed after creation — it's referenced by filed applications and by requirement/category wiring.
+              </p>
+            ) : null}
           </Field>
           <Field label="Name">
             <input

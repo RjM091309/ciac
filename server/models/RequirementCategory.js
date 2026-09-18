@@ -1,4 +1,7 @@
 const { selectData, insertData, updateData, updateSchema, runInTransaction } = require("../config/database");
+// Cross-model require so deactivating a category can cascade down to the
+// requirements filed under it (see deactivateRequirementCategory below).
+const Requirement = require("./Requirement");
 
 function toInt(v) {
   const n = Number(v);
@@ -37,6 +40,14 @@ async function ensureSchema() {
         CONSTRAINT FK_req_cat_app_types_category FOREIGN KEY (category_id) REFERENCES dbo.requirement_categories(id)
       );
     END
+
+    -- Set when this row was deactivated automatically because an application
+    -- type it's wired to was deactivated (and this was its last active
+    -- type) — as opposed to someone deactivating it directly. Lets that
+    -- type's reactivate cascade back down to exactly the categories it
+    -- disabled, without resurrecting one deactivated independently.
+    IF COL_LENGTH('dbo.requirement_categories', 'deactivated_via_cascade') IS NULL
+      ALTER TABLE dbo.requirement_categories ADD deactivated_via_cascade BIT NOT NULL CONSTRAINT DF_requirement_categories_deactivated_via_cascade DEFAULT (0);
   `);
 }
 
@@ -50,6 +61,7 @@ function mapRow(rc) {
     created_at: rc.created_at ?? null,
     updated_at: rc.updated_at ?? null,
     is_active: rc.is_active,
+    deactivated_via_cascade: rc.deactivated_via_cascade ?? 0,
     // Populated by the caller from a second query — empty array means
     // "applies to every application type".
     application_types: [],
@@ -104,7 +116,8 @@ async function listRequirementCategories() {
       rc.updated_by,
       rc.created_at,
       rc.updated_at,
-      rc.is_active
+      rc.is_active,
+      rc.deactivated_via_cascade
     FROM dbo.requirement_categories rc
     ORDER BY rc.id DESC
   `);
@@ -123,7 +136,8 @@ async function getRequirementCategoryById(id) {
       rc.updated_by,
       rc.created_at,
       rc.updated_at,
-      rc.is_active
+      rc.is_active,
+      rc.deactivated_via_cascade
     FROM dbo.requirement_categories rc
     WHERE rc.id = @param0
     `,
@@ -188,42 +202,43 @@ async function updateRequirementCategory(id, { name, description, is_active, app
   return getRequirementCategoryById(id);
 }
 
-async function deactivateRequirementCategory(id, updated_by) {
+// Deactivating a category always succeeds now — instead of blocking it while
+// requirements are still assigned, it cascades down and deactivates them too
+// (flagged deactivated_via_cascade=1 so a later reactivate of THIS category
+// knows to bring them back, without touching ones deactivated on their own).
+async function deactivateRequirementCategory(id, updated_by, viaCascade = false) {
   await ensureSchema();
 
   const current = await getRequirementCategoryById(id);
   if (!current) return null;
-
-  // Block deactivation while active Requirements still point at this
-  // category — same guard as deactivateApplicationType one level up, so the
-  // catalog can't silently orphan the requirements underneath it.
-  const dependentRows = await selectData(
-    `SELECT COUNT(1) AS n FROM dbo.requirements WHERE category_id = @param0 AND is_active = 1`,
-    [id]
-  );
-  const dependentCount = Number(dependentRows?.[0]?.n || 0);
-  if (dependentCount > 0) {
-    throw new Error(
-      `Cannot deactivate "${current.name}" — ${dependentCount} active requirement${
-        dependentCount === 1 ? " is" : "s are"
-      } still assigned to it. Reassign or deactivate ${dependentCount === 1 ? "it" : "them"} first.`
-    );
-  }
 
   const updatedBy = toInt(updated_by);
   await updateData(
     `
     UPDATE dbo.requirement_categories
     SET is_active = 0,
+        deactivated_via_cascade = @param2,
         updated_by = @param1,
         updated_at = GETDATE()
     WHERE id = @param0
     `,
-    [id, updatedBy]
+    [id, updatedBy, viaCascade ? 1 : 0]
   );
+
+  const dependentRows = await selectData(
+    `SELECT id FROM dbo.requirements WHERE category_id = @param0 AND is_active = 1`,
+    [id]
+  );
+  for (const row of dependentRows) {
+    await Requirement.deactivateRequirement(row.id, updated_by, true);
+  }
+
   return getRequirementCategoryById(id);
 }
 
+// Reactivating cascades back down to exactly the requirements this category
+// previously cascade-disabled — one deactivated independently (the flag is
+// 0) is left alone, since the person who turned it off did so on purpose.
 async function reactivateRequirementCategory(id, updated_by) {
   await ensureSchema();
   const updatedBy = toInt(updated_by);
@@ -231,12 +246,22 @@ async function reactivateRequirementCategory(id, updated_by) {
     `
     UPDATE dbo.requirement_categories
     SET is_active = 1,
+        deactivated_via_cascade = 0,
         updated_by = @param1,
         updated_at = GETDATE()
     WHERE id = @param0
     `,
     [id, updatedBy]
   );
+
+  const cascadedRows = await selectData(
+    `SELECT id FROM dbo.requirements WHERE category_id = @param0 AND is_active = 0 AND deactivated_via_cascade = 1`,
+    [id]
+  );
+  for (const row of cascadedRows) {
+    await Requirement.reactivateRequirement(row.id, updated_by);
+  }
+
   return getRequirementCategoryById(id);
 }
 

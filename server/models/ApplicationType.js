@@ -131,13 +131,28 @@ async function createApplicationType({ code, name, description, created_by, is_a
 
 async function updateApplicationType(id, { code, name, description, is_active, updated_by }) {
   await ensureSchema();
+
+  // `code` is stored as a plain string everywhere it's referenced — filed
+  // applications (applications.application_type), the requirement/category
+  // wiring tables — none of which are real FKs to application_types.id and
+  // none of which get cascade-renamed. Changing it here would silently
+  // orphan all of that existing data, so it's locked after creation; only
+  // the display name/description can change.
+  if (code !== undefined) {
+    const current = await getApplicationTypeById(id);
+    if (current && String(code).trim().toUpperCase() !== String(current.code || "").trim().toUpperCase()) {
+      throw new Error(
+        `The code "${current.code}" can't be changed after creation — it's referenced by filed applications and by requirement/category wiring. Create a new type instead if you need a different code.`
+      );
+    }
+  }
+
   const sets = [];
   const params = [];
   const pushSet = (sqlFrag, value) => {
     sets.push(sqlFrag.replace("?", `@param${params.length}`));
     params.push(value);
   };
-  if (code !== undefined) pushSet("code = ?", code);
   if (name !== undefined) pushSet("name = ?", name);
   if (description !== undefined) pushSet("description = ?", description ?? null);
   if (is_active !== undefined) pushSet("is_active = ?", is_active ? 1 : 0);
@@ -155,33 +170,18 @@ async function updateApplicationType(id, { code, name, description, is_active, u
   return getApplicationTypeById(id);
 }
 
+// Deactivating a type always succeeds now — instead of blocking it while
+// categories are still wired to it, it cascades down: a category loses this
+// type, and if this was the LAST active type it had, the category itself
+// gets cascade-deactivated too (which itself cascades further to its
+// requirements — see RequirementCategory.deactivateRequirementCategory). A
+// category still tagged to another active type is left alone.
 async function deactivateApplicationType(id, updated_by) {
   await ensureSchema();
   await RequirementCategory.ensureSchema();
 
   const current = await getApplicationTypeById(id);
   if (!current) return null;
-
-  // Block deactivation while active Requirement Categories are still wired
-  // to this type — deactivating out from under them would silently orphan
-  // the catalog's sorting instead of surfacing the conflict up front.
-  const dependentRows = await selectData(
-    `
-    SELECT COUNT(1) AS n
-    FROM dbo.requirement_category_application_types rcat
-    INNER JOIN dbo.requirement_categories rc ON rc.id = rcat.category_id
-    WHERE rcat.application_type = @param0 AND rc.is_active = 1
-    `,
-    [current.code]
-  );
-  const dependentCount = Number(dependentRows?.[0]?.n || 0);
-  if (dependentCount > 0) {
-    throw new Error(
-      `Cannot deactivate "${current.name}" — ${dependentCount} active requirement categor${
-        dependentCount === 1 ? "y is" : "ies are"
-      } still assigned to it. Reassign or deactivate ${dependentCount === 1 ? "it" : "them"} first.`
-    );
-  }
 
   const updatedBy = toInt(updated_by);
   await updateData(
@@ -192,11 +192,39 @@ async function deactivateApplicationType(id, updated_by) {
     `,
     [id, updatedBy]
   );
+
+  const orphanedCategories = await selectData(
+    `
+    SELECT rc.id
+    FROM dbo.requirement_categories rc
+    INNER JOIN dbo.requirement_category_application_types rcat ON rcat.category_id = rc.id AND rcat.application_type = @param0
+    WHERE rc.is_active = 1
+      AND NOT EXISTS (
+        SELECT 1
+        FROM dbo.requirement_category_application_types rcat2
+        INNER JOIN dbo.application_types at2 ON at2.code = rcat2.application_type
+        WHERE rcat2.category_id = rc.id AND rcat2.application_type <> @param0 AND at2.is_active = 1
+      )
+    `,
+    [current.code]
+  );
+  for (const row of orphanedCategories) {
+    await RequirementCategory.deactivateRequirementCategory(row.id, updated_by, true);
+  }
+
   return getApplicationTypeById(id);
 }
 
+// Reactivating cascades back down to exactly the categories this type
+// previously cascade-disabled (deactivated_via_cascade=1) — one deactivated
+// independently is left alone, same rule as the level below it.
 async function reactivateApplicationType(id, updated_by) {
   await ensureSchema();
+  await RequirementCategory.ensureSchema();
+
+  const current = await getApplicationTypeById(id);
+  if (!current) return null;
+
   const updatedBy = toInt(updated_by);
   await updateData(
     `
@@ -206,6 +234,20 @@ async function reactivateApplicationType(id, updated_by) {
     `,
     [id, updatedBy]
   );
+
+  const cascadedCategories = await selectData(
+    `
+    SELECT rc.id
+    FROM dbo.requirement_categories rc
+    INNER JOIN dbo.requirement_category_application_types rcat ON rcat.category_id = rc.id AND rcat.application_type = @param0
+    WHERE rc.is_active = 0 AND rc.deactivated_via_cascade = 1
+    `,
+    [current.code]
+  );
+  for (const row of cascadedCategories) {
+    await RequirementCategory.reactivateRequirementCategory(row.id, updated_by);
+  }
+
   return getApplicationTypeById(id);
 }
 

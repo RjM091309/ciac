@@ -58,6 +58,15 @@ async function ensureSchema() {
         CONSTRAINT FK_req_app_types_requirement FOREIGN KEY (requirement_id) REFERENCES dbo.requirements(id)
       );
     END
+
+    -- Set when this row was deactivated automatically because its category
+    -- (or, one level further up, its category's application type) was
+    -- deactivated — as opposed to someone deactivating it directly. Lets a
+    -- parent's reactivate cascade back down to exactly the rows it disabled,
+    -- without resurrecting something that was independently deactivated on
+    -- its own for an unrelated reason.
+    IF COL_LENGTH('dbo.requirements', 'deactivated_via_cascade') IS NULL
+      ALTER TABLE dbo.requirements ADD deactivated_via_cascade BIT NOT NULL CONSTRAINT DF_requirements_deactivated_via_cascade DEFAULT (0);
   `);
 }
 
@@ -73,6 +82,7 @@ function mapRow(row) {
     for_renewal: row.for_renewal,
     is_mandatory: row.is_mandatory,
     is_active: row.is_active,
+    deactivated_via_cascade: row.deactivated_via_cascade ?? 0,
     created_by: row.created_by ?? null,
     updated_by: row.updated_by ?? null,
     created_at: row.created_at ?? null,
@@ -134,6 +144,7 @@ async function listRequirements() {
       r.for_renewal,
       r.is_mandatory,
       r.is_active,
+      r.deactivated_via_cascade,
       r.created_by,
       r.updated_by,
       r.created_at,
@@ -162,6 +173,7 @@ async function getRequirementById(id) {
       r.for_renewal,
       r.is_mandatory,
       r.is_active,
+      r.deactivated_via_cascade,
       r.created_by,
       r.updated_by,
       r.created_at,
@@ -247,16 +259,16 @@ async function updateRequirement(
   return getRequirementById(id);
 }
 
-async function deactivateRequirement(id, updated_by) {
+async function deactivateRequirement(id, updated_by, viaCascade = false) {
   await ensureSchema();
   const updatedBy = toInt(updated_by);
   await updateData(
     `
     UPDATE dbo.requirements
-    SET is_active = 0, updated_by = @param1, updated_at = GETDATE()
+    SET is_active = 0, deactivated_via_cascade = @param2, updated_by = @param1, updated_at = GETDATE()
     WHERE id = @param0
     `,
-    [id, updatedBy]
+    [id, updatedBy, viaCascade ? 1 : 0]
   );
   return getRequirementById(id);
 }
@@ -267,7 +279,7 @@ async function reactivateRequirement(id, updated_by) {
   await updateData(
     `
     UPDATE dbo.requirements
-    SET is_active = 1, updated_by = @param1, updated_at = GETDATE()
+    SET is_active = 1, deactivated_via_cascade = 0, updated_by = @param1, updated_at = GETDATE()
     WHERE id = @param0
     `,
     [id, updatedBy]
