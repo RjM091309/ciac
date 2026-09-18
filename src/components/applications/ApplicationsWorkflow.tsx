@@ -1,13 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AnimatePresence, motion } from 'motion/react';
 import {
   ArrowRight,
-  CheckCircle2,
-  Clock3,
-  Eye,
-  FileText,
-  History,
-  Loader2,
   Mail,
   MapPin,
   Pencil,
@@ -16,19 +9,15 @@ import {
   Search,
   Upload,
   X,
-  XCircle,
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { cn } from '../../lib/utils';
 import { SidePanel } from '../ui/SidePanel';
 import { DataTableControls } from '../ui/DataTableControls';
 import { AppSelect } from '../ui/AppSelect';
-import { Skeleton, TableSkeleton } from '../ui/Skeleton';
+import { TableSkeleton } from '../ui/Skeleton';
 import { EmptyState } from '../ui/EmptyState';
 import { useSessionStorageCachedResource } from '../../hooks/useSessionStorageCachedResource';
 import { requestNotificationsRefresh } from '../../lib/notificationRefresh';
-import { DatePicker } from '../ui/DatePicker';
-import { TextField } from '@mui/material';
 
 const NOTIFICATION_HIGHLIGHT_DURATION_MS = 5000;
 
@@ -97,26 +86,6 @@ type DocumentRow = {
   created_at?: string | null;
 };
 
-type ContractRow = {
-  id: number;
-  application_id: number;
-  contract_no?: string | null;
-  issue_date?: string | null;
-  effective_start?: string | null;
-  effective_end?: string | null;
-  document_id?: number | null;
-  created_at?: string | null;
-  updated_at?: string | null;
-};
-
-type StatusHistoryRow = {
-  id: number;
-  from_status?: string | null;
-  to_status: string;
-  remarks?: string | null;
-  changed_at?: string | null;
-};
-
 function api(path: string) {
   return path;
 }
@@ -179,31 +148,6 @@ function computeProgress(reqRows: AppRequirementRow[], docRows: DocumentRow[]): 
 
   const percent = Math.round((verified / total) * 100);
   return { total, verified, pending, rejected, missing, percent };
-}
-
-function toDateInputValue(v: string | null | undefined) {
-  if (!v) return '';
-  const d = new Date(v);
-  if (Number.isNaN(d.getTime())) return '';
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, '0');
-  const dd = String(d.getDate()).padStart(2, '0');
-  return `${yyyy}-${mm}-${dd}`;
-}
-
-function toDatePickerValue(v: string | null | undefined) {
-  if (!v) return null;
-  const d = new Date(v);
-  if (Number.isNaN(d.getTime())) return null;
-  return d;
-}
-
-function formatDatePickerValue(v: Date | null) {
-  if (!v || Number.isNaN(v.getTime())) return '';
-  const yyyy = v.getFullYear();
-  const mm = String(v.getMonth() + 1).padStart(2, '0');
-  const dd = String(v.getDate()).padStart(2, '0');
-  return `${yyyy}-${mm}-${dd}`;
 }
 
 function stripNotificationQueryParams(search: string) {
@@ -274,17 +218,7 @@ export function ApplicationsWorkflow({
     setApplicationTypes(baseData.applicationTypes);
   }, [baseData]);
 
-  const [selectedId, setSelectedId] = useState<number | null>(null);
-  const [requirements, setRequirements] = useState<AppRequirementRow[]>([]);
-  const [documents, setDocuments] = useState<DocumentRow[]>([]);
-  const [history, setHistory] = useState<StatusHistoryRow[]>([]);
-  const [detailsLoading, setDetailsLoading] = useState(false);
-  const [selectedContract, setSelectedContract] = useState<ContractRow | null>(null);
-  const [previewRequirementId, setPreviewRequirementId] = useState<number | null>(null);
   const [progressByApp, setProgressByApp] = useState<Record<number, ProgressSummary>>({});
-  const [detailsOpen, setDetailsOpen] = useState(false);
-  const [documentEditorOpen, setDocumentEditorOpen] = useState(false);
-  const [documentEditorMode, setDocumentEditorMode] = useState<'insert' | 'update'>('insert');
   // Editing an application's own type/renewal flag (locator stays fixed —
   // the backend only accepts application_type/is_renewal, never a proponent
   // change) is only ever allowed while it's still DRAFT, same rule the
@@ -307,9 +241,6 @@ export function ApplicationsWorkflow({
   const [highlightedApplicationId, setHighlightedApplicationId] = useState<number | null>(null);
   const [highlightedApplicationTick, setHighlightedApplicationTick] = useState(0);
   const [shouldCleanNotificationQuery, setShouldCleanNotificationQuery] = useState(false);
-  const [checklistSearchQuery, setChecklistSearchQuery] = useState('');
-  const [checklistPageSize, setChecklistPageSize] = useState(20);
-  const [checklistPage, setChecklistPage] = useState(1);
 
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [createForm, setCreateForm] = useState({
@@ -322,12 +253,6 @@ export function ApplicationsWorkflow({
   // this draft's own row (and submits it, unless "Save as draft" is still
   // checked) rather than POSTing a new application.
   const [continuingDraftId, setContinuingDraftId] = useState<number | null>(null);
-
-  const [documentForm, setDocumentForm] = useState<{ requirement_id: string; file: File | null }>({
-    requirement_id: '',
-    file: null,
-  });
-  const [uploading, setUploading] = useState(false);
 
   const applicationsEffective = baseData?.applications ?? applications;
   const proponentsEffective = baseData?.proponents ?? proponents;
@@ -400,67 +325,6 @@ export function ApplicationsWorkflow({
     return [appsPage - 2, appsPage - 1, appsPage, appsPage + 1, appsPage + 2];
   }, [appsPage, appsTotalPages]);
 
-  const selectedApp = useMemo(() => filteredApps.find((a) => a.id === selectedId) || null, [filteredApps, selectedId]);
-  const selectedProgress = useMemo(() => computeProgress(requirements, documents), [requirements, documents]);
-  const selectedRequirementDisplay = useMemo(() => {
-    const requirementId = Number(documentForm.requirement_id);
-    if (!Number.isFinite(requirementId)) return '—';
-    const requirement = requirements.find((r) => Number(r.requirement_id) === requirementId);
-    if (!requirement) return `#${requirementId}`;
-    return `${requirement.requirement_code || `REQ-${requirementId}`} - ${requirement.requirement_name || 'Requirement'}`;
-  }, [documentForm.requirement_id, requirements]);
-  const selectedDocByRequirement = useMemo(() => {
-    const map = new Map<number, DocumentRow>();
-    for (const d of documents) {
-      const key = Number(d.requirement_id);
-      if (!Number.isFinite(key)) continue;
-      if (!map.has(key)) map.set(key, d);
-    }
-    return map;
-  }, [documents]);
-
-  const selectedContractDoc = useMemo(() => {
-    if (!selectedContract?.document_id) return null;
-    const id = Number(selectedContract.document_id);
-    if (!Number.isFinite(id)) return null;
-    return documents.find((d) => d.id === id) || null;
-  }, [selectedContract, documents]);
-  const filteredChecklistRequirements = useMemo(() => {
-    const q = checklistSearchQuery.trim().toLowerCase();
-    if (!q) return requirements;
-    return requirements.filter((r) => {
-      const code = String(r.requirement_code || '').toLowerCase();
-      const name = String(r.requirement_name || '').toLowerCase();
-      const status = String(r.status || '').toLowerCase();
-      return code.includes(q) || name.includes(q) || status.includes(q);
-    });
-  }, [checklistSearchQuery, requirements]);
-  const checklistTotalPages = useMemo(
-    () => Math.max(1, Math.ceil(filteredChecklistRequirements.length / Math.max(1, checklistPageSize))),
-    [filteredChecklistRequirements.length, checklistPageSize]
-  );
-  const pagedChecklistRequirements = useMemo(() => {
-    const safePage = Math.min(Math.max(1, checklistPage), checklistTotalPages);
-    const start = (safePage - 1) * checklistPageSize;
-    return filteredChecklistRequirements.slice(start, start + checklistPageSize);
-  }, [checklistPage, checklistPageSize, checklistTotalPages, filteredChecklistRequirements]);
-  const checklistShowingRange = useMemo(() => {
-    if (filteredChecklistRequirements.length === 0) return { from: 0, to: 0 };
-    const safePage = Math.min(Math.max(1, checklistPage), checklistTotalPages);
-    return {
-      from: (safePage - 1) * checklistPageSize + 1,
-      to: Math.min(filteredChecklistRequirements.length, safePage * checklistPageSize),
-    };
-  }, [filteredChecklistRequirements.length, checklistPage, checklistPageSize, checklistTotalPages]);
-  const checklistVisiblePageNumbers = useMemo(() => {
-    if (checklistTotalPages <= 5) return Array.from({ length: checklistTotalPages }, (_, i) => i + 1);
-    if (checklistPage <= 3) return [1, 2, 3, 4, 5];
-    if (checklistPage >= checklistTotalPages - 2) {
-      return [checklistTotalPages - 4, checklistTotalPages - 3, checklistTotalPages - 2, checklistTotalPages - 1, checklistTotalPages];
-    }
-    return [checklistPage - 2, checklistPage - 1, checklistPage, checklistPage + 1, checklistPage + 2];
-  }, [checklistPage, checklistTotalPages]);
-
   const highlightApplicationRow = useCallback((applicationId: number) => {
     setHighlightedApplicationId(applicationId);
     setHighlightedApplicationTick((current) => current + 1);
@@ -493,45 +357,6 @@ export function ApplicationsWorkflow({
     }
   }
 
-  async function loadDetails(applicationId: number) {
-    setDetailsLoading(true);
-    try {
-      const [reqRes, docRes, contractRes, historyRes] = await Promise.all([
-        fetch(api(`/api/applications/${applicationId}/requirements`), { credentials: 'include' }),
-        fetch(api(`/api/applications/${applicationId}/documents`), { credentials: 'include' }),
-        fetch(api(`/api/contracts/application/${applicationId}`), { credentials: 'include' }),
-        fetch(api(`/api/applications/${applicationId}/status-history`), { credentials: 'include' }),
-      ]);
-      const [reqJson, docJson, contractJson, historyJson] = await Promise.all([
-        reqRes.json(),
-        docRes.json(),
-        contractRes.json(),
-        historyRes.json(),
-      ]);
-      setRequirements(Array.isArray(reqJson?.data) ? reqJson.data : []);
-      setDocuments(Array.isArray(docJson?.data) ? docJson.data : []);
-      setHistory(Array.isArray(historyJson?.data) ? historyJson.data : []);
-      setSelectedContract(contractJson?.data || null);
-    } catch (error: any) {
-      toast.error(error?.message || 'Failed to load application details');
-    } finally {
-      setDetailsLoading(false);
-    }
-  }
-
-  useEffect(() => {
-    if (!filteredApps.length) {
-      setSelectedId(null);
-      setRequirements([]);
-      setDocuments([]);
-      setHistory([]);
-      return;
-    }
-
-    const exists = filteredApps.some((a) => a.id === selectedId);
-    const nextId = exists ? selectedId : filteredApps[0].id;
-    if (nextId !== selectedId) setSelectedId(nextId || null);
-  }, [filteredApps, selectedId]);
 
   useEffect(() => {
     const search = String(locationSearch || '').trim();
@@ -551,10 +376,6 @@ export function ApplicationsWorkflow({
     }
 
     consumedNotificationQueryRef.current = search;
-    setPreviewRequirementId(null);
-    setChecklistPageSize(20);
-    setChecklistPage(1);
-    setDetailsOpen(false);
     setAppsPage(Math.floor(targetIndex / Math.max(1, appsPageSize)) + 1);
     setShouldCleanNotificationQuery(true);
     highlightApplicationRow(rawId);
@@ -617,12 +438,6 @@ export function ApplicationsWorkflow({
   useEffect(() => {
     if (appsPage > appsTotalPages) setAppsPage(appsTotalPages);
   }, [appsPage, appsTotalPages]);
-  useEffect(() => {
-    setChecklistPage(1);
-  }, [checklistSearchQuery, checklistPageSize, selectedId]);
-  useEffect(() => {
-    if (checklistPage > checklistTotalPages) setChecklistPage(checklistTotalPages);
-  }, [checklistPage, checklistTotalPages]);
 
   // This page is Locator/Assessment territory only — it never routes into
   // Approval & Issuance (that's the Account Officer's own module, reached
@@ -635,22 +450,6 @@ export function ApplicationsWorkflow({
       return;
     }
     navigate(`/assessment?applicationId=${row.id}&tab=Compliance`);
-  }
-
-  async function openDetails(applicationId: number) {
-    consumedNotificationQueryRef.current = '';
-    if (applicationId !== selectedId) {
-      setRequirements([]);
-      setDocuments([]);
-      setSelectedContract(null);
-    }
-    setSelectedId(applicationId);
-    setPreviewRequirementId(null);
-    // Ensure the checklist shows the expected default amount every time the modal opens.
-    setChecklistPageSize(20);
-    setChecklistPage(1);
-    setDetailsOpen(true);
-    await loadDetails(applicationId);
   }
 
   function openEditApplication(row: ApplicationRow) {
@@ -695,27 +494,6 @@ export function ApplicationsWorkflow({
     }
   }
 
-  function openDocumentEditor(row: AppRequirementRow, mode: 'insert' | 'update') {
-    setDocumentEditorMode(mode);
-    setDocumentForm({ requirement_id: String(row.requirement_id), file: null });
-    setDocumentEditorOpen(true);
-  }
-
-  function handleRequirementAction(row: AppRequirementRow, action: string) {
-    if (!action) return;
-    if (action === 'preview') {
-      setPreviewRequirementId((prev) => (prev === row.requirement_id ? null : row.requirement_id));
-      return;
-    }
-    if (action === 'insert') {
-      openDocumentEditor(row, 'insert');
-      return;
-    }
-    if (action === 'update') {
-      openDocumentEditor(row, 'update');
-    }
-  }
-
   async function createApplication() {
     const proponentId = Number(createForm.proponent_id);
     if (!Number.isFinite(proponentId)) {
@@ -740,17 +518,23 @@ export function ApplicationsWorkflow({
         if (!res.ok || !json?.success) throw new Error(json?.message || 'Failed to update draft');
 
         const draftId = continuingDraftId;
-        setIsCreateOpen(false);
-        setContinuingDraftId(null);
         if (createForm.save_as_draft) {
           toast.success(`Draft ${json?.data?.application_no || ''} updated`);
           requestNotificationsRefresh();
           await refreshBase({ showLoading: false });
+          setIsCreateOpen(false);
+          setContinuingDraftId(null);
         } else {
-          // submitApplication() covers its own toast/refresh/notification.
-          await submitApplication(draftId);
+          // submitApplication() covers its own toast/refresh/notification —
+          // only close the panel once it actually succeeds (e.g. the
+          // mandatory-document check can still reject it), so a failed
+          // submit doesn't look like it silently went through.
+          const submitted = await submitApplication(draftId);
+          if (submitted) {
+            setIsCreateOpen(false);
+            setContinuingDraftId(null);
+          }
         }
-        setSelectedId(draftId);
       } catch (error: any) {
         toast.error(error?.message || 'Failed to update draft');
       } finally {
@@ -791,49 +575,10 @@ export function ApplicationsWorkflow({
       setIsCreateOpen(false);
       setCreateForm((p) => ({ ...p, save_as_draft: false }));
       await refreshBase({ showLoading: false });
-      const createdId = Number(json?.data?.id || 0);
-      if (createdId) setSelectedId(createdId);
     } catch (error: any) {
       toast.error(error?.message || 'Failed to create application');
     } finally {
       setSaving(false);
-    }
-  }
-
-  async function uploadDocument() {
-    if (!selectedId) return;
-    const requirementId = Number(documentForm.requirement_id);
-    if (!Number.isFinite(requirementId)) {
-      toast.error('Requirement is required');
-      return;
-    }
-    if (!documentForm.file) {
-      toast.error('Choose a file to upload');
-      return;
-    }
-
-    setUploading(true);
-    try {
-      const form = new FormData();
-      form.append('application_id', String(selectedId));
-      form.append('requirement_id', String(requirementId));
-      form.append('file', documentForm.file);
-
-      const res = await fetch(api('/api/applications/documents'), {
-        method: 'POST',
-        credentials: 'include',
-        body: form,
-      });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok || !json?.success) throw new Error(json?.message || 'Failed to upload document');
-      toast.success('Document uploaded');
-      requestNotificationsRefresh();
-      setDocumentEditorOpen(false);
-      await loadDetails(selectedId);
-    } catch (error: any) {
-      toast.error(error?.message || 'Failed to upload document');
-    } finally {
-      setUploading(false);
     }
   }
 
@@ -850,17 +595,23 @@ export function ApplicationsWorkflow({
       const json = await res.json().catch(() => ({}));
       if (!res.ok || !json?.success) throw new Error(json?.message || 'Failed to submit application');
       toast.success(`Application ${json?.data?.application_no || ''} submitted`);
+      if (json?.locatorActivated) {
+        toast.success(
+          json?.locatorEmailSent
+            ? 'Locator account activated — login was emailed to them.'
+            : 'Locator account activated, but the email could not be sent — check the server console for the temporary password.'
+        );
+      }
       requestNotificationsRefresh();
       await refreshBase({ showLoading: false });
-      if (selectedId === applicationId) await loadDetails(applicationId);
+      return true;
     } catch (error: any) {
       toast.error(error?.message || 'Failed to submit application');
+      return false;
     } finally {
       setSaving(false);
     }
   }
-
-  const detailsTitle = selectedApp?.proponent_name || (renewalMode ? 'Renewal Application' : 'New Application');
 
   return (
     <div className="space-y-4 sm:space-y-5">
@@ -1077,418 +828,6 @@ export function ApplicationsWorkflow({
               loading={baseLoading || baseRevalidating}
         />
       </div>
-
-      <AnimatePresence>
-        {detailsOpen ? (
-          <div className="fixed inset-0 z-50 flex items-center justify-center px-2 sm:px-4">
-            <motion.div
-              className="absolute inset-0"
-              style={{ backgroundColor: 'rgba(0,0,0,.45)' }}
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.2, ease: 'easeOut' }}
-              onClick={() => setDetailsOpen(false)}
-            />
-            <motion.div
-              className="w-full max-w-7xl rounded-2xl border shadow-2xl overflow-hidden flex flex-col relative z-10"
-              style={{ backgroundColor: 'var(--surface)', borderColor: 'var(--border-subtle)', height: 'min(82vh, 860px)' }}
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              transition={{ duration: 0.2, ease: 'easeOut' }}
-            >
-              <div className="px-4 sm:px-5 py-3 border-b flex items-start justify-between" style={{ borderColor: 'var(--border-subtle)' }}>
-              <div>
-                <div className="text-lg font-bold" style={{ color: 'var(--text)' }}>{detailsTitle}</div>
-                <div className="text-xs text-secondary">
-                  {selectedApp ? `Compliance Progress • ${selectedApp.application_no}` : 'Compliance Progress'}
-                </div>
-              </div>
-              <button
-                className="rounded-lg px-3 py-1.5 text-xs border"
-                style={{ borderColor: 'var(--border-subtle)', color: 'var(--text-muted)' }}
-                onClick={() => setDetailsOpen(false)}
-              >
-                Close
-              </button>
-            </div>
-
-            <div className="p-4 sm:p-5 flex-1 overflow-hidden flex flex-col min-h-0">
-              {!selectedApp ? (
-                <div className="py-8 text-center text-sm text-secondary">Select an application.</div>
-              ) : (
-                <>
-                  <div className="rounded-xl border p-2 mb-3 shrink-0" style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'color-mix(in oklab, var(--control-bg) 65%, transparent)' }}>
-                    <div className="flex items-center justify-between">
-                      <div className="text-xs font-semibold">Compliance Progress</div>
-                      <div className="text-lg font-bold" style={{ color: selectedProgress.percent >= 100 ? '#10b981' : selectedProgress.percent >= 50 ? '#3b82f6' : '#f59e0b' }}>
-                        {selectedProgress.percent}%
-                      </div>
-                    </div>
-                    <div className="h-2 rounded-full mt-1.5 overflow-hidden" style={{ backgroundColor: 'var(--input-border)' }}>
-                      <div
-                        className="h-full rounded-full transition-all duration-500"
-                        style={{
-                          width: `${selectedProgress.percent}%`,
-                          background:
-                            selectedProgress.percent >= 100
-                              ? 'linear-gradient(90deg,#10b981,#34d399)'
-                              : selectedProgress.percent >= 50
-                                ? 'linear-gradient(90deg,#3b82f6,#60a5fa)'
-                                : 'linear-gradient(90deg,#f59e0b,#fbbf24)',
-                        }}
-                      />
-                    </div>
-                    <div className="mt-1.5 flex flex-wrap gap-2 text-[10px]">
-                      <span className="inline-flex items-center gap-1.5" style={{ color: '#10b981' }}>
-                        <CheckCircle2 size={14} /> {selectedProgress.verified} Verified
-                      </span>
-                      <span className="inline-flex items-center gap-1.5" style={{ color: '#f59e0b' }}>
-                        <Clock3 size={14} /> {selectedProgress.pending} Pending Review
-                      </span>
-                      <span className="inline-flex items-center gap-1.5" style={{ color: '#ef4444' }}>
-                        <XCircle size={14} /> {selectedProgress.missing + selectedProgress.rejected} Missing/Rejected
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="rounded-xl border flex flex-col flex-1 min-h-0" style={{ borderColor: 'var(--border-subtle)' }}>
-                    <div className="px-4 py-3 border-b flex items-center justify-between" style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'color-mix(in oklab, var(--control-bg) 65%, transparent)' }}>
-                      <div className="text-sm font-semibold">Requirements Checklist</div>
-                      <span className="text-[11px] rounded-full px-2.5 py-1 border" style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'var(--surface)' }}>
-                        {filteredChecklistRequirements.length} items
-                      </span>
-                    </div>
-
-                    <div className="flex-1 min-h-0 flex flex-col">
-                      <div className="px-4 pt-3 shrink-0">
-                        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-3">
-                          <div className="relative group w-full sm:w-72">
-                            <Search
-                              className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)] group-focus-within:text-[var(--text)] transition-colors pointer-events-none"
-                              size={14}
-                            />
-                            <input
-                              type="text"
-                              placeholder="Search requirements..."
-                              value={checklistSearchQuery}
-                              onChange={(e) => setChecklistSearchQuery(e.target.value)}
-                              className="h-9 rounded-full pl-9 pr-3 text-xs w-full focus:outline-none focus:ring-1 focus:ring-[var(--border)] text-[var(--text)] placeholder:text-[var(--text-muted)] transition-all"
-                              style={{
-                                backgroundColor: 'color-mix(in oklab, var(--control-bg) 70%, transparent)',
-                              }}
-                            />
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
-                        {detailsLoading ? (
-                          <div className="p-5">
-                            <TableSkeleton columns={7} rows={6} />
-                          </div>
-                        ) : filteredChecklistRequirements.length === 0 ? (
-                          <EmptyState
-                            icon={<FileText size={40} className="opacity-40" />}
-                            title="No requirements found"
-                            description={
-                              checklistSearchQuery 
-                                ? 'No requirements match your search query.' 
-                                : 'There are no requirements assigned to this application yet.'
-                            }
-                          />
-                        ) : (
-                          <div className="min-w-full">
-                            <table className="min-w-full text-left text-xs" style={{ borderCollapse: 'collapse' }}>
-                              <thead>
-                                <tr style={{ borderBottom: '1px solid var(--border-subtle)' }}>
-                                  <th className="px-4 py-2.5 text-[10px] uppercase tracking-wider text-secondary">Requirement</th>
-                                  <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary">Updated</th>
-                                  <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary">Valid From - To</th>
-                                  <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary">Status</th>
-                                  <th className="px-2 py-2.5 text-[10px] uppercase tracking-wider text-secondary text-right">Preview</th>
-                                  <th className="px-2 py-2.5 text-[10px] uppercase tracking-wider text-secondary text-right">Insert</th>
-                                  <th className="px-2 py-2.5 text-[10px] uppercase tracking-wider text-secondary text-right">Update</th>
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {pagedChecklistRequirements.map((r, idx) => {
-                                  const absoluteIndex = checklistShowingRange.from + idx;
-                                  const status = toUpper(r.status);
-                                  const hasDoc = selectedDocByRequirement.has(Number(r.requirement_id));
-                                  const displayStatus = hasDoc && status === 'PENDING' ? 'PENDING_REVIEW' : status;
-                                  const doc = selectedDocByRequirement.get(Number(r.requirement_id));
-
-                                  const isLinkedContractRow =
-                                    !!selectedContractDoc && Number(selectedContractDoc.id) === Number(doc?.id);
-
-                                  const effectiveDisplayStatus = isLinkedContractRow ? 'VERIFIED' : displayStatus;
-                                  const effectiveBadge = getBadgeStyles(effectiveDisplayStatus);
-                                  const rowDocForDate = isLinkedContractRow ? selectedContractDoc ?? doc : doc;
-
-                                  const effectiveDateText =
-                                    isLinkedContractRow
-                                      ? `${selectedContract?.effective_start ? new Date(selectedContract.effective_start).toLocaleDateString() : '—'} - ${
-                                          selectedContract?.effective_end ? new Date(selectedContract.effective_end).toLocaleDateString() : '—'
-                                        }`
-                                      : '—';
-
-                                  const updatedAtText = r.updated_at
-                                    ? new Date(r.updated_at).toLocaleDateString()
-                                    : rowDocForDate?.created_at
-                                      ? new Date(rowDocForDate.created_at).toLocaleDateString()
-                                      : '—';
-
-                                  const docForPreview = rowDocForDate ?? doc;
-
-                                  return (
-                                    <React.Fragment key={r.id}>
-                                      <tr style={{ borderTop: '1px solid var(--border-subtle)' }}>
-                                        <td className="px-4 py-3.5 align-top" style={{ width: 'min(520px, 48vw)' }}>
-                                          <div className="font-semibold text-sm truncate">
-                                            {absoluteIndex}. {r.requirement_name || r.requirement_code || `Requirement #${r.requirement_id}`}
-                                          </div>
-                                          <div className="mt-1 text-[11px] text-secondary flex flex-wrap items-center gap-3">
-                                            {r.remarks ? (
-                                              <span className="rounded px-1.5 py-0.5" style={{ backgroundColor: 'rgba(239,68,68,.12)', color: '#ef4444' }}>
-                                                Note: {r.remarks}
-                                              </span>
-                                            ) : null}
-                                          </div>
-                                        </td>
-
-                                        <td className="px-3 py-3.5 align-top text-[11px] text-secondary" style={{ whiteSpace: 'nowrap' }}>
-                                          {updatedAtText !== '—' ? `Updated: ${updatedAtText}` : 'Updated: —'}
-                                        </td>
-
-                                        <td className="px-3 py-3.5 align-top text-[11px] text-secondary">
-                                          {effectiveDateText}
-                                        </td>
-
-                                        <td className="px-3 py-3.5 align-top">
-                                          {/* Read-only here — verifying/rejecting a requirement happens in
-                                              Assessment Evaluation, the one place that owns this status now. */}
-                                          <span
-                                            className="inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold border"
-                                            style={{
-                                              borderColor: effectiveBadge.border,
-                                              color: effectiveBadge.color,
-                                              backgroundColor: effectiveBadge.bg,
-                                            }}
-                                          >
-                                            {effectiveDisplayStatus || 'PENDING'}
-                                          </span>
-                                        </td>
-
-                                        <td className="px-2 py-3.5 align-top text-right">
-                                          <button
-                                            className={cn(
-                                              'inline-flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-xs font-semibold',
-                                              !hasDoc && 'opacity-50 cursor-not-allowed'
-                                            )}
-                                            style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'var(--control-bg)' }}
-                                            disabled={!hasDoc}
-                                            onClick={() => handleRequirementAction(r, 'preview')}
-                                            title="Preview"
-                                          >
-                                            <Eye size={13} />
-                                          </button>
-                                        </td>
-
-                                        <td className="px-2 py-3.5 align-top text-right">
-                                          <button
-                                            className="inline-flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-xs font-semibold"
-                                            style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'var(--control-bg)' }}
-                                            onClick={() => handleRequirementAction(r, 'insert')}
-                                            title="Insert document"
-                                          >
-                                            <Upload size={13} />
-                                          </button>
-                                        </td>
-
-                                        <td className="px-2 py-3.5 align-top text-right">
-                                          <button
-                                            className={cn(
-                                              'inline-flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-xs font-semibold',
-                                              !hasDoc && 'opacity-50 cursor-not-allowed'
-                                            )}
-                                            style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'var(--control-bg)' }}
-                                            disabled={!hasDoc}
-                                            onClick={() => handleRequirementAction(r, 'update')}
-                                            title="Update document"
-                                          >
-                                            <FileText size={13} />
-                                          </button>
-                                        </td>
-                                      </tr>
-
-                                      {previewRequirementId === r.requirement_id && hasDoc && (
-                                        <tr style={{ borderTop: '1px solid var(--border-subtle)' }}>
-                                          <td colSpan={7} className="px-4 py-3.5">
-                                            <div className="rounded-xl border p-4" style={{ borderColor: 'var(--border-subtle)', backgroundColor: '#081735' }}>
-                                              <div className="flex items-center justify-between">
-                                                <div className="inline-flex items-center gap-2 text-slate-300">
-                                                  <FileText size={16} />
-                                                  <span className="text-xs font-semibold">
-                                                    {docForPreview?.original_file_name || docForPreview?.file_name || 'Document preview'}
-                                                  </span>
-                                                </div>
-                                                {docForPreview?.id ? (
-                                                  <a
-                                                    href={
-                                                      /^https?:\/\//i.test(docForPreview.storage_path || '')
-                                                        ? docForPreview.storage_path
-                                                        : `/api/documents/${docForPreview.id}/download`
-                                                    }
-                                                    target="_blank"
-                                                    rel="noreferrer"
-                                                    className="inline-flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-xs font-semibold text-slate-200"
-                                                    style={{ borderColor: 'var(--border-subtle)' }}
-                                                  >
-                                                    Download
-                                                  </a>
-                                                ) : null}
-                                              </div>
-                                              <div className="mt-4 text-center py-8 text-slate-400 text-xs">Preview placeholder for file rendering.</div>
-                                            </div>
-                                          </td>
-                                        </tr>
-                                      )}
-                                    </React.Fragment>
-                                  );
-                                })}
-                              </tbody>
-                            </table>
-                          </div>
-                        )}
-                    </div>
-                  </div>
-
-                  <div className="shrink-0">
-                    <DataTableControls
-                      page={checklistPage}
-                      totalPages={checklistTotalPages}
-                      totalItems={filteredChecklistRequirements.length}
-                      showingFrom={checklistShowingRange.from}
-                      showingTo={checklistShowingRange.to}
-                      visiblePageNumbers={checklistVisiblePageNumbers}
-                      pageSize={checklistPageSize}
-                      pageSizeOptions={[5, 20, 50, 100, 200]}
-                      onPageSizeChange={setChecklistPageSize}
-                      onPageChange={setChecklistPage}
-                      loading={detailsLoading}
-                    />
-                  </div>
-
-                  {/* BRM-10: the audit trail was already being fetched into
-                      `history` state but never rendered anywhere — this is
-                      the first place it's actually shown. */}
-                  <details className="shrink-0 rounded-xl border mt-3" style={{ borderColor: 'var(--border-subtle)' }}>
-                    <summary
-                      className="px-4 py-2.5 text-xs font-semibold cursor-pointer flex items-center gap-2 select-none"
-                      style={{ color: 'var(--text)' }}
-                    >
-                      <History size={13} />
-                      Status History
-                      <span className="text-secondary font-normal">({history.length})</span>
-                    </summary>
-                    <div className="px-4 pb-3 max-h-40 overflow-y-auto space-y-1.5">
-                      {history.length === 0 ? (
-                        <p className="text-[11px] text-secondary py-1">No status changes recorded yet.</p>
-                      ) : (
-                        history.map((h) => (
-                          <div key={h.id} className="flex items-center justify-between gap-3 text-[11px] py-1 border-b last:border-b-0" style={{ borderColor: 'var(--border-subtle)' }}>
-                            <span style={{ color: 'var(--text)' }}>
-                              {h.from_status ? `${h.from_status} → ${h.to_status}` : `Created as ${h.to_status}`}
-                              {h.remarks ? <span className="text-secondary"> — {h.remarks}</span> : null}
-                            </span>
-                            <span className="text-secondary shrink-0">
-                              {h.changed_at ? new Date(h.changed_at).toLocaleString() : '—'}
-                            </span>
-                          </div>
-                        ))
-                      )}
-                    </div>
-                  </details>
-
-                </div>
-                </>
-              )}
-            </div>
-          </motion.div>
-        </div>
-      ) : null}
-      </AnimatePresence>
-
-      <AnimatePresence>
-      {documentEditorOpen ? (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center px-3">
-          <motion.div
-            className="absolute inset-0"
-            style={{ backgroundColor: 'rgba(0,0,0,.45)' }}
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.2, ease: 'easeOut' }}
-            onClick={() => setDocumentEditorOpen(false)}
-          />
-          <motion.div
-            className="w-full max-w-xl rounded-2xl border p-4 sm:p-5 relative z-10"
-            style={{ backgroundColor: 'var(--surface)', borderColor: 'var(--border-subtle)' }}
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.95 }}
-            transition={{ duration: 0.2, ease: 'easeOut' }}
-          >
-            <div className="flex items-start justify-between gap-3 border-b pb-3" style={{ borderColor: 'var(--input-border)' }}>
-              <div>
-                <div className="text-sm font-bold" style={{ color: 'var(--text)' }}>
-                  {documentEditorMode === 'insert' ? 'Insert Document' : 'Update Document'}
-                </div>
-                <div className="text-xs text-secondary mt-0.5">Requirement: {selectedRequirementDisplay}</div>
-              </div>
-              <button
-                className="rounded-lg px-2 py-1 text-xs border"
-                style={{ borderColor: 'var(--border-subtle)', color: 'var(--text-muted)' }}
-                onClick={() => setDocumentEditorOpen(false)}
-              >
-                Close
-              </button>
-            </div>
-            <div className="pt-3 grid grid-cols-1 gap-2.5">
-              <label
-                className="app-form-control flex items-center gap-2 cursor-pointer"
-                style={{ color: documentForm.file ? 'var(--text)' : 'var(--text-muted)' }}
-              >
-                <Upload size={14} className="shrink-0" />
-                <span className="truncate">{documentForm.file ? documentForm.file.name : 'Choose a file (PDF, Word, Excel, or image)...'}</span>
-                <input
-                  type="file"
-                  className="hidden"
-                  accept=".pdf,.doc,.docx,.xls,.xlsx,image/jpeg,image/png,image/webp"
-                  onChange={(e) => setDocumentForm((p) => ({ ...p, file: e.target.files?.[0] ?? null }))}
-                />
-              </label>
-              {documentForm.file ? (
-                <p className="text-[11px] text-secondary">
-                  {(documentForm.file.size / 1024).toFixed(0)} KB · {documentForm.file.type || 'unknown type'}
-                </p>
-              ) : null}
-              <button
-                className={cn('rounded-lg px-3 py-2 text-sm font-semibold inline-flex items-center justify-center gap-1.5', (uploading || !documentForm.file) && 'opacity-60 cursor-not-allowed')}
-                style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
-                disabled={uploading || !documentForm.file}
-                onClick={uploadDocument}
-              >
-                {uploading ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
-                {documentEditorMode === 'insert' ? 'Upload Document' : 'Replace Document'}
-              </button>
-            </div>
-          </motion.div>
-        </div>
-      ) : null}
-      </AnimatePresence>
 
       <SidePanel
         open={isCreateOpen}

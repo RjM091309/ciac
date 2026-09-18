@@ -1,12 +1,20 @@
 const express = require("express");
 const router = express.Router();
 const controller = require("../controller/c_applications");
-const { requireApplicationsAccess } = require("../middleware/m_auth");
+const { requireApplicationsAccess, requireRole } = require("../middleware/m_auth");
 const { upload } = require("../middleware/m_upload");
 
-// Staff-only: full listing and staff-driven status decisions.
+// Staff-only: full listing.
 router.get("/", requireApplicationsAccess(), controller.list);
-router.patch("/:id/status", requireApplicationsAccess(), controller.updateStatus);
+// Admin-only escape hatch: a raw, business-rule-free status jump (no
+// mandatory-document check, doesn't start Approval routing on FOR_APPROVAL,
+// etc.) — the real path is Assessment's Compliance verify/reject +
+// Recommendation submit. Was reachable by any staff role with applications
+// access until this lockdown. Deliberately hardcoded to admin only, unlike
+// Assessment/Approval's own Reopen (requireMenuAccess(..., "edit")), which
+// stays a configurable Control Panel permission any staff role can be
+// granted — this one has no such per-role opt-in.
+router.patch("/:id/status", requireRole("admin"), controller.updateStatus);
 router.patch("/requirements/:id/status", requireApplicationsAccess(), controller.updateRequirementStatus);
 
 // Staff + proponent: a proponent may only ever reach their own application —

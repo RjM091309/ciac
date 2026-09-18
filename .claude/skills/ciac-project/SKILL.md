@@ -1,6 +1,6 @@
 ---
 name: ciac-project
-description: Overview, run/dev, build, and deploy instructions for the CIAC system (3CORE) — a React/Vite frontend + Express/MSSQL backend. Use when running, building, deploying, or navigating this repo.
+description: Overview, run/dev, build, and deploy instructions for the CIAC system (3CORE) — a React/Vite frontend + Express/MSSQL backend — plus the Locator → Assessment Officer → Account Officer application workflow (statuses, draft/submit/activation rules, who does what). Use when running, building, deploying, or navigating this repo, or when working on application filing/assessment/approval logic.
 ---
 
 # CIAC System (3CORE)
@@ -90,6 +90,25 @@ npm run build     # emits static frontend to dist/
 `dist/` is served as the built frontend; the Express server (`server/app.js`) serves its own static assets from `server/public` and JSON/API routes — the two are deployed/run as separate processes (see `ecosystem.config.cjs`), with the frontend's dev proxy (or a reverse proxy in production) routing `/api` to the backend port.
 
 Auth/session guard on startup: `server/app.js` calls `initializeDatabase()` then `Role.ensureSchema()` / `User.ensureSchema()` before listening — if the DB is unreachable, the server still starts (login page still loads) but DB-backed routes will fail. `User.ensureSchema()` also auto-adds the `users.totp_secret` / `users.totp_enabled` columns for 2FA.
+
+## Application workflow (Locator → Assessment Officer → Account Officer)
+
+Staff files applications on the locator's behalf now (not locator self-service filing). Roles are **not hardcoded** — access is driven by Control Panel per-role menu permissions (`assessment:queue`, `approval:queue`, `applications:new`, `applications:renewals`), checked live per request (`requireMenuAccess`/`requireApplicationsAccess` in `server/middleware/m_auth.js`). "Assessment Officer"/"Account Officer" are just conventional role names an admin assigns those permissions to — nothing in code checks the literal role string except `admin` and `proponent`.
+
+**Statuses** (`APPLICATION_STATUSES`, `server/models/ApplicationWorkflow.js`): `DRAFT, SUBMITTED, UNDER_REVIEW (dead — nothing sets it), RESUBMITTED, RETURNED, REJECTED, FOR_APPROVAL, DISAPPROVED, APPROVED`.
+
+**Stage 1 — Filing** (`src/components/applications/ApplicationsWorkflow.tsx`, "Applications" page): staff picks a Locator + Application Type, either "Save as draft" or submits immediately.
+- **DRAFT means hold/not-yet-started** — no notification, no email, no locator account activation while draft. A DRAFT row shows a "Draft →" button (not Submit) that reopens the same panel pre-filled ("Continue Draft") to fix the Locator (DRAFT-only) or Application Type (`TYPE_EDITABLE_STATUSES = DRAFT/SUBMITTED/UNDER_REVIEW/RESUBMITTED/RETURNED`, refused once documents exist and the type actually changes) before really submitting.
+- **The mandatory-document check only applies to RETURNED → RESUBMITTED, never to the first DRAFT → SUBMITTED.** This is deliberate, not a bug: a freshly-filed locator has no portal access yet (their account is still PENDING, no login emailed) until this exact submit succeeds — requiring documents before that first submit would be circular (can't upload without logging in, can't log in without this submit, can't submit without documents). The locator uploads their own documents in their own portal *after* this handoff. Resubmitting after a RETURNED does require all mandatory docs, since the locator already has access by then.
+- **Locator account activation is tied to a real submit, not to filing/drafting.** `activateLocatorIfPending()` (`server/controller/c_applications.js`) resets a PENDING locator's password and emails it, but only fires from `exports.create` (non-draft) and `exports.submit` — never while saving/updating a draft. It no-ops safely if the account is already ACTIVE (checked before any password reset), so re-submitting other applications for the same locator never re-issues credentials.
+- One proponent (business) can have any number of applications, including multiple simultaneous DRAFTs — no uniqueness constraint on `applications.proponent_id`, each application has its own row/`application_no`/requirement checklist. This already works correctly.
+- "One login, multiple *businesses*" (a second `proponents` row for an already-active `user_id`) is a **separate, unsupported** scenario — no reachable UI creates a second business for an existing account, and the self-service portal (`requireProponentSelf`) only ever resolves one proponent per user (`TOP(1)`, no `ORDER BY`) — a second one would be silently invisible to the locator. Don't confuse this with the (fully working) multi-application case above.
+
+**Stage 2 — Locator uploads** (`src/components/proponent/ProponentApplications.tsx`, locator's own portal): locator logs in (once activated), uploads documents against the requirement checklist, submits/resubmits themselves via the same DRAFT→SUBMITTED / RETURNED→RESUBMITTED transitions. Re-uploading against a REJECTED requirement auto-flips it back to PENDING server-side.
+
+**Stage 3 — Assessment** (`src/components/assessment/AssessmentEvaluation.tsx`, `/assessment`): Compliance tab verifies/rejects each requirement (Verify disabled once REJECTED until a reupload flips it back to PENDING); a per-requirement comment/reply thread (`application_requirement_comments`, cascades on delete) lets the Assessment Officer and Locator discuss a specific requirement; ad-hoc one-off requirements can be attached to a single application (`is_ad_hoc=1` catalog rows, excluded from the shared Requirements screen and preserved across a type-change checklist rebuild). Findings (structured deficiencies) are staff/Account-Officer-only, never shown to the Locator. Recommendation submit (ENDORSE/RETURN/DISAPPROVE) moves the application to FOR_APPROVAL/RETURNED/DISAPPROVED and locks the whole Overview/Findings/Recommendation UI until an admin Reopens. FOR_APPROVAL auto-starts the Approval routing ladder — no manual "Start" step.
+
+**Stage 4 — Approval** (`src/components/approval/ApprovalIssuance.tsx`, `/approval`, Account Officer territory): out of scope for the Applications/Assessment pages — clicking a row in "Applications" never routes here; it always opens `/assessment?tab=Compliance`. Contract/permit issuance happens only in this module (a duplicate contract-creation UI in the old Applications page was removed as a workflow-bypass risk). A raw `PATCH /api/applications/:id/status` escape hatch exists but is now `requireRole("admin")`-gated — it skips the mandatory-document check and doesn't auto-start Approval routing, so it's not a substitute for the real Compliance→Recommendation flow.
 
 ## Notes / gotchas
 

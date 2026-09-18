@@ -195,7 +195,19 @@ exports.submit = async (req, res) => {
 
     const row = await Workflow.submitApplication(id, { changed_by: req.user?.id ?? null });
     if (!row) return res.status(404).json({ success: false, message: "Application not found" });
-    return res.json({ success: true, data: row });
+
+    // A DRAFT saved earlier (not submitted immediately at filing time) never
+    // went through create's own activation call — this is that same "first
+    // real submission" moment, just reached via Continue Draft/Resubmit
+    // instead. No-ops if the locator's account is already ACTIVE.
+    const activation = await activateLocatorIfPending(row.proponent_id, req.user?.id ?? null);
+
+    return res.json({
+      success: true,
+      data: row,
+      locatorActivated: activation?.activated || undefined,
+      locatorEmailSent: activation ? activation.emailSent : undefined,
+    });
   } catch (error) {
     console.error("Submit application error:", error);
     return res.status(400).json({ success: false, message: error.message || "Internal server error" });

@@ -403,10 +403,26 @@ async function ensureSchema() {
         message NVARCHAR(2000) NOT NULL,
         created_at DATETIME2(3) NOT NULL CONSTRAINT DF_app_req_comments_created_at DEFAULT (SYSUTCDATETIME()),
         CONSTRAINT FK_app_req_comments_requirement FOREIGN KEY (application_requirement_id)
-          REFERENCES dbo.application_requirements(id)
+          REFERENCES dbo.application_requirements(id) ON DELETE CASCADE
       );
       CREATE INDEX IX_app_req_comments_requirement_id ON dbo.application_requirement_comments(application_requirement_id);
       CREATE INDEX IX_app_req_comments_application_id ON dbo.application_requirement_comments(application_id);
+    END;
+
+    -- Retrofits ON DELETE CASCADE onto an already-created FK (the table
+    -- above shipped without it first) — a requirement rebuilt away by
+    -- updateDraftApplication/deleteDraftApplication (see below) must be
+    -- able to take its now-orphaned comment thread with it instead of
+    -- throwing a raw FK-violation error.
+    IF EXISTS (
+      SELECT 1 FROM sys.foreign_keys
+      WHERE name = 'FK_app_req_comments_requirement' AND delete_referential_action = 0
+    )
+    BEGIN
+      ALTER TABLE dbo.application_requirement_comments DROP CONSTRAINT FK_app_req_comments_requirement;
+      ALTER TABLE dbo.application_requirement_comments
+        ADD CONSTRAINT FK_app_req_comments_requirement FOREIGN KEY (application_requirement_id)
+          REFERENCES dbo.application_requirements(id) ON DELETE CASCADE;
     END;
 
     IF OBJECT_ID('dbo.documents', 'U') IS NULL
@@ -815,28 +831,42 @@ async function submitApplication(id, { changed_by }) {
     throw new Error(`Cannot submit an application while it is ${currentStatus}`);
   }
 
-  // BRM — validation of supporting documents: every mandatory requirement must
-  // have at least one uploaded document before the application can be
-  // (re)submitted. Staff moving the status by other paths are unaffected.
-  const missingRows = await selectData(
-    `
-    SELECT COUNT(1) AS n
-    FROM dbo.application_requirements ar
-    INNER JOIN dbo.requirements r ON r.id = ar.requirement_id
-    WHERE ar.application_id = @param0
-      AND r.is_mandatory = 1
-      AND NOT EXISTS (
-        SELECT 1 FROM dbo.documents d
-        WHERE d.application_id = ar.application_id AND d.requirement_id = ar.requirement_id
-      )
-    `,
-    [id]
-  );
-  const missing = Number(missingRows?.[0]?.n || 0);
-  if (missing > 0) {
-    throw new Error(
-      `Upload the required document${missing === 1 ? "" : "s"} for ${missing} mandatory requirement${missing === 1 ? "" : "s"} before submitting.`
+  // BRM — validation of supporting documents: every mandatory requirement
+  // must have at least one uploaded document before a RESUBMIT (RETURNED ->
+  // RESUBMITTED) goes through — at that point the locator already has
+  // portal access (they had to, to get returned in the first place) and is
+  // expected to have fixed what was missing/rejected.
+  //
+  // This deliberately does NOT apply to the first DRAFT -> SUBMITTED
+  // handoff: staff files the draft on the locator's behalf before the
+  // locator's account is even activated (see submit's caller,
+  // activateLocatorIfPending — activation only fires on a successful
+  // submit). Requiring documents here would be circular: the locator can't
+  // upload anything until they can log in, and they can't log in until
+  // this submit succeeds and emails them credentials. That first submit is
+  // the hand-off that lets them start, not a "everything's already done"
+  // checkpoint.
+  if (currentStatus === "RETURNED") {
+    const missingRows = await selectData(
+      `
+      SELECT COUNT(1) AS n
+      FROM dbo.application_requirements ar
+      INNER JOIN dbo.requirements r ON r.id = ar.requirement_id
+      WHERE ar.application_id = @param0
+        AND r.is_mandatory = 1
+        AND NOT EXISTS (
+          SELECT 1 FROM dbo.documents d
+          WHERE d.application_id = ar.application_id AND d.requirement_id = ar.requirement_id
+        )
+      `,
+      [id]
     );
+    const missing = Number(missingRows?.[0]?.n || 0);
+    if (missing > 0) {
+      throw new Error(
+        `Upload the required document${missing === 1 ? "" : "s"} for ${missing} mandatory requirement${missing === 1 ? "" : "s"} before resubmitting.`
+      );
+    }
   }
 
   const changedBy = toInt(changed_by);
@@ -944,7 +974,19 @@ async function updateDraftApplication(id, { application_type, is_renewal, propon
     );
 
     if (renewalChanged || typeChanged) {
-      await tx.query(`DELETE FROM dbo.application_requirements WHERE application_id = @param0`, [id]);
+      // Ad-hoc requirements (is_ad_hoc = 1) are scoped to just this one
+      // application and never part of the catalog re-seed below — deleting
+      // them here would silently lose a specific request the Assessment
+      // Officer made to this locator, with no way to bring it back.
+      await tx.query(
+        `
+        DELETE ar
+        FROM dbo.application_requirements ar
+        INNER JOIN dbo.requirements r ON r.id = ar.requirement_id
+        WHERE ar.application_id = @param0 AND r.is_ad_hoc = 0
+        `,
+        [id]
+      );
       await tx.query(
         `
         INSERT INTO dbo.application_requirements
