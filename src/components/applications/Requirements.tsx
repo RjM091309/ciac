@@ -224,6 +224,9 @@ export function RequirementsManagement() {
   // Which type folders are expanded in the tree — independent of selection,
   // so more than one can stay open at once (matches a normal file-tree feel).
   const [expandedTypeCodes, setExpandedTypeCodes] = useState<Set<string>>(new Set());
+  // Filters the tree by Type/Category name — matching types force-expand so
+  // a category match is visible without an extra click.
+  const [treeSearchQuery, setTreeSearchQuery] = useState('');
 
   function appliesToType(item: RequirementRow, code: string) {
     return item.application_types.includes(code);
@@ -296,6 +299,30 @@ export function RequirementsManagement() {
     return { typePanelOptions: typeOptions, categoryOptionsByType: categoryMap };
   }, [applicationTypes, activeItems, categories]);
 
+  // Search over the tree itself — matches a Type's own name, or falls
+  // through to any of its Categories' names so a category match still
+  // surfaces its parent Type (which then force-expands to reveal it).
+  const treeSearch = treeSearchQuery.trim().toLowerCase();
+
+  const visibleTypePanelOptions = useMemo(() => {
+    if (!treeSearch) return typePanelOptions;
+    // "All Types" is dropped while searching — it re-lists every match under
+    // one aggregate bucket, which just duplicates whatever shows up under
+    // each match's real Type below it.
+    return typePanelOptions.filter((t) => {
+      if (t.code === '__all__') return false;
+      if (t.name.toLowerCase().includes(treeSearch)) return true;
+      const cats = categoryOptionsByType.get(t.code) || [];
+      return cats.some((c) => c.key !== '__all__' && c.key !== '__uncategorized__' && c.name.toLowerCase().includes(treeSearch));
+    });
+  }, [typePanelOptions, categoryOptionsByType, treeSearch]);
+
+  function visibleCategoriesForType(typeCode: string, typeName: string) {
+    const cats = categoryOptionsByType.get(typeCode) || [];
+    if (!treeSearch || typeName.toLowerCase().includes(treeSearch)) return cats;
+    return cats.filter((c) => c.key === '__all__' || c.key === '__uncategorized__' || c.name.toLowerCase().includes(treeSearch));
+  }
+
   const panelFilteredItems = useMemo(() => {
     if (!selectedTypeCode) return activeItems;
     if (!selectedCategoryKey || selectedCategoryKey === '__all__') return itemsForSelectedType;
@@ -333,6 +360,29 @@ export function RequirementsManagement() {
       );
     });
   }, [panelFilteredItems, searchQuery]);
+
+  // Searching the Requirements table (Panel 3) auto-expands the tree path
+  // (Type -> Category) leading to each match, so results don't show up
+  // divorced from where they actually live in the catalog.
+  const requirementsSearchActive = searchQuery.trim().length > 0;
+
+  const searchExpandedTypeCodes = useMemo(() => {
+    if (!requirementsSearchActive) return new Set<string>();
+    const set = new Set<string>();
+    filteredItems.forEach((item) => {
+      (item.application_types || []).forEach((code) => set.add(code));
+    });
+    return set;
+  }, [filteredItems, requirementsSearchActive]);
+
+  const searchMatchedCategoryKeys = useMemo(() => {
+    if (!requirementsSearchActive) return new Set<string>();
+    const set = new Set<string>();
+    filteredItems.forEach((item) => {
+      set.add(item.category_id != null ? String(item.category_id) : '__uncategorized__');
+    });
+    return set;
+  }, [filteredItems, requirementsSearchActive]);
 
   const filteredDeactivatedItems = useMemo(() => {
     const q = recoverySearch.trim().toLowerCase();
@@ -852,10 +902,31 @@ export function RequirementsManagement() {
             </div>
           ) : null}
 
+          <div className="relative group mb-2">
+            <Search
+              className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)] group-focus-within:text-[var(--text)] transition-colors pointer-events-none"
+              size={13}
+            />
+            <input
+              type="text"
+              placeholder="Search types or categories..."
+              value={treeSearchQuery}
+              onChange={(e) => setTreeSearchQuery(e.target.value)}
+              className="h-8 rounded-full pl-8 pr-3 text-[11px] w-full focus:outline-none focus:ring-1 focus:ring-[var(--border)] text-[var(--text)] placeholder:text-[var(--text-muted)] transition-all"
+              style={{ backgroundColor: 'color-mix(in oklab, var(--control-bg) 70%, transparent)' }}
+            />
+          </div>
+
+          {treeSearch && visibleTypePanelOptions.length === 0 ? (
+            <p className="text-[11px] text-secondary px-1 py-2">No types or categories match "{treeSearchQuery.trim()}".</p>
+          ) : null}
+
           <div className="flex flex-col gap-0.5">
-            {typePanelOptions.map((t) => {
-              const expanded = expandedTypeCodes.has(t.code);
-              const typeCategories = categoryOptionsByType.get(t.code) || [];
+            {visibleTypePanelOptions.map((t) => {
+              const expanded = treeSearch
+                ? true
+                : expandedTypeCodes.has(t.code) || searchExpandedTypeCodes.has(t.code);
+              const typeCategories = visibleCategoriesForType(t.code, t.name);
               const typeRow = t.code !== '__all__' ? applicationTypeByCode.get(t.code) : null;
               const typeInactive = t.is_active !== 1;
               return (
@@ -957,6 +1028,7 @@ export function RequirementsManagement() {
                         const active = selectedTypeCode === t.code && selectedCategoryKey === c.key;
                         const catRow = c.key !== '__all__' && c.key !== '__uncategorized__' ? categoryById.get(c.key) : null;
                         const catInactive = c.is_active !== 1;
+                        const searchMatched = requirementsSearchActive && !active && searchMatchedCategoryKeys.has(c.key);
                         return (
                           <div
                             key={c.key}
@@ -965,6 +1037,11 @@ export function RequirementsManagement() {
                               catInactive && 'opacity-50',
                               active ? 'bg-[var(--nav-active-bg)]' : 'hover:bg-[var(--surface-hover)]'
                             )}
+                            style={
+                              searchMatched
+                                ? { boxShadow: 'inset 0 0 0 1px var(--nav-active-bg)', borderRadius: 6 }
+                                : undefined
+                            }
                           >
                             {catInactive ? (
                               <div className="flex-1 min-w-0 px-2 py-1.5 text-xs flex items-center gap-2" style={{ color: 'var(--text)' }}>
