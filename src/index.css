@@ -614,3 +614,65 @@ input[type='week']:not(:disabled)::-webkit-calendar-picker-indicator {
 .MuiPickersMonth-monthButton {
   cursor: pointer;
 }
+
+/* Folder-style tab strip (e.g. the Locator Information side panel) — rounded
+   top corners plus a slanted trailing edge (the border-triangle trick) so
+   each tab reads as a physical folder tab, and the active one visually
+   merges into the content pane below it. Tab width is intrinsic (padding-
+   based) rather than the fixed px in the original design, so long labels
+   like "Stockholders Information" aren't clipped; the slanted edge is
+   positioned with a `left: 100%` percentage instead of a fixed offset so it
+   still lines up correctly at any tab width. */
+.folders {
+  background: var(--control-bg);
+  padding: 10px 10px 0;
+  border-radius: 0.75rem 0.75rem 0 0;
+}
+.tabs {
+  display: flex;
+}
+.tab {
+  height: 40px;
+  line-height: 40px;
+  padding: 0 20px;
+  background: var(--control-bg);
+  color: var(--text-muted);
+  border-top-left-radius: 16px;
+  border-top-right-radius: 16px;
+  position: relative;
+  margin-right: 17.5px;
+  cursor: pointer;
+  font-size: 0.75rem;
+  font-weight: 600;
+  white-space: nowrap;
+  border: none;
+  transition: color 150ms, background-color 150ms;
+}
+.tab:hover:not(.active) {
+  color: var(--text);
+}
+.tab.active {
+  z-index: 100;
+  background: var(--surface);
+  color: var(--text);
+}
+.tab::after {
+  content: '';
+  display: block;
+  position: absolute;
+  border-left: 35px solid var(--control-bg);
+  border-top: 35px solid transparent;
+  left: calc(100% - 5px);
+  bottom: 0;
+  transition: border-left-color 150ms;
+}
+.tab.active::after {
+  border-left-color: var(--surface);
+}
+.contents {
+  background: var(--surface);
+  border-radius: 0 0.75rem 0.75rem 0.75rem;
+}
+.content {
+  padding: 1rem;
+}

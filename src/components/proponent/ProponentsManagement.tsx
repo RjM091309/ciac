@@ -42,6 +42,16 @@ type ProponentRow = {
   subscribed_capital_currency: string | null;
   paid_up_capital: string | null;
   paid_up_capital_currency: string | null;
+  business_activities: string | null;
+  advance_lease_payment_months: string | null;
+  advance_lease_payment_amount: string | null;
+  advance_lease_payment_currency: string | null;
+  security_deposit_months: string | null;
+  security_deposit_amount: string | null;
+  security_deposit_currency: string | null;
+  performance_security_months: string | null;
+  performance_security_amount: string | null;
+  performance_security_currency: string | null;
   // Contract-derived, read-only here — same "no contract yet = blank" rule
   // as the Locators List columns. contract_type_code IS settable (writes to
   // the current contract, see Contract.setContractTypeForProponent).
@@ -50,12 +60,48 @@ type ProponentRow = {
   lease_term: string | null;
   contract_type_code: string | null;
   contract_type_name: string | null;
+  // "Industry" in the legacy BRIDGE form — the Application Type of this
+  // locator's most recently filed application, same source as the Locators
+  // List's "business_type" column. Never set directly (no application yet =
+  // blank), so it's read-only wherever it's shown.
+  business_type: string | null;
+  properties: PropertyRow[];
   created_by: number | null;
   updated_by: number | null;
   created_at?: string | null;
   updated_at?: string | null;
   is_active: number;
 };
+
+// The legacy BRIDGE "Profile" tab's property schedule table — a real
+// one-to-many child table (dbo.proponent_properties), synced wholesale on
+// every save (see replaceProponentProperties in server/models/Proponent.js).
+type PropertyRow = {
+  id?: number;
+  year: string;
+  date_from: string;
+  date_to: string;
+  type_of_property: string;
+  area_sqm: string;
+  rate_sqm_mo: string;
+  rate_currency: string;
+  mgl_mo: string;
+  mgl_currency: string;
+};
+
+function blankPropertyRow(): PropertyRow {
+  return {
+    year: '',
+    date_from: '',
+    date_to: '',
+    type_of_property: '',
+    area_sqm: '',
+    rate_sqm_mo: '',
+    rate_currency: 'PHP',
+    mgl_mo: '',
+    mgl_currency: 'PHP',
+  };
+}
 
 // Fields resolved dynamically from the applications/contracts/users tables
 // (never typed in directly) — see server/models/Proponent.js's
@@ -152,6 +198,17 @@ const BLANK_PROFILE_FORM = {
   paid_up_capital: '',
   paid_up_capital_currency: 'PHP',
   contract_type_code: '',
+  business_activities: '',
+  advance_lease_payment_months: '',
+  advance_lease_payment_amount: '',
+  advance_lease_payment_currency: 'PHP',
+  security_deposit_months: '',
+  security_deposit_amount: '',
+  security_deposit_currency: 'PHP',
+  performance_security_months: '',
+  performance_security_amount: '',
+  performance_security_currency: 'PHP',
+  properties: [] as PropertyRow[],
 };
 
 export function ProponentsManagement() {
@@ -159,6 +216,11 @@ export function ProponentsManagement() {
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<ProponentRow | null>(null);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
+  // Mirrors the legacy BRIDGE system's Locator's Information tab strip —
+  // only Profile has content so far, the rest are placeholders.
+  const [activeProfileTab, setActiveProfileTab] = useState<
+    'Profile' | 'Stockholders Information' | 'Contact Person' | 'Documents' | 'Investment'
+  >('Profile');
   const [confirmDeactivateId, setConfirmDeactivateId] = useState<number | null>(null);
   const [confirmReactivateId, setConfirmReactivateId] = useState<number | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -376,6 +438,7 @@ export function ProponentsManagement() {
       contact_no: '',
       ...BLANK_PROFILE_FORM,
     });
+    setActiveProfileTab('Profile');
     setIsCreateOpen(true);
   }
 
@@ -384,6 +447,7 @@ export function ProponentsManagement() {
   // rather than pulled for every row up front.
   function openEdit(p: ProponentRow) {
     setIsCreateOpen(true);
+    setActiveProfileTab('Profile');
     setEditing(p);
     setForm({
       user_id: p.user_id != null ? String(p.user_id) : '',
@@ -423,6 +487,30 @@ export function ProponentsManagement() {
           paid_up_capital: data.paid_up_capital || '',
           paid_up_capital_currency: data.paid_up_capital_currency || 'PHP',
           contract_type_code: data.contract_type_code || '',
+          business_activities: data.business_activities || '',
+          advance_lease_payment_months: data.advance_lease_payment_months || '',
+          advance_lease_payment_amount: data.advance_lease_payment_amount || '',
+          advance_lease_payment_currency: data.advance_lease_payment_currency || 'PHP',
+          security_deposit_months: data.security_deposit_months || '',
+          security_deposit_amount: data.security_deposit_amount || '',
+          security_deposit_currency: data.security_deposit_currency || 'PHP',
+          performance_security_months: data.performance_security_months || '',
+          performance_security_amount: data.performance_security_amount || '',
+          performance_security_currency: data.performance_security_currency || 'PHP',
+          properties: Array.isArray(data.properties)
+            ? data.properties.map((row: any) => ({
+                id: row.id,
+                year: row.year || '',
+                date_from: toDateInputValue(row.date_from),
+                date_to: toDateInputValue(row.date_to),
+                type_of_property: row.type_of_property || '',
+                area_sqm: row.area_sqm || '',
+                rate_sqm_mo: row.rate_sqm_mo || '',
+                rate_currency: row.rate_currency || 'PHP',
+                mgl_mo: row.mgl_mo || '',
+                mgl_currency: row.mgl_currency || 'PHP',
+              }))
+            : [],
         };
         setForm((prev) => ({ ...prev, ...profileFields }));
         setEditing((prev) =>
@@ -435,6 +523,7 @@ export function ProponentsManagement() {
                 end_term: data.end_term ?? null,
                 lease_term: data.lease_term ?? null,
                 contract_type_name: data.contract_type_name ?? null,
+                business_type: data.business_type ?? null,
               }
             : prev,
         );
@@ -479,6 +568,27 @@ export function ProponentsManagement() {
         subscribed_capital_currency: form.subscribed_capital_currency || null,
         paid_up_capital: form.paid_up_capital.trim() || null,
         paid_up_capital_currency: form.paid_up_capital_currency || null,
+        business_activities: form.business_activities.trim() || null,
+        advance_lease_payment_months: form.advance_lease_payment_months.trim() || null,
+        advance_lease_payment_amount: form.advance_lease_payment_amount.trim() || null,
+        advance_lease_payment_currency: form.advance_lease_payment_currency || null,
+        security_deposit_months: form.security_deposit_months.trim() || null,
+        security_deposit_amount: form.security_deposit_amount.trim() || null,
+        security_deposit_currency: form.security_deposit_currency || null,
+        performance_security_months: form.performance_security_months.trim() || null,
+        performance_security_amount: form.performance_security_amount.trim() || null,
+        performance_security_currency: form.performance_security_currency || null,
+        properties: form.properties.map((row) => ({
+          year: row.year.trim() || null,
+          date_from: row.date_from || null,
+          date_to: row.date_to || null,
+          type_of_property: row.type_of_property.trim() || null,
+          area_sqm: row.area_sqm.trim() || null,
+          rate_sqm_mo: row.rate_sqm_mo.trim() || null,
+          rate_currency: row.rate_currency || null,
+          mgl_mo: row.mgl_mo.trim() || null,
+          mgl_currency: row.mgl_currency || null,
+        })),
       };
 
       // Type of Contract lives on the proponent's current contract record,
@@ -1007,6 +1117,400 @@ export function ProponentsManagement() {
                 />
                 Sub-Lease
               </label>
+            </div>
+
+            {/* Folder-tab strip mirroring the legacy BRIDGE system's Locator's
+                Information form — only Profile has content built out so far. */}
+            <div className="folders">
+              <div className="tabs">
+                {(['Profile', 'Stockholders Information', 'Contact Person', 'Documents', 'Investment'] as const).map((tab) => (
+                  <div
+                    key={tab}
+                    className={`tab ${activeProfileTab === tab ? 'active' : ''}`}
+                    onClick={() => setActiveProfileTab(tab)}
+                  >
+                    {tab}
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="contents">
+              <div className="content">
+                {activeProfileTab !== 'Profile' ? (
+                  <div className="text-xs text-secondary py-8 text-center">{activeProfileTab} — coming soon.</div>
+                ) : (
+                  <div className="flex flex-col gap-3">
+
+            {/* Business Activities (left, tall) beside Grace Period/%PGRO/%PGRR/Land Use
+                (right, two stacked mini-rows) — matches the legacy BRIDGE layout where
+                the two sit side by side, not stacked as separate full-width rows. */}
+            <div className="flex gap-3 items-stretch">
+              <div className="flex-[0.9] flex">
+                <Field compact label="Business Activities" className="h-full flex-1">
+                  <textarea
+                    className="app-form-control app-form-control-sm flex-1 min-h-0"
+                    value={form.business_activities}
+                    disabled={loadingLocation}
+                    onChange={(e) => setForm((p) => ({ ...p, business_activities: e.target.value }))}
+                  />
+                </Field>
+              </div>
+
+              <div className="flex-1 flex flex-col gap-2">
+                <div className="flex gap-3">
+                  <div className="w-[204px]">
+                    <Field compact label="Grace Period">
+                      <div className="app-form-control app-form-control-sm p-0 overflow-hidden flex items-stretch">
+                        <input
+                          className="flex-1 min-w-0 border-0 bg-transparent outline-none px-2 py-1"
+                          style={{ color: 'var(--text)' }}
+                          value={form.grace_period}
+                          disabled={loadingLocation}
+                          onChange={(e) => setForm((p) => ({ ...p, grace_period: e.target.value }))}
+                        />
+                      </div>
+                    </Field>
+                  </div>
+                  <div className="flex-1">
+                    <Field compact label="Industry">
+                      <div className="app-form-control app-form-control-sm p-0 overflow-hidden flex items-stretch">
+                        <input
+                          className="flex-1 min-w-0 border-0 bg-transparent outline-none px-2 py-1"
+                          style={{ color: 'var(--text)' }}
+                          value={editing?.business_type || '—'}
+                          disabled
+                          readOnly
+                          title="Derived from this locator's most recently filed application — not set here."
+                        />
+                      </div>
+                    </Field>
+                  </div>
+                  <div className="flex-1">
+                    <Field compact label="Location">
+                      <div className="app-form-control app-form-control-sm p-0 overflow-hidden flex items-stretch">
+                        <input
+                          className="flex-1 min-w-0 border-0 bg-transparent outline-none px-2 py-1"
+                          style={{ color: 'var(--text)' }}
+                          value={form.location}
+                          disabled={loadingLocation}
+                          placeholder="e.g. G Puyat, Bertaphil V..."
+                          onChange={(e) => setForm((p) => ({ ...p, location: e.target.value }))}
+                        />
+                      </div>
+                    </Field>
+                  </div>
+                </div>
+                <div className="flex gap-3">
+                  <div className="w-24">
+                    <Field compact label="% PGRO">
+                      <div className="app-form-control app-form-control-sm p-0 overflow-hidden flex items-stretch">
+                        <input
+                          className="flex-1 min-w-0 border-0 bg-transparent outline-none px-2 py-1"
+                          style={{ color: 'var(--text)' }}
+                          value={form.sub_pgro}
+                          disabled={loadingLocation}
+                          onChange={(e) => setForm((p) => ({ ...p, sub_pgro: e.target.value }))}
+                        />
+                      </div>
+                    </Field>
+                  </div>
+                  <div className="w-24">
+                    <Field compact label="% PGRR">
+                      <div className="app-form-control app-form-control-sm p-0 overflow-hidden flex items-stretch">
+                        <input
+                          className="flex-1 min-w-0 border-0 bg-transparent outline-none px-2 py-1"
+                          style={{ color: 'var(--text)' }}
+                          value={form.sub_pgrr}
+                          disabled={loadingLocation}
+                          onChange={(e) => setForm((p) => ({ ...p, sub_pgrr: e.target.value }))}
+                        />
+                      </div>
+                    </Field>
+                  </div>
+                  <div className="flex-1">
+                    <Field compact label="Land Use">
+                      <div className="app-form-control app-form-control-sm p-0 overflow-hidden flex items-stretch">
+                        <input
+                          className="flex-1 min-w-0 border-0 bg-transparent outline-none px-2 py-1"
+                          style={{ color: 'var(--text)' }}
+                          value={form.land_use}
+                          disabled={loadingLocation}
+                          onChange={(e) => setForm((p) => ({ ...p, land_use: e.target.value }))}
+                        />
+                      </div>
+                    </Field>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Property schedule (dbo.proponent_properties) — an inline editable
+                table synced wholesale on Save, add/remove-row buttons on the right. */}
+            <div className="flex gap-2 items-start">
+              <div className="flex-1 overflow-x-auto rounded-lg border" style={{ borderColor: 'var(--input-border)' }}>
+                <table className="w-full text-xs border-collapse">
+                  <thead>
+                    <tr style={{ backgroundColor: 'var(--control-bg)' }}>
+                      {['No.', 'Year', 'Date From', 'Date To', 'Type of Property', 'Area (SQM)', 'Rate/SQM/MO', 'Currency', 'MGL/MO', 'Currency'].map(
+                        (h) => (
+                          <th
+                            key={h}
+                            className="px-2 py-1.5 text-left font-semibold uppercase tracking-wide text-[9px] border-b"
+                            style={{ borderColor: 'var(--input-border)', color: 'var(--text-muted)' }}
+                          >
+                            {h}
+                          </th>
+                        ),
+                      )}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {form.properties.map((row, i) => (
+                      <tr key={i}>
+                        <td className="px-2 py-1 border-b text-center" style={{ borderColor: 'var(--input-border)' }}>
+                          {i + 1}
+                        </td>
+                        <td className="px-1 py-1 border-b" style={{ borderColor: 'var(--input-border)' }}>
+                          <input
+                            className="app-form-control app-form-control-sm w-16"
+                            value={row.year}
+                            disabled={loadingLocation}
+                            onChange={(e) =>
+                              setForm((p) => ({
+                                ...p,
+                                properties: p.properties.map((r, ri) => (ri === i ? { ...r, year: e.target.value } : r)),
+                              }))
+                            }
+                          />
+                        </td>
+                        <td className="px-1 py-1 border-b" style={{ borderColor: 'var(--input-border)' }}>
+                          <input
+                            type="date"
+                            className="app-form-control app-form-control-sm w-36"
+                            value={row.date_from}
+                            disabled={loadingLocation}
+                            onChange={(e) =>
+                              setForm((p) => ({
+                                ...p,
+                                properties: p.properties.map((r, ri) => (ri === i ? { ...r, date_from: e.target.value } : r)),
+                              }))
+                            }
+                          />
+                        </td>
+                        <td className="px-1 py-1 border-b" style={{ borderColor: 'var(--input-border)' }}>
+                          <input
+                            type="date"
+                            className="app-form-control app-form-control-sm w-36"
+                            value={row.date_to}
+                            disabled={loadingLocation}
+                            onChange={(e) =>
+                              setForm((p) => ({
+                                ...p,
+                                properties: p.properties.map((r, ri) => (ri === i ? { ...r, date_to: e.target.value } : r)),
+                              }))
+                            }
+                          />
+                        </td>
+                        <td className="px-1 py-1 border-b" style={{ borderColor: 'var(--input-border)' }}>
+                          <input
+                            className="app-form-control app-form-control-sm w-full min-w-[10rem]"
+                            value={row.type_of_property}
+                            disabled={loadingLocation}
+                            onChange={(e) =>
+                              setForm((p) => ({
+                                ...p,
+                                properties: p.properties.map((r, ri) => (ri === i ? { ...r, type_of_property: e.target.value } : r)),
+                              }))
+                            }
+                          />
+                        </td>
+                        <td className="px-1 py-1 border-b" style={{ borderColor: 'var(--input-border)' }}>
+                          <input
+                            className="app-form-control app-form-control-sm w-20"
+                            value={row.area_sqm}
+                            disabled={loadingLocation}
+                            onChange={(e) =>
+                              setForm((p) => ({
+                                ...p,
+                                properties: p.properties.map((r, ri) => (ri === i ? { ...r, area_sqm: e.target.value } : r)),
+                              }))
+                            }
+                          />
+                        </td>
+                        <td className="px-1 py-1 border-b" style={{ borderColor: 'var(--input-border)' }}>
+                          <input
+                            className="app-form-control app-form-control-sm w-24"
+                            value={row.rate_sqm_mo}
+                            disabled={loadingLocation}
+                            onChange={(e) =>
+                              setForm((p) => ({
+                                ...p,
+                                properties: p.properties.map((r, ri) => (ri === i ? { ...r, rate_sqm_mo: e.target.value } : r)),
+                              }))
+                            }
+                          />
+                        </td>
+                        <td className="px-1 py-1 border-b" style={{ borderColor: 'var(--input-border)' }}>
+                          <select
+                            className="app-form-control app-form-control-sm w-16"
+                            value={row.rate_currency}
+                            disabled={loadingLocation}
+                            onChange={(e) =>
+                              setForm((p) => ({
+                                ...p,
+                                properties: p.properties.map((r, ri) => (ri === i ? { ...r, rate_currency: e.target.value } : r)),
+                              }))
+                            }
+                          >
+                            {CURRENCY_OPTIONS.map((c) => (
+                              <option key={c} value={c}>
+                                {c}
+                              </option>
+                            ))}
+                          </select>
+                        </td>
+                        <td className="px-1 py-1 border-b" style={{ borderColor: 'var(--input-border)' }}>
+                          <input
+                            className="app-form-control app-form-control-sm w-24"
+                            value={row.mgl_mo}
+                            disabled={loadingLocation}
+                            onChange={(e) =>
+                              setForm((p) => ({
+                                ...p,
+                                properties: p.properties.map((r, ri) => (ri === i ? { ...r, mgl_mo: e.target.value } : r)),
+                              }))
+                            }
+                          />
+                        </td>
+                        <td className="px-1 py-1 border-b" style={{ borderColor: 'var(--input-border)' }}>
+                          <select
+                            className="app-form-control app-form-control-sm w-16"
+                            value={row.mgl_currency}
+                            disabled={loadingLocation}
+                            onChange={(e) =>
+                              setForm((p) => ({
+                                ...p,
+                                properties: p.properties.map((r, ri) => (ri === i ? { ...r, mgl_currency: e.target.value } : r)),
+                              }))
+                            }
+                          >
+                            {CURRENCY_OPTIONS.map((c) => (
+                              <option key={c} value={c}>
+                                {c}
+                              </option>
+                            ))}
+                          </select>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="flex flex-col gap-1.5 shrink-0">
+                <button
+                  type="button"
+                  disabled={loadingLocation}
+                  onClick={() => setForm((p) => ({ ...p, properties: [...p.properties, blankPropertyRow()] }))}
+                  className="w-7 h-7 rounded-md flex items-center justify-center text-white font-bold cursor-pointer disabled:cursor-not-allowed disabled:opacity-60"
+                  style={{ backgroundColor: '#22c55e' }}
+                  title="Add row"
+                >
+                  +
+                </button>
+                <button
+                  type="button"
+                  disabled={loadingLocation || form.properties.length === 0}
+                  onClick={() => setForm((p) => ({ ...p, properties: p.properties.slice(0, -1) }))}
+                  className="w-7 h-7 rounded-md flex items-center justify-center text-white font-bold cursor-pointer disabled:cursor-not-allowed disabled:opacity-60"
+                  style={{ backgroundColor: '#ef4444' }}
+                  title="Remove last row"
+                >
+                  −
+                </button>
+              </div>
+            </div>
+
+            {/* Row 6: Advance Lease Payment | Security Deposit | Performance Security */}
+            <div className="grid grid-cols-3 gap-3">
+              <div className="flex flex-col gap-2">
+                <div className="text-[9px] font-semibold uppercase tracking-widest text-center" style={{ color: 'var(--nav-active-bg)' }}>
+                  Advance Lease Payment
+                </div>
+                <Field compact label="Months MGL">
+                  <div className="app-form-control app-form-control-sm p-0 overflow-hidden flex items-stretch">
+                    <input
+                      className="flex-1 min-w-0 border-0 bg-transparent outline-none px-2 py-1"
+                      style={{ color: 'var(--text)' }}
+                      value={form.advance_lease_payment_months}
+                      disabled={loadingLocation}
+                      onChange={(e) => setForm((p) => ({ ...p, advance_lease_payment_months: e.target.value }))}
+                    />
+                  </div>
+                </Field>
+                <CapitalField
+                  label="Amount"
+                  amount={form.advance_lease_payment_amount}
+                  currency={form.advance_lease_payment_currency}
+                  disabled={loadingLocation}
+                  onAmountChange={(v) => setForm((p) => ({ ...p, advance_lease_payment_amount: v }))}
+                  onCurrencyChange={(v) => setForm((p) => ({ ...p, advance_lease_payment_currency: v }))}
+                />
+              </div>
+
+              <div className="flex flex-col gap-2">
+                <div className="text-[9px] font-semibold uppercase tracking-widest text-center" style={{ color: 'var(--nav-active-bg)' }}>
+                  Security Deposit
+                </div>
+                <Field compact label="Months MGL">
+                  <div className="app-form-control app-form-control-sm p-0 overflow-hidden flex items-stretch">
+                    <input
+                      className="flex-1 min-w-0 border-0 bg-transparent outline-none px-2 py-1"
+                      style={{ color: 'var(--text)' }}
+                      value={form.security_deposit_months}
+                      disabled={loadingLocation}
+                      onChange={(e) => setForm((p) => ({ ...p, security_deposit_months: e.target.value }))}
+                    />
+                  </div>
+                </Field>
+                <CapitalField
+                  label="Amount"
+                  amount={form.security_deposit_amount}
+                  currency={form.security_deposit_currency}
+                  disabled={loadingLocation}
+                  onAmountChange={(v) => setForm((p) => ({ ...p, security_deposit_amount: v }))}
+                  onCurrencyChange={(v) => setForm((p) => ({ ...p, security_deposit_currency: v }))}
+                />
+              </div>
+
+              <div className="flex flex-col gap-2">
+                <div className="text-[9px] font-semibold uppercase tracking-widest text-center" style={{ color: 'var(--nav-active-bg)' }}>
+                  Performance Security
+                </div>
+                <Field compact label="Months MGL">
+                  <div className="app-form-control app-form-control-sm p-0 overflow-hidden flex items-stretch">
+                    <input
+                      className="flex-1 min-w-0 border-0 bg-transparent outline-none px-2 py-1"
+                      style={{ color: 'var(--text)' }}
+                      value={form.performance_security_months}
+                      disabled={loadingLocation}
+                      onChange={(e) => setForm((p) => ({ ...p, performance_security_months: e.target.value }))}
+                    />
+                  </div>
+                </Field>
+                <CapitalField
+                  label="Amount"
+                  amount={form.performance_security_amount}
+                  currency={form.performance_security_currency}
+                  disabled={loadingLocation}
+                  onAmountChange={(v) => setForm((p) => ({ ...p, performance_security_amount: v }))}
+                  onCurrencyChange={(v) => setForm((p) => ({ ...p, performance_security_currency: v }))}
+                />
+              </div>
+            </div>
+
+                  </div>
+                )}
+              </div>
             </div>
           </div>
           );

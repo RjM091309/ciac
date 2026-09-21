@@ -177,8 +177,116 @@ async function ensureSchema() {
         paid_up_capital_currency NVARCHAR(10) NULL,
         CONSTRAINT FK_proponents_account_officer FOREIGN KEY (account_officer_id) REFERENCES dbo.users(id);
   `);
+  // Rest of the legacy BRIDGE "Profile" tab: business activities plus the
+  // three Months MGL/Amount/Currency blocks (Advance Lease Payment,
+  // Security Deposit, Performance Security). "Months MGL" is free text, not
+  // a number — the legacy form itself shows values like "15 CALENDAR DAYS
+  // FROM RECEIPT OF BILLING" in that field.
+  await updateSchema(`
+    IF NOT EXISTS (
+      SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+      WHERE TABLE_NAME = 'proponents' AND COLUMN_NAME = 'business_activities'
+    )
+      ALTER TABLE dbo.proponents ADD
+        business_activities NVARCHAR(MAX) NULL,
+        advance_lease_payment_months NVARCHAR(255) NULL,
+        advance_lease_payment_amount NVARCHAR(50) NULL,
+        advance_lease_payment_currency NVARCHAR(10) NULL,
+        security_deposit_months NVARCHAR(255) NULL,
+        security_deposit_amount NVARCHAR(50) NULL,
+        security_deposit_currency NVARCHAR(10) NULL,
+        performance_security_months NVARCHAR(255) NULL,
+        performance_security_amount NVARCHAR(50) NULL,
+        performance_security_currency NVARCHAR(10) NULL;
+  `);
+  // The legacy "Profile" tab's property schedule table (No./Year/Date
+  // From--To/Type of Property/Area/Rate/MGL, add-a-row via the +/- buttons)
+  // — a real one-to-many child table, not columns on proponents, since a
+  // locator can list any number of properties.
+  await updateSchema(`
+    IF OBJECT_ID('dbo.proponent_properties', 'U') IS NULL
+    BEGIN
+      CREATE TABLE dbo.proponent_properties (
+        id INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+        proponent_id INT NOT NULL,
+        sort_order INT NOT NULL CONSTRAINT DF_proponent_properties_sort_order DEFAULT (0),
+        year NVARCHAR(10) NULL,
+        date_from DATE NULL,
+        date_to DATE NULL,
+        type_of_property NVARCHAR(255) NULL,
+        area_sqm NVARCHAR(50) NULL,
+        rate_sqm_mo NVARCHAR(50) NULL,
+        rate_currency NVARCHAR(10) NULL,
+        mgl_mo NVARCHAR(50) NULL,
+        mgl_currency NVARCHAR(10) NULL,
+        created_at DATETIME2(3) NOT NULL CONSTRAINT DF_proponent_properties_created_at DEFAULT (SYSUTCDATETIME()),
+        CONSTRAINT FK_proponent_properties_proponent FOREIGN KEY (proponent_id) REFERENCES dbo.proponents(id) ON DELETE CASCADE
+      );
+      CREATE INDEX IX_proponent_properties_proponent_id ON dbo.proponent_properties(proponent_id);
+    END
+  `);
   await migrateLegacyPlaintextTin();
   await backfillMissingRefNos();
+}
+
+/** Replaces every property-schedule row for a proponent with the given list
+ * — the simplest correct sync for an inline editable table with its own
+ * add/remove-row buttons (no per-row identity worth preserving server-side
+ * between saves). No-op (leaves existing rows alone) when `properties` is
+ * undefined, so a caller that doesn't touch this table doesn't wipe it. */
+async function replaceProponentProperties(tx, proponentId, properties) {
+  if (properties === undefined) return;
+  await tx.query(`DELETE FROM dbo.proponent_properties WHERE proponent_id = @param0`, [proponentId]);
+  if (!Array.isArray(properties) || !properties.length) return;
+
+  for (let i = 0; i < properties.length; i++) {
+    const row = properties[i] || {};
+    await tx.query(
+      `
+      INSERT INTO dbo.proponent_properties
+        (proponent_id, sort_order, year, date_from, date_to, type_of_property, area_sqm, rate_sqm_mo, rate_currency, mgl_mo, mgl_currency)
+      VALUES
+        (@param0, @param1, @param2, @param3, @param4, @param5, @param6, @param7, @param8, @param9, @param10)
+      `,
+      [
+        proponentId,
+        i,
+        row.year || null,
+        row.date_from || null,
+        row.date_to || null,
+        row.type_of_property || null,
+        row.area_sqm || null,
+        row.rate_sqm_mo || null,
+        row.rate_currency || null,
+        row.mgl_mo || null,
+        row.mgl_currency || null,
+      ]
+    );
+  }
+}
+
+async function getProponentProperties(proponentId) {
+  const rows = await selectData(
+    `
+    SELECT id, year, date_from, date_to, type_of_property, area_sqm, rate_sqm_mo, rate_currency, mgl_mo, mgl_currency
+    FROM dbo.proponent_properties
+    WHERE proponent_id = @param0
+    ORDER BY sort_order ASC, id ASC
+    `,
+    [proponentId]
+  );
+  return (rows || []).map((r) => ({
+    id: r.id,
+    year: r.year ?? null,
+    date_from: r.date_from ?? null,
+    date_to: r.date_to ?? null,
+    type_of_property: r.type_of_property ?? null,
+    area_sqm: r.area_sqm ?? null,
+    rate_sqm_mo: r.rate_sqm_mo ?? null,
+    rate_currency: r.rate_currency ?? null,
+    mgl_mo: r.mgl_mo ?? null,
+    mgl_currency: r.mgl_currency ?? null,
+  }));
 }
 
 async function listProponents() {
@@ -266,6 +374,16 @@ async function getProponentById(id) {
       p.subscribed_capital_currency,
       p.paid_up_capital,
       p.paid_up_capital_currency,
+      p.business_activities,
+      p.advance_lease_payment_months,
+      p.advance_lease_payment_amount,
+      p.advance_lease_payment_currency,
+      p.security_deposit_months,
+      p.security_deposit_amount,
+      p.security_deposit_currency,
+      p.performance_security_months,
+      p.performance_security_amount,
+      p.performance_security_currency,
       p.created_by,
       p.updated_by,
       p.created_at,
@@ -274,7 +392,8 @@ async function getProponentById(id) {
       ct.effective_start AS start_term,
       ct.effective_end AS end_term,
       ct.contract_type_code,
-      toctype.name AS contract_type_name
+      toctype.name AS contract_type_name,
+      apptype.name AS business_type
     FROM dbo.proponents p
     LEFT JOIN dbo.users officer ON officer.id = p.account_officer_id
     OUTER APPLY (
@@ -285,6 +404,13 @@ async function getProponentById(id) {
       ORDER BY c.effective_end DESC, c.id DESC
     ) ct
     LEFT JOIN dbo.application_types toctype ON toctype.code = ct.contract_type_code
+    OUTER APPLY (
+      SELECT TOP (1) a2.application_type
+      FROM dbo.applications a2
+      WHERE a2.proponent_id = p.id
+      ORDER BY a2.created_at DESC, a2.id DESC
+    ) latest_app
+    LEFT JOIN dbo.application_types apptype ON apptype.code = latest_app.application_type
     WHERE p.id = @param0
     `,
     [id]
@@ -292,6 +418,7 @@ async function getProponentById(id) {
 
   const p = rows?.[0] || null;
   if (!p) return null;
+  const properties = await getProponentProperties(id);
   return {
     id: p.id,
     user_id: p.user_id ?? null,
@@ -321,11 +448,23 @@ async function getProponentById(id) {
     subscribed_capital_currency: p.subscribed_capital_currency ?? null,
     paid_up_capital: p.paid_up_capital ?? null,
     paid_up_capital_currency: p.paid_up_capital_currency ?? null,
+    business_activities: p.business_activities ?? null,
+    advance_lease_payment_months: p.advance_lease_payment_months ?? null,
+    advance_lease_payment_amount: p.advance_lease_payment_amount ?? null,
+    advance_lease_payment_currency: p.advance_lease_payment_currency ?? null,
+    security_deposit_months: p.security_deposit_months ?? null,
+    security_deposit_amount: p.security_deposit_amount ?? null,
+    security_deposit_currency: p.security_deposit_currency ?? null,
+    performance_security_months: p.performance_security_months ?? null,
+    performance_security_amount: p.performance_security_amount ?? null,
+    performance_security_currency: p.performance_security_currency ?? null,
     start_term: p.start_term ?? null,
     end_term: p.end_term ?? null,
     lease_term: formatLeaseTerm(p.start_term, p.end_term),
     contract_type_code: p.contract_type_code ?? null,
     contract_type_name: p.contract_type_name ?? null,
+    business_type: p.business_type ?? null,
+    properties,
     created_by: p.created_by ?? null,
     updated_by: p.updated_by ?? null,
     created_at: p.created_at ?? null,
@@ -428,6 +567,17 @@ async function createProponent({
   subscribed_capital_currency,
   paid_up_capital,
   paid_up_capital_currency,
+  business_activities,
+  advance_lease_payment_months,
+  advance_lease_payment_amount,
+  advance_lease_payment_currency,
+  security_deposit_months,
+  security_deposit_amount,
+  security_deposit_currency,
+  performance_security_months,
+  performance_security_amount,
+  performance_security_currency,
+  properties,
   created_by,
   is_active = 1,
 }) {
@@ -451,6 +601,10 @@ async function createProponent({
          grace_period,is_sublease,sub_pgro,sub_pgrr,land_use,extension_date,extension_remarks,
          authorized_capital,authorized_capital_currency,subscribed_capital,subscribed_capital_currency,
          paid_up_capital,paid_up_capital_currency,
+         business_activities,
+         advance_lease_payment_months,advance_lease_payment_amount,advance_lease_payment_currency,
+         security_deposit_months,security_deposit_amount,security_deposit_currency,
+         performance_security_months,performance_security_amount,performance_security_currency,
          ref_no,created_by,updated_by,created_at,updated_at,is_active)
       OUTPUT INSERTED.id
       VALUES
@@ -459,7 +613,11 @@ async function createProponent({
          @param12,@param13,@param14,@param15,@param16,@param17,@param18,
          @param19,@param20,@param21,@param22,
          @param23,@param24,
-         @param25,@param26,NULL,GETDATE(),NULL,@param27)
+         @param25,
+         @param26,@param27,@param28,
+         @param29,@param30,@param31,
+         @param32,@param33,@param34,
+         @param35,@param36,NULL,GETDATE(),NULL,@param37)
       `,
       [
         userId, business_name, registration_no, encryptValue(tin), address, contact_no, location ?? null,
@@ -467,10 +625,16 @@ async function createProponent({
         grace_period ?? null, isSublease, sub_pgro ?? null, sub_pgrr ?? null, land_use ?? null, extension_date ?? null, extension_remarks ?? null,
         authorized_capital ?? null, authorized_capital_currency ?? null, subscribed_capital ?? null, subscribed_capital_currency ?? null,
         paid_up_capital ?? null, paid_up_capital_currency ?? null,
+        business_activities ?? null,
+        advance_lease_payment_months ?? null, advance_lease_payment_amount ?? null, advance_lease_payment_currency ?? null,
+        security_deposit_months ?? null, security_deposit_amount ?? null, security_deposit_currency ?? null,
+        performance_security_months ?? null, performance_security_amount ?? null, performance_security_currency ?? null,
         refNo, createdBy, active,
       ]
     );
-    return result?.recordset?.[0]?.id;
+    const insertedId = result?.recordset?.[0]?.id;
+    await replaceProponentProperties(tx, insertedId, properties);
+    return insertedId;
   });
 
   return await getProponentById(newId);
@@ -504,6 +668,17 @@ async function updateProponent(
     subscribed_capital_currency,
     paid_up_capital,
     paid_up_capital_currency,
+    business_activities,
+    advance_lease_payment_months,
+    advance_lease_payment_amount,
+    advance_lease_payment_currency,
+    security_deposit_months,
+    security_deposit_amount,
+    security_deposit_currency,
+    performance_security_months,
+    performance_security_amount,
+    performance_security_currency,
+    properties,
     updated_by,
     is_active,
   }
@@ -541,20 +716,32 @@ async function updateProponent(
   if (subscribed_capital_currency !== undefined) pushSet("subscribed_capital_currency = ?", subscribed_capital_currency);
   if (paid_up_capital !== undefined) pushSet("paid_up_capital = ?", paid_up_capital);
   if (paid_up_capital_currency !== undefined) pushSet("paid_up_capital_currency = ?", paid_up_capital_currency);
+  if (business_activities !== undefined) pushSet("business_activities = ?", business_activities);
+  if (advance_lease_payment_months !== undefined) pushSet("advance_lease_payment_months = ?", advance_lease_payment_months);
+  if (advance_lease_payment_amount !== undefined) pushSet("advance_lease_payment_amount = ?", advance_lease_payment_amount);
+  if (advance_lease_payment_currency !== undefined) pushSet("advance_lease_payment_currency = ?", advance_lease_payment_currency);
+  if (security_deposit_months !== undefined) pushSet("security_deposit_months = ?", security_deposit_months);
+  if (security_deposit_amount !== undefined) pushSet("security_deposit_amount = ?", security_deposit_amount);
+  if (security_deposit_currency !== undefined) pushSet("security_deposit_currency = ?", security_deposit_currency);
+  if (performance_security_months !== undefined) pushSet("performance_security_months = ?", performance_security_months);
+  if (performance_security_amount !== undefined) pushSet("performance_security_amount = ?", performance_security_amount);
+  if (performance_security_currency !== undefined) pushSet("performance_security_currency = ?", performance_security_currency);
   if (is_active !== undefined) pushSet("is_active = ?", is_active ? 1 : 0);
 
   const updatedBy = toInt(updated_by);
   if (updatedBy !== null) pushSet("updated_by = ?", updatedBy);
 
-  if (sets.length) {
-    const query = `
-      UPDATE dbo.proponents
-      SET ${sets.join(", ")}, updated_at = GETDATE()
-      WHERE id = @param${params.length}
-    `;
-    params.push(id);
-    await updateData(query, params);
-  }
+  await runInTransaction(async (tx) => {
+    if (sets.length) {
+      const query = `
+        UPDATE dbo.proponents
+        SET ${sets.join(", ")}, updated_at = GETDATE()
+        WHERE id = @param${params.length}
+      `;
+      await tx.query(query, [...params, id]);
+    }
+    await replaceProponentProperties(tx, id, properties);
+  });
 
   return await getProponentById(id);
 }
