@@ -18,6 +18,7 @@ import { toast } from 'sonner';
 import { cn } from '../../lib/utils';
 import { AppSelect } from '../ui/AppSelect';
 import { DataTableControls } from '../ui/DataTableControls';
+import { DatePicker, parseYmd, toYmd } from '../ui/DatePicker';
 import { EmptyState } from '../ui/EmptyState';
 import { TableSkeleton } from '../ui/Skeleton';
 import { useControlPanelAccess } from '../../context/ControlPanelAccessContext';
@@ -1332,21 +1333,23 @@ function ContractTab({
           ) : null}
           <div className="grid grid-cols-2 gap-2">
             <Field label="Effective start">
-              <input
-                type="date"
-                className={inputCls}
-                style={inputStyle}
-                value={form.effective_start}
-                onChange={(e) => setForm((f) => ({ ...f, effective_start: e.target.value }))}
+              <DatePicker
+                mode="single"
+                bordered
+                fullWidth
+                placeholder="Select date"
+                value={parseYmd(form.effective_start)}
+                onChange={(d: Date | null) => setForm((f) => ({ ...f, effective_start: toYmd(d) }))}
               />
             </Field>
             <Field label="Effective end">
-              <input
-                type="date"
-                className={inputCls}
-                style={inputStyle}
-                value={form.effective_end}
-                onChange={(e) => setForm((f) => ({ ...f, effective_end: e.target.value }))}
+              <DatePicker
+                mode="single"
+                bordered
+                fullWidth
+                placeholder="Select date"
+                value={parseYmd(form.effective_end)}
+                onChange={(d: Date | null) => setForm((f) => ({ ...f, effective_end: toYmd(d) }))}
               />
             </Field>
           </div>

@@ -53,13 +53,24 @@ const RangePickersDay = styled(PickersDay, {
       backgroundColor: theme.palette.primary.main,
       color: theme.palette.primary.contrastText,
       fontWeight: 700,
-      borderRadius: '50%',
+      borderRadius: 0,
       '&:hover, &:focus': {
         backgroundColor: theme.palette.primary.dark,
       },
     }),
   };
 });
+
+/** 'YYYY-MM-DD' <-> local Date, without the UTC shift toISOString() would add. */
+export function parseYmd(v: string | null | undefined): Date | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(v || '');
+  return m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : null;
+}
+export function toYmd(d: Date | null): string {
+  if (!d) return '';
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
 
 function stripTime(d: Date) {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate());
@@ -74,6 +85,14 @@ function isSameDay(a: Date, b: Date) {
 function isBetweenInclusive(day: Date, start: Date, end: Date) {
   const t = day.getTime();
   return t >= start.getTime() && t <= end.getTime();
+}
+
+/** Rows the calendar grid needs for a month (Sunday-first). MUI reserves 6 rows
+ * of height for every month, which leaves a gap under 4/5-row months. */
+function weeksInMonth(month: Date) {
+  const offset = new Date(month.getFullYear(), month.getMonth(), 1).getDay();
+  const days = new Date(month.getFullYear(), month.getMonth() + 1, 0).getDate();
+  return Math.ceil((offset + days) / 7);
 }
 
 function getRelativeRange(days: number): [Date, Date] {
@@ -136,6 +155,7 @@ export function DatePicker({
   rounded = 'full',
   dense = false,
   boxed = false,
+  bordered = false,
 }: {
   value: any;
   onChange: (next: any) => void;
@@ -157,9 +177,13 @@ export function DatePicker({
    * of the app-wide filled-pill look. Implies dense sizing. Use this to make
    * a date field pixel-match a plain text field it sits beside. */
   boxed?: boolean;
+  /** Pill-shaped form field with a visible border and solid background (matches
+   * AppSelect), instead of the borderless filter-bar look. */
+  bordered?: boolean;
 }) {
   const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
   const open = Boolean(anchorEl);
+  const [viewMonth, setViewMonth] = useState<Date>(() => new Date());
 
   let rangeText = '';
   let start: Date | null = null;
@@ -176,6 +200,9 @@ export function DatePicker({
     isEmpty = !start && !end;
     selectedPreset = detectPreset(value || [null, null]);
   }
+  // Month the calendar opens on (selected date, else today) — kept in sync via onMonthChange.
+  const openMonth = (mode === 'single' ? value : start) || new Date();
+  const weekRows = weeksInMonth(viewMonth);
   const presets: { key: PresetKey; label: string; range?: [Date, Date] }[] = [
     { key: 'today', label: 'Today', range: getTodayRange() },
     { key: 'yesterday', label: 'Yesterday', range: getYesterdayRange() },
@@ -191,7 +218,10 @@ export function DatePicker({
       {compact ? (
         <button
           type="button"
-          onClick={(e) => setAnchorEl(e.currentTarget)}
+          onClick={(e) => {
+            setViewMonth(openMonth);
+            setAnchorEl(e.currentTarget);
+          }}
           aria-label="Open date range picker"
           className="h-9 w-9 inline-flex items-center justify-center rounded-full text-[var(--text-muted)] hover:text-[var(--text)] transition-colors shrink-0"
           style={{
@@ -216,18 +246,23 @@ export function DatePicker({
             value={isEmpty ? '' : rangeText}
             placeholder={placeholder}
             aria-label="Date range"
-            onClick={(e) => setAnchorEl(e.currentTarget)}
+            onClick={(e) => {
+              setViewMonth(openMonth);
+              setAnchorEl(e.currentTarget);
+            }}
             className={
               boxed
                 ? 'flex-1 min-w-0 border-0 bg-transparent outline-none pl-7 pr-2 py-1 text-xs w-full text-[var(--text)] placeholder:text-[var(--text-muted)] cursor-pointer'
-                : `${dense ? 'h-7 pl-7 pr-2' : 'h-9 pl-9 pr-3'} ${rounded === 'lg' ? 'rounded-lg' : 'rounded-full'} text-xs w-full focus:outline-none focus:ring-1 focus:ring-[var(--border)] text-[var(--text)] placeholder:text-[var(--text-muted)] transition-all cursor-pointer`
+                : `${dense ? 'h-7 pl-7 pr-2' : `${bordered ? 'h-8 border' : 'h-9'} pl-9 pr-3`} ${rounded === 'lg' ? 'rounded-lg' : 'rounded-full'} text-xs w-full focus:outline-none focus:ring-1 focus:ring-[var(--border)] text-[var(--text)] placeholder:text-[var(--text-muted)] transition-all cursor-pointer`
             }
             style={
               boxed
                 ? { opacity: isEmpty ? 0.72 : 1, whiteSpace: 'nowrap' }
                 : {
-                    backgroundColor: 'color-mix(in oklab, var(--control-bg) 70%, transparent)',
-                    opacity: isEmpty ? 0.72 : 1,
+                    ...(bordered
+                      ? { backgroundColor: 'var(--surface)', borderColor: 'var(--input-border)' }
+                      : { backgroundColor: 'color-mix(in oklab, var(--control-bg) 70%, transparent)' }),
+                    opacity: isEmpty && !bordered ? 0.72 : 1,
                     whiteSpace: 'nowrap',
                   }
             }
@@ -245,7 +280,7 @@ export function DatePicker({
           paper: {
             sx: {
               overflow: 'hidden',
-              borderRadius: 2,
+              borderRadius: 0,
               // Tighter shell: hug calendar + presets; content sizes (cells, fonts) unchanged below
               width: { xs: 'calc(100vw - 12px)', sm: 'max-content' },
               maxWidth: 'calc(100vw - 16px)',
@@ -256,9 +291,9 @@ export function DatePicker({
       >
         <Box
           sx={(t) => ({
-            px: { xs: 1, sm: 1.25 },
-            pt: { xs: 0.75, sm: 1 },
-            pb: { xs: 0.5, sm: 0.75 },
+            px: { xs: 1.5, sm: 2 },
+            pt: { xs: 1.25, sm: 1.5 },
+            pb: { xs: 0.75, sm: 1 },
             bgcolor: t.palette.mode === 'dark' ? '#000000' : t.palette.background.paper,
             color: t.palette.mode === 'dark' ? '#ffffff' : t.palette.text.primary,
           })}
@@ -326,7 +361,7 @@ export function DatePicker({
                       textTransform: 'none',
                       px: 1.2,
                       py: 0.7,
-                      borderRadius: 0.5,
+                      borderRadius: 0,
                       minHeight: 34,
                       fontSize: 13,
                       flex: { xs: '1 1 calc(50% - 4px)', sm: 'initial' },
@@ -342,6 +377,7 @@ export function DatePicker({
 
           <DateCalendar
             value={mode === 'single' ? value : start}
+            onMonthChange={setViewMonth}
             onChange={(picked) => {
               if (!picked) return;
               const day = stripTime(picked);
@@ -367,7 +403,11 @@ export function DatePicker({
             sx={{
               width: { xs: '100%', sm: 'max-content' },
               maxWidth: '100%',
+              // MUI pins the calendar root to a fixed 336px; let it hug its content instead
+              height: 'auto',
               mx: { xs: 'auto', sm: 0 },
+              px: { xs: 1.5, sm: 2 },
+              pb: { xs: 1, sm: 1.5 },
               // Trim chrome only — day cell px & font sizes stay the same
               '& .MuiDateCalendar-root': { p: 0, margin: 0, width: 'max-content', maxWidth: '100%' },
               '& .MuiPickersCalendarHeader-root': {
@@ -381,12 +421,15 @@ export function DatePicker({
               '& .MuiPickersCalendarHeader-label': { fontSize: { xs: '1.1rem', sm: '1.25rem' }, fontWeight: 600 },
               '& .MuiDayCalendar-header': { px: { xs: 0.25, sm: 0.5 }, marginTop: 0 },
               '& .MuiDayCalendar-weekContainer': { mx: { xs: 0, sm: 0 } },
-              '& .MuiDayCalendar-slideTransition': { marginTop: 0 },
+              // Cell = day size + 2px margin top/bottom; size the grid to this month's rows only
+              '& .MuiDayCalendar-slideTransition': { marginTop: 0, minHeight: { xs: weekRows * 36, sm: weekRows * 40 } },
               '& .MuiDayCalendar-weekDayLabel': {
                 width: { xs: 32, sm: 36 },
                 fontSize: { xs: 11, sm: 12 },
               },
+              '& .MuiIconButton-root, & .MuiPickersCalendarHeader-switchViewButton': { borderRadius: 0 },
               '& .MuiPickersDay-root': {
+                borderRadius: 0,
                 width: { xs: 32, sm: 36 },
                 height: { xs: 32, sm: 36 },
                 fontSize: { xs: 13, sm: 14 },
@@ -429,15 +472,16 @@ export function DatePicker({
             justifyContent: 'flex-end',
             alignItems: 'center',
             gap: 0.75,
-            px: { xs: 0.75, sm: 1 },
-            pb: { xs: 0.75, sm: 0.75 },
-            pt: { xs: 0.25, sm: 0 },
+            px: { xs: 1.5, sm: 2 },
+            pb: { xs: 1.5, sm: 2 },
+            pt: { xs: 0.5, sm: 0.5 },
           }}
         >
           <Box sx={{ display: 'flex', gap: 1, width: { xs: '100%', sm: 'auto' } }}>
             <Button
               size="small"
               fullWidth
+              sx={{ borderRadius: 0 }}
               onClick={() => {
                 onChange(mode === 'single' ? null : [null, null]);
                 if (mode === 'single') setAnchorEl(null);
@@ -445,7 +489,7 @@ export function DatePicker({
             >
               Clear
             </Button>
-            <Button size="small" variant="contained" onClick={() => setAnchorEl(null)} fullWidth>
+            <Button size="small" variant="contained" onClick={() => setAnchorEl(null)} fullWidth sx={{ borderRadius: 0 }}>
               Save
             </Button>
           </Box>

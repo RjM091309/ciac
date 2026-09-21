@@ -526,12 +526,12 @@ export function ReportsAnalytics({ navigate }: { navigate?: (to: string, opts?: 
           <div className="grid grid-cols-2 gap-3 sm:flex sm:flex-row sm:flex-wrap flex-1">
             <FieldLabel label="From">
               <div className="w-full sm:w-44">
-                <DatePicker mode="single" fullWidth value={dateFrom} onChange={setDateFrom} placeholder="From date" />
+                <DatePicker mode="single" bordered fullWidth value={dateFrom} onChange={setDateFrom} placeholder="From date" />
               </div>
             </FieldLabel>
             <FieldLabel label="To">
               <div className="w-full sm:w-44">
-                <DatePicker mode="single" fullWidth value={dateTo} onChange={setDateTo} placeholder="To date" />
+                <DatePicker mode="single" bordered fullWidth value={dateTo} onChange={setDateTo} placeholder="To date" />
               </div>
             </FieldLabel>
             <FieldLabel label="Application Type">

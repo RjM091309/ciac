@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import { SidePanel } from '../ui/SidePanel';
 import { ConfirmModal } from '../ui/ConfirmModal';
 import { AppSelect } from '../ui/AppSelect';
+import { DatePicker, parseYmd, toYmd } from '../ui/DatePicker';
 import { TableSkeleton } from '../ui/Skeleton';
 import { EmptyState } from '../ui/EmptyState';
 import { useSessionStorageCachedResource } from '../../hooks/useSessionStorageCachedResource';
@@ -542,10 +543,24 @@ export function PermitsManagement() {
             />
           </FieldLabel>
           <FieldLabel label="Issue Date">
-            <Input type="date" value={form.issue_date} onChange={(v) => setForm((p) => ({ ...p, issue_date: v }))} />
+            <DatePicker
+              mode="single"
+              bordered
+              fullWidth
+              placeholder="Select date"
+              value={parseYmd(form.issue_date)}
+              onChange={(d: Date | null) => setForm((p) => ({ ...p, issue_date: toYmd(d) }))}
+            />
           </FieldLabel>
           <FieldLabel label="Expiry Date">
-            <Input type="date" value={form.expiry_date} onChange={(v) => setForm((p) => ({ ...p, expiry_date: v }))} />
+            <DatePicker
+              mode="single"
+              bordered
+              fullWidth
+              placeholder="Select date"
+              value={parseYmd(form.expiry_date)}
+              onChange={(d: Date | null) => setForm((p) => ({ ...p, expiry_date: toYmd(d) }))}
+            />
           </FieldLabel>
         </div>
         <div className="mt-3">

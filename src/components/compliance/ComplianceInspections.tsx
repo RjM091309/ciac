@@ -17,6 +17,7 @@ import { toast } from 'sonner';
 import { cn } from '../../lib/utils';
 import { AppSelect } from '../ui/AppSelect';
 import { DataTableControls } from '../ui/DataTableControls';
+import { DatePicker, parseYmd, toYmd } from '../ui/DatePicker';
 import { EmptyState } from '../ui/EmptyState';
 import { TableSkeleton } from '../ui/Skeleton';
 import { useControlPanelAccess } from '../../context/ControlPanelAccessContext';
@@ -1297,12 +1298,13 @@ function ActionsTab({ data, perms, busy, run }: { data: DetailPayload; perms: Pe
               />
             </Field>
             <Field label="Due date">
-              <input
-                type="date"
-                className={inputCls}
-                style={inputStyle}
-                value={form.due_date}
-                onChange={(e) => setForm((f) => ({ ...f, due_date: e.target.value }))}
+              <DatePicker
+                mode="single"
+                bordered
+                fullWidth
+                placeholder="Select date"
+                value={parseYmd(form.due_date)}
+                onChange={(d: Date | null) => setForm((f) => ({ ...f, due_date: toYmd(d) }))}
               />
             </Field>
           </div>
@@ -1556,12 +1558,13 @@ function NewInspection({
         </Field>
         <div className="grid grid-cols-2 gap-2">
           <Field label="Scheduled date">
-            <input
-              type="date"
-              className={inputCls}
-              style={inputStyle}
-              value={form.scheduled_date}
-              onChange={(e) => setForm((f) => ({ ...f, scheduled_date: e.target.value }))}
+            <DatePicker
+              mode="single"
+              bordered
+              fullWidth
+              placeholder="Select date"
+              value={parseYmd(form.scheduled_date)}
+              onChange={(d: Date | null) => setForm((f) => ({ ...f, scheduled_date: toYmd(d) }))}
             />
           </Field>
           <Field label="Inspector (optional)">
