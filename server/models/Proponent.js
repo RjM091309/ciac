@@ -1,4 +1,4 @@
-const { selectData, insertData, updateData, updateSchema } = require("../config/database");
+const { selectData, insertData, updateData, updateSchema, runInTransaction } = require("../config/database");
 const { encryptValue, decryptValue } = require("../lib/crypto");
 
 function toInt(v) {
@@ -28,6 +28,75 @@ async function migrateLegacyPlaintextTin() {
   }
 }
 
+/** Server-authoritative locator reference number: LOC-YYYY-00001, incrementing
+ * per year. Reuses the same counter table as generateApplicationNo
+ * (ApplicationWorkflow.js) under a distinct "LOC-{year}" key so concurrent
+ * locator creations never race onto the same number. */
+async function generateLocatorRefNo(tx) {
+  const year = new Date().getFullYear();
+  const counterKey = `LOC-${year}`;
+
+  const result = await tx.query(
+    `
+    MERGE dbo.application_no_counters WITH (HOLDLOCK) AS target
+    USING (SELECT @param0 AS counter_key) AS src
+    ON target.counter_key = src.counter_key
+    WHEN MATCHED THEN UPDATE SET last_value = target.last_value + 1
+    WHEN NOT MATCHED THEN INSERT (counter_key, last_value) VALUES (src.counter_key, 1)
+    OUTPUT INSERTED.last_value;
+    `,
+    [counterKey]
+  );
+  const seq = result?.recordset?.[0]?.last_value || 1;
+  return `${counterKey}-${String(seq).padStart(5, "0")}`;
+}
+
+/** Formats a start/end date pair as "<years>Y-<months>M-<days>D", derived at
+ * read time from the actual contract dates so it can never drift out of sync
+ * with what was really issued. Returns null if either date is missing. */
+function formatLeaseTerm(start, end) {
+  if (!start || !end) return null;
+  const s = new Date(start);
+  const e = new Date(end);
+  if (Number.isNaN(s.getTime()) || Number.isNaN(e.getTime()) || e < s) return null;
+
+  let years = e.getFullYear() - s.getFullYear();
+  let months = e.getMonth() - s.getMonth();
+  let days = e.getDate() - s.getDate();
+  if (days < 0) {
+    months -= 1;
+    days += new Date(e.getFullYear(), e.getMonth(), 0).getDate();
+  }
+  if (months < 0) {
+    years -= 1;
+    months += 12;
+  }
+  return `${years}Y-${months}M-${days}D`;
+}
+
+let refNoBackfillRan = false;
+
+/** One-time, idempotent: assigns a ref_no to any proponent rows created
+ * before this column existed, so the Locators List always has a stable
+ * reference number to show. */
+async function backfillMissingRefNos() {
+  if (refNoBackfillRan) return;
+  refNoBackfillRan = true;
+  try {
+    const rows = await selectData(
+      `SELECT id FROM dbo.proponents WHERE ref_no IS NULL ORDER BY id ASC`
+    );
+    for (const row of rows) {
+      await runInTransaction(async (tx) => {
+        const refNo = await generateLocatorRefNo(tx);
+        await tx.query(`UPDATE dbo.proponents SET ref_no = @param1 WHERE id = @param0`, [row.id, refNo]);
+      });
+    }
+  } catch (error) {
+    console.error("Locator ref_no backfill failed:", error);
+  }
+}
+
 async function ensureSchema() {
   await updateSchema(`
     IF OBJECT_ID('dbo.proponents', 'U') IS NULL
@@ -40,6 +109,7 @@ async function ensureSchema() {
         tin NVARCHAR(50) NULL,
         address NVARCHAR(500) NULL,
         contact_no NVARCHAR(100) NULL,
+        ref_no NVARCHAR(30) NULL,
         created_by INT NULL,
         updated_by INT NULL,
         created_at DATETIME2(3) NOT NULL CONSTRAINT DF_proponents_created_at DEFAULT (SYSUTCDATETIME()),
@@ -61,7 +131,25 @@ async function ensureSchema() {
     )
       ALTER TABLE dbo.proponents ALTER COLUMN tin NVARCHAR(255) NULL;
   `);
+  await updateSchema(`
+    IF NOT EXISTS (
+      SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+      WHERE TABLE_NAME = 'proponents' AND COLUMN_NAME = 'ref_no'
+    )
+      ALTER TABLE dbo.proponents ADD ref_no NVARCHAR(30) NULL;
+  `);
+  // Distinct from `address` (the full mailing address) — a short
+  // zone/building label (e.g. "G PUYAT", "BERTAPHIL V"). Shown on the
+  // per-locator detail/edit panel only, never in the Locators List table.
+  await updateSchema(`
+    IF NOT EXISTS (
+      SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+      WHERE TABLE_NAME = 'proponents' AND COLUMN_NAME = 'location'
+    )
+      ALTER TABLE dbo.proponents ADD location NVARCHAR(255) NULL;
+  `);
   await migrateLegacyPlaintextTin();
+  await backfillMissingRefNos();
 }
 
 async function listProponents() {
@@ -76,6 +164,7 @@ async function listProponents() {
       p.tin,
       p.address,
       p.contact_no,
+      p.ref_no,
       p.created_by,
       p.updated_by,
       p.created_at,
@@ -98,6 +187,7 @@ async function listProponents() {
     tin: p.tin ? decryptValue(p.tin) : null,
     address: p.address ?? null,
     contact_no: p.contact_no ?? null,
+    ref_no: p.ref_no ?? null,
     created_by: p.created_by ?? null,
     updated_by: p.updated_by ?? null,
     created_at: p.created_at ?? null,
@@ -126,6 +216,8 @@ async function getProponentById(id) {
       p.tin,
       p.address,
       p.contact_no,
+      p.ref_no,
+      p.location,
       p.created_by,
       p.updated_by,
       p.created_at,
@@ -147,12 +239,82 @@ async function getProponentById(id) {
     tin: p.tin ? decryptValue(p.tin) : null,
     address: p.address ?? null,
     contact_no: p.contact_no ?? null,
+    ref_no: p.ref_no ?? null,
+    location: p.location ?? null,
     created_by: p.created_by ?? null,
     updated_by: p.updated_by ?? null,
     created_at: p.created_at ?? null,
     updated_at: p.updated_at ?? null,
     is_active: p.is_active,
   };
+}
+
+/**
+ * Locators/Proponent List view. Extends the base proponent record with
+ * fields that must stay dynamically in sync with the rest of the workflow
+ * rather than being duplicated/typed in a second time:
+ *  - encoded_by: the staff user who created the record (p.created_by).
+ *  - business_type: the Application Type of the proponent's most recently
+ *    filed application (dbo.applications.application_type resolved against
+ *    dbo.application_types) — reflects whatever was actually filed.
+ *  - start_term/end_term/lease_term: the effective dates of the proponent's
+ *    most recent contract (dbo.contracts, via its application), with
+ *    lease_term computed at read time so it can't drift from those dates.
+ * A proponent with no application/contract yet simply shows blanks for the
+ * fields that depend on one.
+ */
+async function listProponentsForLocatorList() {
+  await ensureSchema();
+  const rows = await selectData(
+    `
+    SELECT
+      p.id,
+      p.ref_no,
+      p.business_name,
+      p.registration_no,
+      p.address,
+      p.contact_no,
+      p.is_active,
+      p.created_at,
+      creator.full_name AS encoded_by,
+      apptype.name AS business_type,
+      ct.effective_start AS start_term,
+      ct.effective_end AS end_term
+    FROM dbo.proponents p
+    LEFT JOIN dbo.users creator ON creator.id = p.created_by
+    OUTER APPLY (
+      SELECT TOP (1) a.application_type
+      FROM dbo.applications a
+      WHERE a.proponent_id = p.id
+      ORDER BY a.created_at DESC, a.id DESC
+    ) latest_app
+    LEFT JOIN dbo.application_types apptype ON apptype.code = latest_app.application_type
+    OUTER APPLY (
+      SELECT TOP (1) c.effective_start, c.effective_end
+      FROM dbo.contracts c
+      INNER JOIN dbo.applications a2 ON a2.id = c.application_id
+      WHERE a2.proponent_id = p.id
+      ORDER BY c.effective_end DESC, c.id DESC
+    ) ct
+    ORDER BY p.id DESC
+    `
+  );
+
+  return rows.map((p) => ({
+    id: p.id,
+    ref_no: p.ref_no ?? null,
+    tenant: p.business_name,
+    registration_no: p.registration_no ?? null,
+    address: p.address ?? null,
+    contact_no: p.contact_no ?? null,
+    is_active: p.is_active,
+    created_at: p.created_at ?? null,
+    encoded_by: p.encoded_by ?? null,
+    business_type: p.business_type ?? null,
+    start_term: p.start_term ?? null,
+    end_term: p.end_term ?? null,
+    lease_term: formatLeaseTerm(p.start_term, p.end_term),
+  }));
 }
 
 async function createProponent({
@@ -162,6 +324,7 @@ async function createProponent({
   tin,
   address,
   contact_no,
+  location,
   created_by,
   is_active = 1,
 }) {
@@ -170,24 +333,30 @@ async function createProponent({
   const userId = toInt(user_id);
   const createdBy = toInt(created_by);
 
-  const result = await insertData(
-    `
-    INSERT INTO dbo.proponents
-      (user_id,business_name,registration_no,tin,address,contact_no,created_by,updated_by,created_at,updated_at,is_active)
-    OUTPUT INSERTED.id
-    VALUES
-      (@param0,@param1,@param2,@param3,@param4,@param5,@param6,NULL,GETDATE(),NULL,@param7)
-    `,
-    [userId, business_name, registration_no, encryptValue(tin), address, contact_no, createdBy, active]
-  );
+  const newId = await runInTransaction(async (tx) => {
+    // Minted here, never accepted from the caller — same reasoning as
+    // application_no/contract_no (see generateApplicationNo).
+    const refNo = await generateLocatorRefNo(tx);
 
-  const newId = result?.recordset?.[0]?.id;
+    const result = await tx.query(
+      `
+      INSERT INTO dbo.proponents
+        (user_id,business_name,registration_no,tin,address,contact_no,location,ref_no,created_by,updated_by,created_at,updated_at,is_active)
+      OUTPUT INSERTED.id
+      VALUES
+        (@param0,@param1,@param2,@param3,@param4,@param5,@param6,@param7,@param8,NULL,GETDATE(),NULL,@param9)
+      `,
+      [userId, business_name, registration_no, encryptValue(tin), address, contact_no, location ?? null, refNo, createdBy, active]
+    );
+    return result?.recordset?.[0]?.id;
+  });
+
   return await getProponentById(newId);
 }
 
 async function updateProponent(
   id,
-  { user_id, business_name, registration_no, tin, address, contact_no, updated_by, is_active }
+  { user_id, business_name, registration_no, tin, address, contact_no, location, updated_by, is_active }
 ) {
   await ensureSchema();
   const sets = [];
@@ -203,6 +372,7 @@ async function updateProponent(
   if (tin !== undefined) pushSet("tin = ?", encryptValue(tin));
   if (address !== undefined) pushSet("address = ?", address);
   if (contact_no !== undefined) pushSet("contact_no = ?", contact_no);
+  if (location !== undefined) pushSet("location = ?", location);
   if (is_active !== undefined) pushSet("is_active = ?", is_active ? 1 : 0);
 
   const updatedBy = toInt(updated_by);
@@ -319,6 +489,7 @@ async function getProponentByUserId(userId) {
 module.exports = {
   ensureSchema,
   listProponents,
+  listProponentsForLocatorList,
   getProponentById,
   getProponentByUserId,
   createProponent,

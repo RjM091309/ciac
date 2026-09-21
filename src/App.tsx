@@ -19,6 +19,7 @@ const PermitsManagement = lazy(() => import('./components/compliance/PermitsMana
 const UsersManagement = lazy(() => import('./components/settings/UsersManagement').then((m) => ({ default: m.UsersManagement })));
 const LocatorUsersManagement = lazy(() => import('./components/settings/LocatorUsersManagement').then((m) => ({ default: m.LocatorUsersManagement })));
 const ControlPanelManagement = lazy(() => import('./components/settings/ControlPanelManagement').then((m) => ({ default: m.ControlPanelManagement })));
+const ProponentsManagement = lazy(() => import('./components/proponent/ProponentsManagement').then((m) => ({ default: m.ProponentsManagement })));
 const RequirementsManagement = lazy(() => import('./components/applications/Requirements').then((m) => ({ default: m.RequirementsManagement })));
 const RequirementCategoriesManagement = lazy(() => import('./components/applications/RequirementCategories').then((m) => ({ default: m.RequirementCategoriesManagement })));
 const ApplicationsWorkflow = lazy(() => import('./components/applications/ApplicationsWorkflow').then((m) => ({ default: m.ApplicationsWorkflow })));
@@ -62,6 +63,7 @@ const VIEW_TO_PATH: Record<AppView, string> = {
   'reports:analytics': '/reports/analytics',
   'settings:users': '/settings/users',
   'settings:locator-users': '/settings/locator-users',
+  'settings:proponents': '/settings/proponents',
   'settings:requirement-categories': '/settings/requirement-categories',
   'settings:inspection-types': '/settings/inspection-types',
   'settings:compliance-types': '/settings/compliance-types',
@@ -589,6 +591,8 @@ export default function App() {
                 <ComplianceInspections locationSearch={locationSearch} navigate={navigate} />
               ) : view === 'reports:analytics' ? (
                 <ReportsAnalytics navigate={navigate} />
+              ) : view === 'settings:proponents' ? (
+                <ProponentsManagement />
               ) : view === 'settings:requirement-categories' ? (
                 <RequirementCategoriesManagement />
               ) : view === 'settings:inspection-types' ? (
@@ -810,6 +814,24 @@ const LANDING_CONFIG: Record<AppView, LandingConfig> = {
       rows: [
         ['jdelacruz', 'Juan Dela Cruz', 'j.delacruz@skyport.com', 'On', 'Active'],
         ['mreyes', 'Maria Reyes', 'm.reyes@greenfuel.com', 'On', 'Active'],
+      ],
+    },
+  },
+  'settings:proponents': {
+    title: 'Locators / Proponent List',
+    description: 'Master list of registered locator businesses, with lease/contract status pulled in automatically.',
+    badge: 'Directory',
+    icon: Users,
+    stats: [
+      { label: 'Total Locators', value: '—' },
+      { label: 'Active', value: '—' },
+      { label: 'Deactivated', value: '—' },
+    ],
+    table: {
+      columns: ['Ref No', 'Tenant', 'Address', 'Industry', 'Start Term', 'End Term', 'Lease Term', 'Encoded By'],
+      rows: [
+        ['LOC-2026-00001', 'SkyPort Logistics Inc.', 'Clark Freeport Zone', 'Warehouse Lease', 'Mar 10, 2024', 'Mar 10, 2027', '3Y-0M-0D', 'J. Puyat'],
+        ['LOC-2026-00002', 'GreenFuel Terminals Corp.', 'Clark Civil Aviation Complex', 'Direct Lease', 'Mar 09, 2024', 'Mar 09, 2029', '5Y-0M-0D', 'G. Cruz'],
       ],
     },
   },

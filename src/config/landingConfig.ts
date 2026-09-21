@@ -225,6 +225,26 @@ export const LANDING_CONFIG: Record<AppView, LandingConfig> = {
       ],
     },
   },
+  'settings:proponents': {
+    title: 'Locators / Proponent List',
+    description: 'Master list of registered locator businesses, with lease/contract status pulled in automatically.',
+    badge: 'Directory',
+    icon: Users,
+    isCrud: true,
+    stats: [
+      { label: 'Total Locators', value: '—' },
+      { label: 'Active', value: '—' },
+      { label: 'Deactivated', value: '—' },
+    ],
+    table: {
+      columns: ['Ref No', 'Tenant', 'Address', 'Industry', 'Start Term', 'End Term', 'Lease Term', 'Encoded By'],
+      rows: [
+        ['LOC-2026-00001', 'SkyPort Logistics Inc.', 'Clark Freeport Zone', 'Warehouse Lease', 'Mar 10, 2024', 'Mar 10, 2027', '3Y-0M-0D', 'J. Puyat'],
+        ['LOC-2026-00002', 'GreenFuel Terminals Corp.', 'Clark Civil Aviation Complex', 'Direct Lease', 'Mar 09, 2024', 'Mar 09, 2029', '5Y-0M-0D', 'G. Cruz'],
+        ['LOC-2026-00003', 'Metro Agro Trading', 'Building 7508, Clark', '—', '—', '—', '—', 'B. Cabangbang'],
+      ],
+    },
+  },
   'settings:requirement-categories': {
     title: 'Requirement Categories',
     description: 'Organize requirements into categories to support filtering and templates.',
