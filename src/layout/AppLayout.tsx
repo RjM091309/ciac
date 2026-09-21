@@ -206,16 +206,19 @@ export function AppLayout({
   // Panel permissions; every other role uses the permission-gated AppSidebar.
   const effectiveSidebarRole = sidebarRoleOverride ?? userRole;
   const SidebarComponent = effectiveSidebarRole === 'proponent' ? ProponentSidebar : AppSidebar;
-  // Locators get a persistent bottom tab bar on mobile instead of relying on
-  // the hamburger drawer for primary nav; other roles are unaffected.
-  const showBottomNav = isMobile && effectiveSidebarRole === 'proponent';
+  // Every role gets a persistent bottom tab bar on mobile instead of relying
+  // on the hamburger drawer for primary nav.
+  const showBottomNav = isMobile;
 
   return (
     <ThemeProvider theme={muiTheme}>
       <ControlPanelAccessProvider>
       <div
         className={cn(
-          'h-screen overflow-hidden flex flex-col font-sans relative',
+          // 100vh on mobile browsers is the height with the URL bar *hidden*, so
+          // with it showing, the bottom of the scroll area (behind the fixed
+          // bottom nav) is pushed off-screen. dvh tracks the visible viewport.
+          'h-screen supports-[height:100dvh]:h-dvh overflow-hidden flex flex-col font-sans relative',
         )}
         style={{ backgroundColor: 'var(--background)', color: 'var(--foreground)', transition: 'background-color 220ms ease-out, color 220ms ease-out' }}
       >
@@ -285,6 +288,7 @@ export function AppLayout({
 
         {showBottomNav && (
           <ProponentBottomNav
+            role={effectiveSidebarRole}
             view={view}
             onViewChange={onViewChange}
             onOpenMore={toggleSidebar}

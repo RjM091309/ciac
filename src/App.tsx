@@ -128,10 +128,16 @@ const PROPONENT_SUBHEADER: Record<ProponentView, { title: string; description: s
 // --- Main App ---
 
 export default function App() {
-  const backendUrl = useMemo(
-    () => ((import.meta as any).env?.VITE_BACKEND_URL as string) || 'http://localhost:3100',
-    []
-  );
+  const backendUrl = useMemo(() => {
+    const env = (import.meta as any).env ?? {};
+    // Dev server: always same-origin /api. Vite proxies it to VITE_BACKEND_URL
+    // (see vite.config.ts), so the auth cookie is first-party whether the page
+    // is opened via localhost, a LAN IP (http://192.168.x.x:2500) or another
+    // device — calling the backend directly would make the cookie cross-site
+    // (and "localhost" would point at the phone itself).
+    if (env.DEV) return '';
+    return (env.VITE_BACKEND_URL as string) || 'http://localhost:3100';
+  }, []);
 
   const [locationState, setLocationState] = useState<{ pathname: string; search: string }>(() => ({
     pathname: window.location.pathname || '/',

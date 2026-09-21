@@ -318,7 +318,7 @@ const MetricCard = ({
         : undefined
     }
     className={cn(
-      'glass-card p-3 sm:p-3.5 flex flex-col min-h-[100px] sm:h-31 transition-colors group !border-transparent',
+      'glass-card p-3 sm:p-3.5 flex flex-col min-w-0 min-h-[112px] sm:min-h-[100px] sm:h-31 transition-colors group !border-transparent',
       onClick && 'cursor-pointer hover:brightness-110 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--nav-active-bg)]'
     )}
     style={{
@@ -326,7 +326,7 @@ const MetricCard = ({
     }}
   >
     {/* Fixed height for label row so value row aligns across all cards */}
-    <div className="flex justify-between items-center gap-2 min-w-0 h-9 shrink-0">
+    <div className="flex justify-between items-center gap-2 min-w-0 h-8 sm:h-9 shrink-0">
       <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
         <div
           className="p-1.5 sm:p-2 rounded-lg sm:rounded-xl border transition-colors shrink-0"
@@ -341,13 +341,13 @@ const MetricCard = ({
             style={{ color: 'var(--text)' }}
           />
         </div>
-        <span className="text-xs font-medium text-secondary truncate">{title}</span>
+        <span className="text-[11px] sm:text-xs font-medium text-secondary truncate">{title}</span>
       </div>
       <button
         type="button"
         aria-label="More options"
         onClick={(e) => e.stopPropagation()}
-        className="p-2 -m-1 rounded-full transition-colors shrink-0 touch-target min-h-[44px] min-w-[44px] sm:min-h-0 sm:min-w-0 sm:p-1 flex items-center justify-center"
+        className="hidden sm:flex p-1 -m-1 rounded-full transition-colors shrink-0 touch-target items-center justify-center"
         style={{
           color: 'var(--text-muted)',
         }}
@@ -356,19 +356,21 @@ const MetricCard = ({
       </button>
     </div>
 
-    <div className="flex items-end justify-between pt-1 sm:pt-1.5 gap-2 flex-1 min-h-0">
-      <p className="text-lg sm:text-xl font-bold tracking-tight leading-none truncate min-w-0" style={{ color: 'var(--text)' }}>
+    {/* Phone: value stacked over the chip (half-width cards are too narrow
+        for both on one line); sm+: side by side. */}
+    <div className="flex flex-col items-start sm:flex-row sm:items-end justify-end sm:justify-between pt-1 sm:pt-1.5 gap-1.5 sm:gap-2 flex-1 min-h-0 min-w-0">
+      <p className="text-2xl sm:text-xl font-bold tracking-tight leading-none truncate min-w-0 max-w-full" style={{ color: 'var(--text)' }}>
         {value}
       </p>
       {trendValue && (
         <div
           className={cn(
-            'flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-full',
+            'flex items-center gap-1 text-[9px] sm:text-[10px] font-bold px-2 py-1 rounded-full max-w-full min-w-0 sm:shrink-0 sm:max-w-none sm:min-w-fit',
             trend === 'up' ? 'text-emerald-400 bg-emerald-400/10' : 'text-orange-400 bg-orange-400/10',
           )}
         >
-          <TrendingUp size={10} className={trend === 'down' ? 'rotate-180' : ''} />
-          {trendValue}
+          <TrendingUp size={10} className={cn('shrink-0', trend === 'down' && 'rotate-180')} />
+          <span className="truncate">{trendValue}</span>
         </div>
       )}
     </div>
@@ -435,12 +437,12 @@ export function Dashboard({ data, navigate }: { data: AdminDashboardData | null;
 
   return (
     <>
-      <div className="grid grid-cols-12 gap-4 sm:gap-4 lg:gap-5 touch-landscape-dashboard-grid">
+      <div className="grid grid-cols-12 gap-3 sm:gap-4 lg:gap-5 touch-landscape-dashboard-grid">
         {/* Left side: hero + metrics — full width until 1181px (iPad Pro 1024 matches iPad Air stack) */}
-        <div className="col-span-12 xl:col-span-8 flex flex-col gap-4 sm:gap-4 touch-landscape-top-left">
+        <div className="col-span-12 xl:col-span-8 flex flex-col gap-3 sm:gap-4 touch-landscape-top-left">
           {/* Welcome + Weather Card (from provided design) */}
           <div
-            className="relative overflow-hidden rounded-2xl px-4 py-5 sm:px-6 sm:py-6 !border-transparent"
+            className="relative overflow-hidden rounded-2xl px-4 py-4 sm:px-6 sm:py-6 !border-transparent"
             style={{
               backgroundColor: 'var(--surface)',
               boxShadow:
@@ -450,7 +452,36 @@ export function Dashboard({ data, navigate }: { data: AdminDashboardData | null;
             {/* Subtle Glow Effect */}
             <div className="pointer-events-none absolute -top-32 -right-32 h-80 w-80 rounded-full bg-blue-600/30 blur-[100px]" />
 
-            <div className="relative flex flex-col md:flex-row justify-between gap-5 sm:gap-6">
+            {/* Phone: compact hero — title, then clock + today's count on one row. */}
+            <div className="relative sm:hidden">
+              <h3 className="text-lg font-bold tracking-tight" style={{ color: 'var(--text)' }}>
+                Lease Application Center
+              </h3>
+              <p className="mt-0.5 text-[11px] text-secondary">
+                {currentTime.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}
+              </p>
+              <div className="mt-4 flex items-end justify-between gap-3">
+                <div className="flex items-baseline gap-1.5">
+                  <span className="text-4xl font-bold tracking-tighter leading-none" style={{ color: 'var(--text)' }}>
+                    {timeStr}
+                  </span>
+                  <span className="text-sm font-bold opacity-80 uppercase" style={{ color: 'var(--text)' }}>
+                    {ampm}
+                  </span>
+                </div>
+                <div
+                  className="flex items-center gap-2"
+                >
+                  <FileText size={16} className="shrink-0" style={{ color: 'var(--text)' }} />
+                  <div className="leading-tight">
+                    <p className="text-base font-bold" style={{ color: 'var(--text)' }}>{totals.applicationsToday}</p>
+                    <p className="text-[9px] text-secondary font-medium">submitted today</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="relative hidden sm:flex flex-col md:flex-row justify-between gap-5 sm:gap-6">
               {/* Left Side: Greeting and Time */}
               <div className="flex flex-col justify-between space-y-5 sm:space-y-8">
                 <div>
@@ -516,7 +547,7 @@ export function Dashboard({ data, navigate }: { data: AdminDashboardData | null;
           </div>
 
         {/* Metrics row directly under hero */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-4 touch-landscape-metrics">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 touch-landscape-metrics">
           <MetricCard
             title="Total Applications"
             value={totals.totalApplications}
@@ -563,10 +594,10 @@ export function Dashboard({ data, navigate }: { data: AdminDashboardData | null;
           >
             Requirements Overview
           </h4>
-          <p className="text-xs text-secondary mb-4 md:mb-6">Completion rate by requirement category</p>
+          <p className="text-xs text-secondary mb-3 sm:mb-4 md:mb-6">Completion rate by requirement category</p>
 
           <div
-            className="flex-1 rounded-2xl p-4 md:p-6 border flex flex-col"
+            className="flex-1 rounded-2xl p-3 sm:p-4 md:p-6 border flex flex-col"
             style={{
               backgroundColor: 'var(--control-bg)',
               borderColor: 'var(--border-subtle)',
@@ -574,7 +605,7 @@ export function Dashboard({ data, navigate }: { data: AdminDashboardData | null;
           >
             {/* Mobile: stack vertically; Desktop: side-by-side */}
             <div className="flex flex-col md:flex-row items-center md:items-center gap-5 md:gap-5 touch-landscape-requirements-row">
-              <div className="relative w-32 h-32 sm:w-36 sm:h-36 md:w-40 md:h-40 shrink-0 flex items-center justify-center">
+              <div className="relative w-28 h-28 sm:w-36 sm:h-36 md:w-40 md:h-40 shrink-0 flex items-center justify-center">
                 <svg className="w-full h-full" viewBox="0 0 240 240" preserveAspectRatio="xMidYMid meet">
                   {topCategories.length > 0 ? (
                     topCategories.map((cat, i) => (
@@ -813,7 +844,7 @@ export function Dashboard({ data, navigate }: { data: AdminDashboardData | null;
                 <button
                   key={p}
                   onClick={() => setPeriod(p)}
-                  className="px-2 py-1 rounded-md text-[9px] font-bold uppercase tracking-wide transition-colors"
+                  className="min-w-[32px] min-h-[32px] sm:min-w-0 sm:min-h-0 px-2 py-1 rounded-md text-[10px] sm:text-[9px] font-bold uppercase tracking-wide transition-colors"
                   style={
                     period === p
                       ? { backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }
@@ -826,7 +857,7 @@ export function Dashboard({ data, navigate }: { data: AdminDashboardData | null;
             </div>
           </div>
 
-          <div className="h-40 sm:h-48 w-full min-h-[160px] min-w-0">
+          <div className="h-36 sm:h-48 w-full min-h-[144px] min-w-0">
             <ResponsiveContainer width="100%" height="100%" minWidth={0}>
               <AreaChart data={activeTrend.map((m) => ({ name: m.label, value: m.total }))}>
                 <defs>
@@ -888,7 +919,7 @@ export function Dashboard({ data, navigate }: { data: AdminDashboardData | null;
             Status Breakdown
           </h4>
           <p className="text-[10px] text-secondary mb-4 sm:mb-6">Every application, by current status</p>
-          <div className="h-40 sm:h-48 w-full min-h-[160px] min-w-0">
+          <div className="h-36 sm:h-48 w-full min-h-[144px] min-w-0">
             <ResponsiveContainer width="100%" height="100%" minWidth={0}>
               <BarChart
                 data={[

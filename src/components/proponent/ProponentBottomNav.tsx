@@ -1,5 +1,21 @@
 import React from 'react';
-import { LayoutDashboard, FileText, FileCheck2, Building2, Menu } from 'lucide-react';
+import {
+  LayoutDashboard,
+  FileText,
+  FileCheck2,
+  Building2,
+  Menu,
+  FilePlus2,
+  ClipboardCheck,
+  Stamp,
+  ShieldCheck,
+  FileCheck,
+  BarChart3,
+  RefreshCw,
+  Users,
+  ClipboardList,
+  ScrollText,
+} from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { useControlPanelAccess } from '../../context/ControlPanelAccessContext';
 
@@ -9,13 +25,35 @@ type BottomNavItem = {
   icon: React.ComponentType<{ size?: number; strokeWidth?: number; className?: string }>;
 };
 
-const LEFT_ITEMS: BottomNavItem[] = [
+/** Locator self-service tabs — fixed menu, same as ProponentSidebar. */
+const PROPONENT_ITEMS: BottomNavItem[] = [
   { key: 'me:applications', label: 'Applications', icon: FileText },
   { key: 'me:contracts-permits', label: 'Contracts', icon: FileCheck2 },
-];
-const RIGHT_ITEMS: BottomNavItem[] = [
   { key: 'me:profile', label: 'Profile', icon: Building2 },
 ];
+
+/**
+ * Staff tabs in priority order. Only the first MAX_TABS the role can actually
+ * see are shown, so each role (admin, account/assessment officer, viewer) gets
+ * its own most relevant screens; everything else stays in the "More" drawer.
+ */
+const STAFF_ITEMS: BottomNavItem[] = [
+  { key: 'applications:new', label: 'Applications', icon: FilePlus2 },
+  { key: 'assessment:queue', label: 'Evaluation', icon: ClipboardCheck },
+  { key: 'approval:queue', label: 'Approval', icon: Stamp },
+  { key: 'compliance:inspections', label: 'Inspections', icon: ShieldCheck },
+  { key: 'compliance:permits', label: 'Permits', icon: FileCheck },
+  { key: 'reports:analytics', label: 'Reports', icon: BarChart3 },
+  { key: 'applications:renewals', label: 'Renewals', icon: RefreshCw },
+  { key: 'settings:users', label: 'Users', icon: Users },
+  // Fallbacks so read-only roles (e.g. Viewer) whose menus aren't in the list
+  // above still get real tabs instead of a bar with only "More".
+  { key: 'applications:requirements', label: 'Requirements', icon: ClipboardList },
+  { key: 'settings:locator-users', label: 'Locators', icon: Building2 },
+  { key: 'settings:audit-log', label: 'Audit Log', icon: ScrollText },
+];
+
+const MAX_TABS = 3; // + "More" = 4 slots, 2 on each side of the FAB
 
 const BAR_HEIGHT = 64; // px, excludes safe-area inset
 const NOTCH_RADIUS = 40; // px
@@ -33,36 +71,57 @@ export const BOTTOM_NAV_HEIGHT = BAR_HEIGHT + TOP_CLEARANCE;
 const NOTCH_MASK = `radial-gradient(circle ${NOTCH_RADIUS}px at 50% ${-FAB_LIFT}px, transparent 99%, #000 100%)`;
 
 /**
- * Persistent bottom tab bar — the locator (proponent) role's mobile nav,
- * standing in for the sidebar drawer's primary items so mobile feels like a
- * native app instead of a desktop layout with a hamburger bolted on.
+ * Persistent mobile bottom tab bar for every role, standing in for the
+ * sidebar drawer's primary items so mobile feels like a native app instead of
+ * a desktop layout with a hamburger bolted on.
  * Dashboard/Home lives in the raised center FAB (bank-app style notch);
- * "More" opens the existing drawer for Activity History + Logout rather
+ * "More" opens the existing drawer for the rest of the menu + Logout rather
  * than duplicating them here, so those stay in one place.
  */
 export function ProponentBottomNav({
+  role,
   view,
   onViewChange,
   onOpenMore,
   permissionOverride,
 }: {
+  role: 'admin' | 'officer' | 'proponent';
   view: string;
   onViewChange: (view: string) => void;
   onOpenMore: () => void;
   permissionOverride?: Record<string, boolean> | null;
 }) {
-  const { sidebarPermissions: mySidebarPermissions, ready } = useControlPanelAccess();
+  const { sidebarPermissions, fullAccess, ready } = useControlPanelAccess();
+  const isProponent = role === 'proponent';
 
+  // Mirrors each sidebar's own gating: ProponentSidebar fails open, AppSidebar
+  // fails closed (nothing restricted shows until permissions load).
   const canView = (key: string) => {
-    if (key === 'dashboard') return true;
-    if (permissionOverride) return key in permissionOverride ? Boolean(permissionOverride[key]) : true;
-    if (!ready) return true;
-    return key in mySidebarPermissions ? mySidebarPermissions[key] : true;
+    if (isProponent) {
+      if (key === 'dashboard') return true;
+      if (permissionOverride) return key in permissionOverride ? Boolean(permissionOverride[key]) : true;
+      if (!ready) return true;
+      return key in sidebarPermissions ? sidebarPermissions[key] : true;
+    }
+    if (permissionOverride) return Boolean(permissionOverride[key]);
+    if (fullAccess) return true;
+    if (!ready) return false;
+    return Boolean(sidebarPermissions[key]);
   };
 
-  const leftItems = LEFT_ITEMS.filter((item) => canView(item.key));
-  const rightItems = RIGHT_ITEMS.filter((item) => canView(item.key));
+  const tabs = (isProponent ? PROPONENT_ITEMS : STAFF_ITEMS).filter((item) => canView(item.key)).slice(0, MAX_TABS);
+  // Two tabs left of the FAB; the rest (plus "More") on the right.
+  const leftItems = tabs.slice(0, 2);
+  const rightItems = tabs.slice(2);
+  const showHome = canView('dashboard');
   const homeActive = view === 'dashboard';
+  // Fixed slot grid (2 per side of the FAB), padded with empty slots, so every
+  // role's tabs line up the same: "More" always sits in the far-right slot and
+  // the notch stays centered even for roles with 0–1 tabs (e.g. Viewer).
+  const rightCount = rightItems.length + 1; // + "More"
+  const sideSlots = Math.max(2, leftItems.length, rightCount);
+  const spacers = (n: number, side: string) =>
+    Array.from({ length: Math.max(0, n) }, (_, i) => <div key={`${side}-pad-${i}`} className="flex-1" aria-hidden="true" />);
 
   const renderItem = (item: BottomNavItem) => {
     const active = view === item.key;
@@ -98,7 +157,7 @@ export function ProponentBottomNav({
           scrolled content can never show through the notch or beside the FAB. */}
       <div className="absolute inset-0" style={{ backgroundColor: 'var(--background)' }} />
 
-      {/* Notched bar background, pinned to the bottom of the taller wrapper. */}
+      {/* Bar background (notched when the Home FAB is shown), pinned to the bottom of the taller wrapper. */}
       <div
         className="absolute left-0 right-0 bottom-0"
         style={{
@@ -106,8 +165,8 @@ export function ProponentBottomNav({
           backgroundColor: 'var(--surface)',
           borderTop: '1px solid var(--border-subtle)',
           boxShadow: '0 -8px 20px rgba(0,0,0,0.18)',
-          maskImage: NOTCH_MASK,
-          WebkitMaskImage: NOTCH_MASK,
+          maskImage: showHome ? NOTCH_MASK : undefined,
+          WebkitMaskImage: showHome ? NOTCH_MASK : undefined,
         }}
       />
 
@@ -115,9 +174,11 @@ export function ProponentBottomNav({
         className="absolute left-0 right-0 bottom-0 flex items-stretch"
         style={{ height: BAR_HEIGHT, paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
       >
+        {showHome && spacers(sideSlots - leftItems.length, 'left')}
         {leftItems.map(renderItem)}
-        <div style={{ width: NOTCH_RADIUS * 2 }} aria-hidden="true" />
+        {showHome && <div style={{ width: NOTCH_RADIUS * 2 }} aria-hidden="true" />}
         {rightItems.map(renderItem)}
+        {showHome && spacers(sideSlots - rightCount, 'right')}
         <button
           type="button"
           onClick={onOpenMore}
@@ -129,25 +190,27 @@ export function ProponentBottomNav({
         </button>
       </div>
 
-      <button
-        type="button"
-        onClick={() => onViewChange('dashboard')}
-        aria-label="Home"
-        aria-current={homeActive ? 'page' : undefined}
-        className="absolute left-1/2 flex items-center justify-center cursor-pointer"
-        style={{
-          top: TOP_CLEARANCE - FAB_LIFT - FAB_SIZE / 2,
-          width: FAB_SIZE,
-          height: FAB_SIZE,
-          borderRadius: '9999px',
-          transform: 'translateX(-50%)',
-          backgroundColor: 'var(--nav-active-bg)',
-          color: 'var(--nav-active-text)',
-          boxShadow: '0 10px 22px rgba(0,0,0,0.35)',
-        }}
-      >
-        <LayoutDashboard size={24} strokeWidth={homeActive ? 2.4 : 2} />
-      </button>
+      {showHome && (
+        <button
+          type="button"
+          onClick={() => onViewChange('dashboard')}
+          aria-label="Home"
+          aria-current={homeActive ? 'page' : undefined}
+          className="absolute left-1/2 flex items-center justify-center cursor-pointer"
+          style={{
+            top: TOP_CLEARANCE - FAB_LIFT - FAB_SIZE / 2,
+            width: FAB_SIZE,
+            height: FAB_SIZE,
+            borderRadius: '9999px',
+            transform: 'translateX(-50%)',
+            backgroundColor: 'var(--nav-active-bg)',
+            color: 'var(--nav-active-text)',
+            boxShadow: '0 10px 22px rgba(0,0,0,0.35)',
+          }}
+        >
+          <LayoutDashboard size={24} strokeWidth={homeActive ? 2.4 : 2} />
+        </button>
+      )}
     </div>
   );
 }
