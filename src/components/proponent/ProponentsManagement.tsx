@@ -148,6 +148,19 @@ function fmtDate(value?: string | null) {
   return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
 }
 
+// Live thousand-separator formatting for currency-amount inputs (Capital
+// Stock, Advance Lease Payment/Security Deposit/Performance Security,
+// property schedule Rate/MGL) — strips everything but digits and a single
+// decimal point, then re-inserts commas every 3 digits on the integer part.
+function formatAmountInput(value: string): string {
+  const cleaned = value.replace(/[^\d.]/g, '');
+  const firstDot = cleaned.indexOf('.');
+  const intPart = firstDot === -1 ? cleaned : cleaned.slice(0, firstDot);
+  const decPart = firstDot === -1 ? '' : cleaned.slice(firstDot + 1).replace(/\./g, '');
+  const withCommas = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return firstDot === -1 ? withCommas : `${withCommas}.${decPart}`;
+}
+
 // yyyy-mm-dd, what <input type="date"> requires.
 function toDateInputValue(value?: string | null) {
   if (!value) return '';
@@ -1283,30 +1296,36 @@ export function ProponentsManagement() {
                             }
                           />
                         </td>
-                        <td className="px-1 py-1 border-b" style={{ borderColor: 'var(--input-border)' }}>
-                          <input
-                            type="date"
-                            className="app-form-control app-form-control-sm w-36"
-                            value={row.date_from}
-                            disabled={loadingLocation}
-                            onChange={(e) =>
+                        <td className="px-1 py-1 border-b w-36" style={{ borderColor: 'var(--input-border)' }}>
+                          <DatePicker
+                            mode="single"
+                            fullWidth
+                            boxed
+                            placeholder="Select date"
+                            value={dateInputToDate(row.date_from)}
+                            onChange={(d: Date | null) =>
                               setForm((p) => ({
                                 ...p,
-                                properties: p.properties.map((r, ri) => (ri === i ? { ...r, date_from: e.target.value } : r)),
+                                properties: p.properties.map((r, ri) =>
+                                  ri === i ? { ...r, date_from: dateToDateInputValue(d) } : r,
+                                ),
                               }))
                             }
                           />
                         </td>
-                        <td className="px-1 py-1 border-b" style={{ borderColor: 'var(--input-border)' }}>
-                          <input
-                            type="date"
-                            className="app-form-control app-form-control-sm w-36"
-                            value={row.date_to}
-                            disabled={loadingLocation}
-                            onChange={(e) =>
+                        <td className="px-1 py-1 border-b w-36" style={{ borderColor: 'var(--input-border)' }}>
+                          <DatePicker
+                            mode="single"
+                            fullWidth
+                            boxed
+                            placeholder="Select date"
+                            value={dateInputToDate(row.date_to)}
+                            onChange={(d: Date | null) =>
                               setForm((p) => ({
                                 ...p,
-                                properties: p.properties.map((r, ri) => (ri === i ? { ...r, date_to: e.target.value } : r)),
+                                properties: p.properties.map((r, ri) =>
+                                  ri === i ? { ...r, date_to: dateToDateInputValue(d) } : r,
+                                ),
                               }))
                             }
                           />
@@ -1345,7 +1364,9 @@ export function ProponentsManagement() {
                             onChange={(e) =>
                               setForm((p) => ({
                                 ...p,
-                                properties: p.properties.map((r, ri) => (ri === i ? { ...r, rate_sqm_mo: e.target.value } : r)),
+                                properties: p.properties.map((r, ri) =>
+                                  ri === i ? { ...r, rate_sqm_mo: formatAmountInput(e.target.value) } : r,
+                                ),
                               }))
                             }
                           />
@@ -1377,7 +1398,9 @@ export function ProponentsManagement() {
                             onChange={(e) =>
                               setForm((p) => ({
                                 ...p,
-                                properties: p.properties.map((r, ri) => (ri === i ? { ...r, mgl_mo: e.target.value } : r)),
+                                properties: p.properties.map((r, ri) =>
+                                  ri === i ? { ...r, mgl_mo: formatAmountInput(e.target.value) } : r,
+                                ),
                               }))
                             }
                           />
@@ -1620,7 +1643,7 @@ function CapitalField({
           value={amount}
           disabled={disabled}
           placeholder="0.00"
-          onChange={(e) => onAmountChange(e.target.value)}
+          onChange={(e) => onAmountChange(formatAmountInput(e.target.value))}
         />
         <select
           className="shrink-0 border-0 bg-transparent outline-none px-1.5 py-1"
