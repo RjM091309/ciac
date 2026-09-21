@@ -20,6 +20,7 @@ export type AppView =
   | 'reports:analytics'
   | 'settings:users'
   | 'settings:locator-users'
+  | 'settings:proponents'
   | 'settings:requirement-categories'
   | 'settings:inspection-types'
   | 'settings:compliance-types'

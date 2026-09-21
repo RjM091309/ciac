@@ -13,6 +13,19 @@ exports.list = async (req, res) => {
   }
 };
 
+// Locators/Proponent List page: same underlying proponents, but with
+// Business Type / Start-End-Lease Term / Encoded By resolved dynamically
+// from the applications/contracts/users tables instead of duplicated data.
+exports.listForLocatorList = async (req, res) => {
+  try {
+    const rows = await Proponent.listProponentsForLocatorList();
+    return res.json({ success: true, data: rows });
+  } catch (error) {
+    console.error("List locators error:", error);
+    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+  }
+};
+
 // Proponent self-service: returns the caller's own linked profile plus any
 // pending change request and recent request history.
 // `req.proponent` is populated by requireProponentSelf.
@@ -288,7 +301,7 @@ exports.getById = async (req, res) => {
 
 exports.create = async (req, res) => {
   try {
-    const { user_id, business_name, registration_no, tin, address, contact_no, is_active } = req.body || {};
+    const { user_id, business_name, registration_no, tin, address, contact_no, location, is_active } = req.body || {};
     if (!business_name) return res.status(400).json({ success: false, message: "business_name is required" });
 
     const row = await Proponent.createProponent({
@@ -298,6 +311,7 @@ exports.create = async (req, res) => {
       tin,
       address,
       contact_no,
+      location,
       created_by: req.user?.id ?? null,
       is_active,
     });
@@ -313,7 +327,7 @@ exports.update = async (req, res) => {
     const id = Number(req.params.id);
     if (!Number.isFinite(id)) return res.status(400).json({ success: false, message: "Invalid id" });
 
-    const { user_id, business_name, registration_no, tin, address, contact_no, is_active } = req.body || {};
+    const { user_id, business_name, registration_no, tin, address, contact_no, location, is_active } = req.body || {};
     const row = await Proponent.updateProponent(id, {
       user_id,
       business_name,
@@ -321,6 +335,7 @@ exports.update = async (req, res) => {
       tin,
       address,
       contact_no,
+      location,
       is_active,
       updated_by: req.user?.id ?? null,
     });

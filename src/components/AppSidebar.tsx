@@ -304,6 +304,7 @@ export function AppSidebar({
     canView('applications:new') ||
     canView('applications:renewals') ||
     canView('applications:requirements') ||
+    canView('settings:proponents') ||
     canView('assessment:queue') ||
     canView('approval:queue');
   const showComplianceInspection = canView('compliance:inspections');
@@ -330,6 +331,7 @@ export function AppSidebar({
     canView('applications:new') && { key: 'applications:new', label: 'Applications', active: view === 'applications:new', onClick: () => onViewChange('applications:new'), icon: FilePlus2 },
     canView('applications:renewals') && { key: 'applications:renewals', label: 'Renewal Tracking', active: view === 'applications:renewals', onClick: () => onViewChange('applications:renewals'), icon: RefreshCw },
     canView('applications:requirements') && { key: 'applications:requirements', label: 'Requirements', active: view === 'applications:requirements', onClick: () => onViewChange('applications:requirements'), icon: ClipboardList },
+    canView('settings:proponents') && { key: 'settings:proponents', label: 'Locators / Proponent List', active: view === 'settings:proponents', onClick: () => onViewChange('settings:proponents'), icon: Users },
     canView('assessment:queue') && { key: 'assessment:queue', label: 'Evaluation Queue', active: view === 'assessment:queue', onClick: () => onViewChange('assessment:queue'), icon: ClipboardCheck },
     canView('approval:queue') && { key: 'approval:queue', label: 'Approval Queue', active: view === 'approval:queue', onClick: () => onViewChange('approval:queue'), icon: Stamp },
   ].filter(Boolean) as SidebarLeaf[];

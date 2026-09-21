@@ -49,6 +49,9 @@ router.patch("/change-requests/:id/reject", requireMenuAccess(MENU_KEY, "edit"),
 // only, though: this returns every business's contact info and decrypted
 // TIN, which a Locator account has no legitimate reason to enumerate.
 router.get("/", requireStaffRole, proponentsController.list);
+// Locators/Proponent List admin page — before "/:id" for the same reason as
+// "me"/"change-requests" above.
+router.get("/locator-list", requireMenuAccess(MENU_KEY, "view"), proponentsController.listForLocatorList);
 router.get("/:id", requireMenuAccess(MENU_KEY, "view"), proponentsController.getById);
 router.post("/", requireMenuAccess(MENU_KEY, "add"), proponentsController.create);
 router.put("/:id", requireMenuAccess(MENU_KEY, "edit"), proponentsController.update);
