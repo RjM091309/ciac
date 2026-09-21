@@ -451,6 +451,8 @@ export function ProponentsManagement() {
     setSaving(true);
     setError(null);
     try {
+      // Same field set for both create and edit — createProponent now persists
+      // the full profile up front instead of requiring a later edit.
       const payload: any = {
         user_id: form.user_id.trim() ? Number(form.user_id) : null,
         business_name: form.business_name.trim(),
@@ -459,32 +461,31 @@ export function ProponentsManagement() {
         address: form.address.trim() || null,
         contact_no: form.contact_no.trim() || null,
         location: form.location.trim() || null,
+        ref_code: form.ref_code.trim() || null,
+        lease_address: form.lease_address.trim() || null,
+        account_officer_id: form.account_officer_id.trim() ? Number(form.account_officer_id) : null,
+        sec_registration_date: form.sec_registration_date || null,
+        date_signed: form.date_signed || null,
+        grace_period: form.grace_period.trim() || null,
+        is_sublease: form.is_sublease,
+        sub_pgro: form.sub_pgro.trim() || null,
+        sub_pgrr: form.sub_pgrr.trim() || null,
+        land_use: form.land_use.trim() || null,
+        extension_date: form.extension_date || null,
+        extension_remarks: form.extension_remarks.trim() || null,
+        authorized_capital: form.authorized_capital.trim() || null,
+        authorized_capital_currency: form.authorized_capital_currency || null,
+        subscribed_capital: form.subscribed_capital.trim() || null,
+        subscribed_capital_currency: form.subscribed_capital_currency || null,
+        paid_up_capital: form.paid_up_capital.trim() || null,
+        paid_up_capital_currency: form.paid_up_capital_currency || null,
       };
 
-      // Profile fields are only settable once a locator exists (createProponent
-      // deliberately keeps new-locator creation to the bare essentials above).
+      // Type of Contract lives on the proponent's current contract record,
+      // which only exists once editing (create has no contract yet — see
+      // Contract.setContractTypeForProponent's no-op note).
       if (editing) {
-        Object.assign(payload, {
-          ref_code: form.ref_code.trim() || null,
-          lease_address: form.lease_address.trim() || null,
-          account_officer_id: form.account_officer_id.trim() ? Number(form.account_officer_id) : null,
-          sec_registration_date: form.sec_registration_date || null,
-          date_signed: form.date_signed || null,
-          grace_period: form.grace_period.trim() || null,
-          is_sublease: form.is_sublease,
-          sub_pgro: form.sub_pgro.trim() || null,
-          sub_pgrr: form.sub_pgrr.trim() || null,
-          land_use: form.land_use.trim() || null,
-          extension_date: form.extension_date || null,
-          extension_remarks: form.extension_remarks.trim() || null,
-          authorized_capital: form.authorized_capital.trim() || null,
-          authorized_capital_currency: form.authorized_capital_currency || null,
-          subscribed_capital: form.subscribed_capital.trim() || null,
-          subscribed_capital_currency: form.subscribed_capital_currency || null,
-          paid_up_capital: form.paid_up_capital.trim() || null,
-          paid_up_capital_currency: form.paid_up_capital_currency || null,
-          contract_type_code: form.contract_type_code || null,
-        });
+        payload.contract_type_code = form.contract_type_code || null;
       }
 
       if (!payload.business_name) throw new Error('Business name is required');
@@ -749,63 +750,17 @@ export function ProponentsManagement() {
         }
         widthClassName="max-w-[75vw]"
       >
-        {!editing ? (
-          // New locator: only what createProponent actually accepts — Profile
-          // fields (below) only make sense once the locator exists.
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-3 gap-y-2">
-            <Field compact label="Business name" className="col-span-2">
-              <input
-                className="app-form-control app-form-control-sm"
-                value={form.business_name}
-                onChange={(e) => setForm((p) => ({ ...p, business_name: e.target.value }))}
-              />
-            </Field>
-            <Field compact label="Linked user">
-              <AppSelect
-                options={userOptions}
-                value={form.user_id}
-                onChange={(value) => setForm((p) => ({ ...p, user_id: value || '' }))}
-                placeholder="Select..."
-                isClearable
-                isDisabled={saving}
-              />
-            </Field>
-            <Field compact label="Registration no">
-              <input
-                className="app-form-control app-form-control-sm"
-                value={form.registration_no}
-                onChange={(e) => setForm((p) => ({ ...p, registration_no: e.target.value }))}
-              />
-            </Field>
-            <Field compact label="TIN">
-              <input
-                className="app-form-control app-form-control-sm"
-                value={form.tin}
-                onChange={(e) => setForm((p) => ({ ...p, tin: e.target.value }))}
-              />
-            </Field>
-            <Field compact label="Contact no">
-              <input
-                className="app-form-control app-form-control-sm"
-                value={form.contact_no}
-                onChange={(e) => setForm((p) => ({ ...p, contact_no: e.target.value }))}
-              />
-            </Field>
-            <Field compact label="Address" className="col-span-2">
-              <input
-                className="app-form-control app-form-control-sm"
-                value={form.address}
-                onChange={(e) => setForm((p) => ({ ...p, address: e.target.value }))}
-              />
-            </Field>
-          </div>
-        ) : (
-          // Editing: same field groupings/positions as the legacy BRIDGE
-          // system's Locator's Information form — one flex row per visual
-          // row of the reference form, each field given a width fraction
-          // matching it (no shared grid-row-height coupling between
-          // differently-sized rows, which is what caused the cramped
-          // overlap in an earlier attempt at this layout).
+        {(() => {
+          // Same field layout for New and Edit — same grouping/positions as
+          // the legacy BRIDGE system's Locator's Information form, one flex
+          // row per visual row of the reference form, each field given a
+          // width fraction matching it (no shared grid-row-height coupling
+          // between differently-sized rows, which is what caused the
+          // cramped overlap in an earlier attempt at this layout). Start/End
+          // Term and Lease Term are contract-derived and only exist once a
+          // contract has been filed against this locator, so they read
+          // straight off `editing` (blank for a not-yet-created locator).
+          return (
           <div className="flex flex-col gap-3">
             {/* Row 1 and Row 2 share this exact column template (same track sizes, same gap,
                 same column count) so their edges line up vertically — Row 2 nests
@@ -1002,7 +957,7 @@ export function ProponentsManagement() {
                       <input
                         className="flex-1 min-w-0 border-0 bg-transparent outline-none px-2 py-1"
                         style={{ color: 'var(--text)' }}
-                        value={fmtDate(editing.start_term)}
+                        value={fmtDate(editing?.start_term)}
                         disabled
                         readOnly
                       />
@@ -1015,7 +970,7 @@ export function ProponentsManagement() {
                       <input
                         className="flex-1 min-w-0 border-0 bg-transparent outline-none px-2 py-1"
                         style={{ color: 'var(--text)' }}
-                        value={fmtDate(editing.end_term)}
+                        value={fmtDate(editing?.end_term)}
                         disabled
                         readOnly
                       />
@@ -1031,7 +986,7 @@ export function ProponentsManagement() {
                       <input
                         className="flex-1 min-w-0 border-0 bg-transparent outline-none px-2 py-1"
                         style={{ color: 'var(--text)' }}
-                        value={editing.lease_term || '—'}
+                        value={editing?.lease_term || '—'}
                         disabled
                         readOnly
                       />
@@ -1054,7 +1009,8 @@ export function ProponentsManagement() {
               </label>
             </div>
           </div>
-        )}
+          );
+        })()}
       </SidePanel>
 
       <ConfirmModal

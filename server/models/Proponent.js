@@ -410,6 +410,24 @@ async function createProponent({
   address,
   contact_no,
   location,
+  ref_code,
+  lease_address,
+  account_officer_id,
+  sec_registration_date,
+  date_signed,
+  grace_period,
+  is_sublease,
+  sub_pgro,
+  sub_pgrr,
+  land_use,
+  extension_date,
+  extension_remarks,
+  authorized_capital,
+  authorized_capital_currency,
+  subscribed_capital,
+  subscribed_capital_currency,
+  paid_up_capital,
+  paid_up_capital_currency,
   created_by,
   is_active = 1,
 }) {
@@ -417,6 +435,8 @@ async function createProponent({
   const active = is_active ? 1 : 0;
   const userId = toInt(user_id);
   const createdBy = toInt(created_by);
+  const accountOfficerId = toInt(account_officer_id);
+  const isSublease = is_sublease === null || is_sublease === undefined ? null : is_sublease ? 1 : 0;
 
   const newId = await runInTransaction(async (tx) => {
     // Minted here, never accepted from the caller — same reasoning as
@@ -426,12 +446,29 @@ async function createProponent({
     const result = await tx.query(
       `
       INSERT INTO dbo.proponents
-        (user_id,business_name,registration_no,tin,address,contact_no,location,ref_no,created_by,updated_by,created_at,updated_at,is_active)
+        (user_id,business_name,registration_no,tin,address,contact_no,location,
+         ref_code,lease_address,account_officer_id,sec_registration_date,date_signed,
+         grace_period,is_sublease,sub_pgro,sub_pgrr,land_use,extension_date,extension_remarks,
+         authorized_capital,authorized_capital_currency,subscribed_capital,subscribed_capital_currency,
+         paid_up_capital,paid_up_capital_currency,
+         ref_no,created_by,updated_by,created_at,updated_at,is_active)
       OUTPUT INSERTED.id
       VALUES
-        (@param0,@param1,@param2,@param3,@param4,@param5,@param6,@param7,@param8,NULL,GETDATE(),NULL,@param9)
+        (@param0,@param1,@param2,@param3,@param4,@param5,@param6,
+         @param7,@param8,@param9,@param10,@param11,
+         @param12,@param13,@param14,@param15,@param16,@param17,@param18,
+         @param19,@param20,@param21,@param22,
+         @param23,@param24,
+         @param25,@param26,NULL,GETDATE(),NULL,@param27)
       `,
-      [userId, business_name, registration_no, encryptValue(tin), address, contact_no, location ?? null, refNo, createdBy, active]
+      [
+        userId, business_name, registration_no, encryptValue(tin), address, contact_no, location ?? null,
+        ref_code ?? null, lease_address ?? null, accountOfficerId, sec_registration_date ?? null, date_signed ?? null,
+        grace_period ?? null, isSublease, sub_pgro ?? null, sub_pgrr ?? null, land_use ?? null, extension_date ?? null, extension_remarks ?? null,
+        authorized_capital ?? null, authorized_capital_currency ?? null, subscribed_capital ?? null, subscribed_capital_currency ?? null,
+        paid_up_capital ?? null, paid_up_capital_currency ?? null,
+        refNo, createdBy, active,
+      ]
     );
     return result?.recordset?.[0]?.id;
   });

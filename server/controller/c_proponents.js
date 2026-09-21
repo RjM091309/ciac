@@ -302,7 +302,34 @@ exports.getById = async (req, res) => {
 
 exports.create = async (req, res) => {
   try {
-    const { user_id, business_name, registration_no, tin, address, contact_no, location, is_active } = req.body || {};
+    const {
+      user_id,
+      business_name,
+      registration_no,
+      tin,
+      address,
+      contact_no,
+      location,
+      ref_code,
+      lease_address,
+      account_officer_id,
+      sec_registration_date,
+      date_signed,
+      grace_period,
+      is_sublease,
+      sub_pgro,
+      sub_pgrr,
+      land_use,
+      extension_date,
+      extension_remarks,
+      authorized_capital,
+      authorized_capital_currency,
+      subscribed_capital,
+      subscribed_capital_currency,
+      paid_up_capital,
+      paid_up_capital_currency,
+      is_active,
+    } = req.body || {};
     if (!business_name) return res.status(400).json({ success: false, message: "business_name is required" });
 
     const row = await Proponent.createProponent({
@@ -313,6 +340,24 @@ exports.create = async (req, res) => {
       address,
       contact_no,
       location,
+      ref_code,
+      lease_address,
+      account_officer_id,
+      sec_registration_date,
+      date_signed,
+      grace_period,
+      is_sublease,
+      sub_pgro,
+      sub_pgrr,
+      land_use,
+      extension_date,
+      extension_remarks,
+      authorized_capital,
+      authorized_capital_currency,
+      subscribed_capital,
+      subscribed_capital_currency,
+      paid_up_capital,
+      paid_up_capital_currency,
       created_by: req.user?.id ?? null,
       is_active,
     });
