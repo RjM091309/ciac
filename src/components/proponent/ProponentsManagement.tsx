@@ -393,7 +393,7 @@ export function ProponentsManagement() {
 
   return (
     <div className="space-y-4 sm:space-y-5">
-      <div className="glass-card p-4 sm:p-5 !border-transparent overflow-hidden" style={{ backgroundColor: 'var(--surface)' }}>
+      <div className="glass-card p-3 sm:p-5 !border-transparent overflow-hidden" style={{ backgroundColor: 'var(--surface)' }}>
         {error && (
           <div
             className="mb-3 rounded-lg border px-3 py-2 text-xs"
@@ -403,8 +403,9 @@ export function ProponentsManagement() {
           </div>
         )}
 
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-3">
-          <div className="relative group w-full sm:w-72">
+        {/* Search + New Locator share one row on every size. */}
+        <div className="flex items-center justify-between gap-2 mb-3">
+          <div className="relative group flex-1 min-w-0 sm:flex-none sm:w-72">
             <Search
               className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)] group-focus-within:text-[var(--text)] transition-colors pointer-events-none"
               size={14}
@@ -421,12 +422,13 @@ export function ProponentsManagement() {
             />
           </div>
           <button
-            className="rounded-lg px-3 py-2 text-sm font-semibold inline-flex items-center gap-1.5 shadow-sm cursor-pointer whitespace-nowrap"
+            className="shrink-0 h-9 rounded-lg px-3 text-xs sm:text-sm font-semibold inline-flex items-center gap-1.5 shadow-sm cursor-pointer whitespace-nowrap"
             style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
             onClick={openCreate}
           >
             <Plus size={15} />
-            New Locator
+            <span className="sm:hidden">New</span>
+            <span className="hidden sm:inline">New Locator</span>
           </button>
         </div>
 
@@ -455,7 +457,55 @@ export function ProponentsManagement() {
             }
           />
         ) : (
-          <div className="overflow-x-auto">
+          <>
+          {/* Phones: one card per locator instead of an 8-column table */}
+          <div className="sm:hidden space-y-2">
+            {pagedRows.map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                className="w-full text-left rounded-xl p-3 cursor-pointer active:bg-[var(--selected-bg)] transition-colors"
+                style={{
+                  border: '1px solid var(--border-subtle)',
+                  backgroundColor: 'color-mix(in oklab, var(--control-bg) 35%, transparent)',
+                }}
+                onClick={() => openEdit(p)}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0 flex-1 text-[13px] font-semibold leading-snug break-words" style={{ color: 'var(--text)' }}>
+                    {p.business_name}
+                  </div>
+                  <span className="shrink-0 text-[10px] font-semibold text-secondary tabular-nums">{p.ref_no || '—'}</span>
+                </div>
+                {p.address ? <div className="mt-0.5 text-[11px] text-secondary break-words line-clamp-2">{p.address}</div> : null}
+                {p.business_type ? (
+                  <span
+                    className="mt-2 inline-flex max-w-full items-center rounded-full border px-2 py-0.5 text-[10px] font-medium truncate"
+                    style={{ backgroundColor: 'rgba(99,102,241,0.18)', color: '#818cf8', borderColor: 'rgba(99,102,241,0.4)' }}
+                  >
+                    {p.business_type}
+                  </span>
+                ) : null}
+                <div className="mt-2.5 grid grid-cols-3 gap-2 text-[11px]">
+                  <div className="min-w-0">
+                    <div className="text-[9px] uppercase tracking-wider text-secondary">Start</div>
+                    <div className="truncate" style={{ color: 'var(--text)' }}>{fmtDate(p.start_term)}</div>
+                  </div>
+                  <div className="min-w-0">
+                    <div className="text-[9px] uppercase tracking-wider text-secondary">End</div>
+                    <div className="truncate" style={{ color: 'var(--text)' }}>{fmtDate(p.end_term)}</div>
+                  </div>
+                  <div className="min-w-0 text-right">
+                    <div className="text-[9px] uppercase tracking-wider text-secondary">Lease term</div>
+                    <div className="truncate" style={{ color: 'var(--text)' }}>{p.lease_term || '—'}</div>
+                  </div>
+                </div>
+                {p.encoded_by ? <div className="mt-2 text-[10px] text-secondary">Encoded by {p.encoded_by}</div> : null}
+              </button>
+            ))}
+          </div>
+
+          <div className="hidden sm:block overflow-x-auto">
             <table className="min-w-full text-left text-xs">
               <thead>
                 <tr style={{ borderBottom: '1px solid var(--border-subtle)' }}>
@@ -497,6 +547,7 @@ export function ProponentsManagement() {
                 ))}
               </tbody>
             </table>
+          </div>
             <DataTableControls
               page={page}
               totalPages={totalPages}
@@ -510,7 +561,7 @@ export function ProponentsManagement() {
               onPageChange={(p) => setPage(p)}
               loading={isLoading || isRevalidating}
             />
-          </div>
+          </>
         )}
       </div>
 
