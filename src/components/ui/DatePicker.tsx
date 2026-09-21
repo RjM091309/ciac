@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { CalendarDays } from 'lucide-react';
-import { Box, Button, Popover, Typography } from '@mui/material';
+import { Box, Button, Popover } from '@mui/material';
 import { alpha, styled } from '@mui/material/styles';
 import { DateCalendar } from '@mui/x-date-pickers/DateCalendar';
 import { PickersDay } from '@mui/x-date-pickers/PickersDay';
@@ -290,34 +290,6 @@ export function DatePicker({
         }}
       >
         <Box
-          sx={(t) => ({
-            px: { xs: 1.5, sm: 2 },
-            pt: { xs: 1.25, sm: 1.5 },
-            pb: { xs: 0.75, sm: 1 },
-            bgcolor: t.palette.mode === 'dark' ? '#000000' : t.palette.background.paper,
-            color: t.palette.mode === 'dark' ? '#ffffff' : t.palette.text.primary,
-          })}
-        >
-          <Typography
-            variant="overline"
-            sx={{ opacity: 0.9, letterSpacing: '0.12em', fontWeight: 700, lineHeight: 1.2, fontSize: { xs: 10, sm: 11 } }}
-          >
-            {mode === 'single' ? 'SELECTED DATE' : 'SELECTED RANGE'}
-          </Typography>
-          <Typography
-            variant="body1"
-            sx={{
-              fontWeight: 600,
-              mt: 0.25,
-              lineHeight: 1.35,
-              fontSize: { xs: '1rem', sm: '1.3rem' },
-            }}
-          >
-            {rangeText}
-          </Typography>
-        </Box>
-
-        <Box
           sx={{
             display: 'grid',
             gridTemplateColumns: showPresets ? { xs: '1fr', sm: '128px max-content' } : 'max-content',
@@ -407,6 +379,7 @@ export function DatePicker({
               height: 'auto',
               mx: { xs: 'auto', sm: 0 },
               px: { xs: 1.5, sm: 2 },
+              pt: { xs: 1.5, sm: 2 },
               pb: { xs: 1, sm: 1.5 },
               // Trim chrome only — day cell px & font sizes stay the same
               '& .MuiDateCalendar-root': { p: 0, margin: 0, width: 'max-content', maxWidth: '100%' },
