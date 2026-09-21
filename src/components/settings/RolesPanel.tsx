@@ -157,7 +157,7 @@ export function RolesPanel({
   return (
     <>
       <button
-        className="inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[11px] font-semibold cursor-pointer"
+        className="inline-flex items-center justify-center gap-1.5 rounded-lg border px-3 py-1.5 text-[11px] font-semibold cursor-pointer whitespace-nowrap"
         style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'var(--control-bg)', color: 'var(--text)' }}
         onClick={() => setOpen(true)}
       >

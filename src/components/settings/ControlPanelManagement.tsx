@@ -4,6 +4,7 @@ import { Check, Loader2, Save } from 'lucide-react';
 import { toast } from 'sonner';
 import { Skeleton, TableSkeleton } from '../ui/Skeleton';
 import { EmptyState } from '../ui/EmptyState';
+import { AppSelect } from '../ui/AppSelect';
 import { LANDING_CONFIG } from '../../config/landingConfig';
 import { roleDisplayName } from '../../lib/roleDisplay';
 
@@ -49,9 +50,10 @@ const PROPONENT_MENU_ITEMS: MenuItem[] = [
 ];
 const PROPONENT_MENU_KEYS = new Set(PROPONENT_MENU_ITEMS.map((item) => item.key));
 
-/** Fixed widths so CRUD header labels line up with toggle columns. */
+/** Fixed widths so CRUD header labels line up with toggle columns. Grid only
+ * from `sm` up — on phones each module stacks its switches under the name. */
 const CRUD_TOGGLE_COLS_CLASS =
-  'grid grid-cols-[minmax(0,1fr)_3.25rem_3.25rem_3.25rem] items-center gap-x-3';
+  'sm:grid-cols-[minmax(0,1fr)_3.25rem_3.25rem_3.25rem] sm:items-center gap-x-3';
 
 /** Pill switch: thumb stays inside track (flex + translateX only — avoids absolute + conflicting translate bugs). */
 function PermissionToggle({
@@ -341,52 +343,35 @@ export function ControlPanelManagement({ locationSearch }: { locationSearch?: st
           className="flex rounded-xl border p-1"
           style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'var(--control-bg)' }}
         >
-          <button
-            role="tab"
-            aria-selected={activeTab === 'sidebar'}
-            className="flex-1 rounded-lg px-3 py-2 flex flex-col gap-0.5 text-left transition-colors cursor-pointer"
-            style={
-              activeTab === 'sidebar'
-                ? { backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }
-                : { backgroundColor: 'transparent', color: 'var(--text)' }
-            }
-            onClick={() => setActiveTab('sidebar')}
-          >
-            <span className="text-[10px] font-semibold uppercase tracking-widest opacity-80">Sidebar</span>
-            <span className="text-sm font-bold leading-tight tracking-tight">Menu Permissions</span>
-          </button>
-          <button
-            role="tab"
-            aria-selected={activeTab === 'crud'}
-            className="flex-1 rounded-lg px-3 py-2 flex flex-col gap-0.5 text-left transition-colors cursor-pointer"
-            style={
-              activeTab === 'crud'
-                ? { backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }
-                : { backgroundColor: 'transparent', color: 'var(--text)' }
-            }
-            onClick={() => setActiveTab('crud')}
-          >
-            <span className="text-[10px] font-semibold uppercase tracking-widest opacity-80">CRUD</span>
-            <span className="text-sm font-bold leading-tight tracking-tight">Permissions</span>
-          </button>
-          <button
-            role="tab"
-            aria-selected={activeTab === 'widgets'}
-            className="flex-1 rounded-lg px-3 py-2 flex flex-col gap-0.5 text-left transition-colors cursor-pointer"
-            style={
-              activeTab === 'widgets'
-                ? { backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }
-                : { backgroundColor: 'transparent', color: 'var(--text)' }
-            }
-            onClick={() => setActiveTab('widgets')}
-          >
-            <span className="text-[10px] font-semibold uppercase tracking-widest opacity-80">Dashboard</span>
-            <span className="text-sm font-bold leading-tight tracking-tight">Widgets</span>
-          </button>
+          {(
+            [
+              ['sidebar', 'Sidebar', 'Menu Permissions', 'Sidebar'],
+              ['crud', 'CRUD', 'Permissions', 'CRUD'],
+              ['widgets', 'Dashboard', 'Widgets', 'Widgets'],
+            ] as const
+          ).map(([key, caption, title, shortTitle]) => (
+            <button
+              key={key}
+              role="tab"
+              aria-selected={activeTab === key}
+              className="flex-1 min-w-0 rounded-lg px-2 sm:px-3 py-2 flex flex-col gap-0.5 text-center sm:text-left transition-colors cursor-pointer"
+              style={
+                activeTab === key
+                  ? { backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }
+                  : { backgroundColor: 'transparent', color: 'var(--text)' }
+              }
+              onClick={() => setActiveTab(key)}
+            >
+              <span className="hidden sm:block text-[10px] font-semibold uppercase tracking-widest opacity-80">{caption}</span>
+              {/* Phones: one short word per tab so all three fit without wrapping. */}
+              <span className="sm:hidden text-[12px] font-bold leading-tight tracking-tight">{shortTitle}</span>
+              <span className="hidden sm:block text-sm font-bold leading-tight tracking-tight">{title}</span>
+            </button>
+          ))}
         </div>
       </div>
 
-      <div className="glass-card p-4 sm:p-5 !border-transparent" style={{ backgroundColor: 'var(--surface)' }}>
+      <div className="glass-card p-3 sm:p-5 !border-transparent" style={{ backgroundColor: 'var(--surface)' }}>
         {loading && !roles.length ? (
           <div className="py-2">
             <Skeleton className="h-[200px] w-full rounded-xl" />
@@ -397,9 +382,24 @@ export function ControlPanelManagement({ locationSearch }: { locationSearch?: st
             description="There are no roles available to manage permissions for."
           />
         ) : (
-          <div className="grid grid-cols-1 lg:grid-cols-[280px_1fr] gap-4">
+          <div className="grid grid-cols-1 lg:grid-cols-[280px_1fr] gap-3 sm:gap-4">
+            {/* Phones/tablets: a role dropdown instead of the tall role list,
+                so the permission switches are visible without scrolling. */}
+            <div className="lg:hidden space-y-1">
+              <div className="text-[10px] font-semibold text-secondary uppercase tracking-widest">Role</div>
+              <AppSelect
+                value={selectedRoleId}
+                onChange={(v) => v && setSelectedRoleId(v)}
+                options={roles.map((role) => ({ value: String(role.id), label: roleDisplayName(role.name) }))}
+                isClearable={false}
+              />
+              {selectedRole?.description ? (
+                <div className="text-[10px] text-secondary">{selectedRole.description}</div>
+              ) : null}
+            </div>
+
             <div
-              className="rounded-xl border p-3 h-fit"
+              className="hidden lg:block rounded-xl border p-3 h-fit"
               style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'var(--control-bg)' }}
             >
               <div className="mb-2 text-[10px] font-semibold text-secondary uppercase tracking-widest">Roles</div>
@@ -430,9 +430,9 @@ export function ControlPanelManagement({ locationSearch }: { locationSearch?: st
               </div>
             </div>
 
-            <div className="rounded-xl border p-3" style={{ borderColor: 'var(--border-subtle)' }}>
-              <div className="flex items-center justify-between gap-2 mb-3">
-                <div>
+            <div className="min-w-0 sm:rounded-xl sm:border sm:p-3" style={{ borderColor: 'var(--border-subtle)' }}>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
+                <div className="min-w-0">
                   <div className="text-[10px] font-semibold text-secondary uppercase tracking-widest">
                     {activeTab === 'sidebar'
                       ? 'Sidebar Menu Permissions'
@@ -556,7 +556,7 @@ export function ControlPanelManagement({ locationSearch }: { locationSearch?: st
                     className="space-y-2"
                   >
                     <div
-                      className={`${CRUD_TOGGLE_COLS_CLASS} gap-y-1 px-3 py-2 border rounded-lg text-[10px] font-semibold uppercase tracking-widest text-secondary`}
+                      className={`hidden sm:grid ${CRUD_TOGGLE_COLS_CLASS} gap-y-1 px-3 py-2 border rounded-lg text-[10px] font-semibold uppercase tracking-widest text-secondary`}
                       style={{ borderColor: 'var(--border-subtle)' }}
                     >
                       <span className="min-w-0">Module</span>
@@ -584,13 +584,16 @@ export function ControlPanelManagement({ locationSearch }: { locationSearch?: st
                       return (
                         <div
                           key={item.key}
-                          className={`group ${CRUD_TOGGLE_COLS_CLASS} gap-y-1 px-3 py-2.5 border rounded-lg transition-colors`}
+                          className={`group block sm:grid ${CRUD_TOGGLE_COLS_CLASS} gap-y-1 px-3 py-2.5 border rounded-lg transition-colors`}
                           style={{ borderColor: 'var(--border-subtle)' }}
                         >
                           <span className="min-w-0 text-[11px] font-medium" style={{ color: 'var(--text)' }}>
                             {item.label}
                           </span>
-                          <div className="flex min-h-[1.75rem] items-center justify-center">
+                          {/* Phones: switches sit under the name with their own labels; from sm the wrapper dissolves into the grid columns. */}
+                          <div className="mt-2 grid grid-cols-3 gap-2 sm:contents">
+                          <div className="flex flex-col sm:flex-row min-h-[1.75rem] items-center justify-center gap-1">
+                            <span className="sm:hidden text-[9px] font-semibold uppercase tracking-wider text-secondary">Add</span>
                             <PermissionToggle
                               aria-label={`${item.label} add permission`}
                               checked={row.can_add}
@@ -606,7 +609,8 @@ export function ControlPanelManagement({ locationSearch }: { locationSearch?: st
                               }
                             />
                           </div>
-                          <div className="flex min-h-[1.75rem] items-center justify-center">
+                          <div className="flex flex-col sm:flex-row min-h-[1.75rem] items-center justify-center gap-1">
+                            <span className="sm:hidden text-[9px] font-semibold uppercase tracking-wider text-secondary">Edit</span>
                             <PermissionToggle
                               aria-label={`${item.label} edit permission`}
                               checked={row.can_edit}
@@ -622,7 +626,8 @@ export function ControlPanelManagement({ locationSearch }: { locationSearch?: st
                               }
                             />
                           </div>
-                          <div className="flex min-h-[1.75rem] items-center justify-center">
+                          <div className="flex flex-col sm:flex-row min-h-[1.75rem] items-center justify-center gap-1">
+                            <span className="sm:hidden text-[9px] font-semibold uppercase tracking-wider text-secondary">Delete</span>
                             <PermissionToggle
                               aria-label={`${item.label} delete permission`}
                               checked={row.can_delete}
@@ -637,6 +642,7 @@ export function ControlPanelManagement({ locationSearch }: { locationSearch?: st
                                 }))
                               }
                             />
+                          </div>
                           </div>
                         </div>
                       );

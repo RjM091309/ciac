@@ -6,6 +6,7 @@ import {
   BarChart,
   CartesianGrid,
   Cell,
+  LabelList,
   Line,
   LineChart,
   Pie,
@@ -34,6 +35,13 @@ const STATUS_LABELS: Record<string, string> = {
   APPROVED: 'Approved',
 };
 const STATUS_ORDER = Object.keys(STATUS_LABELS);
+const MOBILE_SORT_OPTIONS = [
+  { value: 'submitted_at', label: 'Submitted date' },
+  { value: 'proponent_name', label: 'Locator' },
+  { value: 'application_no', label: 'Application no.' },
+  { value: 'application_type_name', label: 'Type' },
+  { value: 'status', label: 'Status' },
+];
 const CHART_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899', '#84cc16'];
 
 // Shared Tooltip look for every chart on this page: themed so labels stay
@@ -172,6 +180,21 @@ function readFiltersFromUrl() {
   };
 }
 
+// Phones get chart layouts that fit a ~350px card (horizontal status bars,
+// thinned month ticks) — recharts needs this in JS, not CSS.
+function useIsPhone() {
+  const query = '(max-width: 639px)';
+  const [isPhone, setIsPhone] = useState(() => typeof window !== 'undefined' && window.matchMedia(query).matches);
+  useEffect(() => {
+    const mql = window.matchMedia(query);
+    const onChange = () => setIsPhone(mql.matches);
+    onChange();
+    mql.addEventListener('change', onChange);
+    return () => mql.removeEventListener('change', onChange);
+  }, []);
+  return isPhone;
+}
+
 function usePagination<T>(items: T[], pageSize: number, page: number) {
   return useMemo(() => {
     const totalPages = Math.max(1, Math.ceil(items.length / Math.max(1, pageSize)));
@@ -219,6 +242,7 @@ export function ReportsAnalytics({ navigate }: { navigate?: (to: string, opts?: 
   const [pageSize, setPageSize] = useState(10);
 
   const tableRef = useRef<HTMLDivElement>(null);
+  const isPhone = useIsPhone();
   const { fullAccess, sidebarPermissions } = useControlPanelAccess();
   const canOpenAssessment = fullAccess || Boolean(sidebarPermissions['assessment:queue']);
 
@@ -499,7 +523,7 @@ export function ReportsAnalytics({ navigate }: { navigate?: (to: string, opts?: 
     <div className="space-y-4 sm:space-y-5">
       <div className="glass-card p-4 sm:p-5 !border-transparent" style={{ backgroundColor: 'var(--surface)' }}>
         <div className="flex flex-col lg:flex-row lg:items-end gap-3">
-          <div className="flex flex-col sm:flex-row flex-wrap gap-3 flex-1">
+          <div className="grid grid-cols-2 gap-3 sm:flex sm:flex-row sm:flex-wrap flex-1">
             <FieldLabel label="From">
               <div className="w-full sm:w-44">
                 <DatePicker mode="single" fullWidth value={dateFrom} onChange={setDateFrom} placeholder="From date" />
@@ -534,7 +558,7 @@ export function ReportsAnalytics({ navigate }: { navigate?: (to: string, opts?: 
                 />
               </div>
             </FieldLabel>
-            <FieldLabel label="New / Renewal">
+            <FieldLabel label="New / Renewal" className="col-span-2">
               <div className="w-full sm:w-40">
                 <AppSelect
                   compact
@@ -551,7 +575,8 @@ export function ReportsAnalytics({ navigate }: { navigate?: (to: string, opts?: 
             </FieldLabel>
           </div>
 
-          <div className="flex items-center gap-2">
+          {/* Phones: three equal buttons across the full width. */}
+          <div className="grid grid-cols-3 gap-2 sm:flex sm:items-center [&>button]:justify-center [&>button]:whitespace-nowrap [&>button]:px-2 sm:[&>button]:px-3">
             <button
               type="button"
               onClick={resetFilters}
@@ -592,7 +617,7 @@ export function ReportsAnalytics({ navigate }: { navigate?: (to: string, opts?: 
         </div>
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4">
+      <div className="grid grid-cols-3 lg:grid-cols-6 gap-2 sm:gap-4">
         <StatTile
           label="Total Applications"
           value={overview?.total_applications ?? '—'}
@@ -633,6 +658,36 @@ export function ReportsAnalytics({ navigate }: { navigate?: (to: string, opts?: 
           {statusChartData.length === 0 ? (
             <ChartEmpty />
           ) : (
+            isPhone ? (
+              // Phones: horizontal bars so status names read level instead of
+              // as squeezed, angled ticks; counts sit at each bar's end since
+              // hover tooltips are awkward on touch.
+              <ResponsiveContainer width="100%" height={statusChartData.length * 30 + 12}>
+                <BarChart data={statusChartData} layout="vertical" margin={{ top: 4, right: 32, left: 0, bottom: 4 }} barCategoryGap={6}>
+                  <XAxis type="number" hide allowDecimals={false} />
+                  <YAxis
+                    type="category"
+                    dataKey="status"
+                    width={92}
+                    tick={{ fontSize: 10, fill: 'var(--text-muted)' }}
+                    axisLine={false}
+                    tickLine={false}
+                  />
+                  <Tooltip {...CHART_TOOLTIP_PROPS} />
+                  <Bar
+                    dataKey="total"
+                    radius={[0, 4, 4, 0]}
+                    className="cursor-pointer"
+                    onClick={(d: any) => d?.key && drillToStatus(d.key)}
+                  >
+                    {statusChartData.map((d, i) => (
+                      <Cell key={i} fill={STATUS_TONE[d.key]?.color || CHART_COLORS[i % CHART_COLORS.length]} />
+                    ))}
+                    <LabelList dataKey="total" position="right" style={{ fontSize: 10, fill: 'var(--text)' }} />
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            ) : (
             <ResponsiveContainer width="100%" height={220}>
               <BarChart data={statusChartData} margin={{ top: 4, right: 8, left: -20, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" vertical={false} />
@@ -651,6 +706,7 @@ export function ReportsAnalytics({ navigate }: { navigate?: (to: string, opts?: 
                 </Bar>
               </BarChart>
             </ResponsiveContainer>
+            )
           )}
         </ChartCard>
 
@@ -658,7 +714,7 @@ export function ReportsAnalytics({ navigate }: { navigate?: (to: string, opts?: 
           {typeChartData.length === 0 ? (
             <ChartEmpty />
           ) : (
-            <ResponsiveContainer width="100%" height={220}>
+            <ResponsiveContainer width="100%" height={isPhone ? 180 : 220}>
               <PieChart>
                 <Tooltip {...CHART_TOOLTIP_PROPS} />
                 <Pie
@@ -701,10 +757,15 @@ export function ReportsAnalytics({ navigate }: { navigate?: (to: string, opts?: 
           {trendChartData.length === 0 ? (
             <ChartEmpty />
           ) : (
-            <ResponsiveContainer width="100%" height={220}>
-              <LineChart data={trendChartData} margin={{ top: 4, right: 8, left: -20, bottom: 0 }}>
+            <ResponsiveContainer width="100%" height={isPhone ? 190 : 220}>
+              <LineChart data={trendChartData} margin={{ top: 4, right: isPhone ? 12 : 8, left: -20, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" vertical={false} />
-                <XAxis dataKey="month" tick={{ fontSize: 10, fill: 'var(--text-muted)' }} />
+                <XAxis
+                  dataKey="month"
+                  tick={{ fontSize: 10, fill: 'var(--text-muted)' }}
+                  interval={isPhone ? 'preserveStartEnd' : undefined}
+                  minTickGap={isPhone ? 16 : undefined}
+                />
                 <YAxis tick={{ fontSize: 10, fill: 'var(--text-muted)' }} allowDecimals={false} />
                 <Tooltip {...CHART_TOOLTIP_PROPS} />
                 <Line
@@ -725,7 +786,7 @@ export function ReportsAnalytics({ navigate }: { navigate?: (to: string, opts?: 
           Permits & Inspections
         </h3>
 
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4">
+        <div className="grid grid-cols-3 lg:grid-cols-6 gap-2 sm:gap-4">
           <StatTile label="Total Permits" value={overview ? totalPermits : '—'} />
           <StatTile label="Valid Permits" value={overview?.permits_by_status?.VALID ?? 0} tone={PERMIT_STATUS_TONE.VALID.color} />
           <StatTile label="Expiring Permits" value={overview?.permits_by_status?.EXPIRING ?? 0} tone={PERMIT_STATUS_TONE.EXPIRING.color} />
@@ -794,7 +855,80 @@ export function ReportsAnalytics({ navigate }: { navigate?: (to: string, opts?: 
           />
         ) : (
           <>
-            <div className="overflow-x-auto">
+            {/* Phones: cards, with a sort picker standing in for the clickable column headers. */}
+            <div className="sm:hidden">
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-[10px] font-semibold uppercase tracking-wider text-secondary shrink-0">Sort by</span>
+                <div className="flex-1 min-w-0">
+                  <AppSelect
+                    compact
+                    placeholder="Default"
+                    value={sortKey ?? ''}
+                    onChange={(v) => {
+                      setSortKey((v || null) as typeof sortKey);
+                      setSortDir('asc');
+                    }}
+                    options={MOBILE_SORT_OPTIONS}
+                    isClearable
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))}
+                  disabled={!sortKey}
+                  className={cn(
+                    'shrink-0 h-8 w-8 inline-flex items-center justify-center rounded-lg border',
+                    sortKey ? 'cursor-pointer' : 'opacity-40 cursor-not-allowed'
+                  )}
+                  style={{ borderColor: 'var(--border)', color: 'var(--text)' }}
+                  aria-label={sortDir === 'asc' ? 'Sorted ascending — switch to descending' : 'Sorted descending — switch to ascending'}
+                >
+                  {sortDir === 'asc' ? <ArrowUp size={14} /> : <ArrowDown size={14} />}
+                </button>
+              </div>
+
+              <div className="space-y-2">
+                {pg.pageItems.map((r) => {
+                  const clickable = canOpenAssessment && Boolean(navigate);
+                  const Tag: any = clickable ? 'button' : 'div';
+                  return (
+                    <Tag
+                      key={r.id}
+                      type={clickable ? 'button' : undefined}
+                      className={cn(
+                        'w-full text-left rounded-xl p-3 block',
+                        clickable && 'cursor-pointer active:bg-[var(--selected-bg)] transition-colors'
+                      )}
+                      style={{
+                        border: '1px solid var(--border-subtle)',
+                        backgroundColor: 'color-mix(in oklab, var(--control-bg) 35%, transparent)',
+                      }}
+                      onClick={clickable ? () => navigate!(`/assessment?applicationId=${r.id}&tab=Compliance`) : undefined}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0 flex-1">
+                          <div className="text-[13px] font-semibold leading-snug break-words" style={{ color: 'var(--text)' }}>
+                            {r.proponent_name || '—'}
+                          </div>
+                          <div className="mt-0.5 text-[11px] text-secondary">
+                            {r.application_no} · {r.is_renewal ? 'Renewal' : 'New'}
+                          </div>
+                        </div>
+                        <div className="shrink-0">
+                          <StatusBadge status={r.status} />
+                        </div>
+                      </div>
+                      <div className="mt-2 flex items-center justify-between gap-2 text-[11px]">
+                        <span className="text-secondary truncate">{r.application_type_name || '—'}</span>
+                        <span className="shrink-0 text-secondary">Submitted {fmtDate(r.submitted_at)}</span>
+                      </div>
+                    </Tag>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="hidden sm:block overflow-x-auto">
               <table className="min-w-full text-left text-xs">
                 <thead>
                   <tr style={{ borderBottom: '1px solid var(--border-subtle)' }}>
@@ -913,9 +1047,9 @@ function SortableHeader<K extends string>({
   );
 }
 
-function FieldLabel({ label, children }: { label: string; children: React.ReactNode }) {
+function FieldLabel({ label, children, className }: { label: string; children: React.ReactNode; className?: string }) {
   return (
-    <div className="space-y-1">
+    <div className={cn('space-y-1 min-w-0', className)}>
       <div className="text-[10px] font-semibold text-secondary uppercase tracking-widest">{label}</div>
       {children}
     </div>
@@ -943,13 +1077,15 @@ function StatTile({
       onClick={onClick}
       title={title}
       className={cn(
-        'rounded-xl px-3 py-3 flex flex-col gap-1 shadow-sm text-left w-full',
+        'rounded-xl px-2.5 sm:px-3 py-2.5 sm:py-3 flex flex-col justify-between gap-1 shadow-sm text-left w-full h-full min-w-0',
         onClick && 'cursor-pointer transition-transform hover:-translate-y-0.5 hover:shadow-md'
       )}
       style={{ backgroundColor: 'color-mix(in oklab, var(--surface) 94%, white 6%)' }}
     >
-      <span className="text-[10px] font-semibold text-secondary uppercase tracking-widest">{label}</span>
-      <span className="text-base sm:text-lg font-bold leading-tight" style={{ color: tone || 'var(--text)' }}>
+      <span className="text-[9px] sm:text-[10px] font-semibold text-secondary uppercase tracking-wide sm:tracking-widest leading-tight">
+        {label}
+      </span>
+      <span className="text-lg font-bold leading-tight" style={{ color: tone || 'var(--text)' }}>
         {value}
       </span>
     </Tag>
@@ -958,7 +1094,7 @@ function StatTile({
 
 function ChartCard({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="glass-card p-4 !border-transparent" style={{ backgroundColor: 'var(--surface)' }}>
+    <div className="glass-card p-3.5 sm:p-4 !border-transparent min-w-0" style={{ backgroundColor: 'var(--surface)' }}>
       <h4 className="text-[11px] font-semibold text-secondary uppercase tracking-widest mb-2">{title}</h4>
       {children}
     </div>

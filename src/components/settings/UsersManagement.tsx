@@ -394,9 +394,132 @@ export function UsersManagement({
     }
   }
 
+  function renderStatusBadges(u: UserRow) {
+    return (
+      <>
+        <span
+          className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold"
+          style={
+            u.status === 'SUSPENDED'
+              ? { backgroundColor: 'rgba(245,158,11,.14)', color: 'rgba(245,158,11,.95)' }
+              : u.is_active === 1
+                ? { backgroundColor: 'rgba(34,197,94,.14)', color: 'rgba(34,197,94,.95)' }
+                : { backgroundColor: 'rgba(148,163,184,.14)', color: 'rgba(148,163,184,.95)' }
+          }
+        >
+          {u.status === 'SUSPENDED' ? 'Suspended' : u.is_active === 1 ? 'Active' : 'Deactivated'}
+        </span>
+        {u.is_locked && (
+          <span
+            className="ml-1.5 inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold"
+            style={{ backgroundColor: 'rgba(239,68,68,.14)', color: 'rgba(239,68,68,.95)' }}
+            title="Locked out from repeated failed login attempts"
+          >
+            Locked
+          </span>
+        )}
+      </>
+    );
+  }
+
+  function renderUserActions(u: UserRow) {
+    return (
+      <>
+        {canEdit ? (
+          <button
+            className={cn(
+              'inline-flex items-center justify-center rounded-md p-1.5 text-secondary',
+              saving ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
+            )}
+            onClick={() => openEdit(u)}
+            disabled={saving}
+            aria-label={`Edit ${u.username}`}
+            title="Edit"
+          >
+            <Pencil size={14} />
+          </button>
+        ) : null}
+        {u.is_active === 1 ? (
+          <>
+            {canDelete ? (
+              <button
+                className={cn(
+                  'inline-flex items-center justify-center rounded-md p-1.5 text-secondary',
+                  saving ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
+                )}
+                onClick={() => setConfirmSuspendId(u.id)}
+                disabled={saving}
+                aria-label={`Suspend ${u.username}`}
+                title="Suspend (temporary hold)"
+              >
+                <Ban size={14} />
+              </button>
+            ) : null}
+            {canDelete ? (
+              <button
+                className={cn(
+                  'inline-flex items-center justify-center rounded-md p-1.5 text-secondary',
+                  saving ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
+                )}
+                onClick={() => setConfirmDeactivateId(u.id)}
+                disabled={saving}
+                aria-label={`Deactivate ${u.username}`}
+                title="Deactivate"
+              >
+                <UserX size={14} />
+              </button>
+            ) : null}
+            {canEdit ? (
+              <button
+                className={cn(
+                  'inline-flex items-center justify-center rounded-md p-1.5 text-secondary',
+                  saving ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
+                )}
+                onClick={() => setConfirmRevokeId(u.id)}
+                disabled={saving}
+                aria-label={`Revoke sessions for ${u.username}`}
+                title="Revoke active sessions"
+              >
+                <LogOut size={14} />
+              </button>
+            ) : null}
+          </>
+        ) : u.status === 'SUSPENDED' ? (
+          canEdit ? (
+            <button
+              className={cn(
+                'inline-flex items-center justify-center rounded-md p-1.5 text-secondary',
+                saving ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
+              )}
+              onClick={() => void unsuspend(u.id)}
+              disabled={saving}
+              aria-label={`Reinstate ${u.username}`}
+              title="Lift suspension"
+            >
+              <RotateCcw size={14} />
+            </button>
+          ) : null
+        ) : canEdit ? (
+          <button
+            className={cn(
+              'inline-flex items-center justify-center rounded-md p-1.5 text-secondary',
+              saving ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
+            )}
+            onClick={() => setConfirmReactivateId(u.id)}
+            disabled={saving}
+            aria-label={`Reactivate ${u.username}`}
+            title="Reactivate"
+          >
+            <RotateCcw size={14} />
+          </button>
+        ) : null}
+      </>
+    );
+  }
+
   return (
     <div className="space-y-4 sm:space-y-5">
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 mt-3">
+      <div className="grid grid-cols-4 gap-2 sm:gap-4 mt-3">
         <StatCard label="Active Users" value={String(stats.active)} />
         <StatCard label="Total Users" value={String(stats.total)} />
         <StatCard label="Suspended" value={String(stats.suspended)} />
@@ -407,15 +530,16 @@ export function UsersManagement({
         className="glass-card p-4 sm:p-5 !border-transparent"
         style={{ backgroundColor: 'var(--surface)' }}
       >
-        <div className="flex items-center justify-between mb-3 gap-2">
+        {/* Phones: title on its own line, the two buttons split the row below it. */}
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-3 gap-2">
           <h3 className="text-sm font-bold tracking-tight" style={{ color: 'var(--text)' }}>
             User Management List
           </h3>
-          <div className="flex items-center gap-2">
+          <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center">
             <RolesPanel onChanged={() => refresh({ showLoading: false })} navigate={navigate} />
             {canAdd ? (
               <button
-                className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-semibold shadow-sm cursor-pointer"
+                className="inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-semibold shadow-sm cursor-pointer whitespace-nowrap"
                 style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
                 onClick={openCreate}
               >
@@ -475,7 +599,50 @@ export function UsersManagement({
             }
           />
         ) : (
-          <div className="overflow-x-auto">
+          <>
+          {/* Phones: one card per user instead of a 7-column table */}
+          <div className="sm:hidden space-y-2">
+            {pagedUsers.map((u) => (
+              <div
+                key={u.id}
+                className="rounded-xl p-3"
+                style={{
+                  border: '1px solid var(--border-subtle)',
+                  backgroundColor: 'color-mix(in oklab, var(--control-bg) 35%, transparent)',
+                }}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0 flex-1">
+                    <div className="text-[13px] font-semibold leading-snug break-words" style={{ color: 'var(--text)' }}>
+                      {u.full_name || u.username}
+                    </div>
+                    <div className="mt-0.5 text-[11px] text-secondary break-all">@{u.username}</div>
+                    {u.email ? <div className="text-[11px] text-secondary break-all">{u.email}</div> : null}
+                  </div>
+                  <div className="shrink-0 flex flex-wrap justify-end gap-1 max-w-[45%]">{renderStatusBadges(u)}</div>
+                </div>
+
+                <div className="mt-2.5 flex items-center justify-between gap-2">
+                  <div className="min-w-0 flex flex-wrap items-center gap-1.5 text-[11px]">
+                    <span className="text-secondary truncate">
+                      {u.roles && u.roles.length ? u.roles.map((r) => roleDisplayName(r.name)).join(', ') : 'No role'}
+                    </span>
+                    {u.totp_enabled === 1 ? (
+                      <span
+                        className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold"
+                        style={{ backgroundColor: 'rgba(34,197,94,.14)', color: 'rgba(34,197,94,.95)' }}
+                      >
+                        <ShieldCheck size={11} /> 2FA
+                      </span>
+                    ) : null}
+                  </div>
+                  <div className="shrink-0 flex items-center gap-0.5 -mr-1.5">{renderUserActions(u)}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="hidden sm:block overflow-x-auto">
             <table className="min-w-full text-left text-xs">
               <thead>
                 <tr>
@@ -517,124 +684,18 @@ export function UsersManagement({
                       )}
                     </td>
                     <td className="px-3 py-2 text-[11px]">
-                      <span
-                        className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold"
-                        style={
-                          u.status === 'SUSPENDED'
-                            ? { backgroundColor: 'rgba(245,158,11,.14)', color: 'rgba(245,158,11,.95)' }
-                            : u.is_active === 1
-                              ? { backgroundColor: 'rgba(34,197,94,.14)', color: 'rgba(34,197,94,.95)' }
-                              : { backgroundColor: 'rgba(148,163,184,.14)', color: 'rgba(148,163,184,.95)' }
-                        }
-                      >
-                        {u.status === 'SUSPENDED' ? 'Suspended' : u.is_active === 1 ? 'Active' : 'Deactivated'}
-                      </span>
-                      {u.is_locked && (
-                        <span
-                          className="ml-1.5 inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold"
-                          style={{ backgroundColor: 'rgba(239,68,68,.14)', color: 'rgba(239,68,68,.95)' }}
-                          title="Locked out from repeated failed login attempts"
-                        >
-                          Locked
-                        </span>
-                      )}
+                      {renderStatusBadges(u)}
                     </td>
                     <td className="px-3 py-2 pr-2">
                       <div className="flex items-center justify-end gap-1.5">
-                        {canEdit ? (
-                          <button
-                            className={cn(
-                              'inline-flex items-center justify-center rounded-md p-1.5 text-secondary',
-                              saving ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
-                            )}
-                            onClick={() => openEdit(u)}
-                            disabled={saving}
-                            aria-label={`Edit ${u.username}`}
-                            title="Edit"
-                          >
-                            <Pencil size={14} />
-                          </button>
-                        ) : null}
-                        {u.is_active === 1 ? (
-                          <>
-                            {canDelete ? (
-                              <button
-                                className={cn(
-                                  'inline-flex items-center justify-center rounded-md p-1.5 text-secondary',
-                                  saving ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
-                                )}
-                                onClick={() => setConfirmSuspendId(u.id)}
-                                disabled={saving}
-                                aria-label={`Suspend ${u.username}`}
-                                title="Suspend (temporary hold)"
-                              >
-                                <Ban size={14} />
-                              </button>
-                            ) : null}
-                            {canDelete ? (
-                              <button
-                                className={cn(
-                                  'inline-flex items-center justify-center rounded-md p-1.5 text-secondary',
-                                  saving ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
-                                )}
-                                onClick={() => setConfirmDeactivateId(u.id)}
-                                disabled={saving}
-                                aria-label={`Deactivate ${u.username}`}
-                                title="Deactivate"
-                              >
-                                <UserX size={14} />
-                              </button>
-                            ) : null}
-                            {canEdit ? (
-                              <button
-                                className={cn(
-                                  'inline-flex items-center justify-center rounded-md p-1.5 text-secondary',
-                                  saving ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
-                                )}
-                                onClick={() => setConfirmRevokeId(u.id)}
-                                disabled={saving}
-                                aria-label={`Revoke sessions for ${u.username}`}
-                                title="Revoke active sessions"
-                              >
-                                <LogOut size={14} />
-                              </button>
-                            ) : null}
-                          </>
-                        ) : u.status === 'SUSPENDED' ? (
-                          canEdit ? (
-                            <button
-                              className={cn(
-                                'inline-flex items-center justify-center rounded-md p-1.5 text-secondary',
-                                saving ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
-                              )}
-                              onClick={() => void unsuspend(u.id)}
-                              disabled={saving}
-                              aria-label={`Reinstate ${u.username}`}
-                              title="Lift suspension"
-                            >
-                              <RotateCcw size={14} />
-                            </button>
-                          ) : null
-                        ) : canEdit ? (
-                          <button
-                            className={cn(
-                              'inline-flex items-center justify-center rounded-md p-1.5 text-secondary',
-                              saving ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
-                            )}
-                            onClick={() => setConfirmReactivateId(u.id)}
-                            disabled={saving}
-                            aria-label={`Reactivate ${u.username}`}
-                            title="Reactivate"
-                          >
-                            <RotateCcw size={14} />
-                          </button>
-                        ) : null}
+                        {renderUserActions(u)}
                       </div>
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
+          </div>
 
             <DataTableControls
               page={page}
@@ -649,7 +710,7 @@ export function UsersManagement({
               onPageChange={(p) => setPage(p)}
               loading={isLoading || isRevalidating}
             />
-          </div>
+          </>
         )}
       </div>
 
@@ -790,13 +851,15 @@ export function UsersManagement({
 function StatCard({ label, value }: { label: string; value: string }) {
   return (
     <div
-      className="rounded-xl px-3 py-3 flex flex-col gap-1 shadow-sm"
+      className="rounded-xl px-2 sm:px-3 py-2.5 sm:py-3 flex flex-col justify-between gap-1 shadow-sm min-w-0"
       style={{
         backgroundColor: 'color-mix(in oklab, var(--surface) 94%, white 6%)',
       }}
     >
-      <span className="text-[10px] font-semibold text-secondary uppercase tracking-widest">{label}</span>
-      <span className="text-base sm:text-lg font-bold leading-tight" style={{ color: 'var(--text)' }}>
+      <span className="text-[9px] sm:text-[10px] font-semibold text-secondary uppercase tracking-wide sm:tracking-widest leading-tight break-words">
+        {label}
+      </span>
+      <span className="text-lg font-bold leading-tight" style={{ color: 'var(--text)' }}>
         {value}
       </span>
     </div>

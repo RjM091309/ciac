@@ -229,6 +229,7 @@ export function ApplicationsWorkflow({
   const consumedNotificationQueryRef = useRef<string>('');
   const consumedStatusQueryRef = useRef<string>('');
   const applicationRowRefs = useRef<Record<number, HTMLTableRowElement | null>>({});
+  const applicationCardRefs = useRef<Record<number, HTMLDivElement | null>>({});
   const [appsSearchQuery, setAppsSearchQuery] = useState('');
   // Pre-applied when landing here from a dashboard stat card (e.g. "Rejected
   // / Returned" -> ?status=REJECTED,RETURNED) so the list is already scoped
@@ -400,9 +401,11 @@ export function ApplicationsWorkflow({
 
   useEffect(() => {
     if (!highlightedApplicationId) return;
-    const row = applicationRowRefs.current[highlightedApplicationId];
-    if (!row) return;
-    row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    // Table rows are hidden on phones (cards shown instead), so scroll whichever one is visible.
+    const target = [applicationRowRefs.current[highlightedApplicationId], applicationCardRefs.current[highlightedApplicationId]]
+      .find((node) => node && node.offsetParent !== null);
+    if (!target) return;
+    target.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }, [highlightedApplicationId, pagedApps]);
 
   useEffect(() => {
@@ -613,6 +616,91 @@ export function ApplicationsWorkflow({
     }
   }
 
+  const typeBadgeStyle = {
+    background: renewalMode ? 'rgba(168,85,247,0.18)' : 'rgba(99,102,241,0.18)',
+    color: renewalMode ? '#c084fc' : '#818cf8',
+    borderColor: renewalMode ? 'rgba(168,85,247,0.4)' : 'rgba(99,102,241,0.4)',
+  };
+
+  /** Shared per-row display values for the desktop table and the mobile card list. */
+  function getRowView(row: ApplicationRow) {
+    const percent = progressByApp[row.id]?.percent ?? 0;
+    const isHighlighted = row.id === highlightedApplicationId;
+    return {
+      percent,
+      barColor: percent >= 100 ? '#10b981' : percent >= 50 ? '#3b82f6' : '#f59e0b',
+      badge: getBadgeStyles(row.status),
+      typeName: applicationTypeNameByCode[row.application_type] || row.application_type || '',
+      isHighlighted,
+      highlightStyle: isHighlighted
+        ? {
+            background:
+              'linear-gradient(90deg, rgba(59,130,246,0.14) 0%, rgba(59,130,246,0.07) 34%, rgba(59,130,246,0.02) 100%)',
+            boxShadow: 'inset 3px 0 0 #2563eb, inset 0 0 0 1px rgba(59,130,246,0.22)',
+          }
+        : undefined,
+    };
+  }
+
+  function renderRowActions(row: ApplicationRow) {
+    const status = toUpper(row.status);
+    return (
+      <>
+        {status === 'DRAFT' ? (
+          <button
+            className="inline-flex items-center justify-center gap-1 rounded-lg h-8 px-2.5 text-[10px] font-bold uppercase tracking-wide"
+            style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
+            onClick={() => openContinueDraft(row)}
+            disabled={saving}
+            title="Continue Draft"
+            aria-label="Continue Draft"
+          >
+            Draft <ArrowRight size={12} />
+          </button>
+        ) : status === 'RETURNED' ? (
+          <button
+            className="inline-flex items-center justify-center rounded-lg h-8 w-8 text-xs font-semibold"
+            style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
+            onClick={() => submitApplication(row.id)}
+            disabled={saving}
+            title="Resubmit"
+            aria-label="Resubmit"
+          >
+            <Upload size={14} />
+          </button>
+        ) : null}
+        {TYPE_EDITABLE_STATUSES.includes(status) && status !== 'DRAFT' ? (
+          <button
+            className="inline-flex items-center justify-center rounded-lg border h-8 w-8 text-xs font-semibold"
+            style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'var(--control-bg)' }}
+            onClick={() => openEditApplication(row)}
+            disabled={saving}
+            title="Edit Application"
+            aria-label="Edit Application"
+          >
+            <Pencil size={14} />
+          </button>
+        ) : null}
+      </>
+    );
+  }
+
+  function renderHighlightTag() {
+    return (
+      <span
+        className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold"
+        style={{
+          color: '#1d4ed8',
+          backgroundColor: 'rgba(219,234,254,0.95)',
+          borderColor: 'rgba(59,130,246,0.22)',
+        }}
+      >
+        <span className="h-1.5 w-1.5 rounded-full animate-pulse" style={{ backgroundColor: '#2563eb' }} />
+        From notification
+      </span>
+    );
+  }
+
   return (
     <div className="space-y-4 sm:space-y-5">
       <div className="flex items-center justify-end gap-2">
@@ -681,138 +769,152 @@ export function ApplicationsWorkflow({
             }
           />
         ) : (
-          <div className="overflow-x-auto">
-            <table className="min-w-full text-left text-xs">
-              <thead>
-                <tr style={{ borderBottom: '1px solid var(--border-subtle)' }}>
-                  <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary">Company / Locator</th>
-                  <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary">Application Type</th>
-                  <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary">Progress</th>
-                  <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary">Status</th>
-                  <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {pagedApps.map((row) => {
-                  const summary = progressByApp[row.id];
-                  const percent = summary?.percent ?? 0;
-                  const barColor = percent >= 100 ? '#10b981' : percent >= 50 ? '#3b82f6' : '#f59e0b';
-                  const badge = getBadgeStyles(row.status);
-                  const isHighlighted = row.id === highlightedApplicationId;
-                  const highlightStyle = isHighlighted
-                    ? {
-                        background:
-                          'linear-gradient(90deg, rgba(59,130,246,0.14) 0%, rgba(59,130,246,0.07) 34%, rgba(59,130,246,0.02) 100%)',
-                        boxShadow: 'inset 3px 0 0 #2563eb, inset 0 0 0 1px rgba(59,130,246,0.22)',
-                      }
-                    : undefined;
-                  return (
-                    <tr
-                      key={row.id}
-                      ref={(node) => {
-                        applicationRowRefs.current[row.id] = node;
-                      }}
-                      className="transition-[background-color,box-shadow] duration-500 cursor-pointer hover:bg-[var(--selected-bg)]"
-                      style={{
-                        borderTop: '1px solid var(--border-subtle)',
-                        ...highlightStyle,
-                      }}
-                      onClick={() => goToApplication(row)}
-                    >
-                      <td className="px-3 py-2.5">
-                        <div className="font-semibold" style={{ color: 'var(--text)' }}>
+          <>
+            {/* Phones: stacked cards instead of a horizontally scrolling table */}
+            <div className="sm:hidden -mx-1 space-y-2.5">
+              {pagedApps.map((row) => {
+                const { percent, barColor, badge, typeName, isHighlighted, highlightStyle } = getRowView(row);
+                return (
+                  <div
+                    key={row.id}
+                    ref={(node) => {
+                      applicationCardRefs.current[row.id] = node;
+                    }}
+                    role="button"
+                    tabIndex={0}
+                    className="rounded-xl p-3.5 transition-[background-color,box-shadow] duration-500 cursor-pointer active:bg-[var(--selected-bg)]"
+                    style={{
+                      border: '1px solid var(--border-subtle)',
+                      backgroundColor: 'color-mix(in oklab, var(--control-bg) 35%, transparent)',
+                      ...highlightStyle,
+                    }}
+                    onClick={() => goToApplication(row)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') goToApplication(row);
+                    }}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <div className="text-[13px] font-semibold leading-snug break-words" style={{ color: 'var(--text)' }}>
                           {row.proponent_name || `#${row.proponent_id}`}
                         </div>
-                        <div className="mt-0.5 flex items-center gap-2 flex-wrap">
-                          <div className="text-[11px] text-secondary">{row.application_no}</div>
-                          {isHighlighted ? (
-                            <span
-                              className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold"
-                              style={{
-                                color: '#1d4ed8',
-                                backgroundColor: 'rgba(219,234,254,0.95)',
-                                borderColor: 'rgba(59,130,246,0.22)',
-                              }}
-                            >
-                              <span className="h-1.5 w-1.5 rounded-full animate-pulse" style={{ backgroundColor: '#2563eb' }} />
-                              From notification
-                            </span>
-                          ) : null}
-                        </div>
-                      </td>
-                      <td className="px-3 py-2.5">
-                        <span
-                          className="inline-flex items-center rounded-full border px-2.5 py-0.5 text-[11px] font-medium"
-                          style={{
-                            background: renewalMode ? 'rgba(168,85,247,0.18)' : 'rgba(99,102,241,0.18)',
-                            color: renewalMode ? '#c084fc' : '#818cf8',
-                            borderColor: renewalMode ? 'rgba(168,85,247,0.4)' : 'rgba(99,102,241,0.4)',
-                          }}
-                        >
-                          {applicationTypeNameByCode[row.application_type] || row.application_type}
-                        </span>
-                      </td>
-                      <td className="px-3 py-2.5 min-w-[180px]">
-                        <div className="flex items-center gap-2">
-                          <div className="h-2.5 rounded-full overflow-hidden w-[120px]" style={{ backgroundColor: 'var(--input-border)' }}>
-                            <div className="h-full rounded-full transition-all" style={{ width: `${percent}%`, backgroundColor: barColor }} />
-                          </div>
+                        <div className="mt-0.5 text-[11px] text-secondary truncate">{row.application_no}</div>
+                      </div>
+                      <span
+                        className="shrink-0 inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold"
+                        style={{ backgroundColor: badge.bg, color: badge.color, borderColor: badge.border }}
+                      >
+                        {row.status}
+                      </span>
+                    </div>
+
+                    {typeName || isHighlighted ? (
+                      <div className="mt-2 flex items-center gap-1.5 flex-wrap">
+                        {typeName ? (
+                          <span
+                            className="inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium"
+                            style={typeBadgeStyle}
+                          >
+                            {typeName}
+                          </span>
+                        ) : null}
+                        {isHighlighted ? renderHighlightTag() : null}
+                      </div>
+                    ) : null}
+
+                    <div className="mt-3 flex items-center gap-3">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-[10px] uppercase tracking-wider text-secondary">Progress</span>
                           <span className="text-[11px] font-semibold">{percent}%</span>
                         </div>
-                      </td>
-                      <td className="px-3 py-2.5">
-                        <span
-                          className="inline-flex items-center rounded-full border px-2.5 py-0.5 text-[11px] font-semibold"
-                          style={{ backgroundColor: badge.bg, color: badge.color, borderColor: badge.border }}
-                        >
-                          {row.status}
-                        </span>
-                      </td>
-                      <td className="px-3 py-2.5 text-right" onClick={(e) => e.stopPropagation()}>
-                        <div className="inline-flex items-center gap-1.5">
-                          {toUpper(row.status) === 'DRAFT' ? (
-                            <button
-                              className="inline-flex items-center justify-center gap-1 rounded-lg h-8 px-2.5 text-[10px] font-bold uppercase tracking-wide"
-                              style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
-                              onClick={() => openContinueDraft(row)}
-                              disabled={saving}
-                              title="Continue Draft"
-                              aria-label="Continue Draft"
-                            >
-                              Draft <ArrowRight size={12} />
-                            </button>
-                          ) : toUpper(row.status) === 'RETURNED' ? (
-                            <button
-                              className="inline-flex items-center justify-center rounded-lg h-8 w-8 text-xs font-semibold"
-                              style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
-                              onClick={() => submitApplication(row.id)}
-                              disabled={saving}
-                              title="Resubmit"
-                              aria-label="Resubmit"
-                            >
-                              <Upload size={14} />
-                            </button>
-                          ) : null}
-                          {TYPE_EDITABLE_STATUSES.includes(toUpper(row.status)) && toUpper(row.status) !== 'DRAFT' ? (
-                            <button
-                              className="inline-flex items-center justify-center rounded-lg border h-8 w-8 text-xs font-semibold"
-                              style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'var(--control-bg)' }}
-                              onClick={() => openEditApplication(row)}
-                              disabled={saving}
-                              title="Edit Application"
-                              aria-label="Edit Application"
-                            >
-                              <Pencil size={14} />
-                            </button>
-                          ) : null}
+                        <div className="h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--input-border)' }}>
+                          <div className="h-full rounded-full transition-all" style={{ width: `${percent}%`, backgroundColor: barColor }} />
                         </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+                      </div>
+                      <div className="shrink-0 inline-flex items-center gap-1.5 empty:hidden" onClick={(e) => e.stopPropagation()}>
+                        {renderRowActions(row)}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="hidden sm:block overflow-x-auto">
+              <table className="min-w-full text-left text-xs">
+                <thead>
+                  <tr style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+                    <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary">Company / Locator</th>
+                    <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary">Application Type</th>
+                    <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary">Progress</th>
+                    <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary">Status</th>
+                    <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {pagedApps.map((row) => {
+                    const { percent, barColor, badge, typeName, isHighlighted, highlightStyle } = getRowView(row);
+                    return (
+                      <tr
+                        key={row.id}
+                        ref={(node) => {
+                          applicationRowRefs.current[row.id] = node;
+                        }}
+                        className="transition-[background-color,box-shadow] duration-500 cursor-pointer hover:bg-[var(--selected-bg)]"
+                        style={{
+                          borderTop: '1px solid var(--border-subtle)',
+                          ...highlightStyle,
+                        }}
+                        onClick={() => goToApplication(row)}
+                      >
+                        <td className="px-3 py-2.5">
+                          <div className="font-semibold" style={{ color: 'var(--text)' }}>
+                            {row.proponent_name || `#${row.proponent_id}`}
+                          </div>
+                          <div className="mt-0.5 flex items-center gap-2 flex-wrap">
+                            <div className="text-[11px] text-secondary">{row.application_no}</div>
+                            {isHighlighted ? renderHighlightTag() : null}
+                          </div>
+                        </td>
+                        <td className="px-3 py-2.5">
+                          {typeName ? (
+                            <span
+                              className="inline-flex items-center rounded-full border px-2.5 py-0.5 text-[11px] font-medium"
+                              style={typeBadgeStyle}
+                            >
+                              {typeName}
+                            </span>
+                          ) : (
+                            <span className="text-secondary">—</span>
+                          )}
+                        </td>
+                        <td className="px-3 py-2.5 min-w-[180px]">
+                          <div className="flex items-center gap-2">
+                            <div className="h-2.5 rounded-full overflow-hidden w-[120px]" style={{ backgroundColor: 'var(--input-border)' }}>
+                              <div className="h-full rounded-full transition-all" style={{ width: `${percent}%`, backgroundColor: barColor }} />
+                            </div>
+                            <span className="text-[11px] font-semibold">{percent}%</span>
+                          </div>
+                        </td>
+                        <td className="px-3 py-2.5">
+                          <span
+                            className="inline-flex items-center rounded-full border px-2.5 py-0.5 text-[11px] font-semibold"
+                            style={{ backgroundColor: badge.bg, color: badge.color, borderColor: badge.border }}
+                          >
+                            {row.status}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2.5 text-right" onClick={(e) => e.stopPropagation()}>
+                          <div className="inline-flex items-center gap-1.5">{renderRowActions(row)}</div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </>
         )}
         <DataTableControls
           page={appsPage}

@@ -238,22 +238,87 @@ export function ComplianceTypesManagement() {
     }
   }
 
+  function renderStatusBadge(item: (typeof pagedItems)[number]) {
+    return (
+      <span
+        className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold"
+        style={
+          item.is_active === 1
+            ? { backgroundColor: 'rgba(34,197,94,.14)', color: 'rgba(34,197,94,.95)' }
+            : { backgroundColor: 'rgba(148,163,184,.14)', color: 'rgba(148,163,184,.95)' }
+        }
+      >
+        {item.is_active === 1 ? 'Active' : 'Inactive'}
+      </span>
+    );
+  }
+
+  function renderItemActions(item: (typeof pagedItems)[number]) {
+    return (
+      <>
+        {canEdit ? (
+          <button
+            className={cn(
+              'inline-flex items-center justify-center rounded-md p-1.5 text-secondary',
+              saving ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer',
+            )}
+            onClick={() => openEdit(item)}
+            disabled={saving}
+            aria-label={`Edit ${item.name}`}
+            title="Edit"
+          >
+            <Pencil size={14} />
+          </button>
+        ) : null}
+        {item.is_active === 1 ? (
+          canDelete ? (
+            <button
+              className={cn(
+                'inline-flex items-center justify-center rounded-md p-1.5 text-secondary',
+                saving ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer',
+              )}
+              onClick={() => setConfirmDeactivateId(item.id)}
+              disabled={saving}
+              aria-label={`Deactivate ${item.name}`}
+              title="Deactivate"
+            >
+              <UserX size={14} />
+            </button>
+          ) : null
+        ) : canEdit ? (
+          <button
+            className={cn(
+              'inline-flex items-center justify-center rounded-md p-1.5 text-secondary',
+              saving ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer',
+            )}
+            onClick={() => setConfirmReactivateId(item.id)}
+            disabled={saving}
+            aria-label={`Reactivate ${item.name}`}
+            title="Reactivate"
+          >
+            <RotateCcw size={14} />
+          </button>
+        ) : null}
+      </>
+    );
+  }
+
   return (
     <div className="space-y-4 sm:space-y-5">
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4 mt-3">
+      <div className="grid grid-cols-3 gap-2 sm:gap-4 mt-3">
         <StatCard label="Active Types" value={String(stats.active)} />
         <StatCard label="Total Types" value={String(stats.total)} />
         <StatCard label="Deactivated" value={String(stats.inactive)} />
       </div>
 
-      <div className="glass-card p-4 sm:p-5 !border-transparent" style={{ backgroundColor: 'var(--surface)' }}>
+      <div className="glass-card p-3 sm:p-5 !border-transparent" style={{ backgroundColor: 'var(--surface)' }}>
         <div className="flex items-center justify-between mb-3 gap-2">
           <h3 className="text-sm font-bold tracking-tight" style={{ color: 'var(--text)' }}>
             Compliance Types List
           </h3>
           {canAdd ? (
             <button
-              className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-semibold shadow-sm"
+              className="shrink-0 whitespace-nowrap inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-semibold shadow-sm cursor-pointer"
               style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
               onClick={openCreate}
             >
@@ -293,7 +358,7 @@ export function ComplianceTypesManagement() {
             }
           />
         ) : (
-          <div className="overflow-x-auto">
+          <div>
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-3">
               <div className="relative group w-full sm:w-72">
                 <Search
@@ -310,6 +375,35 @@ export function ComplianceTypesManagement() {
                 />
               </div>
             </div>
+            {/* Phones: one card per compliance type instead of a 5-column table */}
+            <div className="sm:hidden space-y-2">
+              {pagedItems.map((item) => (
+                <div
+                  key={item.id}
+                  className="rounded-xl p-3"
+                  style={{
+                    border: '1px solid var(--border-subtle)',
+                    backgroundColor: 'color-mix(in oklab, var(--control-bg) 35%, transparent)',
+                  }}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0 flex-1">
+                      <div className="text-[13px] font-semibold leading-snug break-words" style={{ color: 'var(--text)' }}>
+                        {item.name}
+                      </div>
+                      <div className="mt-0.5 text-[10px] font-semibold uppercase tracking-wider text-secondary break-all">{item.code}</div>
+                    </div>
+                    <div className="shrink-0">{renderStatusBadge(item)}</div>
+                  </div>
+                  <div className="mt-1.5 flex items-end justify-between gap-2">
+                    <p className="min-w-0 flex-1 text-[11px] text-secondary break-words">{item.description || 'No description'}</p>
+                    <div className="shrink-0 flex items-center gap-0.5 -mr-1.5 -mb-1">{renderItemActions(item)}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="hidden sm:block overflow-x-auto">
             <table className="min-w-full text-left text-xs">
               <thead>
                 <tr>
@@ -338,68 +432,18 @@ export function ComplianceTypesManagement() {
                     </td>
                     <td className="px-3 py-2 text-[11px] text-secondary">{item.description || '-'}</td>
                     <td className="px-3 py-2 text-[11px]">
-                      <span
-                        className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold"
-                        style={
-                          item.is_active === 1
-                            ? { backgroundColor: 'rgba(34,197,94,.14)', color: 'rgba(34,197,94,.95)' }
-                            : { backgroundColor: 'rgba(148,163,184,.14)', color: 'rgba(148,163,184,.95)' }
-                        }
-                      >
-                        {item.is_active === 1 ? 'Active' : 'Inactive'}
-                      </span>
+                      {renderStatusBadge(item)}
                     </td>
                     <td className="px-3 py-2 pr-2">
                       <div className="flex items-center justify-end gap-2">
-                        {canEdit ? (
-                          <button
-                            className={cn(
-                              'inline-flex items-center justify-center rounded-md p-1.5 text-secondary',
-                              saving ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer',
-                            )}
-                            onClick={() => openEdit(item)}
-                            disabled={saving}
-                            aria-label={`Edit ${item.name}`}
-                            title="Edit"
-                          >
-                            <Pencil size={14} />
-                          </button>
-                        ) : null}
-                        {item.is_active === 1 ? (
-                          canDelete ? (
-                            <button
-                              className={cn(
-                                'inline-flex items-center justify-center rounded-md p-1.5 text-secondary',
-                                saving ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer',
-                              )}
-                              onClick={() => setConfirmDeactivateId(item.id)}
-                              disabled={saving}
-                              aria-label={`Deactivate ${item.name}`}
-                              title="Deactivate"
-                            >
-                              <UserX size={14} />
-                            </button>
-                          ) : null
-                        ) : canEdit ? (
-                          <button
-                            className={cn(
-                              'inline-flex items-center justify-center rounded-md p-1.5 text-secondary',
-                              saving ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer',
-                            )}
-                            onClick={() => setConfirmReactivateId(item.id)}
-                            disabled={saving}
-                            aria-label={`Reactivate ${item.name}`}
-                            title="Reactivate"
-                          >
-                            <RotateCcw size={14} />
-                          </button>
-                        ) : null}
+                        {renderItemActions(item)}
                       </div>
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
+            </div>
             <DataTableControls
               page={page}
               totalPages={totalPages}
@@ -488,13 +532,15 @@ export function ComplianceTypesManagement() {
 function StatCard({ label, value }: { label: string; value: string }) {
   return (
     <div
-      className="rounded-xl px-3 py-3 flex flex-col gap-1 shadow-sm"
+      className="rounded-xl px-2.5 sm:px-3 py-2.5 sm:py-3 flex flex-col justify-between gap-1 shadow-sm min-w-0"
       style={{
         backgroundColor: 'color-mix(in oklab, var(--surface) 94%, white 6%)',
       }}
     >
-      <span className="text-[10px] font-semibold text-secondary uppercase tracking-widest">{label}</span>
-      <span className="text-base sm:text-lg font-bold leading-tight" style={{ color: 'var(--text)' }}>
+      <span className="text-[9px] sm:text-[10px] font-semibold text-secondary uppercase tracking-wide sm:tracking-widest leading-tight">
+        {label}
+      </span>
+      <span className="text-lg font-bold leading-tight" style={{ color: 'var(--text)' }}>
         {value}
       </span>
     </div>

@@ -366,7 +366,7 @@ export function ApprovalIssuance({
 
   return (
     <div className="space-y-4 sm:space-y-5">
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4 mt-3">
+      <div className="grid grid-cols-3 lg:grid-cols-6 gap-2 sm:gap-4 mt-3">
         <StatTile label="Total" value={summary?.total ?? '—'} />
         <StatTile label="Awaiting Start" value={summary?.awaiting_start ?? '—'} tone="#94a3b8" />
         <StatTile label="In Progress" value={summary?.in_progress ?? '—'} tone="#3b82f6" />
@@ -389,8 +389,8 @@ export function ApprovalIssuance({
       </div>
 
       <div className="glass-card p-4 sm:p-5 !border-transparent overflow-hidden" style={{ backgroundColor: 'var(--surface)' }}>
-        <div className="flex flex-col sm:flex-row sm:items-center gap-2 mb-3">
-          <div className="relative group w-full sm:w-72">
+        <div className="flex items-center gap-2 mb-3">
+          <div className="relative group flex-1 min-w-0 sm:flex-none sm:w-72">
             <Search
               size={14}
               className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)] group-focus-within:text-[var(--text)] transition-colors pointer-events-none"
@@ -403,7 +403,7 @@ export function ApprovalIssuance({
               style={{ backgroundColor: 'color-mix(in oklab, var(--control-bg) 70%, transparent)' }}
             />
           </div>
-          <div className="w-full sm:w-48">
+          <div className="w-36 shrink-0 sm:w-48">
             <AppSelect
               compact
               placeholder="All statuses"
@@ -425,7 +425,90 @@ export function ApprovalIssuance({
             description="Applications endorsed by assessment appear here to be routed through the approval hierarchy and issued their approval documents."
           />
         ) : (
-          <div className="overflow-x-auto">
+          <>
+          {/* Phones: stacked cards instead of a horizontally scrolling table */}
+          <div className="sm:hidden space-y-2">
+            {pg.pageItems.map((r) => {
+              const stepsPct = r.total_steps ? Math.round((r.approved_steps / r.total_steps) * 100) : 0;
+              const assignee = r.current_assignee_name || r.current_assignee_username;
+              return (
+                <button
+                  key={r.application_id}
+                  type="button"
+                  className="w-full text-left rounded-xl p-3 cursor-pointer active:bg-[var(--selected-bg)] transition-colors"
+                  style={{
+                    border: '1px solid var(--border-subtle)',
+                    backgroundColor: 'color-mix(in oklab, var(--control-bg) 35%, transparent)',
+                  }}
+                  onClick={() => setSelectedId(r.application_id)}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0 flex-1">
+                      <div className="text-[13px] font-semibold leading-snug break-words" style={{ color: 'var(--text)' }}>
+                        {r.proponent_name || '—'}
+                      </div>
+                      <div className="mt-0.5 text-[11px] text-secondary">
+                        {r.application_no} · {r.is_renewal ? 'Renewal' : 'New'}
+                        {r.application_type_name ? ` · ${r.application_type_name}` : ''}
+                      </div>
+                    </div>
+                    <div className="shrink-0">
+                      <Badge
+                        label={APPROVAL_STATUS_LABELS[r.approval_status] || r.approval_status}
+                        styles={statusBadge(r.approval_status)}
+                      />
+                    </div>
+                  </div>
+
+                  {r.approval_status === 'IN_PROGRESS' ? (
+                    <div className="mt-2 text-[11px]" style={{ color: 'var(--text)' }}>
+                      <span className="text-secondary">Now at: </span>
+                      {r.current_level_name || `Level ${r.current_level_no ?? '—'}`}
+                      {assignee ? <span className="text-secondary"> · {assignee}</span> : null}
+                    </div>
+                  ) : null}
+
+                  <div className="mt-2.5">
+                    <div className="flex items-center justify-between mb-1 text-[10px]">
+                      <span className="uppercase tracking-wider text-secondary">Approval steps</span>
+                      <span className="font-semibold" style={{ color: 'var(--text)' }}>
+                        {r.total_steps ? `${r.approved_steps}/${r.total_steps}` : '—'}
+                      </span>
+                    </div>
+                    <div className="h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--input-border)' }}>
+                      <div
+                        className="h-full rounded-full"
+                        style={{
+                          width: `${stepsPct}%`,
+                          backgroundColor: stepsPct >= 100 ? '#10b981' : '#3b82f6',
+                        }}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="mt-2.5 flex items-center justify-between text-[11px]">
+                    <div>
+                      <span className="text-[9px] uppercase tracking-wider text-secondary">Issued </span>
+                      <span style={{ color: 'var(--text)' }}>{r.issuance_count || '—'}</span>
+                    </div>
+                    <div>
+                      <span className="text-[9px] uppercase tracking-wider text-secondary">Days </span>
+                      <span
+                        className="tabular-nums"
+                        style={{
+                          color: r.days_in_approval != null && r.days_in_approval > 7 ? '#ef4444' : 'var(--text)',
+                        }}
+                      >
+                        {r.days_in_approval ?? '—'}
+                      </span>
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="hidden sm:block overflow-x-auto">
             <table className="min-w-full text-left text-xs">
               <thead>
                 <tr style={{ borderBottom: '1px solid var(--border-subtle)' }}>
@@ -487,6 +570,7 @@ export function ApprovalIssuance({
               </tbody>
             </table>
           </div>
+          </>
         )}
         <DataTableControls
           page={page}
@@ -532,11 +616,13 @@ function StatTile({
 }) {
   return (
     <div
-      className="rounded-xl px-3 py-3 flex flex-col gap-1 shadow-sm"
+      className="rounded-xl px-2.5 sm:px-3 py-2.5 sm:py-3 flex flex-col gap-1 shadow-sm"
       style={{ backgroundColor: 'color-mix(in oklab, var(--surface) 94%, white 6%)' }}
     >
-      <span className="text-[10px] font-semibold text-secondary uppercase tracking-widest">{label}</span>
-      <span className="text-base sm:text-lg font-bold leading-tight" style={{ color: tone || 'var(--text)' }}>
+      <span className="text-[9px] sm:text-[10px] font-semibold text-secondary uppercase tracking-wide sm:tracking-widest truncate">
+        {label}
+      </span>
+      <span className="text-lg font-bold leading-tight" style={{ color: tone || 'var(--text)' }}>
         {value}
       </span>
     </div>

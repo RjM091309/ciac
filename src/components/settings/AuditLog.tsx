@@ -53,6 +53,15 @@ function actionTone(action: string): 'good' | 'bad' | 'neutral' {
   return 'neutral';
 }
 
+function actionBadgeStyle(action: string) {
+  const tone = actionTone(action);
+  return tone === 'bad'
+    ? { backgroundColor: 'rgba(239,68,68,.14)', color: 'rgba(239,68,68,.95)' }
+    : tone === 'good'
+      ? { backgroundColor: 'rgba(34,197,94,.14)', color: 'rgba(34,197,94,.95)' }
+      : { backgroundColor: 'rgba(148,163,184,.14)', color: 'rgba(148,163,184,.95)' };
+}
+
 function formatDate(value: string) {
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return value;
@@ -130,19 +139,20 @@ export function AuditLog() {
 
   return (
     <div className="space-y-4 sm:space-y-5">
-      <div className="glass-card p-4 sm:p-5 !border-transparent" style={{ backgroundColor: 'var(--surface)' }}>
-        <div className="flex items-center gap-2 mb-1">
+      <div className="glass-card p-3 sm:p-5 !border-transparent" style={{ backgroundColor: 'var(--surface)' }}>
+        {/* Phones: the page header right above already says this, so skip the repeat. */}
+        <div className="hidden sm:flex items-center gap-2 mb-1">
           <ShieldAlert size={16} style={{ color: 'var(--text)' }} />
           <h3 className="text-sm font-bold tracking-tight" style={{ color: 'var(--text)' }}>
             Audit Log
           </h3>
         </div>
-        <p className="text-[11px] text-secondary mb-4">
+        <p className="hidden sm:block text-[11px] text-secondary mb-4">
           Logins, account changes, and permission changes — for monitoring and compliance review.
         </p>
 
-        <div className="flex flex-col lg:flex-row lg:items-center gap-2 mb-4">
-          <div className="relative group w-full lg:w-56">
+        <div className="grid grid-cols-2 gap-2 mb-4 lg:flex lg:items-center">
+          <div className="relative group col-span-2 lg:w-56">
             <Search
               className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)] group-focus-within:text-[var(--text)] transition-colors pointer-events-none"
               size={14}
@@ -156,7 +166,7 @@ export function AuditLog() {
               style={{ backgroundColor: 'color-mix(in oklab, var(--control-bg) 70%, transparent)' }}
             />
           </div>
-          <div className="w-full lg:w-56">
+          <div className="col-span-2 lg:w-56">
             <AppSelect
               options={actionOptions}
               value={actionFilter}
@@ -166,10 +176,10 @@ export function AuditLog() {
               compact
             />
           </div>
-          <div className="w-full lg:w-44">
+          <div className="min-w-0 lg:w-44">
             <DatePicker mode="single" fullWidth value={fromDate} onChange={setFromDate} placeholder="From date" />
           </div>
-          <div className="w-full lg:w-44">
+          <div className="min-w-0 lg:w-44">
             <DatePicker mode="single" fullWidth value={toDate} onChange={setToDate} placeholder="To date" />
           </div>
         </div>
@@ -181,7 +191,47 @@ export function AuditLog() {
         ) : rows.length === 0 ? (
           <EmptyState title="No matching activity" description="Try widening your filters or date range." />
         ) : (
-          <div className="overflow-x-auto">
+          <>
+          {/* Phones: one card per event instead of a 6-column table */}
+          <div className="sm:hidden space-y-2">
+            {rows.map((row) => (
+              <div
+                key={row.id}
+                className="rounded-xl p-3"
+                style={{
+                  border: '1px solid var(--border-subtle)',
+                  backgroundColor: 'color-mix(in oklab, var(--control-bg) 35%, transparent)',
+                }}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <span
+                    className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold"
+                    style={actionBadgeStyle(row.action)}
+                  >
+                    {ACTION_LABELS[row.action] || row.action}
+                  </span>
+                  <span className="shrink-0 text-[10px] text-secondary text-right">{formatDate(row.created_at)}</span>
+                </div>
+                <div className="mt-2 text-[13px] font-semibold" style={{ color: 'var(--text)' }}>
+                  {row.actor_username || '—'}
+                </div>
+                <div className="mt-0.5 text-[11px] text-secondary break-all">
+                  {row.entity_type ? `${row.entity_type}${row.entity_id != null ? ` #${row.entity_id}` : ''}` : 'No entity'}
+                  {row.ip_address ? ` · ${row.ip_address}` : ''}
+                </div>
+                {row.details ? (
+                  <div
+                    className="mt-2 rounded-lg px-2 py-1.5 font-mono text-[10px] text-secondary break-all line-clamp-3"
+                    style={{ backgroundColor: 'var(--control-bg)' }}
+                  >
+                    {JSON.stringify(row.details)}
+                  </div>
+                ) : null}
+              </div>
+            ))}
+          </div>
+
+          <div className="hidden sm:block overflow-x-auto">
             <table className="min-w-full text-left text-xs">
               <thead>
                 <tr>
@@ -198,13 +248,7 @@ export function AuditLog() {
               </thead>
               <tbody>
                 {rows.map((row) => {
-                  const tone = actionTone(row.action);
-                  const badgeStyle =
-                    tone === 'bad'
-                      ? { backgroundColor: 'rgba(239,68,68,.14)', color: 'rgba(239,68,68,.95)' }
-                      : tone === 'good'
-                        ? { backgroundColor: 'rgba(34,197,94,.14)', color: 'rgba(34,197,94,.95)' }
-                        : { backgroundColor: 'rgba(148,163,184,.14)', color: 'rgba(148,163,184,.95)' };
+                  const badgeStyle = actionBadgeStyle(row.action);
                   return (
                     <tr key={row.id} className="border-b last:border-b-0" style={{ borderColor: 'var(--border-subtle)' }}>
                       <td className="px-3 py-2 text-[11px] text-secondary whitespace-nowrap">{formatDate(row.created_at)}</td>
@@ -231,6 +275,7 @@ export function AuditLog() {
                 })}
               </tbody>
             </table>
+          </div>
 
             <DataTableControls
               page={page}
@@ -245,7 +290,7 @@ export function AuditLog() {
               onPageChange={setPage}
               loading={loading}
             />
-          </div>
+          </>
         )}
       </div>
     </div>

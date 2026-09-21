@@ -338,7 +338,7 @@ export function ComplianceInspections({
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+      <div className="grid grid-cols-3 lg:grid-cols-6 gap-2">
         <StatTile icon={ClipboardCheck} label="Total" value={summary?.total ?? '—'} />
         <StatTile icon={CalendarClock} label="Scheduled" value={summary?.by_status?.SCHEDULED ?? '—'} tone="#f59e0b" />
         <StatTile icon={ClipboardList} label="In Progress" value={summary?.by_status?.IN_PROGRESS ?? '—'} tone="#3b82f6" />
@@ -358,21 +358,30 @@ export function ComplianceInspections({
             key={k}
             onClick={() => setTab(k)}
             className={cn(
-              'px-3 py-2 text-[12px] font-semibold border-b-2 -mb-px transition-colors',
+              'px-2.5 sm:px-3 py-2 text-[12px] font-semibold border-b-2 -mb-px transition-colors whitespace-nowrap',
               tab === k ? 'border-[var(--text)] text-[var(--text)]' : 'border-transparent text-secondary hover:text-[var(--text)]'
             )}
           >
-            {label}
+            {k === 'monitor' ? (
+              <>
+                <span className="sm:hidden">Monitor</span>
+                <span className="hidden sm:inline">{label}</span>
+              </>
+            ) : (
+              label
+            )}
           </button>
         ))}
-        <div className="ml-auto">
+        <div className="ml-auto shrink-0">
           {perms.canAdd && tab === 'inspections' ? (
             <button
-              className="rounded-lg px-3 py-1.5 text-[12px] font-semibold mb-1"
+              className="rounded-lg px-3 py-1.5 text-[12px] font-semibold mb-1 whitespace-nowrap"
               style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
               onClick={() => setCreating(true)}
             >
-              <Plus size={13} className="inline mr-1" /> New Inspection
+              <Plus size={13} className="inline mr-1" />
+              <span className="sm:hidden">New</span>
+              <span className="hidden sm:inline">New Inspection</span>
             </button>
           ) : null}
         </div>
@@ -399,23 +408,26 @@ export function ComplianceInspections({
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
-            <div className="w-full sm:w-44">
-              <AppSelect
-                compact
-                placeholder="All statuses"
-                value={statusFilter}
-                onChange={setStatusFilter}
-                options={STATUS_ORDER.map((s) => ({ value: s, label: STATUS_LABELS[s] }))}
-              />
-            </div>
-            <div className="w-full sm:w-52">
-              <AppSelect
-                compact
-                placeholder="All types"
-                value={typeFilter}
-                onChange={setTypeFilter}
-                options={meta.types.map((t) => ({ value: String(t.id), label: t.name }))}
-              />
+            {/* Side by side on phones so the filters don't eat two full rows. */}
+            <div className="grid grid-cols-2 gap-2 sm:flex">
+              <div className="min-w-0 sm:w-44">
+                <AppSelect
+                  compact
+                  placeholder="All statuses"
+                  value={statusFilter}
+                  onChange={setStatusFilter}
+                  options={STATUS_ORDER.map((s) => ({ value: s, label: STATUS_LABELS[s] }))}
+                />
+              </div>
+              <div className="min-w-0 sm:w-52">
+                <AppSelect
+                  compact
+                  placeholder="All types"
+                  value={typeFilter}
+                  onChange={setTypeFilter}
+                  options={meta.types.map((t) => ({ value: String(t.id), label: t.name }))}
+                />
+              </div>
             </div>
           </div>
 
@@ -434,7 +446,70 @@ export function ComplianceInspections({
                 description="Schedule an inspection to start tracking locator compliance."
               />
             ) : (
-              <div className="overflow-x-auto">
+              <>
+              {/* Phones: stacked cards instead of a horizontally scrolling table */}
+              <div className="sm:hidden p-2 space-y-2">
+                {pg.pageItems.map((r) => (
+                  <button
+                    key={r.id}
+                    type="button"
+                    className="w-full text-left rounded-xl p-3 cursor-pointer active:bg-[var(--selected-bg)] transition-colors"
+                    style={{
+                      border: '1px solid var(--border-subtle)',
+                      backgroundColor: 'color-mix(in oklab, var(--control-bg) 35%, transparent)',
+                    }}
+                    onClick={() => setSelectedId(r.id)}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0 flex-1">
+                        <div className="text-[13px] font-semibold leading-snug break-words" style={{ color: 'var(--text)' }}>
+                          {r.title}
+                        </div>
+                        <div className="mt-0.5 text-[11px] text-secondary break-words">
+                          {r.proponent_name || '—'}
+                          {r.inspection_type_name || r.inspection_type_code
+                            ? ` · ${r.inspection_type_name || r.inspection_type_code}`
+                            : ''}
+                        </div>
+                      </div>
+                      <div className="shrink-0 flex flex-col items-end gap-1">
+                        <Badge label={STATUS_LABELS[r.status] || r.status} styles={statusBadge(r.status)} />
+                        {r.result ? (
+                          <Badge label={RESULT_LABELS[r.result] || r.result} styles={resultBadge(r.result)} />
+                        ) : null}
+                      </div>
+                    </div>
+
+                    <div className="mt-2.5 grid grid-cols-3 gap-2 text-[11px]">
+                      <div className="min-w-0">
+                        <div className="text-[9px] uppercase tracking-wider text-secondary">Scheduled</div>
+                        <div className="truncate" style={{ color: 'var(--text)' }}>{fmtDate(r.scheduled_date)}</div>
+                      </div>
+                      <div className="min-w-0">
+                        <div className="text-[9px] uppercase tracking-wider text-secondary">Inspector</div>
+                        <div className="truncate" style={{ color: 'var(--text)' }}>
+                          {r.inspector_name || r.inspector_username || '—'}
+                        </div>
+                      </div>
+                      <div className="min-w-0 text-right">
+                        <div className="text-[9px] uppercase tracking-wider text-secondary">Findings</div>
+                        {r.open_findings > 0 ? (
+                          <div style={{ color: '#ef4444' }}>{r.open_findings} open</div>
+                        ) : (
+                          <div style={{ color: 'var(--text)' }}>{r.total_findings || 0}</div>
+                        )}
+                      </div>
+                    </div>
+                    {r.overdue_actions > 0 ? (
+                      <div className="mt-2 inline-flex items-center gap-1 text-[11px]" style={{ color: '#ef4444' }}>
+                        <AlertTriangle size={12} /> {r.overdue_actions} overdue action{r.overdue_actions === 1 ? '' : 's'}
+                      </div>
+                    ) : null}
+                  </button>
+                ))}
+              </div>
+
+              <div className="hidden sm:block overflow-x-auto">
                 <table className="w-full text-left text-[13px]">
                   <thead>
                     <tr
@@ -487,20 +562,23 @@ export function ComplianceInspections({
                   </tbody>
                 </table>
               </div>
+              </>
             )}
-            <DataTableControls
-              page={page}
-              totalPages={pg.totalPages}
-              totalItems={rows.length}
-              showingFrom={pg.showingFrom}
-              showingTo={pg.showingTo}
-              visiblePageNumbers={pg.visiblePageNumbers}
-              pageSize={pageSize}
-              pageSizeOptions={[10, 20, 50, 100]}
-              onPageSizeChange={setPageSize}
-              onPageChange={setPage}
-              loading={loading}
-            />
+            <div className="px-2 pb-2 sm:p-0">
+              <DataTableControls
+                page={page}
+                totalPages={pg.totalPages}
+                totalItems={rows.length}
+                showingFrom={pg.showingFrom}
+                showingTo={pg.showingTo}
+                visiblePageNumbers={pg.visiblePageNumbers}
+                pageSize={pageSize}
+                pageSizeOptions={[10, 20, 50, 100]}
+                onPageSizeChange={setPageSize}
+                onPageChange={setPage}
+                loading={loading}
+              />
+            </div>
           </div>
         </>
       )}
@@ -534,11 +612,12 @@ export function ComplianceInspections({
 function StatTile({ icon: Icon, label, value, tone }: { icon: any; label: string; value: React.ReactNode; tone?: string }) {
   return (
     <div
-      className="rounded-xl border px-3 py-2.5 shadow-sm"
+      className="rounded-xl border px-2.5 sm:px-3 py-2.5 shadow-sm min-w-0"
       style={{ borderColor: 'var(--border)', backgroundColor: 'var(--surface)' }}
     >
-      <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-secondary">
-        <Icon size={12} style={{ color: tone }} /> {label}
+      <div className="flex items-center gap-1 sm:gap-1.5 text-[9px] sm:text-[10px] uppercase tracking-wide text-secondary">
+        <Icon size={12} className="shrink-0" style={{ color: tone }} />
+        <span className="truncate">{label}</span>
       </div>
       <div className="text-lg font-bold mt-0.5" style={{ color: tone }}>
         {value}
@@ -567,9 +646,65 @@ function MonitorTab({
       />
     );
   }
+  const standingOf = (r: (typeof rows)[number]) =>
+    r.overdue_actions > 0 || r.failed_inspections > 0
+      ? { label: 'At Risk', styles: resultBadge('FAILED') }
+      : r.open_findings > 0 || r.open_actions > 0
+        ? { label: 'Monitoring', styles: resultBadge('PASSED_WITH_FINDINGS') }
+        : { label: 'Compliant', styles: resultBadge('PASSED') };
   return (
+    <>
+    {/* Phones: one card per locator instead of a 9-column table */}
+    <div className="sm:hidden space-y-2">
+      {rows.map((r) => {
+        const standing = standingOf(r);
+        const stats: [string, number, boolean][] = [
+          ['Inspections', r.total_inspections, false],
+          ['Completed', r.completed_inspections, false],
+          ['Failed', r.failed_inspections, r.failed_inspections > 0],
+          ['Open findings', r.open_findings, false],
+          ['Open actions', r.open_actions, false],
+          ['Overdue', r.overdue_actions, r.overdue_actions > 0],
+        ];
+        return (
+          <button
+            key={r.proponent_id}
+            type="button"
+            className="w-full text-left rounded-xl border p-3 cursor-pointer active:bg-[var(--selected-bg)] transition-colors"
+            style={{ borderColor: 'var(--border)', backgroundColor: 'var(--surface)' }}
+            onClick={() => onOpenProponent(r.proponent_id)}
+          >
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0 flex-1">
+                <div className="text-[13px] font-semibold leading-snug break-words" style={{ color: 'var(--text)' }}>
+                  {r.proponent_name}
+                </div>
+                <div className="mt-0.5 text-[11px] text-secondary">Last inspection: {fmtDate(r.last_inspection_date)}</div>
+              </div>
+              <div className="shrink-0">
+                <Badge label={standing.label} styles={standing.styles} />
+              </div>
+            </div>
+            <div className="mt-2.5 grid grid-cols-3 gap-x-2 gap-y-2">
+              {stats.map(([label, value, danger]) => (
+                <div key={label} className="min-w-0">
+                  <div className="text-[9px] uppercase tracking-wider text-secondary truncate">{label}</div>
+                  <div
+                    className="text-[13px] font-semibold tabular-nums"
+                    style={{ color: danger ? '#ef4444' : 'var(--text)' }}
+                  >
+                    {value}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </button>
+        );
+      })}
+    </div>
+
     <div
-      className="rounded-xl border overflow-x-auto shadow-sm"
+      className="hidden sm:block rounded-xl border overflow-x-auto shadow-sm"
       style={{ borderColor: 'var(--border)', backgroundColor: 'var(--surface)' }}
     >
       <table className="w-full text-left text-[13px]">
@@ -591,12 +726,7 @@ function MonitorTab({
         </thead>
         <tbody>
           {rows.map((r) => {
-            const standing =
-              r.overdue_actions > 0 || r.failed_inspections > 0
-                ? { label: 'At Risk', styles: resultBadge('FAILED') }
-                : r.open_findings > 0 || r.open_actions > 0
-                  ? { label: 'Monitoring', styles: resultBadge('PASSED_WITH_FINDINGS') }
-                  : { label: 'Compliant', styles: resultBadge('PASSED') };
+            const standing = standingOf(r);
             return (
               <tr
                 key={r.proponent_id}
@@ -625,10 +755,11 @@ function MonitorTab({
         </tbody>
       </table>
     </div>
+    </>
   );
 }
 
-type Perms = { canAdd: boolean; canEdit: boolean; canDelete: boolean };
+type Perms ={ canAdd: boolean; canEdit: boolean; canDelete: boolean };
 type RunFn = (fn: () => Promise<unknown>, successMsg?: string) => Promise<void>;
 
 const DETAIL_TABS = ['Overview', 'Findings', 'Corrective Actions', 'Reports', 'Activity'] as const;

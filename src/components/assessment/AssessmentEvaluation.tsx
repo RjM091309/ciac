@@ -369,7 +369,7 @@ export function AssessmentEvaluation({
   return (
     <div className="space-y-4 sm:space-y-5">
       {/* Monitoring stat bar */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4 mt-3">
+      <div className="grid grid-cols-3 lg:grid-cols-6 gap-2 sm:gap-4 mt-3">
         <StatTile label="Total" value={summary?.total ?? '—'} />
         <StatTile label="Unassigned" value={summary?.by_stage?.UNASSIGNED ?? '—'} tone="#94a3b8" />
         <StatTile label="Active" value={summary?.active ?? '—'} tone="#3b82f6" />
@@ -409,23 +409,26 @@ export function AssessmentEvaluation({
               style={{ backgroundColor: 'color-mix(in oklab, var(--control-bg) 70%, transparent)' }}
             />
           </div>
-          <div className="w-full sm:w-48">
-            <AppSelect
-              compact
-              placeholder="All stages"
-              value={stageFilter}
-              onChange={setStageFilter}
-              options={STAGE_ORDER.filter((s) => s !== 'COMPLETED').map((s) => ({ value: s, label: STAGE_LABELS[s] }))}
-            />
-          </div>
-          <div className="w-full sm:w-48">
-            <AppSelect
-              compact
-              placeholder="All evaluators"
-              value={evaluatorFilter}
-              onChange={setEvaluatorFilter}
-              options={evaluatorOptions}
-            />
+          {/* Side by side on phones so the filters don't eat two full rows. */}
+          <div className="grid grid-cols-2 gap-2 sm:flex">
+            <div className="min-w-0 sm:w-48">
+              <AppSelect
+                compact
+                placeholder="All stages"
+                value={stageFilter}
+                onChange={setStageFilter}
+                options={STAGE_ORDER.filter((s) => s !== 'COMPLETED').map((s) => ({ value: s, label: STAGE_LABELS[s] }))}
+              />
+            </div>
+            <div className="min-w-0 sm:w-48">
+              <AppSelect
+                compact
+                placeholder="All evaluators"
+                value={evaluatorFilter}
+                onChange={setEvaluatorFilter}
+                options={evaluatorOptions}
+              />
+            </div>
           </div>
         </div>
 
@@ -440,7 +443,91 @@ export function AssessmentEvaluation({
             description="Submitted applications appear here for review, compliance evaluation, and charge assessment."
           />
         ) : (
-          <div className="overflow-x-auto">
+          <>
+          {/* Phones: stacked cards instead of a horizontally scrolling table */}
+          <div className="sm:hidden space-y-2">
+            {pg.pageItems.map((r) => {
+              const compliancePct = r.requirements_total
+                ? Math.round((r.requirements_verified / r.requirements_total) * 100)
+                : 0;
+              return (
+                <button
+                  key={r.application_id}
+                  type="button"
+                  className="w-full text-left rounded-xl p-3 cursor-pointer active:bg-[var(--selected-bg)] transition-colors"
+                  style={{
+                    border: '1px solid var(--border-subtle)',
+                    backgroundColor: 'color-mix(in oklab, var(--control-bg) 35%, transparent)',
+                  }}
+                  onClick={() => setSelectedId(r.application_id)}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0 flex-1">
+                      <div className="text-[13px] font-semibold leading-snug break-words" style={{ color: 'var(--text)' }}>
+                        {r.proponent_name || '—'}
+                      </div>
+                      <div className="mt-0.5 text-[11px] text-secondary">
+                        {r.application_no} · {r.is_renewal ? 'Renewal' : 'New'}
+                        {r.application_type_name ? ` · ${r.application_type_name}` : ''}
+                      </div>
+                    </div>
+                    <div className="shrink-0">
+                      <Badge label={STAGE_LABELS[r.stage] || r.stage} styles={stageBadge(r.stage)} />
+                    </div>
+                  </div>
+
+                  <div className="mt-2.5">
+                    <div className="flex items-center justify-between mb-1 text-[10px]">
+                      <span className="uppercase tracking-wider text-secondary">Compliance</span>
+                      <span className="font-semibold" style={{ color: 'var(--text)' }}>
+                        {r.requirements_verified}/{r.requirements_total} verified
+                      </span>
+                    </div>
+                    <div className="h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--input-border)' }}>
+                      <div
+                        className="h-full rounded-full"
+                        style={{
+                          width: `${compliancePct}%`,
+                          backgroundColor: compliancePct >= 100 ? '#10b981' : compliancePct >= 50 ? '#3b82f6' : '#f59e0b',
+                        }}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="mt-2.5 grid grid-cols-3 gap-2 text-[11px]">
+                    <div className="min-w-0">
+                      <div className="text-[9px] uppercase tracking-wider text-secondary">Evaluator</div>
+                      <div className="truncate" style={{ color: 'var(--text)' }}>
+                        {r.evaluator_name || r.evaluator_username || '—'}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-[9px] uppercase tracking-wider text-secondary">Findings</div>
+                      {r.open_findings > 0 ? (
+                        <div style={{ color: '#ef4444' }}>{r.open_findings} open</div>
+                      ) : (
+                        <div style={{ color: 'var(--text)' }}>{r.total_findings || 0}</div>
+                      )}
+                    </div>
+                    <div className="text-right">
+                      <div className="text-[9px] uppercase tracking-wider text-secondary">Working days</div>
+                      <div
+                        className="tabular-nums"
+                        style={{
+                          color:
+                            r.days_in_assessment != null && r.days_in_assessment > 5 ? '#ef4444' : 'var(--text)',
+                        }}
+                      >
+                        {r.days_in_assessment ?? '—'}
+                      </div>
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="hidden sm:block overflow-x-auto">
             <table className="min-w-full text-left text-xs">
               <thead>
                 <tr style={{ borderBottom: '1px solid var(--border-subtle)' }}>
@@ -496,6 +583,7 @@ export function AssessmentEvaluation({
               </tbody>
             </table>
           </div>
+          </>
         )}
         <DataTableControls
           page={page}
@@ -676,14 +764,16 @@ function StatTile({
   return (
     <Tag
       className={cn(
-        'rounded-xl px-3 py-3 flex flex-col gap-1 shadow-sm text-left',
+        'rounded-xl px-2.5 sm:px-3 py-2.5 sm:py-3 flex flex-col gap-1 shadow-sm text-left',
         onClick && 'cursor-pointer hover:ring-1 hover:ring-[var(--text)] transition-shadow'
       )}
       style={{ backgroundColor: 'color-mix(in oklab, var(--surface) 94%, white 6%)' }}
       onClick={onClick}
     >
-      <span className="text-[10px] font-semibold text-secondary uppercase tracking-widest">{label}</span>
-      <span className="text-base sm:text-lg font-bold leading-tight" style={{ color: tone || 'var(--text)' }}>
+      <span className="text-[9px] sm:text-[10px] font-semibold text-secondary uppercase tracking-wide sm:tracking-widest truncate">
+        {label}
+      </span>
+      <span className="text-lg font-bold leading-tight" style={{ color: tone || 'var(--text)' }}>
         {value}
       </span>
     </Tag>

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Ban, Folder, FolderOpen, Minus, Pencil, Plus, RotateCcw, Search, X } from 'lucide-react';
+import { Ban, ChevronDown, Folder, FolderOpen, Minus, Pencil, Plus, RotateCcw, Search, X } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { cn } from '../../lib/utils';
 import { toast } from 'sonner';
@@ -227,6 +227,8 @@ export function RequirementsManagement() {
   // Filters the tree by Type/Category name — matching types force-expand so
   // a category match is visible without an extra click.
   const [treeSearchQuery, setTreeSearchQuery] = useState('');
+  // Phones only: the tree collapses behind a toggle so the requirements list isn't pushed off-screen.
+  const [isTreeOpenMobile, setIsTreeOpenMobile] = useState(false);
 
   function appliesToType(item: RequirementRow, code: string) {
     return item.application_types.includes(code);
@@ -343,7 +345,16 @@ export function RequirementsManagement() {
     setSelectedTypeCode(typeCode);
     setSelectedCategoryKey(key);
     setExpandedTypeCodes((prev) => new Set(prev).add(typeCode));
+    // On phones the tree is a collapsible panel — close it so the filtered list is in view.
+    setIsTreeOpenMobile(false);
   }
+
+  const selectedTreeLabel = useMemo(() => {
+    if (!selectedTypeCode) return 'All requirements';
+    const typeName = typePanelOptions.find((t) => t.code === selectedTypeCode)?.name || selectedTypeCode;
+    const categoryName = (categoryOptionsByType.get(selectedTypeCode) || []).find((c) => c.key === selectedCategoryKey)?.name;
+    return categoryName ? `${typeName} › ${categoryName}` : typeName;
+  }, [selectedTypeCode, selectedCategoryKey, typePanelOptions, categoryOptionsByType]);
 
   const filteredItems = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -848,9 +859,42 @@ export function RequirementsManagement() {
     );
   }, [editingCategory, categoryForm]);
 
+  function renderItemActions(item: RequirementRow) {
+    const buttonClass = cn(
+      'inline-flex items-center justify-center rounded-md p-1.5 text-secondary',
+      saving ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
+    );
+    return (
+      <>
+        {canEdit ? (
+          <button
+            className={buttonClass}
+            onClick={() => openEdit(item)}
+            disabled={saving}
+            aria-label={`Edit ${item.name}`}
+            title="Edit"
+          >
+            <Pencil size={14} />
+          </button>
+        ) : null}
+        {canDelete ? (
+          <button
+            className={buttonClass}
+            onClick={() => setConfirmDeactivateId(item.id)}
+            disabled={saving}
+            aria-label={`Deactivate ${item.name}`}
+            title="Deactivate"
+          >
+            <Ban size={14} />
+          </button>
+        ) : null}
+      </>
+    );
+  }
+
   return (
     <div className="space-y-4 sm:space-y-5">
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4 mt-3">
+      <div className="grid grid-cols-3 gap-2 sm:gap-4 mt-3">
         <StatCard label="Active Requirements" value={String(stats.active)} />
         <StatCard label="Total Requirements" value={String(stats.total)} />
         <StatCard
@@ -879,6 +923,26 @@ export function RequirementsManagement() {
       <div className="flex flex-col lg:flex-row gap-4 items-start">
         {/* Type/Category tree */}
         <div className="glass-card p-3 w-full lg:w-72 shrink-0 !border-transparent" style={{ backgroundColor: 'var(--surface)' }}>
+          <button
+            type="button"
+            onClick={() => setIsTreeOpenMobile((v) => !v)}
+            className="lg:hidden w-full flex items-center gap-2.5 rounded-lg px-1 py-0.5 text-left cursor-pointer"
+            aria-expanded={isTreeOpenMobile}
+          >
+            <FolderOpen size={16} className="shrink-0 text-secondary" />
+            <div className="flex-1 min-w-0">
+              <div className="text-[10px] font-semibold uppercase tracking-wider text-secondary">Type / Category</div>
+              <div className="text-xs font-semibold truncate" style={{ color: 'var(--text)' }}>
+                {selectedTreeLabel}
+              </div>
+            </div>
+            <ChevronDown
+              size={16}
+              className={cn('shrink-0 text-secondary transition-transform', isTreeOpenMobile && 'rotate-180')}
+            />
+          </button>
+
+          <div className={cn(isTreeOpenMobile ? 'block mt-3' : 'hidden', 'lg:block lg:mt-0')}>
           {(canAddTypes || canAddCategories) ? (
             <div className="flex items-center gap-1.5 mb-2">
               {canAddTypes ? (
@@ -960,7 +1024,7 @@ export function RequirementsManagement() {
                     <div className="relative shrink-0 w-12 h-6 mr-1">
                       {!typeInactive ? (
                         <div
-                          className={cn('absolute inset-0 flex items-center justify-end transition-opacity', typeRow && 'group-hover:opacity-0')}
+                          className={cn('absolute inset-0 flex items-center justify-end transition-opacity', typeRow && 'group-hover:opacity-0 [@media(hover:none)]:opacity-0')}
                         >
                           <span
                             className="rounded-full px-1.5 text-[10px]"
@@ -974,7 +1038,7 @@ export function RequirementsManagement() {
                         <div
                           className={cn(
                             'absolute inset-0 flex items-center justify-end gap-0.5 transition-opacity',
-                            typeInactive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                            typeInactive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100'
                           )}
                         >
                           {!typeInactive && canEditTypes ? (
@@ -1064,7 +1128,7 @@ export function RequirementsManagement() {
                             <div className="relative shrink-0 w-11 h-6 mr-1">
                               {!catInactive ? (
                                 <div
-                                  className={cn('absolute inset-0 flex items-center justify-end transition-opacity', catRow && 'group-hover:opacity-0')}
+                                  className={cn('absolute inset-0 flex items-center justify-end transition-opacity', catRow && 'group-hover:opacity-0 [@media(hover:none)]:opacity-0')}
                                 >
                                   <span
                                     className="rounded-full px-1.5 text-[10px]"
@@ -1081,7 +1145,7 @@ export function RequirementsManagement() {
                                 <div
                                   className={cn(
                                     'absolute inset-0 flex items-center justify-end gap-0.5 transition-opacity',
-                                    catInactive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                                    catInactive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100'
                                   )}
                                 >
                                   {!catInactive && canEditCategories ? (
@@ -1139,6 +1203,7 @@ export function RequirementsManagement() {
               );
             })}
           </div>
+          </div>
         </div>
 
         {/* Requirements table, filtered by whatever's picked in the tree */}
@@ -1195,7 +1260,41 @@ export function RequirementsManagement() {
             }
           />
         ) : (
-          <div className="overflow-x-auto">
+          <>
+          {/* Phones: stacked cards instead of a horizontally scrolling table */}
+          <div className="sm:hidden space-y-2">
+            {pagedItems.map((item) => (
+              <div
+                key={item.id}
+                className="rounded-xl p-3"
+                style={{
+                  border: '1px solid var(--border-subtle)',
+                  backgroundColor: 'color-mix(in oklab, var(--control-bg) 35%, transparent)',
+                }}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0 flex-1">
+                    <div className="text-[13px] font-semibold leading-snug break-words" style={{ color: 'var(--text)' }}>
+                      {item.name}
+                    </div>
+                    <div className="mt-0.5 text-[11px] text-secondary break-all">
+                      {item.code}
+                      {item.category_name ? ` · ${item.category_name}` : ''}
+                    </div>
+                  </div>
+                  <div className="shrink-0 flex items-center gap-1 -mr-1 -mt-1">{renderItemActions(item)}</div>
+                </div>
+                <div className="mt-2 flex flex-wrap items-center gap-1">
+                  {item.for_new ? <FlagChip label="New" /> : null}
+                  {item.for_renewal ? <FlagChip label="Renewal" /> : null}
+                  <FlagChip label={item.is_mandatory ? 'Mandatory' : 'Optional'} strong={!!item.is_mandatory} />
+                </div>
+                <div className="mt-1.5 text-[10px] text-secondary">{applicationTypesLabel(item.application_types)}</div>
+              </div>
+            ))}
+          </div>
+
+          <div className="hidden sm:block overflow-x-auto">
             <table className="min-w-full text-left text-xs">
               <thead>
                 <tr style={{ borderBottom: '1px solid var(--border-subtle)' }}>
@@ -1227,41 +1326,13 @@ export function RequirementsManagement() {
                       <div className="text-[10px] mt-0.5 opacity-80">{applicationTypesLabel(item.application_types)}</div>
                     </td>
                     <td className="px-3 py-2 pr-2">
-                      <div className="flex items-center justify-end gap-2">
-                        {canEdit ? (
-                          <button
-                            className={cn(
-                              'inline-flex items-center justify-center rounded-md p-1.5 text-secondary',
-                              saving ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
-                            )}
-                            onClick={() => openEdit(item)}
-                            disabled={saving}
-                            aria-label={`Edit ${item.name}`}
-                            title="Edit"
-                          >
-                            <Pencil size={14} />
-                          </button>
-                        ) : null}
-                        {canDelete ? (
-                          <button
-                            className={cn(
-                              'inline-flex items-center justify-center rounded-md p-1.5 text-secondary',
-                              saving ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
-                            )}
-                            onClick={() => setConfirmDeactivateId(item.id)}
-                            disabled={saving}
-                            aria-label={`Deactivate ${item.name}`}
-                            title="Deactivate"
-                          >
-                            <Ban size={14} />
-                          </button>
-                        ) : null}
-                      </div>
+                      <div className="flex items-center justify-end gap-2">{renderItemActions(item)}</div>
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
+          </div>
             <DataTableControls
               page={page}
               totalPages={totalPages}
@@ -1275,7 +1346,7 @@ export function RequirementsManagement() {
               onPageChange={(p) => setPage(p)}
               loading={isLoading || isRevalidating}
             />
-          </div>
+          </>
         )}
         </div>
       </div>
@@ -1659,7 +1730,7 @@ function StatCard({ label, value, onClick }: { label: string; value: string; onC
       type={onClick ? 'button' : undefined}
       onClick={onClick}
       className={cn(
-        'rounded-xl px-3 py-3 flex flex-col gap-1 shadow-sm text-left w-full transition-colors',
+        'rounded-xl px-2.5 sm:px-3 py-2.5 sm:py-3 flex flex-col justify-between gap-1 shadow-sm text-left w-full h-full transition-colors',
         onClick && 'cursor-pointer hover:bg-[var(--surface-hover)]'
       )}
       style={{
@@ -1667,11 +1738,28 @@ function StatCard({ label, value, onClick }: { label: string; value: string; onC
       }}
       title={onClick ? 'View deactivated items' : undefined}
     >
-      <span className="text-[10px] font-semibold text-secondary uppercase tracking-widest">{label}</span>
-      <span className="text-base sm:text-lg font-bold leading-tight" style={{ color: 'var(--text)' }}>
+      <span className="text-[9px] sm:text-[10px] font-semibold text-secondary uppercase tracking-wide sm:tracking-widest leading-tight">
+        {label}
+      </span>
+      <span className="text-lg font-bold leading-tight" style={{ color: 'var(--text)' }}>
         {value}
       </span>
     </Comp>
+  );
+}
+
+function FlagChip({ label, strong = false }: { label: string; strong?: boolean }) {
+  return (
+    <span
+      className="inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium"
+      style={
+        strong
+          ? { backgroundColor: 'rgba(245,158,11,.14)', color: '#f59e0b', borderColor: 'rgba(245,158,11,.38)' }
+          : { backgroundColor: 'var(--control-bg)', color: 'var(--text-muted)', borderColor: 'var(--border-subtle)' }
+      }
+    >
+      {label}
+    </span>
   );
 }
 

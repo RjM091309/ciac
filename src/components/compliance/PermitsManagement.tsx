@@ -281,9 +281,60 @@ export function PermitsManagement() {
     }
   }
 
+  function renderExpiryHint(p: PermitRow) {
+    const days = daysUntil(p.expiry_date);
+    if (p.effective_status === 'REVOKED' || days === null) return null;
+    return (
+      <div className="mt-0.5">
+        {days < 0 ? (
+          <span className="inline-flex items-center gap-1 text-[10px] font-semibold" style={{ color: '#fca5a5' }}>
+            <AlertTriangle size={10} /> {Math.abs(days)}d overdue
+          </span>
+        ) : (
+          <span className="text-[10px] text-secondary">{days}d left</span>
+        )}
+      </div>
+    );
+  }
+
+  function renderRowActions(p: PermitRow) {
+    return (
+      <>
+        {p.has_certificate ? (
+          <button
+            className="rounded-md p-1.5 text-secondary cursor-pointer"
+            onClick={() => window.open(`/api/permits/${p.id}/certificate?view=1`, '_blank')}
+            title="View permit certificate"
+          >
+            <FileText size={14} />
+          </button>
+        ) : null}
+        {p.has_contract_certificate ? (
+          <button
+            className="rounded-md p-1.5 text-secondary cursor-pointer"
+            onClick={() => window.open(`/api/permits/${p.id}/contract-certificate?view=1`, '_blank')}
+            title="View contract"
+          >
+            <FileSignature size={14} />
+          </button>
+        ) : null}
+        {canEdit ? (
+          <button className="rounded-md p-1.5 text-secondary cursor-pointer" onClick={() => openEdit(p)} title="Edit">
+            <Pencil size={14} />
+          </button>
+        ) : null}
+        {canDelete ? (
+          <button className="rounded-md p-1.5 text-secondary cursor-pointer" onClick={() => setConfirmDeleteId(p.id)} title="Remove">
+            <Trash2 size={14} />
+          </button>
+        ) : null}
+      </>
+    );
+  }
+
   return (
     <div className="space-y-4 sm:space-y-5">
-      <div className="flex flex-wrap gap-3">
+      <div className="grid grid-cols-3 gap-2 sm:gap-3">
         <ExpiryStatCard
           label="Expiring This Month"
           value={expiryStats.expiringThisMonth}
@@ -307,10 +358,21 @@ export function PermitsManagement() {
       </div>
 
       <div className="glass-card p-4 sm:p-5 !border-transparent" style={{ backgroundColor: 'var(--surface)' }}>
-        <div className="flex items-center justify-end mb-3 gap-2">
+        {/* Search + New Permit share one row (search first so it stays left on every size). */}
+        <div className="flex items-center gap-2 mb-3">
+          <div className="relative group flex-1 min-w-0 sm:flex-none sm:w-72">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)] pointer-events-none" size={14} />
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search permits..."
+              className="h-9 rounded-full pl-9 pr-3 text-xs w-full focus:outline-none focus:ring-1 focus:ring-[var(--border)] text-[var(--text)]"
+              style={{ backgroundColor: 'color-mix(in oklab, var(--control-bg) 70%, transparent)' }}
+            />
+          </div>
           {canAdd ? (
             <button
-              className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-semibold shadow-sm cursor-pointer"
+              className="ml-auto shrink-0 inline-flex items-center gap-1.5 rounded-lg px-3 h-9 text-[11px] font-semibold shadow-sm cursor-pointer whitespace-nowrap"
               style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
               onClick={openCreate}
             >
@@ -319,23 +381,65 @@ export function PermitsManagement() {
           ) : null}
         </div>
 
-        <div className="relative group w-full sm:w-72 mb-3">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)] pointer-events-none" size={14} />
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search permits..."
-            className="h-9 rounded-full pl-9 pr-3 text-xs w-full focus:outline-none focus:ring-1 focus:ring-[var(--border)] text-[var(--text)]"
-            style={{ backgroundColor: 'color-mix(in oklab, var(--control-bg) 70%, transparent)' }}
-          />
-        </div>
-
         {isLoading ? (
           <TableSkeleton columns={7} rows={5} />
         ) : filtered.length === 0 ? (
           <EmptyState title="No permits" description="Add a permit to get started." />
         ) : (
-          <div className="overflow-x-auto">
+          <>
+          {/* Phones: stacked cards instead of an 8-column table */}
+          <div className="sm:hidden space-y-2">
+            {filtered.map((p) => {
+              const s = STATUS_STYLE[p.effective_status] || STATUS_STYLE.REVOKED;
+              return (
+                <div
+                  key={p.id}
+                  className="rounded-xl p-3"
+                  style={{
+                    border: '1px solid var(--border-subtle)',
+                    backgroundColor: 'color-mix(in oklab, var(--control-bg) 35%, transparent)',
+                  }}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0 flex-1">
+                      <div className="text-[13px] font-semibold leading-snug break-words" style={{ color: 'var(--text)' }}>
+                        {p.proponent_name || `#${p.proponent_id}`}
+                      </div>
+                      <div className="mt-0.5 text-[11px] text-secondary">{typeLabel[p.permit_type] || p.permit_type}</div>
+                    </div>
+                    <span
+                      className="shrink-0 inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold"
+                      style={{ backgroundColor: s.bg, color: s.color }}
+                    >
+                      {p.effective_status}
+                    </span>
+                  </div>
+
+                  <div className="mt-2 text-[11px] font-semibold break-all" style={{ color: 'var(--text)' }}>
+                    {p.permit_no}
+                    {p.issuing_authority ? <span className="font-normal text-secondary"> · {p.issuing_authority}</span> : null}
+                  </div>
+
+                  <div className="mt-2.5 flex items-end justify-between gap-2">
+                    <div className="grid grid-cols-2 gap-3 text-[11px]">
+                      <div>
+                        <div className="text-[9px] uppercase tracking-wider text-secondary">Issued</div>
+                        <div style={{ color: 'var(--text)' }}>{fmt(p.issue_date)}</div>
+                      </div>
+                      <div>
+                        <div className="text-[9px] uppercase tracking-wider text-secondary">Expiry</div>
+                        <div style={{ color: 'var(--text)' }}>{fmt(p.expiry_date)}</div>
+                        {renderExpiryHint(p)}
+                      </div>
+                    </div>
+                    <div className="shrink-0 flex items-center gap-0.5 -mr-1.5 -mb-1">{renderRowActions(p)}</div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="hidden sm:block overflow-x-auto">
             <table className="min-w-full text-left text-xs">
               <thead>
                 <tr>
@@ -358,20 +462,7 @@ export function PermitsManagement() {
                       <td className="px-3 py-2 text-[11px] text-secondary">{fmt(p.issue_date)}</td>
                       <td className="px-3 py-2 text-[11px] text-secondary">
                         {fmt(p.expiry_date)}
-                        {p.effective_status !== 'REVOKED' && daysUntil(p.expiry_date) !== null ? (
-                          <div className="mt-0.5">
-                            {(() => {
-                              const days = daysUntil(p.expiry_date) as number;
-                              return days < 0 ? (
-                                <span className="inline-flex items-center gap-1 text-[10px] font-semibold" style={{ color: '#fca5a5' }}>
-                                  <AlertTriangle size={10} /> {Math.abs(days)}d overdue
-                                </span>
-                              ) : (
-                                <span className="text-[10px] text-secondary">{days}d left</span>
-                              );
-                            })()}
-                          </div>
-                        ) : null}
+                        {renderExpiryHint(p)}
                       </td>
                       <td className="px-3 py-2 text-[11px]">
                         <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold" style={{ backgroundColor: s.bg, color: s.color }}>
@@ -379,36 +470,7 @@ export function PermitsManagement() {
                         </span>
                       </td>
                       <td className="px-3 py-2 pr-2">
-                        <div className="flex items-center justify-end gap-2">
-                          {p.has_certificate ? (
-                            <button
-                              className="rounded-md p-1.5 text-secondary cursor-pointer"
-                              onClick={() => window.open(`/api/permits/${p.id}/certificate?view=1`, '_blank')}
-                              title="View permit certificate"
-                            >
-                              <FileText size={14} />
-                            </button>
-                          ) : null}
-                          {p.has_contract_certificate ? (
-                            <button
-                              className="rounded-md p-1.5 text-secondary cursor-pointer"
-                              onClick={() => window.open(`/api/permits/${p.id}/contract-certificate?view=1`, '_blank')}
-                              title="View contract"
-                            >
-                              <FileSignature size={14} />
-                            </button>
-                          ) : null}
-                          {canEdit ? (
-                            <button className="rounded-md p-1.5 text-secondary cursor-pointer" onClick={() => openEdit(p)} title="Edit">
-                              <Pencil size={14} />
-                            </button>
-                          ) : null}
-                          {canDelete ? (
-                            <button className="rounded-md p-1.5 text-secondary cursor-pointer" onClick={() => setConfirmDeleteId(p.id)} title="Remove">
-                              <Trash2 size={14} />
-                            </button>
-                          ) : null}
-                        </div>
+                        <div className="flex items-center justify-end gap-2">{renderRowActions(p)}</div>
                       </td>
                     </tr>
                   );
@@ -416,6 +478,7 @@ export function PermitsManagement() {
               </tbody>
             </table>
           </div>
+          </>
         )}
       </div>
 
@@ -548,15 +611,17 @@ function ExpiryStatCard({
     <button
       type="button"
       onClick={onClick}
-      className="glass-card p-3.5 !border-transparent flex-1 min-w-[160px] text-left cursor-pointer transition-shadow"
+      className="glass-card p-2.5 sm:p-3.5 !border-transparent min-w-0 flex flex-col justify-between text-left cursor-pointer transition-shadow"
       style={{
         backgroundColor: 'var(--surface)',
         boxShadow: active ? `0 0 0 2px ${color}` : undefined,
       }}
       title={active ? 'Click again to clear this filter' : `Filter the table to ${label.toLowerCase()}`}
     >
-      <div className="text-[10px] font-semibold uppercase tracking-widest text-secondary">{label}</div>
-      <div className="mt-1 text-2xl font-bold" style={{ color }}>{value}</div>
+      <div className="text-[9px] sm:text-[10px] font-semibold uppercase tracking-wide sm:tracking-widest text-secondary leading-tight">
+        {label}
+      </div>
+      <div className="mt-1 text-xl sm:text-2xl font-bold" style={{ color }}>{value}</div>
     </button>
   );
 }
