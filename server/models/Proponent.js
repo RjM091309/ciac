@@ -148,6 +148,35 @@ async function ensureSchema() {
     )
       ALTER TABLE dbo.proponents ADD location NVARCHAR(255) NULL;
   `);
+  // "Profile" fields mirroring the legacy BRIDGE system's Locator's
+  // Information form — like `location`, these are detail/edit-panel-only
+  // (never bulk-fetched for the Locators List table).
+  await updateSchema(`
+    IF NOT EXISTS (
+      SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+      WHERE TABLE_NAME = 'proponents' AND COLUMN_NAME = 'ref_code'
+    )
+      ALTER TABLE dbo.proponents ADD
+        ref_code NVARCHAR(50) NULL,
+        lease_address NVARCHAR(500) NULL,
+        account_officer_id INT NULL,
+        sec_registration_date DATE NULL,
+        date_signed DATE NULL,
+        grace_period NVARCHAR(50) NULL,
+        is_sublease BIT NULL,
+        sub_pgro NVARCHAR(50) NULL,
+        sub_pgrr NVARCHAR(50) NULL,
+        land_use NVARCHAR(500) NULL,
+        extension_date DATE NULL,
+        extension_remarks NVARCHAR(300) NULL,
+        authorized_capital NVARCHAR(50) NULL,
+        authorized_capital_currency NVARCHAR(10) NULL,
+        subscribed_capital NVARCHAR(50) NULL,
+        subscribed_capital_currency NVARCHAR(10) NULL,
+        paid_up_capital NVARCHAR(50) NULL,
+        paid_up_capital_currency NVARCHAR(10) NULL,
+        CONSTRAINT FK_proponents_account_officer FOREIGN KEY (account_officer_id) REFERENCES dbo.users(id);
+  `);
   await migrateLegacyPlaintextTin();
   await backfillMissingRefNos();
 }
@@ -218,12 +247,44 @@ async function getProponentById(id) {
       p.contact_no,
       p.ref_no,
       p.location,
+      p.ref_code,
+      p.lease_address,
+      p.account_officer_id,
+      officer.full_name AS account_officer_name,
+      p.sec_registration_date,
+      p.date_signed,
+      p.grace_period,
+      p.is_sublease,
+      p.sub_pgro,
+      p.sub_pgrr,
+      p.land_use,
+      p.extension_date,
+      p.extension_remarks,
+      p.authorized_capital,
+      p.authorized_capital_currency,
+      p.subscribed_capital,
+      p.subscribed_capital_currency,
+      p.paid_up_capital,
+      p.paid_up_capital_currency,
       p.created_by,
       p.updated_by,
       p.created_at,
       p.updated_at,
-      p.is_active
+      p.is_active,
+      ct.effective_start AS start_term,
+      ct.effective_end AS end_term,
+      ct.contract_type_code,
+      toctype.name AS contract_type_name
     FROM dbo.proponents p
+    LEFT JOIN dbo.users officer ON officer.id = p.account_officer_id
+    OUTER APPLY (
+      SELECT TOP (1) c.effective_start, c.effective_end, c.contract_type_code
+      FROM dbo.contracts c
+      INNER JOIN dbo.applications a ON a.id = c.application_id
+      WHERE a.proponent_id = p.id
+      ORDER BY c.effective_end DESC, c.id DESC
+    ) ct
+    LEFT JOIN dbo.application_types toctype ON toctype.code = ct.contract_type_code
     WHERE p.id = @param0
     `,
     [id]
@@ -241,6 +302,30 @@ async function getProponentById(id) {
     contact_no: p.contact_no ?? null,
     ref_no: p.ref_no ?? null,
     location: p.location ?? null,
+    ref_code: p.ref_code ?? null,
+    lease_address: p.lease_address ?? null,
+    account_officer_id: p.account_officer_id ?? null,
+    account_officer_name: p.account_officer_name ?? null,
+    sec_registration_date: p.sec_registration_date ?? null,
+    date_signed: p.date_signed ?? null,
+    grace_period: p.grace_period ?? null,
+    is_sublease: p.is_sublease ?? null,
+    sub_pgro: p.sub_pgro ?? null,
+    sub_pgrr: p.sub_pgrr ?? null,
+    land_use: p.land_use ?? null,
+    extension_date: p.extension_date ?? null,
+    extension_remarks: p.extension_remarks ?? null,
+    authorized_capital: p.authorized_capital ?? null,
+    authorized_capital_currency: p.authorized_capital_currency ?? null,
+    subscribed_capital: p.subscribed_capital ?? null,
+    subscribed_capital_currency: p.subscribed_capital_currency ?? null,
+    paid_up_capital: p.paid_up_capital ?? null,
+    paid_up_capital_currency: p.paid_up_capital_currency ?? null,
+    start_term: p.start_term ?? null,
+    end_term: p.end_term ?? null,
+    lease_term: formatLeaseTerm(p.start_term, p.end_term),
+    contract_type_code: p.contract_type_code ?? null,
+    contract_type_name: p.contract_type_name ?? null,
     created_by: p.created_by ?? null,
     updated_by: p.updated_by ?? null,
     created_at: p.created_at ?? null,
@@ -356,7 +441,35 @@ async function createProponent({
 
 async function updateProponent(
   id,
-  { user_id, business_name, registration_no, tin, address, contact_no, location, updated_by, is_active }
+  {
+    user_id,
+    business_name,
+    registration_no,
+    tin,
+    address,
+    contact_no,
+    location,
+    ref_code,
+    lease_address,
+    account_officer_id,
+    sec_registration_date,
+    date_signed,
+    grace_period,
+    is_sublease,
+    sub_pgro,
+    sub_pgrr,
+    land_use,
+    extension_date,
+    extension_remarks,
+    authorized_capital,
+    authorized_capital_currency,
+    subscribed_capital,
+    subscribed_capital_currency,
+    paid_up_capital,
+    paid_up_capital_currency,
+    updated_by,
+    is_active,
+  }
 ) {
   await ensureSchema();
   const sets = [];
@@ -373,6 +486,24 @@ async function updateProponent(
   if (address !== undefined) pushSet("address = ?", address);
   if (contact_no !== undefined) pushSet("contact_no = ?", contact_no);
   if (location !== undefined) pushSet("location = ?", location);
+  if (ref_code !== undefined) pushSet("ref_code = ?", ref_code);
+  if (lease_address !== undefined) pushSet("lease_address = ?", lease_address);
+  if (account_officer_id !== undefined) pushSet("account_officer_id = ?", toInt(account_officer_id));
+  if (sec_registration_date !== undefined) pushSet("sec_registration_date = ?", sec_registration_date);
+  if (date_signed !== undefined) pushSet("date_signed = ?", date_signed);
+  if (grace_period !== undefined) pushSet("grace_period = ?", grace_period);
+  if (is_sublease !== undefined) pushSet("is_sublease = ?", is_sublease === null ? null : is_sublease ? 1 : 0);
+  if (sub_pgro !== undefined) pushSet("sub_pgro = ?", sub_pgro);
+  if (sub_pgrr !== undefined) pushSet("sub_pgrr = ?", sub_pgrr);
+  if (land_use !== undefined) pushSet("land_use = ?", land_use);
+  if (extension_date !== undefined) pushSet("extension_date = ?", extension_date);
+  if (extension_remarks !== undefined) pushSet("extension_remarks = ?", extension_remarks);
+  if (authorized_capital !== undefined) pushSet("authorized_capital = ?", authorized_capital);
+  if (authorized_capital_currency !== undefined) pushSet("authorized_capital_currency = ?", authorized_capital_currency);
+  if (subscribed_capital !== undefined) pushSet("subscribed_capital = ?", subscribed_capital);
+  if (subscribed_capital_currency !== undefined) pushSet("subscribed_capital_currency = ?", subscribed_capital_currency);
+  if (paid_up_capital !== undefined) pushSet("paid_up_capital = ?", paid_up_capital);
+  if (paid_up_capital_currency !== undefined) pushSet("paid_up_capital_currency = ?", paid_up_capital_currency);
   if (is_active !== undefined) pushSet("is_active = ?", is_active ? 1 : 0);
 
   const updatedBy = toInt(updated_by);

@@ -73,8 +73,46 @@ async function ensureSchema() {
 
       IF COL_LENGTH('dbo.contracts', 'certificate_path') IS NULL
         ALTER TABLE dbo.contracts ADD certificate_path NVARCHAR(1000) NULL;
+
+      -- "Type of Contract" (Lease Agreement/Sublease Agreement/etc.) — a
+      -- contract-level attribute, distinct from applications.application_type
+      -- (which this app repurposes for Business Type/Industry). References
+      -- dbo.application_types.code, the same shared catalog table, just a
+      -- different column/purpose.
+      IF COL_LENGTH('dbo.contracts', 'contract_type_code') IS NULL
+        ALTER TABLE dbo.contracts ADD contract_type_code NVARCHAR(50) NULL;
     END;
   `);
+}
+
+/** Finds the given proponent's current/latest contract (same "most recent by
+ * effective_end" rule used everywhere else — see Proponent.js's
+ * listProponentsForLocatorList) and sets its Type of Contract. No-op if the
+ * proponent has no contract yet — same as Start/End/Lease Term, this only
+ * ever describes a contract that already exists. */
+async function setContractTypeForProponent(proponentId, contractTypeCode, updatedBy) {
+  const rows = await selectData(
+    `
+    SELECT TOP (1) c.id
+    FROM dbo.contracts c
+    INNER JOIN dbo.applications a ON a.id = c.application_id
+    WHERE a.proponent_id = @param0
+    ORDER BY c.effective_end DESC, c.id DESC
+    `,
+    [toInt(proponentId)]
+  );
+  const contractId = rows?.[0]?.id;
+  if (!contractId) return false;
+
+  await updateData(
+    `
+    UPDATE dbo.contracts
+    SET contract_type_code = @param1, updated_by = @param2, updated_at = GETDATE()
+    WHERE id = @param0
+    `,
+    [contractId, contractTypeCode || null, toInt(updatedBy)]
+  );
+  return true;
 }
 
 async function setCertificatePath(id, certificatePath) {
@@ -439,5 +477,6 @@ module.exports = {
   setCertificatePath,
   getCertificatePath,
   previewContractNo,
+  setContractTypeForProponent,
 };
 

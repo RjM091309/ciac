@@ -13,29 +13,43 @@ type AppSelectProps = {
   isDisabled?: boolean;
   isClearable?: boolean;
   compact?: boolean;
+  /** Control border radius. Defaults to the pill shape used across the app;
+   * pass '0.5rem' to match app-form-control in dense forms that mix
+   * selects/date pickers with plain inputs (e.g. the Locator edit form). */
+  radius?: string;
+  /** Overrides the compact/non-compact default control height. Pass 28 to
+   * match app-form-control-sm's rendered height exactly (e.g. the Locator
+   * edit form, where selects sit next to plain inputs in the same row). */
+  minHeight?: number;
+  /** Drops the control's own border/radius/background so it can be dropped
+   * into an app-form-control wrapper div that supplies them instead — for
+   * pixel-matching a plain text field it sits beside (e.g. the Locator edit
+   * form). Pair with a wrapper div and a smaller minHeight (the wrapper's
+   * own 1px border no longer overlaps the control's). */
+  boxed?: boolean;
   onChange: (value: string) => void;
 };
 
-const createStyles = (compact: boolean): StylesConfig<AppSelectOption, false> => ({
+const createStyles = (compact: boolean, radius: string, minHeight: number | undefined, boxed: boolean): StylesConfig<AppSelectOption, false> => ({
   control: (base, state) => ({
     ...base,
-    minHeight: compact ? 32 : 40,
+    minHeight: minHeight ?? (compact ? 32 : 40),
     backgroundColor: 'transparent',
     cursor: 'pointer',
     borderStyle: 'solid',
-    borderWidth: '1px',
+    borderWidth: boxed ? 0 : '1px',
     borderColor: state.isFocused ? 'var(--nav-active-bg)' : 'var(--input-border)',
-    borderRadius: '1.5rem',
+    borderRadius: boxed ? 0 : radius,
     boxShadow: 'none',
     outline: 'none',
     '&:hover': {
       borderColor: 'var(--nav-active-bg)',
-      borderWidth: '1px',
+      borderWidth: boxed ? 0 : '1px',
     },
   }),
   valueContainer: (base) => ({
     ...base,
-    padding: compact ? '0 8px' : '0 10px',
+    padding: boxed ? '0 8px' : compact ? '0 8px' : '0 10px',
   }),
   input: (base) => ({
     ...base,
@@ -86,13 +100,13 @@ const createStyles = (compact: boolean): StylesConfig<AppSelectOption, false> =>
   }),
   dropdownIndicator: (base) => ({
     ...base,
-    padding: compact ? 6 : 8,
+    padding: boxed ? 3 : compact ? 6 : 8,
     color: 'var(--text-muted)',
     '&:hover': { color: 'var(--text)' },
   }),
   clearIndicator: (base) => ({
     ...base,
-    padding: compact ? 6 : 8,
+    padding: boxed ? 3 : compact ? 6 : 8,
     color: 'var(--text-muted)',
     '&:hover': { color: 'var(--text)' },
   }),
@@ -105,6 +119,9 @@ export function AppSelect({
   isDisabled = false,
   isClearable = true,
   compact = false,
+  radius = '1.5rem',
+  minHeight,
+  boxed = false,
   onChange,
 }: AppSelectProps) {
   const selected = options.find((option) => option.value === value) ?? null;
@@ -113,7 +130,8 @@ export function AppSelect({
     <Select<AppSelectOption, false>
       options={options}
       value={selected}
-      styles={createStyles(compact)}
+      styles={createStyles(compact, radius, minHeight, boxed)}
+      className={boxed ? 'flex-1 min-w-0' : undefined}
       classNamePrefix="app-select"
       menuPortalTarget={typeof document !== 'undefined' ? document.body : null}
       menuPlacement="auto"

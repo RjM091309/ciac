@@ -331,6 +331,14 @@
   color: var(--text);
   outline: none;
 }
+/* Denser variant for forms that need to fit many fields without scrolling
+   (e.g. the Locators/Proponent List edit panel) — combine with
+   .app-form-control, never used alone. */
+.app-form-control-sm {
+  padding: 0.3rem 0.5rem;
+  font-size: 0.75rem;
+  line-height: 1rem;
+}
 .app-form-control:hover:not(:disabled) {
   border-color: var(--nav-active-bg);
 }

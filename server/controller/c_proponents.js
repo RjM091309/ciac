@@ -2,6 +2,7 @@ const Proponent = require("../models/Proponent");
 const ChangeRequest = require("../models/ProponentChangeRequest");
 const Notification = require("../models/Notification");
 const ActivityLog = require("../models/ActivityLog");
+const Contract = require("../models/Contract");
 
 exports.list = async (req, res) => {
   try {
@@ -327,7 +328,35 @@ exports.update = async (req, res) => {
     const id = Number(req.params.id);
     if (!Number.isFinite(id)) return res.status(400).json({ success: false, message: "Invalid id" });
 
-    const { user_id, business_name, registration_no, tin, address, contact_no, location, is_active } = req.body || {};
+    const {
+      user_id,
+      business_name,
+      registration_no,
+      tin,
+      address,
+      contact_no,
+      location,
+      ref_code,
+      lease_address,
+      account_officer_id,
+      sec_registration_date,
+      date_signed,
+      grace_period,
+      is_sublease,
+      sub_pgro,
+      sub_pgrr,
+      land_use,
+      extension_date,
+      extension_remarks,
+      authorized_capital,
+      authorized_capital_currency,
+      subscribed_capital,
+      subscribed_capital_currency,
+      paid_up_capital,
+      paid_up_capital_currency,
+      contract_type_code,
+      is_active,
+    } = req.body || {};
     const row = await Proponent.updateProponent(id, {
       user_id,
       business_name,
@@ -336,12 +365,38 @@ exports.update = async (req, res) => {
       address,
       contact_no,
       location,
+      ref_code,
+      lease_address,
+      account_officer_id,
+      sec_registration_date,
+      date_signed,
+      grace_period,
+      is_sublease,
+      sub_pgro,
+      sub_pgrr,
+      land_use,
+      extension_date,
+      extension_remarks,
+      authorized_capital,
+      authorized_capital_currency,
+      subscribed_capital,
+      subscribed_capital_currency,
+      paid_up_capital,
+      paid_up_capital_currency,
       is_active,
       updated_by: req.user?.id ?? null,
     });
     if (!row) return res.status(404).json({ success: false, message: "Proponent not found" });
 
-    return res.json({ success: true, data: row });
+    // Type of Contract lives on the proponent's current contract, not the
+    // proponent record — a no-op if there's no contract yet (same as
+    // Start/End/Lease Term, it only ever describes one that already exists).
+    if (contract_type_code !== undefined) {
+      await Contract.setContractTypeForProponent(id, contract_type_code, req.user?.id ?? null);
+    }
+    const refreshed = await Proponent.getProponentById(id);
+
+    return res.json({ success: true, data: refreshed || row });
   } catch (error) {
     console.error("Update proponent error:", error);
     return res.status(500).json({ success: false, message: error.message || "Internal server error" });

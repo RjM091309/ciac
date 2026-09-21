@@ -9,6 +9,9 @@ type SidePanelProps = {
   saveDisabled?: boolean;
   saveLabel?: string;
   widthClassName?: string;
+  /** Small print shown in the footer, to the left of Cancel/Save (e.g. a
+   * "derived automatically" disclaimer) instead of taking up body space. */
+  footerNote?: React.ReactNode;
   onClose: () => void;
   onSave: () => void | Promise<void>;
   children: React.ReactNode;
@@ -22,6 +25,7 @@ export function SidePanel({
   saveDisabled = false,
   saveLabel = 'Save',
   widthClassName = 'max-w-[44rem]',
+  footerNote,
   onClose,
   onSave,
   children,
@@ -69,7 +73,12 @@ export function SidePanel({
 
               <div className="flex-1 overflow-y-auto py-4">{children}</div>
 
-              <div className="border-t pt-3 flex items-center justify-end gap-2" style={{ borderColor: 'var(--input-border)' }}>
+              <div
+                className={`border-t pt-3 flex items-center gap-2 ${footerNote ? 'justify-between' : 'justify-end'}`}
+                style={{ borderColor: 'var(--input-border)' }}
+              >
+                {footerNote ? <div className="text-[10px] text-secondary">{footerNote}</div> : null}
+                <div className="flex items-center gap-2 shrink-0">
                 <button
                   className={`rounded-lg px-3 py-2 text-sm font-semibold border ${
                     saving ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
@@ -90,6 +99,7 @@ export function SidePanel({
                 >
                   {saving ? 'Saving…' : saveLabel}
                 </button>
+                </div>
               </div>
             </motion.div>
           </div>

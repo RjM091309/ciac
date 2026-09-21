@@ -133,6 +133,9 @@ export function DatePicker({
   mode = 'range',
   placeholder = 'Enter Date',
   fullWidth = false,
+  rounded = 'full',
+  dense = false,
+  boxed = false,
 }: {
   value: any;
   onChange: (next: any) => void;
@@ -141,6 +144,19 @@ export function DatePicker({
   mode?: 'single' | 'range';
   placeholder?: string;
   fullWidth?: boolean;
+  /** Corner style of the trigger input. Defaults to the pill shape used
+   * across the app; pass 'lg' to match app-form-control (0.5rem) in dense
+   * forms that mix date pickers with plain inputs (e.g. the Locator edit form). */
+  rounded?: 'full' | 'lg';
+  /** Shrinks the trigger to app-form-control-sm's rendered height (28px)
+   * instead of the app-wide default (36px), for forms that mix date pickers
+   * with plain inputs in the same row (e.g. the Locator edit form). */
+  dense?: boolean;
+  /** Renders the trigger as the exact same bordered box as app-form-control
+   * (border on the outer box, transparent/borderless input inside) instead
+   * of the app-wide filled-pill look. Implies dense sizing. Use this to make
+   * a date field pixel-match a plain text field it sits beside. */
+  boxed?: boolean;
 }) {
   const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
   const open = Boolean(anchorEl);
@@ -185,10 +201,14 @@ export function DatePicker({
           <CalendarDays size={16} />
         </button>
       ) : (
-        <div className={`relative group w-full ${fullWidth ? '' : 'sm:w-36 md:w-44 lg:w-64 xl:w-72 max-w-[170px] lg:max-w-none'}`}>
+        <div
+          className={`relative group w-full flex items-stretch ${
+            boxed ? 'app-form-control app-form-control-sm p-0 overflow-hidden' : ''
+          } ${fullWidth || boxed ? '' : 'sm:w-36 md:w-44 lg:w-64 xl:w-72 max-w-[170px] lg:max-w-none'}`}
+        >
           <CalendarDays
-            className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)] group-focus-within:text-[var(--text)] transition-colors pointer-events-none"
-            size={14}
+            className={`absolute ${dense || boxed ? 'left-2' : 'left-3'} top-1/2 -translate-y-1/2 text-[var(--text-muted)] group-focus-within:text-[var(--text)] transition-colors pointer-events-none`}
+            size={dense || boxed ? 12 : 14}
           />
           <input
             type="text"
@@ -197,12 +217,20 @@ export function DatePicker({
             placeholder={placeholder}
             aria-label="Date range"
             onClick={(e) => setAnchorEl(e.currentTarget)}
-            className="h-9 rounded-full pl-9 pr-3 text-xs w-full focus:outline-none focus:ring-1 focus:ring-[var(--border)] text-[var(--text)] placeholder:text-[var(--text-muted)] transition-all cursor-pointer"
-            style={{
-              backgroundColor: 'color-mix(in oklab, var(--control-bg) 70%, transparent)',
-              opacity: isEmpty ? 0.72 : 1,
-              whiteSpace: 'nowrap',
-            }}
+            className={
+              boxed
+                ? 'flex-1 min-w-0 border-0 bg-transparent outline-none pl-7 pr-2 py-1 text-xs w-full text-[var(--text)] placeholder:text-[var(--text-muted)] cursor-pointer'
+                : `${dense ? 'h-7 pl-7 pr-2' : 'h-9 pl-9 pr-3'} ${rounded === 'lg' ? 'rounded-lg' : 'rounded-full'} text-xs w-full focus:outline-none focus:ring-1 focus:ring-[var(--border)] text-[var(--text)] placeholder:text-[var(--text-muted)] transition-all cursor-pointer`
+            }
+            style={
+              boxed
+                ? { opacity: isEmpty ? 0.72 : 1, whiteSpace: 'nowrap' }
+                : {
+                    backgroundColor: 'color-mix(in oklab, var(--control-bg) 70%, transparent)',
+                    opacity: isEmpty ? 0.72 : 1,
+                    whiteSpace: 'nowrap',
+                  }
+            }
           />
         </div>
       )}
