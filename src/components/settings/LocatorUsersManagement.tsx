@@ -929,14 +929,11 @@ export function LocatorUsersManagement({ locationSearch = '' }: { locationSearch
         </div>
 
         <div className="mt-4 pt-4 border-t" style={{ borderColor: 'var(--border-subtle)' }}>
-          <p className="text-xs font-bold uppercase tracking-widest text-secondary mb-1">Business profile</p>
-          <p className="text-[11px] text-secondary mb-3">
-            {editing
-              ? loadingProfile
-                ? 'Loading current business profile…'
-                : "Edits here update the locator's business profile directly."
-              : "Required — the locator's dashboard opens right after they set up their authenticator, with their business profile already complete."}
-          </p>
+          {editing ? (
+            <p className="text-[11px] text-secondary mb-3">
+              {loadingProfile ? 'Loading current business profile…' : "Edits here update the locator's business profile directly."}
+            </p>
+          ) : null}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <Field label={editing ? 'Business name' : 'Business name *'}>
               <input
@@ -985,12 +982,7 @@ export function LocatorUsersManagement({ locationSearch = '' }: { locationSearch
 
         {editing ? (
           <TotpSection user={editing} onChanged={() => refresh({ showLoading: false })} />
-        ) : (
-          <p className="mt-4 text-[11px] text-secondary">
-            A temporary password will be generated and emailed to the locator on save — they'll set their own on
-            first login. Reopen this account afterward to set up their Google Authenticator.
-          </p>
-        )}
+        ) : null}
       </SidePanel>
 
       <ConfirmModal
