@@ -54,7 +54,7 @@ exports.summary = async (req, res) => {
 
 exports.approvers = async (req, res) => {
   try {
-    return res.json({ success: true, data: await Approval.listApprovers() });
+    return res.json({ success: true, data: await Approval.listApprovers(req.query?.role_id) });
   } catch (error) {
     return fail(res, error, "List approvers");
   }
@@ -132,8 +132,8 @@ exports.actOnStep = async (req, res) => {
   try {
     const id = idParam(req, res, "step id");
     if (id === null) return undefined;
-    const { action, remarks } = req.body || {};
-    const data = await Approval.actOnStep(id, { action, remarks, actorId: req.user?.id ?? null });
+    const { action, remarks, override_unverified } = req.body || {};
+    const data = await Approval.actOnStep(id, { action, remarks, override_unverified: Boolean(override_unverified), actorId: req.user?.id ?? null });
     if (!data) return res.status(404).json({ success: false, message: "Approval step not found" });
     const settledStatus = data?.approval?.approval_status;
     await AuditLog.record({
@@ -403,11 +403,11 @@ exports.listLevels = async (req, res) => {
 
 exports.createLevel = async (req, res) => {
   try {
-    const { level_no, name, role_hint } = req.body || {};
+    const { level_no, name, role_hint, role_id, assignee_user_ids } = req.body || {};
     if (!name || !String(name).trim()) {
       return res.status(400).json({ success: false, message: "name is required" });
     }
-    const row = await Approval.createLevel({ level_no, name, role_hint, actorId: req.user?.id ?? null });
+    const row = await Approval.createLevel({ level_no, name, role_hint, role_id, assignee_user_ids, actorId: req.user?.id ?? null });
     await AuditLog.record({
       actorId: req.user?.id,
       actorUsername: req.user?.username,

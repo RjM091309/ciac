@@ -5,12 +5,16 @@ const { requireMenuAccess, requireRole } = require("../middleware/m_auth");
 
 const MENU_KEY = "approval:queue";
 
-// Configurable approval hierarchy (Workflow Setup). Declared before the
+// Configurable approval hierarchy (Workflow Setup). Lives only inside
+// Control Panel's Menu CRUD Permissions tab (under the Approval & Issuance
+// row), not as its own menu/page — so it's admin-gated the same way Control
+// Panel's own permission-write routes are (r_control_panel.js), rather than
+// through the generic menu-key permission system. Declared before the
 // dynamic "/:applicationId" route so "levels" isn't swallowed as an id.
-router.get("/levels", requireMenuAccess(MENU_KEY, "view"), controller.listLevels);
-router.post("/levels", requireMenuAccess(MENU_KEY, "edit"), controller.createLevel);
-router.put("/levels/:id", requireMenuAccess(MENU_KEY, "edit"), controller.updateLevel);
-router.delete("/levels/:id", requireMenuAccess(MENU_KEY, "edit"), controller.deleteLevel);
+router.get("/levels", requireRole("admin"), controller.listLevels);
+router.post("/levels", requireRole("admin"), controller.createLevel);
+router.put("/levels/:id", requireRole("admin"), controller.updateLevel);
+router.delete("/levels/:id", requireRole("admin"), controller.deleteLevel);
 
 // Read
 router.get("/", requireMenuAccess(MENU_KEY, "view"), controller.list);

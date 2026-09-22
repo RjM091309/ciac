@@ -1,6 +1,7 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
-import { Check, Loader2, Save } from 'lucide-react';
+import { Check, Loader2, Plus, Save } from 'lucide-react';
+import Select, { components, type OptionProps, type StylesConfig } from 'react-select';
 import { toast } from 'sonner';
 import { Skeleton, TableSkeleton } from '../ui/Skeleton';
 import { EmptyState } from '../ui/EmptyState';
@@ -97,6 +98,399 @@ function PermissionToggle({
         }}
       />
     </button>
+  );
+}
+
+type ApprovalLevel = {
+  id: number;
+  level_no: number;
+  name: string;
+  role_id: number | null;
+  role_name: string | null;
+  is_active: number | boolean;
+  assignees: { id: number; full_name: string | null; username: string }[];
+};
+
+type Approver = { id: number; full_name: string | null; username: string };
+type ApproverOption = { value: number; label: string };
+
+const approverSelectStyles: StylesConfig<ApproverOption, true> = {
+  control: (base, state) => ({
+    ...base,
+    minHeight: 32,
+    backgroundColor: 'var(--input-bg)',
+    borderStyle: 'solid',
+    borderWidth: '1px',
+    borderColor: state.isFocused ? 'var(--nav-active-bg)' : 'var(--input-border)',
+    borderRadius: '0.5rem',
+    boxShadow: 'none',
+    cursor: 'pointer',
+  }),
+  valueContainer: (base) => ({ ...base, padding: '2px 8px', gap: 4 }),
+  input: (base) => ({ ...base, color: 'var(--text)', margin: 0 }),
+  placeholder: (base) => ({ ...base, color: 'var(--text-muted)', fontSize: 12 }),
+  multiValue: (base) => ({
+    ...base,
+    backgroundColor: 'color-mix(in oklab, var(--nav-active-bg) 14%, transparent)',
+    borderRadius: 6,
+  }),
+  multiValueLabel: (base) => ({ ...base, color: 'var(--nav-active-bg)', fontSize: 11, padding: '2px 4px' }),
+  multiValueRemove: (base) => ({
+    ...base,
+    color: 'var(--nav-active-bg)',
+    cursor: 'pointer',
+    ':hover': { backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' },
+  }),
+  menuPortal: (base) => ({ ...base, zIndex: 9999 }),
+  menu: (base) => ({
+    ...base,
+    backgroundColor: 'var(--surface)',
+    border: '1px solid var(--input-border)',
+    boxShadow: '0 10px 30px rgba(0,0,0,.25)',
+    overflow: 'hidden',
+  }),
+  menuList: (base) => ({ ...base, scrollbarWidth: 'thin', scrollbarColor: 'var(--border) transparent' }),
+  option: (base) => ({ ...base, fontSize: 12, backgroundColor: 'transparent', cursor: 'pointer' }),
+  indicatorSeparator: () => ({ display: 'none' }),
+  dropdownIndicator: (base) => ({ ...base, padding: 4, color: 'var(--text-muted)' }),
+  clearIndicator: (base) => ({ ...base, padding: 4, color: 'var(--text-muted)' }),
+};
+
+/** Custom checkbox-row Option — react-select's isMulti already gives a
+ * dropdown + removable chips instead of the native multi-select listbox, but
+ * the default option row doesn't show a checkbox, so this adds one. */
+function ApproverOptionRow(props: OptionProps<ApproverOption, true>) {
+  return (
+    <components.Option {...props}>
+      <div className="flex items-center gap-2">
+        <span
+          className="flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded border"
+          style={{
+            borderColor: props.isSelected ? 'var(--nav-active-bg)' : 'var(--input-border)',
+            backgroundColor: props.isSelected ? 'var(--nav-active-bg)' : 'transparent',
+          }}
+        >
+          {props.isSelected ? <Check size={10} color="var(--nav-active-text)" /> : null}
+        </span>
+        <span style={{ color: 'var(--text)' }}>{props.label}</span>
+      </div>
+    </components.Option>
+  );
+}
+
+/** Dropdown multi-select of candidate approvers (real users, not roles) — a
+ * level can be narrowed to specific individuals instead of a role name.
+ * Selecting none leaves the level open to anyone with Approval & Issuance
+ * access. */
+function ApproverMultiSelectField({
+  approvers,
+  selectedIds,
+  disabled,
+  onChange,
+}: {
+  approvers: Approver[];
+  selectedIds: number[];
+  disabled?: boolean;
+  onChange: (userIds: number[]) => void;
+}) {
+  const options: ApproverOption[] = approvers.map((a) => ({ value: a.id, label: a.full_name || a.username }));
+  if (approvers.length === 0) {
+    return (
+      <p className="text-[11px] text-secondary">
+        No eligible approvers yet — grant a role Sidebar access to Approval & Issuance first.
+      </p>
+    );
+  }
+  return (
+    <Select<ApproverOption, true>
+      isMulti
+      options={options}
+      value={options.filter((o) => selectedIds.includes(o.value))}
+      isDisabled={disabled}
+      closeMenuOnSelect={false}
+      hideSelectedOptions={false}
+      placeholder="Select approvers..."
+      classNamePrefix="app-select"
+      menuPortalTarget={typeof document !== 'undefined' ? document.body : null}
+      menuPlacement="auto"
+      menuPosition="fixed"
+      styles={approverSelectStyles}
+      components={{ Option: ApproverOptionRow }}
+      onChange={(opts) => onChange((opts ? Array.from(opts) : []).map((o) => o.value))}
+      noOptionsMessage={() => 'No matches found'}
+    />
+  );
+}
+
+/** Embedded directly under the "Approval & Issuance" row (not its own
+ * Sidebar Menu Permissions page, not its own CRUD toggle) — the approval
+ * ladder (dbo.approval_levels) is a single GLOBAL config, not something that
+ * varies per role the way Add/Edit/Delete switches do, so it belongs here as
+ * live content rather than as one more per-role permission row. Reachable
+ * only by whoever can already open Control Panel itself. */
+function ApprovalWorkflowLevelsSection() {
+  const [levels, setLevels] = useState<ApprovalLevel[]>([]);
+  // Candidate pool for the per-level "Approvers" multi-select — the same
+  // set listApprovers() already computes server-side (admins + anyone whose
+  // role currently has approval:queue sidebar access), so if only Assessment
+  // Officer has that module enabled, this list is effectively just their
+  // users plus admin.
+  const [approvers, setApprovers] = useState<Approver[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [form, setForm] = useState({ name: '', assigneeIds: [] as number[] });
+
+  const load = useCallback(async () => {
+    const res = await fetch(api('/api/approvals/levels?includeInactive=1'), { credentials: 'include' });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(json?.message || 'Failed to load approval levels');
+    setLevels(json.data || []);
+  }, []);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const [, approversRes] = await Promise.all([
+          load(),
+          fetch(api('/api/approvals/approvers'), { credentials: 'include' }),
+        ]);
+        const approversJson = await approversRes.json().catch(() => ({}));
+        if (approversRes.ok) setApprovers(approversJson.data || []);
+      } catch (err) {
+        toast.error((err as Error).message);
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, [load]);
+
+  const run = useCallback(
+    async (fn: () => Promise<Response>, msg?: string) => {
+      setBusy(true);
+      try {
+        const res = await fn();
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(json?.message || 'Request failed');
+        await load();
+        if (msg) toast.success(msg);
+      } catch (err) {
+        toast.error((err as Error).message);
+      } finally {
+        setBusy(false);
+      }
+    },
+    [load]
+  );
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div>
+        <div className="text-[11px] font-bold uppercase tracking-wide text-secondary">Approval Workflow Setup</div>
+        <p className="text-[11px] text-secondary mt-0.5">
+          Ordered levels every new approval routes through — a global setting, not per-role. Existing approvals keep the
+          ladder they started with.
+        </p>
+      </div>
+
+      {loading ? (
+        <div className="flex items-center justify-center py-8">
+          <Loader2 className="animate-spin text-secondary" size={18} />
+        </div>
+      ) : (
+        <>
+          <div className="flex flex-col gap-2">
+            {levels.map((lvl, idx) => (
+              <div
+                key={lvl.id}
+                className="rounded-lg border p-2.5 flex flex-col gap-2"
+                style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'var(--surface)', opacity: lvl.is_active ? 1 : 0.5 }}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <div className="min-w-0 flex-1 flex items-center gap-1 text-[13px] font-semibold">
+                    <span className="shrink-0" style={{ color: 'var(--text)' }}>
+                      L{lvl.level_no} ·
+                    </span>
+                    <input
+                      key={`${lvl.id}-${lvl.name}`}
+                      defaultValue={lvl.name}
+                      disabled={busy}
+                      placeholder="Describe this level, e.g. Legal review before endorsement"
+                      aria-label={`Description for level ${lvl.level_no}`}
+                      className="min-w-0 flex-1 rounded px-1.5 py-0.5 text-[13px] font-semibold bg-transparent border border-transparent hover:border-[var(--border-subtle)] focus:outline-none transition-colors"
+                      style={{ color: 'var(--text)', borderColor: 'transparent' }}
+                      onFocus={(e) => {
+                        e.currentTarget.style.borderColor = 'var(--nav-active-bg)';
+                      }}
+                      onBlur={(e) => {
+                        e.currentTarget.style.borderColor = 'transparent';
+                        const next = e.target.value.trim();
+                        if (!next) {
+                          e.target.value = lvl.name;
+                          toast.error('Description cannot be empty');
+                          return;
+                        }
+                        if (next === lvl.name) return;
+                        run(
+                          () =>
+                            fetch(api(`/api/approvals/levels/${lvl.id}`), {
+                              method: 'PUT',
+                              credentials: 'include',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ name: next }),
+                            }),
+                          'Description updated'
+                        );
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+                      }}
+                    />
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <button
+                      type="button"
+                      className="rounded px-2 py-1 text-[11px] border disabled:opacity-40 cursor-pointer"
+                      style={{ borderColor: 'var(--border-subtle)' }}
+                      disabled={busy || idx === 0}
+                      onClick={() =>
+                        run(async () => {
+                          const prev = levels[idx - 1];
+                          await fetch(api(`/api/approvals/levels/${lvl.id}`), {
+                            method: 'PUT',
+                            credentials: 'include',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ level_no: prev.level_no }),
+                          });
+                          return fetch(api(`/api/approvals/levels/${prev.id}`), {
+                            method: 'PUT',
+                            credentials: 'include',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ level_no: lvl.level_no }),
+                          });
+                        }, 'Reordered')
+                      }
+                    >
+                      ↑
+                    </button>
+                    <button
+                      type="button"
+                      className="rounded px-2 py-1 text-[11px] border disabled:opacity-40 cursor-pointer"
+                      style={{ borderColor: 'var(--border-subtle)' }}
+                      disabled={busy || idx === levels.length - 1}
+                      onClick={() =>
+                        run(async () => {
+                          const next = levels[idx + 1];
+                          await fetch(api(`/api/approvals/levels/${lvl.id}`), {
+                            method: 'PUT',
+                            credentials: 'include',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ level_no: next.level_no }),
+                          });
+                          return fetch(api(`/api/approvals/levels/${next.id}`), {
+                            method: 'PUT',
+                            credentials: 'include',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ level_no: lvl.level_no }),
+                          });
+                        }, 'Reordered')
+                      }
+                    >
+                      ↓
+                    </button>
+                    <button
+                      type="button"
+                      className="rounded px-2 py-1 text-[11px] border disabled:opacity-40 cursor-pointer"
+                      style={{ borderColor: 'var(--border-subtle)' }}
+                      disabled={busy}
+                      onClick={() =>
+                        run(
+                          () =>
+                            fetch(api(`/api/approvals/levels/${lvl.id}`), {
+                              method: 'PUT',
+                              credentials: 'include',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ is_active: !lvl.is_active }),
+                            }),
+                          lvl.is_active ? 'Level disabled' : 'Level enabled'
+                        )
+                      }
+                    >
+                      {lvl.is_active ? 'Disable' : 'Enable'}
+                    </button>
+                  </div>
+                </div>
+                <div className="flex flex-col gap-1">
+                  <ApproverMultiSelectField
+                    approvers={approvers}
+                    selectedIds={(lvl.assignees || []).map((a) => a.id)}
+                    disabled={busy}
+                    onChange={(nextIds) =>
+                      run(
+                        () =>
+                          fetch(api(`/api/approvals/levels/${lvl.id}`), {
+                            method: 'PUT',
+                            credentials: 'include',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ assignee_user_ids: nextIds }),
+                          }),
+                        'Approvers updated'
+                      )
+                    }
+                  />
+                </div>
+              </div>
+            ))}
+            {levels.length === 0 ? (
+              <p className="text-[11px] text-secondary text-center py-2">No levels configured yet.</p>
+            ) : null}
+          </div>
+
+          <div className="rounded-lg border p-2.5 flex flex-col gap-2" style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'var(--surface)' }}>
+            <div className="text-[10px] font-bold uppercase tracking-wide text-secondary">Add level</div>
+            <input
+              className="rounded-md border px-2 py-1.5 text-[12px]"
+              style={{ borderColor: 'var(--input-border)', color: 'var(--text)', backgroundColor: 'var(--input-bg)' }}
+              value={form.name}
+              onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+              placeholder="Description, e.g. Legal review before endorsement"
+            />
+            <div className="flex flex-col gap-1">
+              <ApproverMultiSelectField
+                approvers={approvers}
+                selectedIds={form.assigneeIds}
+                disabled={busy}
+                onChange={(nextIds) => setForm((f) => ({ ...f, assigneeIds: nextIds }))}
+              />
+            </div>
+            <div className="flex justify-end">
+              <button
+                type="button"
+                className="rounded-lg px-3 py-1.5 text-[12px] font-semibold disabled:opacity-50 cursor-pointer"
+                style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
+                disabled={busy || !form.name.trim()}
+                onClick={() =>
+                  run(
+                    () =>
+                      fetch(api('/api/approvals/levels'), {
+                        method: 'POST',
+                        credentials: 'include',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                          name: form.name.trim(),
+                          assignee_user_ids: form.assigneeIds,
+                        }),
+                      }),
+                    'Level added'
+                  ).then(() => setForm({ name: '', assigneeIds: [] }))
+                }
+              >
+                <Plus size={13} className="inline mr-1" /> Add
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
   );
 }
 
@@ -581,15 +975,31 @@ export function ControlPanelManagement({ locationSearch }: { locationSearch?: st
                         can_edit: false,
                         can_delete: false,
                       };
+                      const hints = (LANDING_CONFIG as any)[item.key]?.crudHints as
+                        | { add?: string; edit?: string; delete?: string }
+                        | undefined;
+                      const isApprovalQueue = item.key === 'approval:queue';
                       return (
+                        <React.Fragment key={item.key}>
                         <div
-                          key={item.key}
-                          className={`group block sm:grid ${CRUD_TOGGLE_COLS_CLASS} gap-y-1 px-3 py-2.5 border rounded-lg transition-colors`}
+                          className="border rounded-lg overflow-hidden"
                           style={{ borderColor: 'var(--border-subtle)' }}
                         >
-                          <span className="min-w-0 text-[11px] font-medium" style={{ color: 'var(--text)' }}>
-                            {item.label}
-                          </span>
+                        <div
+                          className={`group block sm:grid ${CRUD_TOGGLE_COLS_CLASS} gap-y-1 px-3 py-2.5 transition-colors`}
+                        >
+                          <div className="min-w-0 flex flex-col gap-0.5">
+                            <span className="text-[11px] font-medium" style={{ color: 'var(--text)' }}>
+                              {item.label}
+                            </span>
+                            {hints ? (
+                              <span className="text-[10px] leading-snug text-secondary">
+                                {hints.add ? <>Add — {hints.add}. </> : null}
+                                {hints.edit ? <>Edit — {hints.edit}. </> : null}
+                                {hints.delete ? <>Delete — {hints.delete}.</> : null}
+                              </span>
+                            ) : null}
+                          </div>
                           {/* Phones: switches sit under the name with their own labels; from sm the wrapper dissolves into the grid columns. */}
                           <div className="mt-2 grid grid-cols-3 gap-2 sm:contents">
                           <div className="flex flex-col sm:flex-row min-h-[1.75rem] items-center justify-center gap-1">
@@ -645,6 +1055,13 @@ export function ControlPanelManagement({ locationSearch }: { locationSearch?: st
                           </div>
                           </div>
                         </div>
+                        {isApprovalQueue ? (
+                          <div className="border-t px-3 py-3" style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'var(--control-bg)' }}>
+                            <ApprovalWorkflowLevelsSection />
+                          </div>
+                        ) : null}
+                        </div>
+                        </React.Fragment>
                       );
                     })}
                     <p className="text-[11px] text-secondary pt-2 border-t mt-2" style={{ borderColor: 'var(--border-subtle)' }}>

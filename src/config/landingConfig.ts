@@ -9,6 +9,10 @@ export type LandingConfig = {
   // Used by Control Panel to decide which views show up under "Menu CRUD Permissions".
   // Keep this in the same registry so adding a new CRUD page becomes automatic.
   isCrud?: boolean;
+  // Optional per-permission explainer shown under the Add/Edit/Delete toggles
+  // in Control Panel, so the admin configuring access sees what each switch
+  // actually unlocks on that screen instead of a bare "Add/Edit/Delete" label.
+  crudHints?: { add?: string; edit?: string; delete?: string };
   stats: { label: string; value: string; hint?: string }[];
   table: {
     columns: string[];
@@ -109,6 +113,11 @@ export const LANDING_CONFIG: Record<AppView, LandingConfig> = {
     badge: 'Approval',
     icon: FileCheck,
     isCrud: true,
+    crudHints: {
+      add: 'Add a charge/fee line to an application in the approval queue',
+      edit: 'Act on an approval step (approve/return/disapprove), endorse, and edit the issued contract',
+      delete: 'Remove a charge/fee line',
+    },
     stats: [
       { label: 'In Progress', value: '—' },
       { label: 'Awaiting Start', value: '—' },

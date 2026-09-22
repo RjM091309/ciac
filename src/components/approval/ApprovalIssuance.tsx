@@ -17,6 +17,7 @@ import {
 import { toast } from 'sonner';
 import { cn } from '../../lib/utils';
 import { AppSelect } from '../ui/AppSelect';
+import { ConfirmModal } from '../ui/ConfirmModal';
 import { DataTableControls } from '../ui/DataTableControls';
 import { DatePicker, parseYmd, toYmd } from '../ui/DatePicker';
 import { EmptyState } from '../ui/EmptyState';
@@ -67,6 +68,12 @@ type StepRow = {
   approval_id: number;
   level_no: number;
   level_name: string;
+  role_id: number | null;
+  role_name: string | null;
+  /** The level's hand-picked eligible approvers (Control Panel's Approval
+   * Workflow Setup multi-select), snapshotted at approval start — empty when
+   * the level was left open to anyone holding role_name. */
+  assignees: { id: number; full_name: string | null; username: string }[];
   assigned_to: number | null;
   assignee_name: string | null;
   assignee_username: string | null;
@@ -153,7 +160,6 @@ type Summary = {
 };
 
 type Approver = { id: number; full_name: string | null; username: string };
-type Level = { id: number; level_no: number; name: string; role_hint: string | null; is_active: number | boolean };
 
 function peso(n: number | null | undefined) {
   const v = Number(n || 0);
@@ -284,7 +290,6 @@ export function ApprovalIssuance({
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [selectedId, setSelectedId] = useState<number | null>(null);
-  const [setupOpen, setSetupOpen] = useState(false);
 
   // One cached fetch of the whole queue + summary + approvers, then filter
   // client-side. Revisits paint instantly from sessionStorage while revalidating,
@@ -372,19 +377,6 @@ export function ApprovalIssuance({
         <StatTile label="Approved" value={summary?.approved ?? '—'} tone="#10b981" />
         <StatTile label="Issued Docs" value={summary?.issued ?? '—'} tone="#0ea5e9" />
         <StatTile label="Avg Days" value={summary?.avg_days_to_decide ?? '—'} tone="#f59e0b" />
-      </div>
-
-      <div className="flex items-center justify-end gap-2">
-        {canEdit ? (
-          <button
-            className="rounded-lg px-3 py-2 text-sm font-semibold inline-flex items-center gap-1.5 shadow-sm cursor-pointer"
-            style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
-            onClick={() => setSetupOpen(true)}
-          >
-            <Stamp size={15} />
-            Workflow Setup
-          </button>
-        ) : null}
       </div>
 
       <div className="glass-card p-4 sm:p-5 !border-transparent overflow-hidden" style={{ backgroundColor: 'var(--surface)' }}>
@@ -595,9 +587,6 @@ export function ApprovalIssuance({
             onClose={() => setSelectedId(null)}
             onMutated={refreshAfterMutation}
           />
-        ) : null}
-        {setupOpen ? (
-          <WorkflowSetup canEdit={canEdit} onClose={() => setSetupOpen(false)} />
         ) : null}
       </AnimatePresence>
     </div>
@@ -865,6 +854,33 @@ function ChainTab({
 }) {
   const current = data.current_step;
   const [remarks, setRemarks] = useState('');
+  const [overridePrompt, setOverridePrompt] = useState<{ message: string; resolve: (v: boolean) => void } | null>(
+    null
+  );
+  // Eligible-assignee lists, fetched per distinct role once a step needs
+  // one — a role-bound step's picker must only offer people who actually
+  // hold that role, not the whole approvers list. Cached by role_id so
+  // switching tabs or re-rendering doesn't refetch it every time.
+  const [approversByRole, setApproversByRole] = useState<Record<number, Approver[]>>({});
+  const [assigning, setAssigning] = useState<number | null>(null);
+  useEffect(() => {
+    const roleIds = Array.from(
+      new Set(data.steps.filter((s) => s.decision === 'PENDING' && s.role_id).map((s) => s.role_id as number))
+    ).filter((id) => !(id in approversByRole));
+    if (!roleIds.length) return;
+    (async () => {
+      for (const roleId of roleIds) {
+        try {
+          const json = await apiFetch(`/api/approvals/approvers?role_id=${roleId}`);
+          setApproversByRole((prev) => ({ ...prev, [roleId]: json.data || [] }));
+        } catch {
+          // Non-fatal — that step's picker just falls back to showing nothing extra.
+        }
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data.steps]);
+
   if (data.steps.length === 0) {
     return (
       <EmptyState
@@ -875,20 +891,62 @@ function ChainTab({
     );
   }
 
+  // Resolved by the ConfirmModal below — lets `act()` `await` the officer's
+  // click instead of blocking on the browser's native confirm().
+  const confirmOverride = (message: string) =>
+    new Promise<boolean>((resolve) => setOverridePrompt({ message, resolve }));
+
   const act = (action: string) => {
     if (!current) return;
+    const stepId = current.id;
+    const remarksValue = remarks.trim() || null;
     run(
-      () =>
-        apiFetch(`/api/approvals/steps/${current.id}/act`, {
-          method: 'PATCH',
-          body: JSON.stringify({ action, remarks: remarks.trim() || null }),
-        }),
+      async () => {
+        try {
+          return await apiFetch(`/api/approvals/steps/${stepId}/act`, {
+            method: 'PATCH',
+            body: JSON.stringify({ action, remarks: remarksValue }),
+          });
+        } catch (err) {
+          const message = (err as Error).message || '';
+          // The one gate that's meant to be overridable, not just blocking —
+          // ask the officer to confirm they really want to approve with
+          // unverified mandatory requirements, then retry with the explicit
+          // override flag instead of silently failing the click.
+          if (action === 'APPROVE' && /mandatory requirement/i.test(message)) {
+            const proceed = await confirmOverride(message);
+            if (proceed) {
+              return apiFetch(`/api/approvals/steps/${stepId}/act`, {
+                method: 'PATCH',
+                body: JSON.stringify({ action, remarks: remarksValue, override_unverified: true }),
+              });
+            }
+          }
+          throw err;
+        }
+      },
       `Level ${action.toLowerCase()}d`
     ).then(() => setRemarks(''));
   };
 
   return (
     <div className="flex flex-col gap-3">
+      <ConfirmModal
+        open={!!overridePrompt}
+        title="Unverified requirements"
+        description={overridePrompt?.message || ''}
+        confirmText="Approve anyway"
+        cancelText="Cancel"
+        danger
+        onConfirm={() => {
+          overridePrompt?.resolve(true);
+          setOverridePrompt(null);
+        }}
+        onCancel={() => {
+          overridePrompt?.resolve(false);
+          setOverridePrompt(null);
+        }}
+      />
       <div className="flex flex-col gap-2">
         {data.steps.map((s) => {
           const isCurrent = current?.id === s.id;
@@ -904,8 +962,50 @@ function ChainTab({
                 </div>
                 <Badge label={s.decision} styles={stepDecisionBadge(s.decision)} />
               </div>
-              <div className="text-[11px] text-secondary mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
-                {s.assignee_name || s.assignee_username ? <span>Assignee: {s.assignee_name || s.assignee_username}</span> : null}
+              <div className="text-[11px] text-secondary mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
+                {(s.assignees || []).length > 0 ? (
+                  <span>Requires: {(s.assignees || []).map((a) => a.full_name || a.username).join(', ')}</span>
+                ) : s.role_name ? (
+                  <span>Requires: {s.role_name}</span>
+                ) : null}
+                {s.decision === 'PENDING' && perms.canEdit ? (
+                  <label className="flex items-center gap-1.5">
+                    Assignee
+                    <select
+                      className="rounded border px-1.5 py-0.5 text-[11px] cursor-pointer disabled:opacity-50"
+                      style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'var(--surface)', color: 'var(--text)' }}
+                      disabled={assigning === s.id}
+                      value={s.assigned_to ?? ''}
+                      onChange={(e) => {
+                        const value = e.target.value ? Number(e.target.value) : null;
+                        setAssigning(s.id);
+                        run(
+                          () =>
+                            apiFetch(`/api/approvals/steps/${s.id}/assign`, {
+                              method: 'PATCH',
+                              body: JSON.stringify({ user_id: value }),
+                            }),
+                          value ? 'Assigned' : 'Unassigned'
+                        ).finally(() => setAssigning(null));
+                      }}
+                    >
+                      <option value="">
+                        {(s.assignees || []).length > 0
+                          ? `Unassigned — any of ${(s.assignees || []).length} approvers`
+                          : s.role_name
+                            ? `Unassigned — any ${s.role_name}`
+                            : 'Unassigned — anyone with access'}
+                      </option>
+                      {((s.assignees || []).length > 0 ? s.assignees : s.role_id ? approversByRole[s.role_id] : approvers)?.map((a) => (
+                        <option key={a.id} value={a.id}>
+                          {a.full_name || a.username}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ) : s.assignee_name || s.assignee_username ? (
+                  <span>Assignee: {s.assignee_name || s.assignee_username}</span>
+                ) : null}
                 {s.endorsed_to_office ? <span>Endorsed to: {s.endorsed_to_office}</span> : null}
                 {s.acted_at ? (
                   <span>
@@ -1421,203 +1521,3 @@ function HistoryTab({ data }: { data: DetailPayload }) {
   );
 }
 
-/* ------------------------------ Workflow Setup ----------------------------- */
-
-function WorkflowSetup({ canEdit, onClose }: { canEdit: boolean; onClose: () => void }) {
-  const [levels, setLevels] = useState<Level[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState(false);
-  const [form, setForm] = useState({ name: '', role_hint: '' });
-
-  const load = useCallback(async () => {
-    const json = await apiFetch('/api/approvals/levels?includeInactive=1');
-    setLevels(json.data || []);
-  }, []);
-
-  useEffect(() => {
-    (async () => {
-      try {
-        await load();
-      } catch (err) {
-        toast.error((err as Error).message);
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, [load]);
-
-  const run = useCallback(
-    async (fn: () => Promise<unknown>, msg?: string) => {
-      setBusy(true);
-      try {
-        await fn();
-        await load();
-        if (msg) toast.success(msg);
-      } catch (err) {
-        toast.error((err as Error).message);
-      } finally {
-        setBusy(false);
-      }
-    },
-    [load]
-  );
-
-  return (
-    <div className="fixed inset-0 z-[60]">
-      <motion.div
-        className="absolute inset-0"
-        style={{ backgroundColor: 'rgba(0,0,0,.45)' }}
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        transition={{ duration: 0.2 }}
-        onClick={onClose}
-      />
-      <div className="absolute inset-y-0 right-0 flex w-full justify-end p-0 sm:p-0">
-        <motion.div
-          className="h-full w-full max-w-[44rem] border-l p-4 sm:p-5 flex flex-col shadow-2xl"
-          style={{ backgroundColor: 'var(--surface)', borderColor: 'var(--border-subtle)' }}
-          initial={{ x: '100%' }}
-          animate={{ x: 0 }}
-          exit={{ x: '100%' }}
-          transition={{ duration: 0.28, ease: [0.16, 1, 0.3, 1] }}
-        >
-          <div className="flex items-start justify-between gap-3 border-b pb-3" style={{ borderColor: 'var(--input-border)' }}>
-            <div>
-              <div className="text-sm font-bold" style={{ color: 'var(--text)' }}>
-                Approval Workflow Setup
-              </div>
-              <div className="text-xs text-secondary mt-0.5">
-                Ordered levels every new approval routes through. Existing approvals keep the ladder they started with.
-              </div>
-            </div>
-            <button
-              className="rounded-lg px-2 py-1 text-xs border cursor-pointer"
-              style={{ borderColor: 'var(--border-subtle)', color: 'var(--text-muted)' }}
-              onClick={onClose}
-            >
-              Close
-            </button>
-          </div>
-
-          <div className="flex-1 overflow-y-auto py-4 flex flex-col gap-3">
-          {loading ? (
-            <div className="flex items-center justify-center py-16">
-              <Loader2 className="animate-spin text-secondary" />
-            </div>
-          ) : (
-            <>
-              <div className="flex flex-col gap-2">
-                {levels.map((lvl, idx) => (
-                  <div
-                    key={lvl.id}
-                    className="rounded-xl border p-2.5 flex items-center justify-between gap-2"
-                    style={{ borderColor: 'var(--border-subtle)', opacity: lvl.is_active ? 1 : 0.5 }}
-                  >
-                    <div className="min-w-0">
-                      <div className="text-[13px] font-semibold truncate">
-                        L{lvl.level_no} · {lvl.name}
-                      </div>
-                      {lvl.role_hint ? <div className="text-[11px] text-secondary truncate">{lvl.role_hint}</div> : null}
-                    </div>
-                    {canEdit ? (
-                      <div className="flex items-center gap-1.5 shrink-0">
-                        <button
-                          className="rounded px-2 py-1 text-[11px] border disabled:opacity-40"
-                          style={{ borderColor: 'var(--border-subtle)' }}
-                          disabled={busy || idx === 0}
-                          onClick={() =>
-                            run(async () => {
-                              const prev = levels[idx - 1];
-                              await apiFetch(`/api/approvals/levels/${lvl.id}`, {
-                                method: 'PUT',
-                                body: JSON.stringify({ level_no: prev.level_no }),
-                              });
-                              await apiFetch(`/api/approvals/levels/${prev.id}`, {
-                                method: 'PUT',
-                                body: JSON.stringify({ level_no: lvl.level_no }),
-                              });
-                            }, 'Reordered')
-                          }
-                        >
-                          ↑
-                        </button>
-                        <button
-                          className="rounded px-2 py-1 text-[11px] border disabled:opacity-40"
-                          style={{ borderColor: 'var(--border-subtle)' }}
-                          disabled={busy}
-                          onClick={() =>
-                            run(
-                              () =>
-                                apiFetch(`/api/approvals/levels/${lvl.id}`, {
-                                  method: 'PUT',
-                                  body: JSON.stringify({ is_active: !lvl.is_active }),
-                                }),
-                              lvl.is_active ? 'Level disabled' : 'Level enabled'
-                            )
-                          }
-                        >
-                          {lvl.is_active ? 'Disable' : 'Enable'}
-                        </button>
-                        <button
-                          className="text-secondary hover:text-red-500 disabled:opacity-40"
-                          disabled={busy}
-                          onClick={() =>
-                            run(() => apiFetch(`/api/approvals/levels/${lvl.id}`, { method: 'DELETE' }), 'Level removed')
-                          }
-                        >
-                          <Trash2 size={13} />
-                        </button>
-                      </div>
-                    ) : null}
-                  </div>
-                ))}
-              </div>
-
-              {canEdit ? (
-                <div className="rounded-xl border p-3 flex flex-col gap-2" style={{ borderColor: 'var(--border-subtle)' }}>
-                  <div className="text-[11px] font-bold uppercase tracking-wide text-secondary">Add level</div>
-                  <Field label="Name">
-                    <input
-                      className={inputCls}
-                      value={form.name}
-                      onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-                      placeholder="e.g. Legal Review"
-                    />
-                  </Field>
-                  <Field label="Role hint (optional)">
-                    <input
-                      className={inputCls}
-                      value={form.role_hint}
-                      onChange={(e) => setForm((f) => ({ ...f, role_hint: e.target.value }))}
-                    />
-                  </Field>
-                  <div className="flex justify-end">
-                    <button
-                      className="rounded-lg px-3 py-1.5 text-[12px] font-semibold disabled:opacity-50"
-                      style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
-                      disabled={busy || !form.name.trim()}
-                      onClick={() =>
-                        run(
-                          () =>
-                            apiFetch('/api/approvals/levels', {
-                              method: 'POST',
-                              body: JSON.stringify({ name: form.name.trim(), role_hint: form.role_hint.trim() || null }),
-                            }),
-                          'Level added'
-                        ).then(() => setForm({ name: '', role_hint: '' }))
-                      }
-                    >
-                      <Plus size={13} className="inline mr-1" /> Add
-                    </button>
-                  </div>
-                </div>
-              ) : null}
-            </>
-          )}
-          </div>
-        </motion.div>
-      </div>
-    </div>
-  );
-}

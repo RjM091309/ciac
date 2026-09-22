@@ -308,6 +308,13 @@ export function AssessmentEvaluation({
     const term = search.trim().toLowerCase();
     return allRows.filter((r) => {
       if ((r.stage || 'UNASSIGNED') === 'COMPLETED') return false;
+      // Normally an endorsed/disapproved application's assessment.stage is
+      // already COMPLETED (caught above), but the admin status-jump escape
+      // hatch (PATCH /api/applications/:id/status) can move an application
+      // straight to APPROVED without ever touching Assessment — this catches
+      // that case too, so an already-approved application can't linger in
+      // the working queue.
+      if (String(r.application_status || '').toUpperCase() === 'APPROVED') return false;
       if (stageFilter && (r.stage || 'UNASSIGNED') !== stageFilter) return false;
       if (evaluatorFilter && String(r.assigned_evaluator_id ?? '') !== evaluatorFilter) return false;
       if (term) {
