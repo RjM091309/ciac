@@ -705,7 +705,7 @@ export function AppHeader({
 
             {notificationOpen && (
               <div
-                className="absolute right-0 mt-2 w-[min(92vw,22rem)] rounded-2xl border z-[120] overflow-hidden"
+                className="absolute right-0 mt-2 w-[min(94vw,28rem)] rounded-2xl border z-[120] overflow-hidden"
                 style={{
                   backgroundColor: theme === 'dark' ? '#0f1115' : '#ffffff',
                   borderColor: 'var(--border-subtle)',
@@ -715,10 +715,10 @@ export function AppHeader({
                 }}
               >
                 <div
-                  className="flex items-center justify-between px-3 py-2.5 border-b"
+                  className="flex items-center justify-between px-4 py-3 border-b"
                   style={{ borderColor: 'var(--border-subtle)' }}
                 >
-                  <span className="text-xs font-bold text-[var(--text)]">Notifications</span>
+                  <span className="text-sm font-bold text-[var(--text)]">Notifications</span>
                 </div>
                 <div
                   className="grid grid-cols-3 gap-1 px-2 py-2 border-b"
@@ -735,7 +735,7 @@ export function AppHeader({
                         key={tab.id}
                         type="button"
                         onClick={() => setNotificationFilter(tab.id)}
-                        className="rounded-full px-2.5 py-1.5 text-[10px] font-semibold cursor-pointer transition-colors"
+                        className="rounded-full px-2.5 py-2 text-xs font-semibold cursor-pointer transition-colors"
                         style={{
                           backgroundColor: isActive
                             ? 'var(--nav-active-bg)'
@@ -748,21 +748,21 @@ export function AppHeader({
                     );
                   })}
                 </div>
-                <div className="max-h-80 overflow-y-auto p-2 custom-scrollbar">
+                <div className="max-h-[min(70vh,32rem)] overflow-y-auto p-2 custom-scrollbar">
                   {displayedNotifications.length === 0 ? (
-                    <div className="px-3 py-10 text-center text-[11px] text-[var(--text-muted)]">
+                    <div className="px-3 py-10 text-center text-xs text-[var(--text-muted)]">
                       {notificationFilter === 'all'
                         ? 'No notifications for this account.'
                         : `No ${notificationFilter} notifications.`}
                     </div>
                   ) : (
-                    <div className="space-y-1">
+                    <div className="space-y-1.5">
                       {displayedNotifications.map((item) => {
                         const typeMeta = getNotificationTypeMeta(item);
                         return (
                           <div
                             key={item.id}
-                            className="rounded-xl border px-2.5 py-2"
+                            className="rounded-xl border px-3 py-3"
                             onClick={() => handleNotificationClick(item)}
                             style={{
                               borderColor: item.isRead ? 'var(--border-subtle)' : typeMeta.border,
@@ -772,28 +772,29 @@ export function AppHeader({
                               cursor: item.targetPath ? 'pointer' : 'default',
                             }}
                           >
-                            <div className="flex items-start gap-2.5">
+                            <div className="flex items-start gap-3">
                               <div
-                                className="mt-0.5 h-8 w-8 rounded-xl border shrink-0 inline-flex items-center justify-center"
+                                className="mt-0.5 h-9 w-9 rounded-xl border shrink-0 inline-flex items-center justify-center"
                                 style={{
                                   backgroundColor: typeMeta.iconBg,
                                   borderColor: typeMeta.border,
                                   color: typeMeta.color,
                                 }}
                               >
-                                <typeMeta.Icon size={15} />
+                                <typeMeta.Icon size={17} />
                               </div>
 
                               <div className="min-w-0 flex-1">
                                 <div className="flex items-start justify-between gap-2">
                                   <div className="min-w-0">
-                                    <div className="text-[11px] font-bold text-[var(--text)] truncate">
+                                    {/* Wraps (up to 2 lines) instead of truncating, so long titles stay readable. */}
+                                    <div className="text-[13px] leading-snug font-bold text-[var(--text)] line-clamp-2 break-words">
                                       {item.title}
                                     </div>
 
-                                    <div className="mt-0.5 flex items-center gap-1.5 flex-wrap">
+                                    <div className="mt-1 flex items-center gap-1.5 flex-wrap">
                                       <span
-                                        className="inline-flex items-center rounded-full border px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide"
+                                        className="inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide"
                                         style={{
                                           color: typeMeta.color,
                                           backgroundColor: typeMeta.chipBg,
@@ -804,16 +805,16 @@ export function AppHeader({
                                       </span>
 
                                       {item.applicationNumber ? (
-                                        <span className="text-[9px] uppercase tracking-wide text-[var(--text-muted)]">
+                                        <span className="text-[11px] uppercase tracking-wide text-[var(--text-muted)]">
                                           {item.applicationNumber}
                                         </span>
                                       ) : null}
                                     </div>
 
-                                    <div className="text-[10px] text-[var(--text-muted)] mt-1">
+                                    <div className="text-xs leading-relaxed text-[var(--text-muted)] mt-1.5 break-words">
                                       {item.message}
                                     </div>
-                                    <div className="text-[9px] text-[var(--text-muted)] mt-1">
+                                    <div className="text-[11px] text-[var(--text-muted)] mt-1">
                                       {formatNotificationTime(item.createdAt)}
                                     </div>
                                   </div>
@@ -825,7 +826,7 @@ export function AppHeader({
                                         event.stopPropagation();
                                         markOneAsRead(item.id);
                                       }}
-                                      className="text-[9px] font-semibold text-[var(--text-muted)] hover:text-[var(--text)] whitespace-nowrap cursor-pointer"
+                                      className="text-[11px] font-semibold text-[var(--text-muted)] hover:text-[var(--text)] whitespace-nowrap cursor-pointer"
                                     >
                                       Mark read
                                     </button>
@@ -841,14 +842,14 @@ export function AppHeader({
                 </div>
 
                 <div
-                  className="flex items-center justify-center px-3 py-2 border-t"
+                  className="flex items-center justify-center px-3 py-2.5 border-t"
                   style={{ borderColor: 'var(--border-subtle)' }}
                 >
                   <button
                     type="button"
                     onClick={markAllAsRead}
                     disabled={unreadCount === 0}
-                    className="text-[10px] font-semibold text-[var(--text-muted)] hover:text-[var(--text)] disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                    className="text-xs font-semibold text-[var(--text-muted)] hover:text-[var(--text)] disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
                   >
                     Mark all as read
                   </button>

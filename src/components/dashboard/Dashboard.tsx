@@ -549,7 +549,7 @@ export function Dashboard({ data, navigate }: { data: AdminDashboardData | null;
         {/* Metrics row directly under hero */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 touch-landscape-metrics">
           <MetricCard
-            title="Total Applications"
+            title="New Applications"
             value={totals.totalApplications}
             icon={FileText}
             trend="up"
@@ -562,7 +562,7 @@ export function Dashboard({ data, navigate }: { data: AdminDashboardData | null;
             icon={Building2}
             trend="up"
             trendValue={`${totals.totalBusinesses} on record`}
-            onClick={navigate ? () => navigate('/applications/locator-users?hasBusiness=1') : undefined}
+            onClick={navigate ? () => navigate('/applications/proponents') : undefined}
           />
           <MetricCard
             title="Pending Review"
@@ -570,7 +570,12 @@ export function Dashboard({ data, navigate }: { data: AdminDashboardData | null;
             icon={Clock}
             trend={statusBreakdown.pending > 0 ? 'down' : 'up'}
             trendValue={`${statusBreakdown.approved} approved`}
-            onClick={navigate ? () => navigate('/assessment') : undefined}
+            // Same statuses c_dashboard.js counts as pending (everything but DRAFT/APPROVED/REJECTED/RETURNED).
+            onClick={
+              navigate
+                ? () => navigate('/applications/new?status=SUBMITTED,UNDER_REVIEW,RESUBMITTED,FOR_APPROVAL,DISAPPROVED')
+                : undefined
+            }
           />
           <MetricCard
             title="Rejected / Returned"
