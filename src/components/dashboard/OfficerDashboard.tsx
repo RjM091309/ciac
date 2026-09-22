@@ -63,7 +63,7 @@ function StatCard({ label, value, icon: Icon }: { label: string; value: string |
         >
           <Icon size={16} style={{ color: 'var(--text)' }} />
         </div>
-        <span className="text-[11px] font-medium text-secondary truncate">{label}</span>
+        <span className="text-[11px] font-medium text-secondary leading-tight line-clamp-2 sm:truncate">{label}</span>
       </div>
       <p className="text-xl font-bold tracking-tight" style={{ color: 'var(--text)' }}>
         {value}
@@ -175,12 +175,13 @@ export function OfficerDashboard({
                     : undefined
                 }
                 className={cn(
-                  'flex items-center justify-between gap-3 rounded-lg border px-3 py-2 text-[11px] transition-colors',
-                  navigate && 'cursor-pointer hover:bg-[var(--surface-hover)]'
+                  'flex flex-col items-start gap-1 rounded-lg border px-3 py-2 text-[11px] transition-colors',
+                  'sm:flex-row sm:items-center sm:justify-between sm:gap-3',
+                  navigate && 'cursor-pointer hover:bg-[var(--surface-hover)] active:brightness-95'
                 )}
                 style={{ borderColor: 'var(--border-subtle)' }}
               >
-                <span className="font-semibold truncate" style={{ color: 'var(--text)' }}>
+                <span className="font-semibold min-w-0 max-w-full truncate" style={{ color: 'var(--text)' }}>
                   {item.application_no} — {item.proponent_name || 'Unknown'}
                 </span>
                 <span className="shrink-0 text-secondary">
@@ -199,7 +200,7 @@ export function OfficerDashboard({
       )}
 
       {canShowWidget('dashboard:table') && (
-      <div className="glass-card p-4 sm:p-5 !border-transparent" style={{ backgroundColor: 'var(--surface)' }}>
+      <div className="rounded-2xl p-0 sm:p-5 sm:border sm:border-transparent sm:shadow-[0_1px_2px_0_rgb(0_0_0_/_0.05)] sm:bg-[var(--surface)]">
         <h4 className="text-sm font-bold mb-3" style={{ color: 'var(--text)' }}>
           Assigned to Me
         </h4>
@@ -210,7 +211,68 @@ export function OfficerDashboard({
             description="You don't have any applications routed to you right now."
           />
         ) : (
-          <div className="overflow-x-auto">
+          <>
+            {/* Mobile: card list — a <table> forces horizontal scrolling on narrow screens. */}
+            <div className="sm:hidden space-y-2.5">
+              {applications.map((app) => {
+                const badge = getStatusBadgeStyles(app.status);
+                const total = Number(app.requirements_total || 0);
+                const verified = Number(app.requirements_verified || 0);
+                const pct = total > 0 ? Math.round((verified / total) * 100) : 0;
+                return (
+                  <div
+                    key={app.id}
+                    role={navigate ? 'button' : undefined}
+                    tabIndex={navigate ? 0 : undefined}
+                    onClick={
+                      navigate
+                        ? () => navigate(`/applications/${Number(app.is_renewal) ? 'renewals' : 'new'}?applicationId=${app.id}`)
+                        : undefined
+                    }
+                    className={cn('rounded-xl border p-3', navigate && 'cursor-pointer active:brightness-95')}
+                    style={{
+                      borderColor: 'var(--border-subtle)',
+                      backgroundColor: 'var(--surface)',
+                      boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
+                    }}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[12px] font-semibold truncate" style={{ color: 'var(--text)' }}>
+                        {app.application_no}
+                      </span>
+                      <span
+                        className="shrink-0 inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold border"
+                        style={{ backgroundColor: badge.bg, color: badge.color, borderColor: badge.border }}
+                      >
+                        {app.status}
+                      </span>
+                    </div>
+                    <p className="mt-1 text-[11px] font-medium truncate" style={{ color: 'var(--text)' }}>
+                      {app.proponent_name || '—'}
+                    </p>
+                    <div className="mt-1 flex items-center justify-between gap-2 text-[11px] text-secondary">
+                      <span>{Number(app.is_renewal) ? 'Renewal' : 'New'}</span>
+                      <span>{formatDate(app.submitted_at || app.created_at)}</span>
+                    </div>
+                    <div className="mt-2 flex items-center gap-2">
+                      <div
+                        className="h-1.5 flex-1 rounded-full overflow-hidden"
+                        style={{ backgroundColor: 'var(--control-bg)' }}
+                      >
+                        <div
+                          className="h-full rounded-full"
+                          style={{ width: `${pct}%`, backgroundColor: 'var(--text)' }}
+                        />
+                      </div>
+                      <span className="shrink-0 text-[10px] text-secondary">{verified}/{total} reqs</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Tablet/desktop: table. */}
+            <div className="hidden sm:block overflow-x-auto">
             <table className="min-w-full text-left text-xs">
               <thead>
                 <tr>
@@ -280,7 +342,8 @@ export function OfficerDashboard({
                 })}
               </tbody>
             </table>
-          </div>
+            </div>
+          </>
         )}
       </div>
       )}

@@ -49,7 +49,9 @@ export function DataTableControls({
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2 text-[11px] text-secondary">
           <span>Show</span>
-          <div className="w-20">
+          {/* Wide enough for a 3-digit option: the select's own 14px insets and
+           * dropdown arrow eat most of a narrower box and ellipsise the number. */}
+          <div className="w-24 shrink-0">
             <AppSelect
               options={pageSizeSelectOptions}
               value={String(pageSize)}
@@ -59,7 +61,9 @@ export function DataTableControls({
               compact
             />
           </div>
-          <span>entries</span>
+          {/* Phones: the row already ends with the "1–7 of 7" summary, so the
+           * word would only crowd it. */}
+          <span className="hidden sm:inline">entries</span>
         </div>
         <div className="md:hidden pr-1 text-[11px] text-secondary whitespace-nowrap">
           {showingFrom}–{showingTo} of {totalItems}
