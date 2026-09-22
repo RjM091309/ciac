@@ -1184,8 +1184,7 @@ function RequirementThreadModal({
                 if (e.key === 'Enter') void sendReply();
               }}
               placeholder="Type a reply…"
-              className="flex-1 rounded-lg border px-3 py-2 text-[12px] bg-transparent outline-none"
-              style={{ borderColor: 'var(--border-subtle)', color: 'var(--text)' }}
+              className="app-input flex-1"
             />
             <button
               onClick={sendReply}

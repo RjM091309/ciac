@@ -4,6 +4,7 @@ import { AppHeader } from '../components/AppHeader';
 import { AppSidebar } from '../components/AppSidebar';
 import { ProponentSidebar } from '../components/proponent/ProponentSidebar';
 import { ProponentBottomNav, BOTTOM_NAV_HEIGHT } from '../components/proponent/ProponentBottomNav';
+import { MobileMenuSheet } from '../components/MobileMenuSheet';
 import { ChangePasswordModal } from '../components/ChangePasswordModal';
 import { ControlPanelAccessProvider } from '../context/ControlPanelAccessContext';
 import { cn } from '../lib/utils';
@@ -241,43 +242,38 @@ export function AppLayout({
         />
 
         <div className="flex-1 flex overflow-hidden relative">
-          {/* Mobile: sidebar as overlay drawer, hidden by default */}
+          {/* Mobile: "More" opens a bottom sheet (MobileMenuSheet) instead of an inline sidebar. */}
           {isMobile ? (
-            <>
-              <div
-                className="fixed left-0 z-50 w-64 max-w-[85vw] pt-1 pb-6 flex flex-col"
-                style={{
-                  top: 'calc(3.5rem + env(safe-area-inset-top, 0px))',
-                  bottom: showBottomNav ? `calc(${BOTTOM_NAV_HEIGHT}px + env(safe-area-inset-bottom, 0px))` : 0,
-                  paddingBottom: 'max(1.5rem, env(safe-area-inset-bottom, 0px))',
-                  transform: sidebarCollapsed ? 'translateX(-100%)' : 'translateX(0)',
-                  transition: 'transform 0.35s cubic-bezier(0.32, 0.72, 0, 1)',
-                  willChange: 'transform',
+            <MobileMenuSheet
+              open={!sidebarCollapsed}
+              onClose={closeSidebar}
+              backendUrl={backendUrl}
+              onOpenSettings={() => {
+                closeSidebar();
+                navigate('/me/profile');
+              }}
+            >
+              <SidebarComponent
+                view={view}
+                onViewChange={(v) => {
+                  onViewChange(v);
+                  closeSidebar();
                 }}
-              >
-                <SidebarComponent
-                  view={view}
-                  onViewChange={(v) => {
-                    onViewChange(v);
+                onLogout={onLogout}
+                variant="sheet"
+                permissionOverride={sidebarPermissionOverride}
+                accountActions={{
+                  onOpenSettings: () => {
                     closeSidebar();
-                  }}
-                  onLogout={onLogout}
-                  collapsed={false}
-                  variant="drawer"
-                  permissionOverride={sidebarPermissionOverride}
-                  accountActions={{
-                    onOpenSettings: () => {
-                      closeSidebar();
-                      navigate('/me/profile');
-                    },
-                    onChangePassword: () => {
-                      closeSidebar();
-                      setChangePasswordOpen(true);
-                    },
-                  }}
-                />
-              </div>
-            </>
+                    navigate('/me/profile');
+                  },
+                  onChangePassword: () => {
+                    closeSidebar();
+                    setChangePasswordOpen(true);
+                  },
+                }}
+              />
+            </MobileMenuSheet>
           ) : (
             <SidebarComponent
               view={view}
@@ -308,8 +304,12 @@ export function AppLayout({
           <ProponentBottomNav
             role={effectiveSidebarRole}
             view={view}
-            onViewChange={onViewChange}
+            onViewChange={(v) => {
+              onViewChange(v);
+              closeSidebar();
+            }}
             onOpenMore={toggleSidebar}
+            moreOpen={!sidebarCollapsed}
             permissionOverride={sidebarPermissionOverride}
           />
         )}

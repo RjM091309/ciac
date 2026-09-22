@@ -16,6 +16,8 @@ import {
   Users,
 } from 'lucide-react';
 import { useControlPanelAccess } from '../context/ControlPanelAccessContext';
+import { useBottomNavTabs } from './proponent/ProponentBottomNav';
+import { SheetRow, SheetRowGroup, SheetSection, SheetTile, SheetTileGrid } from './MobileMenuSheet';
 import { cn } from '../lib/utils';
 import type { AppView } from '../layout/AppLayout';
 
@@ -274,7 +276,7 @@ export function AppSidebar({
   onViewChange: (view: string) => void;
   onLogout: () => void;
   collapsed?: boolean;
-  variant?: 'default' | 'drawer';
+  variant?: 'default' | 'drawer' | 'sheet';
   /** Set only during the admin's dashboard-role preview: the previewed
    * role's actual saved sidebar permissions, shown in place of the logged-in
    * admin's own fullAccess so the preview reflects what that role really sees. */
@@ -284,8 +286,19 @@ export function AppSidebar({
   accountActions?: { onOpenSettings: () => void; onChangePassword: () => void };
 }) {
   const isDrawer = variant === 'drawer';
-  const [openDropdownId, setOpenDropdownId] = useState<string | null>(null);
+  // The sheet remounts each time it opens, so start with the current page's System group expanded.
+  const [openDropdownId, setOpenDropdownId] = useState<string | null>(() => {
+    if (variant !== 'sheet') return null;
+    if (['settings:users', 'settings:locator-users', 'settings:control-panel', 'settings:audit-log'].includes(view)) {
+      return 'system-settings';
+    }
+    // settings:proponents lives under Applications, not File Maintenance.
+    return view.startsWith('settings:') && view !== 'settings:proponents' ? 'file-maintenance' : null;
+  });
   const { ready, fullAccess, sidebarPermissions } = useControlPanelAccess();
+  // Sheet only: every module is listed (the sheet covers the bottom nav), except
+  // Dashboard when it's already the bottom nav's center Home button.
+  const { showHome } = useBottomNavTabs('admin', permissionOverride);
 
   const toggleDropdown = (id: string) => {
     setOpenDropdownId((prev) => (prev === id ? null : id));
@@ -370,6 +383,84 @@ export function AppSidebar({
     canView('settings:building') && { key: 'settings:building', label: 'Building', active: view === 'settings:building', onClick: () => onViewChange('settings:building') },
     canView('settings:land-use') && { key: 'settings:land-use', label: 'Land Use', active: view === 'settings:land-use', onClick: () => onViewChange('settings:land-use') },
   ].filter(Boolean) as SidebarLeaf[];
+
+  if (variant === 'sheet') {
+    const notHidden = (item: SidebarLeaf) => !(showHome && item.key === 'dashboard');
+    // Same full labels as the desktop sidebar, so the two menus read the same.
+    const SHEET_TILES: Record<string, { label: string; icon: any }> = {
+      dashboard: { label: 'Dashboard', icon: LayoutDashboard },
+      'applications:new': { label: 'Applications', icon: FilePlus2 },
+      'applications:renewals': { label: 'Renewal Tracking', icon: RefreshCw },
+      'applications:requirements': { label: 'Requirements', icon: ClipboardList },
+      'settings:proponents': { label: 'Locators / Proponent List', icon: Users },
+      'assessment:queue': { label: 'Evaluation Queue', icon: ClipboardCheck },
+      'approval:queue': { label: 'Approval Queue', icon: Stamp },
+      'compliance:inspections': { label: 'Compliance & Inspection', icon: ClipboardCheck },
+      'compliance:permits': { label: 'Permit & Contract', icon: ShieldCheck },
+      'reports:analytics': { label: 'Reports & Analytics', icon: BarChart3 },
+    };
+    const leaf = (key: AppView): SidebarLeaf => ({ key, label: '', active: view === key, onClick: () => onViewChange(key) });
+    const moduleTiles: SidebarLeaf[] = [
+      ...(showDashboard ? [leaf('dashboard')] : []),
+      ...applicationsItems,
+      ...complianceInspectionItems,
+      ...permitsItems,
+      ...(showReports ? [leaf('reports:analytics')] : []),
+    ].filter(notHidden);
+    // System groups hold many pages each, so they stay accordion rows rather than tiles.
+    const systemGroups = [
+      { id: 'system-settings', label: 'System Settings', icon: Settings, items: systemSettingsItems.filter(notHidden) },
+      { id: 'file-maintenance', label: 'File Maintenance', icon: FileCheck, items: fileMaintenanceItems.filter(notHidden) },
+    ].filter((g) => g.items.length > 0);
+
+    return (
+      <div className="flex flex-col">
+        {moduleTiles.length > 0 && (
+          <SheetSection title="Modules">
+            <SheetTileGrid>
+              {moduleTiles.map((item) => (
+                <SheetTile
+                  key={item.key}
+                  icon={SHEET_TILES[item.key]?.icon || FileCheck}
+                  label={SHEET_TILES[item.key]?.label || item.label}
+                  active={item.active}
+                  onClick={item.onClick}
+                />
+              ))}
+            </SheetTileGrid>
+          </SheetSection>
+        )}
+
+        {systemGroups.length > 0 && (
+          <SheetSection title="System">
+            <SheetRowGroup>
+              {systemGroups.map((g) => {
+                const open = openDropdownId === g.id;
+                return (
+                  <React.Fragment key={g.id}>
+                    <SheetRow icon={g.icon} label={g.label} expandable expanded={open} onClick={() => toggleDropdown(g.id)} />
+                    {open &&
+                      g.items.map((item) => (
+                        <SheetRow key={item.key} nested label={item.label} active={item.active} onClick={item.onClick} />
+                      ))}
+                  </React.Fragment>
+                );
+              })}
+            </SheetRowGroup>
+          </SheetSection>
+        )}
+
+        <SheetSection title="Account">
+          <SheetRowGroup>
+            {accountActions && (
+              <SheetRow icon={KeyRound} label="Change Password" chevron onClick={accountActions.onChangePassword} />
+            )}
+            <SheetRow icon={LogOut} label="Logout" danger onClick={onLogout} />
+          </SheetRowGroup>
+        </SheetSection>
+      </div>
+    );
+  }
 
   return (
     <aside

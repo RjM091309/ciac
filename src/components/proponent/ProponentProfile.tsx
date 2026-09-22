@@ -260,8 +260,7 @@ export function ProponentProfile() {
               <div key={f.key} className={f.key === 'address' ? 'col-span-2 space-y-1.5' : 'space-y-1.5'}>
                 <label className="text-[10px] font-semibold uppercase tracking-widest text-secondary">{f.label}</label>
                 <input
-                  className="w-full rounded-md px-3 py-2 text-sm border focus:outline-none focus:border-[var(--nav-active-bg)]"
-                  style={{ borderColor: 'var(--input-border)', color: 'var(--text)', backgroundColor: 'var(--input-bg)' }}
+                  className="app-input"
                   value={form[f.key] ?? ''}
                   onChange={(e) => setForm((prev) => ({ ...prev, [f.key]: e.target.value }))}
                 />

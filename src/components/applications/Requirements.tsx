@@ -1363,14 +1363,14 @@ export function RequirementsManagement() {
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Field label="Code">
             <input
-              className="app-form-control"
+              className="app-input"
               value={form.code}
               onChange={(e) => setForm((p) => ({ ...p, code: e.target.value }))}
             />
           </Field>
           <Field label="Name">
             <input
-              className="app-form-control"
+              className="app-input"
               value={form.name}
               onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))}
             />
@@ -1387,7 +1387,7 @@ export function RequirementsManagement() {
           </Field>
           <Field label="Description">
             <input
-              className="app-form-control"
+              className="app-input"
               value={form.description}
               onChange={(e) => setForm((p) => ({ ...p, description: e.target.value }))}
             />
@@ -1472,7 +1472,7 @@ export function RequirementsManagement() {
         <div className="grid grid-cols-1 gap-3">
           <Field label="Code">
             <input
-              className="app-form-control"
+              className="app-input"
               value={typeForm.code}
               onChange={(e) => setTypeForm((p) => ({ ...p, code: e.target.value }))}
               placeholder="e.g. DIRECT_LEASE"
@@ -1488,7 +1488,7 @@ export function RequirementsManagement() {
           </Field>
           <Field label="Name">
             <input
-              className="app-form-control"
+              className="app-input"
               value={typeForm.name}
               onChange={(e) => setTypeForm((p) => ({ ...p, name: e.target.value }))}
               placeholder="e.g. Direct Lease"
@@ -1496,7 +1496,7 @@ export function RequirementsManagement() {
           </Field>
           <Field label="Description">
             <input
-              className="app-form-control"
+              className="app-input"
               value={typeForm.description}
               onChange={(e) => setTypeForm((p) => ({ ...p, description: e.target.value }))}
             />
@@ -1529,14 +1529,14 @@ export function RequirementsManagement() {
         <div className="grid grid-cols-1 gap-3">
           <Field label="Name">
             <input
-              className="app-form-control"
+              className="app-input"
               value={categoryForm.name}
               onChange={(e) => setCategoryForm((p) => ({ ...p, name: e.target.value }))}
             />
           </Field>
           <Field label="Description">
             <input
-              className="app-form-control"
+              className="app-input"
               value={categoryForm.description}
               onChange={(e) => setCategoryForm((p) => ({ ...p, description: e.target.value }))}
             />

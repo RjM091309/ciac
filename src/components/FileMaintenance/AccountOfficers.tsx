@@ -28,9 +28,7 @@ type OfficerRow = {
 
 const EMPTY_FORM = { full_name: '', username: '', email: '', phone: '', department_id: '' };
 
-const inputClass =
-  'w-full rounded-md px-3 py-2 text-sm border focus:outline-none focus:border-[var(--nav-active-bg)]';
-const inputStyle = { borderColor: 'var(--input-border)', color: 'var(--text)', backgroundColor: 'var(--input-bg)' };
+const inputClass = 'app-input';
 
 export function AccountOfficersManagement() {
   const { fullAccess, crudPermissions } = useControlPanelAccess();
@@ -471,7 +469,6 @@ export function AccountOfficersManagement() {
           <Field label="Full Name">
             <input
               className={inputClass}
-              style={inputStyle}
               value={form.full_name}
               onChange={(e) => setForm((p) => ({ ...p, full_name: e.target.value }))}
             />
@@ -487,7 +484,6 @@ export function AccountOfficersManagement() {
           <Field label="Username">
             <input
               className={inputClass}
-              style={inputStyle}
               value={form.username}
               onChange={(e) => setForm((p) => ({ ...p, username: e.target.value }))}
             />
@@ -496,7 +492,6 @@ export function AccountOfficersManagement() {
             <input
               type="email"
               className={inputClass}
-              style={inputStyle}
               value={form.email}
               onChange={(e) => setForm((p) => ({ ...p, email: e.target.value }))}
             />
@@ -504,7 +499,6 @@ export function AccountOfficersManagement() {
           <Field label="Phone (optional)">
             <input
               className={inputClass}
-              style={inputStyle}
               value={form.phone}
               onChange={(e) => setForm((p) => ({ ...p, phone: e.target.value }))}
             />

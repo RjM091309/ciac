@@ -354,6 +354,41 @@ textarea.app-form-control {
   font-family: inherit;
 }
 
+/* The app's standard text box / textarea: renders exactly like the Locator
+   form's wrapped field (`app-form-control app-form-control-sm` box + inner
+   `px-2 py-1` input) on a single element — ~36px tall, 12px text, 0.5rem
+   radius, --nav-active-bg border on hover/focus. AppSelect's default control
+   matches it. In @layer components (unlike .app-form-control above) so
+   Tailwind utilities like w-24, pr-9 or min-h-[64px] can still adjust it. */
+@layer components {
+  .app-input {
+    width: 100%;
+    border: 1px solid var(--input-border);
+    border-radius: 0.5rem;
+    padding: 0.55rem 1rem;
+    font-size: 0.75rem;
+    line-height: 1rem;
+    background-color: transparent;
+    color: var(--text);
+    outline: none;
+    transition: border-color 150ms;
+  }
+  .app-input::placeholder {
+    color: var(--text-muted);
+  }
+  .app-input:hover:not(:disabled),
+  .app-input:focus {
+    border-color: var(--nav-active-bg);
+  }
+  .app-input:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+  textarea.app-input {
+    font-family: inherit;
+  }
+}
+
 /* Ensure browser autofill matches input theme */
 input.input-field:-webkit-autofill,
 input.input-field:-webkit-autofill:hover,

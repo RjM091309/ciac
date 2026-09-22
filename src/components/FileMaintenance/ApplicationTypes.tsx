@@ -477,14 +477,8 @@ export function ApplicationTypesManagement() {
         <div className="grid grid-cols-1 gap-3">
           <Field label="Code">
             <input
-              className="w-full rounded-md px-3 py-2 text-sm border focus:outline-none focus:border-[var(--nav-active-bg)]"
-              style={{
-                borderColor: 'var(--input-border)',
-                color: 'var(--text)',
-                backgroundColor: 'var(--input-bg)',
-                opacity: editing ? 0.6 : 1,
-                cursor: editing ? 'not-allowed' : 'text',
-              }}
+              className="app-input"
+              style={{ opacity: editing ? 0.6 : 1, cursor: editing ? 'not-allowed' : 'text' }}
               value={form.code}
               onChange={(e) => setForm((p) => ({ ...p, code: e.target.value }))}
               placeholder="e.g. DIRECT_LEASE"
@@ -499,8 +493,7 @@ export function ApplicationTypesManagement() {
           </Field>
           <Field label="Name">
             <input
-              className="w-full rounded-md px-3 py-2 text-sm border focus:outline-none focus:border-[var(--nav-active-bg)]"
-              style={{ borderColor: 'var(--input-border)', color: 'var(--text)', backgroundColor: 'var(--input-bg)' }}
+              className="app-input"
               value={form.name}
               onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))}
               placeholder="e.g. Direct Lease"
@@ -508,8 +501,7 @@ export function ApplicationTypesManagement() {
           </Field>
           <Field label="Description">
             <textarea
-              className="w-full rounded-md px-3 py-2 text-sm border focus:outline-none focus:border-[var(--nav-active-bg)] min-h-24 resize-y"
-              style={{ borderColor: 'var(--input-border)', color: 'var(--text)', backgroundColor: 'var(--input-bg)' }}
+              className="app-input min-h-24 resize-y"
               value={form.description}
               onChange={(e) => setForm((p) => ({ ...p, description: e.target.value }))}
             />

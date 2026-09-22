@@ -241,9 +241,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-const inputCls =
-  'rounded-lg border px-2.5 py-1.5 text-[13px] font-normal outline-none bg-[var(--surface)] text-[var(--text)]';
-const inputStyle = { borderColor: 'var(--input-border)' } as React.CSSProperties;
+const inputCls = 'app-input';
 
 function usePagination<T>(items: T[], pageSize: number, page: number) {
   return useMemo(() => {
@@ -926,7 +924,6 @@ function ChainTab({
           <Field label="Remarks / basis">
             <textarea
               className={cn(inputCls, 'min-h-[64px] resize-y')}
-              style={inputStyle}
               value={remarks}
               onChange={(e) => setRemarks(e.target.value)}
               placeholder="State the basis for this decision…"
@@ -1161,7 +1158,6 @@ function ChargesTab({
             <Field label="Basis (note)">
               <input
                 className={inputCls}
-                style={inputStyle}
                 value={form.rate_basis}
                 onChange={(e) => setForm((f) => ({ ...f, rate_basis: e.target.value }))}
                 placeholder="e.g. 5000 sqm @ 120/sqm/mo"
@@ -1171,7 +1167,6 @@ function ChargesTab({
           <Field label="Description">
             <input
               className={inputCls}
-              style={inputStyle}
               value={form.description}
               onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
             />
@@ -1180,7 +1175,6 @@ function ChargesTab({
             <Field label="Quantity">
               <input
                 className={inputCls}
-                style={inputStyle}
                 inputMode="decimal"
                 value={form.quantity}
                 onChange={(e) => setForm((f) => ({ ...f, quantity: e.target.value }))}
@@ -1189,7 +1183,6 @@ function ChargesTab({
             <Field label="Unit rate">
               <input
                 className={inputCls}
-                style={inputStyle}
                 inputMode="decimal"
                 value={form.unit_rate}
                 onChange={(e) => setForm((f) => ({ ...f, unit_rate: e.target.value }))}
@@ -1198,7 +1191,6 @@ function ChargesTab({
             <Field label="Amount (override)">
               <input
                 className={inputCls}
-                style={inputStyle}
                 inputMode="decimal"
                 value={form.amount}
                 onChange={(e) => setForm((f) => ({ ...f, amount: e.target.value }))}
@@ -1310,7 +1302,7 @@ function ContractTab({
             <Field label="Application type">
               <input
                 className={inputCls}
-                style={{ ...inputStyle, opacity: 0.65, cursor: 'not-allowed' }}
+                style={{ opacity: 0.65, cursor: 'not-allowed' }}
                 value={`${a.is_renewal ? 'Renewal' : 'New'} · ${a.application_type_name}`}
                 disabled
                 readOnly
@@ -1319,7 +1311,7 @@ function ContractTab({
             <Field label="Contract no.">
               <input
                 className={inputCls}
-                style={{ ...inputStyle, opacity: 0.65, cursor: 'not-allowed' }}
+                style={{ opacity: 0.65, cursor: 'not-allowed' }}
                 value={c?.contract_no || previewNo || 'Computing next number…'}
                 disabled
                 readOnly
@@ -1588,7 +1580,6 @@ function WorkflowSetup({ canEdit, onClose }: { canEdit: boolean; onClose: () => 
                   <Field label="Name">
                     <input
                       className={inputCls}
-                      style={inputStyle}
                       value={form.name}
                       onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
                       placeholder="e.g. Legal Review"
@@ -1597,7 +1588,6 @@ function WorkflowSetup({ canEdit, onClose }: { canEdit: boolean; onClose: () => 
                   <Field label="Role hint (optional)">
                     <input
                       className={inputCls}
-                      style={inputStyle}
                       value={form.role_hint}
                       onChange={(e) => setForm((f) => ({ ...f, role_hint: e.target.value }))}
                     />

@@ -1,7 +1,18 @@
 import React, { useState } from 'react';
-import { KeyRound, LayoutDashboard, LogOut, Settings } from 'lucide-react';
+import { Building2, FileCheck2, FileText, History, KeyRound, LayoutDashboard, LogOut, Settings } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { useControlPanelAccess } from '../../context/ControlPanelAccessContext';
+import { useBottomNavTabs } from './ProponentBottomNav';
+import { SheetRow, SheetRowGroup, SheetSection, SheetTile, SheetTileGrid } from '../MobileMenuSheet';
+
+/** Tile icons for the mobile "More" sheet (the desktop list uses dots). */
+const SHEET_ICONS: Record<string, React.ComponentType<{ size?: number; strokeWidth?: number }>> = {
+  dashboard: LayoutDashboard,
+  'me:applications': FileText,
+  'me:contracts-permits': FileCheck2,
+  'me:profile': Building2,
+  'me:activity': History,
+};
 
 type ProponentNavItem = {
   key: string;
@@ -124,7 +135,7 @@ export function ProponentSidebar({
   onViewChange: (view: string) => void;
   onLogout: () => void;
   collapsed?: boolean;
-  variant?: 'default' | 'drawer';
+  variant?: 'default' | 'drawer' | 'sheet';
   /** Set only during the admin's dashboard-role preview (sourced from the
    * preview endpoint's `sidebarPermissions`), so the preview sidebar matches
    * what a real locator would see instead of always showing all five items. */
@@ -135,6 +146,9 @@ export function ProponentSidebar({
 }) {
   const isDrawer = variant === 'drawer';
   const { sidebarPermissions: mySidebarPermissions, ready } = useControlPanelAccess();
+  // Sheet only: every module is listed (the sheet covers the bottom nav), except
+  // Dashboard when it's already the bottom nav's center Home button.
+  const { showHome } = useBottomNavTabs('proponent', permissionOverride);
 
   const canView = (key: string) => {
     if (key === 'dashboard') return true; // always the portal's landing page
@@ -145,6 +159,37 @@ export function ProponentSidebar({
   const visibleItems = NAV_ITEMS.filter((item) => canView(item.key));
   const dashboardItem = visibleItems.find((item) => item.key === 'dashboard') || null;
   const portalItems = visibleItems.filter((item) => item.key !== 'dashboard');
+
+  if (variant === 'sheet') {
+    const sheetItems = visibleItems.filter((item) => !(showHome && item.key === 'dashboard'));
+    return (
+      <div className="flex flex-col">
+        {sheetItems.length > 0 && (
+          <SheetSection title="Modules">
+            <SheetTileGrid>
+              {sheetItems.map((item) => (
+                <SheetTile
+                  key={item.key}
+                  icon={SHEET_ICONS[item.key] || LayoutDashboard}
+                  label={item.label}
+                  active={view === item.key}
+                  onClick={() => onViewChange(item.key)}
+                />
+              ))}
+            </SheetTileGrid>
+          </SheetSection>
+        )}
+        <SheetSection title="Account">
+          <SheetRowGroup>
+            {accountActions && (
+              <SheetRow icon={KeyRound} label="Change Password" chevron onClick={accountActions.onChangePassword} />
+            )}
+            <SheetRow icon={LogOut} label="Logout" danger onClick={onLogout} />
+          </SheetRowGroup>
+        </SheetSection>
+      </div>
+    );
+  }
 
   return (
     <aside

@@ -219,9 +219,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-const inputCls =
-  'rounded-lg border px-2.5 py-1.5 text-[13px] font-normal outline-none bg-[var(--surface)] text-[var(--text)]';
-const inputStyle = { borderColor: 'var(--input-border)' } as React.CSSProperties;
+const inputCls = 'app-input';
 
 function usePagination<T>(items: T[], pageSize: number, page: number) {
   return useMemo(() => {
@@ -1262,8 +1260,7 @@ function ComplianceTab({
             </label>
             <textarea
               autoFocus
-              className="mt-1 w-full rounded-lg border px-2.5 py-2 text-xs resize-none"
-              style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'var(--surface)', color: 'var(--text)' }}
+              className="app-input mt-1 resize-none"
               rows={3}
               placeholder="Tell the locator what's missing or wrong so they can fix and resubmit…"
               value={rejectRemarks}
@@ -1377,8 +1374,7 @@ function RequirementThreadModal({ requirement, onClose }: { requirement: Require
               if (e.key === 'Enter') void sendReply();
             }}
             placeholder="Reply to the locator…"
-            className="flex-1 rounded-lg border px-3 py-2 text-[12px] bg-transparent outline-none"
-            style={{ borderColor: 'var(--border)' }}
+            className="app-input flex-1"
           />
           <button
             onClick={sendReply}
@@ -1452,8 +1448,7 @@ function AddCustomRequirementModal({
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="e.g. Updated Fire Safety Certificate"
-            className="mt-1 w-full rounded-lg border px-2.5 py-2 text-xs"
-            style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'var(--surface)', color: 'var(--text)' }}
+            className="app-input mt-1"
           />
         </div>
         <div>
@@ -1463,8 +1458,7 @@ function AddCustomRequirementModal({
             onChange={(e) => setDescription(e.target.value)}
             rows={3}
             placeholder="Optional details for the locator"
-            className="mt-1 w-full rounded-lg border px-2.5 py-2 text-xs resize-none"
-            style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'var(--surface)', color: 'var(--text)' }}
+            className="app-input mt-1 resize-none"
           />
         </div>
         <label className="flex items-center gap-2 text-[11px] text-secondary">
@@ -1621,7 +1615,6 @@ function FindingsTab({
           <Field label="Description">
             <textarea
               className={cn(inputCls, 'min-h-[64px] resize-y')}
-              style={inputStyle}
               value={form.description}
               onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
             />
@@ -1755,7 +1748,6 @@ function RecommendationTab({
       <Field label="Summary / basis">
         <textarea
           className={cn(inputCls, 'min-h-[80px] resize-y disabled:opacity-60 disabled:cursor-not-allowed')}
-          style={inputStyle}
           value={summary}
           onChange={(e) => setSummary(e.target.value)}
           disabled={alreadySubmitted}

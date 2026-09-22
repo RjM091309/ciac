@@ -600,8 +600,7 @@ function Input({ value, onChange, type = 'text' }: { value: string; onChange: (v
   return (
     <input
       type={type}
-      className="w-full rounded-md px-3 py-2 text-sm border focus:outline-none focus:border-[var(--nav-active-bg)]"
-      style={{ borderColor: 'var(--input-border)', color: 'var(--text)', backgroundColor: 'var(--input-bg)' }}
+      className="app-input"
       value={value}
       onChange={(e) => onChange(e.target.value)}
     />

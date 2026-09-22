@@ -22,9 +22,7 @@ type Props = {
   onChanged: () => void;
 };
 
-const inputClass =
-  'w-full rounded-md px-3 py-2 text-sm border focus:outline-none focus:border-[var(--nav-active-bg)]';
-const inputStyle = { borderColor: 'var(--input-border)', color: 'var(--text)', backgroundColor: 'var(--input-bg)' };
+const inputClass = 'app-input';
 
 export function DepartmentsModal({ open, canAdd, canEdit, canDelete, onClose, onChanged }: Props) {
   const [items, setItems] = useState<DepartmentRow[]>([]);
@@ -188,7 +186,6 @@ export function DepartmentsModal({ open, canAdd, canEdit, canDelete, onClose, on
                   <span className="text-[11px] font-semibold text-secondary uppercase tracking-widest">Code</span>
                   <input
                     className={inputClass}
-                    style={inputStyle}
                     value={form.code}
                     onChange={(e) => setForm((p) => ({ ...p, code: e.target.value }))}
                   />
@@ -197,7 +194,6 @@ export function DepartmentsModal({ open, canAdd, canEdit, canDelete, onClose, on
                   <span className="text-[11px] font-semibold text-secondary uppercase tracking-widest">Name</span>
                   <input
                     className={inputClass}
-                    style={inputStyle}
                     value={form.name}
                     onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))}
                   />

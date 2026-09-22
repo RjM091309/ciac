@@ -177,8 +177,8 @@ export function DatePicker({
    * of the app-wide filled-pill look. Implies dense sizing. Use this to make
    * a date field pixel-match a plain text field it sits beside. */
   boxed?: boolean;
-  /** Pill-shaped form field with a visible border and solid background (matches
-   * AppSelect), instead of the borderless filter-bar look. */
+  /** Standard form field: the same `.app-input` box as the app's text
+   * boxes and AppSelect, instead of the borderless filter-bar pill. */
   bordered?: boolean;
 }) {
   const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
@@ -237,7 +237,7 @@ export function DatePicker({
           } ${fullWidth || boxed ? '' : 'sm:w-36 md:w-44 lg:w-64 xl:w-72 max-w-[170px] lg:max-w-none'}`}
         >
           <CalendarDays
-            className={`absolute ${dense || boxed ? 'left-2' : 'left-3'} top-1/2 -translate-y-1/2 text-[var(--text-muted)] group-focus-within:text-[var(--text)] transition-colors pointer-events-none`}
+            className={`absolute ${dense || boxed ? 'left-2' : bordered ? 'left-4' : 'left-3'} top-1/2 -translate-y-1/2 text-[var(--text-muted)] group-focus-within:text-[var(--text)] transition-colors pointer-events-none`}
             size={dense || boxed ? 12 : 14}
           />
           <input
@@ -253,16 +253,18 @@ export function DatePicker({
             className={
               boxed
                 ? 'flex-1 min-w-0 border-0 bg-transparent outline-none pl-7 pr-2 py-1 text-xs w-full text-[var(--text)] placeholder:text-[var(--text-muted)] cursor-pointer'
-                : `${dense ? 'h-7 pl-7 pr-2' : `${bordered ? 'h-8 border' : 'h-9'} pl-9 pr-3`} ${rounded === 'lg' ? 'rounded-lg' : 'rounded-full'} text-xs w-full focus:outline-none focus:ring-1 focus:ring-[var(--border)] text-[var(--text)] placeholder:text-[var(--text-muted)] transition-all cursor-pointer`
+                : bordered
+                ? 'app-input pl-10 cursor-pointer'
+                : `${dense ? 'h-7 pl-7 pr-2' : 'h-9 pl-9 pr-3'} ${rounded === 'lg' ? 'rounded-lg' : 'rounded-full'} text-xs w-full focus:outline-none focus:ring-1 focus:ring-[var(--border)] text-[var(--text)] placeholder:text-[var(--text-muted)] transition-all cursor-pointer`
             }
             style={
               boxed
                 ? { opacity: isEmpty ? 0.72 : 1, whiteSpace: 'nowrap' }
+                : bordered
+                ? { whiteSpace: 'nowrap' }
                 : {
-                    ...(bordered
-                      ? { backgroundColor: 'var(--surface)', borderColor: 'var(--input-border)' }
-                      : { backgroundColor: 'color-mix(in oklab, var(--control-bg) 70%, transparent)' }),
-                    opacity: isEmpty && !bordered ? 0.72 : 1,
+                    backgroundColor: 'color-mix(in oklab, var(--control-bg) 70%, transparent)',
+                    opacity: isEmpty ? 0.72 : 1,
                     whiteSpace: 'nowrap',
                   }
             }

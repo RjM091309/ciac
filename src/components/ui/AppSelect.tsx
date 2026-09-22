@@ -16,14 +16,12 @@ type AppSelectProps = {
   placeholder?: string;
   isDisabled?: boolean;
   isClearable?: boolean;
+  /** No longer changes the look — every AppSelect now renders the standard
+   * `.app-input` box. Kept so existing call sites still type-check. */
   compact?: boolean;
-  /** Control border radius. Defaults to the pill shape used across the app;
-   * pass '0.5rem' to match app-form-control in dense forms that mix
-   * selects/date pickers with plain inputs (e.g. the Locator edit form). */
+  /** Control border radius. Defaults to 0.5rem, matching `.app-input`. */
   radius?: string;
-  /** Overrides the compact/non-compact default control height. Pass 28 to
-   * match app-form-control-sm's rendered height exactly (e.g. the Locator
-   * edit form, where selects sit next to plain inputs in the same row). */
+  /** Overrides the default control height (36px, same as `.app-input`). */
   minHeight?: number;
   /** Drops the control's own border/radius/background so it can be dropped
    * into an app-form-control wrapper div that supplies them instead — for
@@ -34,10 +32,13 @@ type AppSelectProps = {
   onChange: (value: string) => void;
 };
 
-const createStyles = (compact: boolean, radius: string, minHeight: number | undefined, boxed: boolean): StylesConfig<AppSelectOption, false> => ({
+// Unboxed, the control reproduces the `.app-input` text box (36px tall, 12px
+// text, 0.5rem radius, 16px text inset); `boxed` keeps the Locator form's
+// wrapper-supplied border as before.
+const createStyles = (radius: string, minHeight: number | undefined, boxed: boolean): StylesConfig<AppSelectOption, false> => ({
   control: (base, state) => ({
     ...base,
-    minHeight: minHeight ?? (compact ? 32 : 40),
+    minHeight: minHeight ?? 36,
     backgroundColor: 'transparent',
     cursor: 'pointer',
     borderStyle: 'solid',
@@ -53,7 +54,11 @@ const createStyles = (compact: boolean, radius: string, minHeight: number | unde
   }),
   valueContainer: (base) => ({
     ...base,
-    padding: boxed ? '0 8px' : compact ? '0 8px' : '0 10px',
+    padding: boxed ? '0 8px' : '0 14px',
+  }),
+  indicatorsContainer: (base) => ({
+    ...base,
+    paddingRight: boxed ? 0 : 5,
   }),
   input: (base) => ({
     ...base,
@@ -63,7 +68,7 @@ const createStyles = (compact: boolean, radius: string, minHeight: number | unde
   placeholder: (base) => ({
     ...base,
     color: 'var(--text-muted)',
-    fontSize: compact ? 12 : 14,
+    fontSize: 12,
     whiteSpace: 'nowrap',
     overflow: 'hidden',
     textOverflow: 'ellipsis',
@@ -71,7 +76,7 @@ const createStyles = (compact: boolean, radius: string, minHeight: number | unde
   singleValue: (base) => ({
     ...base,
     color: 'var(--text)',
-    fontSize: compact ? 12 : 14,
+    fontSize: 12,
     whiteSpace: 'nowrap',
     overflow: 'hidden',
     textOverflow: 'ellipsis',
@@ -94,7 +99,7 @@ const createStyles = (compact: boolean, radius: string, minHeight: number | unde
   }),
   option: (base, state) => ({
     ...base,
-    fontSize: compact ? 12 : 13,
+    fontSize: 12,
     backgroundColor: state.isSelected ? 'var(--nav-active-bg)' : state.isFocused ? 'var(--selected-bg)' : 'transparent',
     color: state.isSelected ? 'var(--nav-active-text)' : 'var(--text)',
     cursor: 'pointer',
@@ -104,13 +109,13 @@ const createStyles = (compact: boolean, radius: string, minHeight: number | unde
   }),
   dropdownIndicator: (base) => ({
     ...base,
-    padding: boxed ? 3 : compact ? 6 : 8,
+    padding: 3,
     color: 'var(--text-muted)',
     '&:hover': { color: 'var(--text)' },
   }),
   clearIndicator: (base) => ({
     ...base,
-    padding: boxed ? 3 : compact ? 6 : 8,
+    padding: 3,
     color: 'var(--text-muted)',
     '&:hover': { color: 'var(--text)' },
   }),
@@ -122,8 +127,7 @@ export function AppSelect({
   placeholder = 'Select...',
   isDisabled = false,
   isClearable = true,
-  compact = false,
-  radius = '1.5rem',
+  radius = '0.5rem',
   minHeight,
   boxed = false,
   onChange,
@@ -135,7 +139,7 @@ export function AppSelect({
     <Select<AppSelectOption, false>
       options={options}
       value={selected}
-      styles={createStyles(compact, radius, minHeight, boxed)}
+      styles={createStyles(radius, minHeight, boxed)}
       className={boxed ? 'flex-1 min-w-0' : undefined}
       classNamePrefix="app-select"
       menuPortalTarget={typeof document !== 'undefined' ? document.body : null}

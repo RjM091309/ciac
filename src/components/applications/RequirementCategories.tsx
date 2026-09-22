@@ -464,14 +464,14 @@ export function RequirementCategoriesManagement() {
         <div className="grid grid-cols-1 gap-3">
           <Field label="Category name">
             <input
-              className="app-form-control"
+              className="app-input"
               value={form.name}
               onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))}
             />
           </Field>
           <Field label="Description">
             <textarea
-              className="app-form-control min-h-24 resize-y"
+              className="app-input min-h-24 resize-y"
               value={form.description}
               onChange={(e) => setForm((p) => ({ ...p, description: e.target.value }))}
             />

@@ -38,12 +38,8 @@ function PasswordField({
           onBlur={() => setTouched(true)}
           autoFocus={autoFocus}
           autoComplete={label === 'Current Password' ? 'current-password' : 'new-password'}
-          className="w-full h-9 rounded-lg border pl-3 pr-9 text-xs focus:outline-none focus:ring-1 focus:ring-[var(--border)]"
-          style={{
-            borderColor: showError ? '#ef4444' : 'var(--border-subtle)',
-            color: 'var(--text)',
-            backgroundColor: 'var(--surface)',
-          }}
+          className="app-input pr-9"
+          style={{ borderColor: showError ? '#ef4444' : undefined }}
         />
         <button
           type="button"

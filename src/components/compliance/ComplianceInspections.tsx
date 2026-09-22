@@ -208,8 +208,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-const inputCls = 'rounded-lg border px-2.5 py-1.5 text-[13px] font-normal outline-none bg-[var(--surface)] text-[var(--text)]';
-const inputStyle = { borderColor: 'var(--input-border)' } as React.CSSProperties;
+const inputCls = 'app-input';
 
 function usePagination<T>(items: T[], pageSize: number, page: number) {
   return useMemo(() => {
@@ -404,7 +403,6 @@ export function ComplianceInspections({
           <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
             <input
               className={cn(inputCls, 'w-full sm:w-64')}
-              style={inputStyle}
               placeholder="Search inspection / locator…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
@@ -1000,7 +998,6 @@ function OverviewTab({
         <Field label="Summary">
           <textarea
             className={cn(inputCls, 'min-h-[64px] resize-y')}
-            style={inputStyle}
             value={summary}
             onChange={(e) => setSummary(e.target.value)}
           />
@@ -1133,7 +1130,6 @@ function FindingsTab({ data, perms, busy, run }: { data: DetailPayload; perms: P
             <Field label="Category">
               <input
                 className={inputCls}
-                style={inputStyle}
                 value={form.category}
                 onChange={(e) => setForm((f) => ({ ...f, category: e.target.value }))}
                 placeholder="e.g. Structural, Documentary"
@@ -1151,7 +1147,6 @@ function FindingsTab({ data, perms, busy, run }: { data: DetailPayload; perms: P
           <Field label="Description">
             <textarea
               className={cn(inputCls, 'min-h-[56px] resize-y')}
-              style={inputStyle}
               value={form.description}
               onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
             />
@@ -1159,7 +1154,6 @@ function FindingsTab({ data, perms, busy, run }: { data: DetailPayload; perms: P
           <Field label="Recommendation">
             <textarea
               className={cn(inputCls, 'min-h-[48px] resize-y')}
-              style={inputStyle}
               value={form.recommendation}
               onChange={(e) => setForm((f) => ({ ...f, recommendation: e.target.value }))}
             />
@@ -1283,7 +1277,6 @@ function ActionsTab({ data, perms, busy, run }: { data: DetailPayload; perms: Pe
           <Field label="Action required">
             <textarea
               className={cn(inputCls, 'min-h-[56px] resize-y')}
-              style={inputStyle}
               value={form.action_required}
               onChange={(e) => setForm((f) => ({ ...f, action_required: e.target.value }))}
             />
@@ -1292,7 +1285,6 @@ function ActionsTab({ data, perms, busy, run }: { data: DetailPayload; perms: Pe
             <Field label="Responsible party">
               <input
                 className={inputCls}
-                style={inputStyle}
                 value={form.responsible_party}
                 onChange={(e) => setForm((f) => ({ ...f, responsible_party: e.target.value }))}
               />
@@ -1409,7 +1401,6 @@ function ReportsTab({ data, perms, busy, run }: { data: DetailPayload; perms: Pe
             <Field label="File name">
               <input
                 className={inputCls}
-                style={inputStyle}
                 value={form.file_name}
                 onChange={(e) => setForm((f) => ({ ...f, file_name: e.target.value }))}
               />
@@ -1418,7 +1409,6 @@ function ReportsTab({ data, perms, busy, run }: { data: DetailPayload; perms: Pe
           <Field label="Path / link">
             <input
               className={inputCls}
-              style={inputStyle}
               value={form.storage_path}
               onChange={(e) => setForm((f) => ({ ...f, storage_path: e.target.value }))}
               placeholder="\\server\share\report.pdf or https://…"
@@ -1550,7 +1540,6 @@ function NewInspection({
         <Field label="Title">
           <input
             className={inputCls}
-            style={inputStyle}
             value={form.title}
             onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
             placeholder="e.g. Annual Safety Inspection 2026"

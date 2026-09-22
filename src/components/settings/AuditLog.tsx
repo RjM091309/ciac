@@ -287,10 +287,10 @@ export function AuditLog() {
             />
           </div>
           <div className="min-w-0 lg:w-44">
-            <DatePicker mode="single" fullWidth value={fromDate} onChange={setFromDate} placeholder="From date" />
+            <DatePicker mode="single" bordered fullWidth value={fromDate} onChange={setFromDate} placeholder="From date" />
           </div>
           <div className="min-w-0 lg:w-44">
-            <DatePicker mode="single" fullWidth value={toDate} onChange={setToDate} placeholder="To date" />
+            <DatePicker mode="single" bordered fullWidth value={toDate} onChange={setToDate} placeholder="To date" />
           </div>
         </div>
 

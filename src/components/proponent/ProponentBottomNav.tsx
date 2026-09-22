@@ -71,26 +71,14 @@ export const BOTTOM_NAV_HEIGHT = BAR_HEIGHT + TOP_CLEARANCE;
 const NOTCH_MASK = `radial-gradient(circle ${NOTCH_RADIUS}px at 50% ${-FAB_LIFT}px, transparent 99%, #000 100%)`;
 
 /**
- * Persistent mobile bottom tab bar for every role, standing in for the
- * sidebar drawer's primary items so mobile feels like a native app instead of
- * a desktop layout with a hamburger bolted on.
- * Dashboard/Home lives in the raised center FAB (bank-app style notch);
- * "More" opens the existing drawer for the rest of the menu + Logout rather
- * than duplicating them here, so those stay in one place.
+ * Which tabs the bottom nav shows for this role (plus 'dashboard' when the
+ * Home FAB is shown). Shared with the "More" sheet so it can skip anything
+ * already one tap away in the bar.
  */
-export function ProponentBottomNav({
-  role,
-  view,
-  onViewChange,
-  onOpenMore,
-  permissionOverride,
-}: {
-  role: 'admin' | 'officer' | 'proponent';
-  view: string;
-  onViewChange: (view: string) => void;
-  onOpenMore: () => void;
-  permissionOverride?: Record<string, boolean> | null;
-}) {
+export function useBottomNavTabs(
+  role: 'admin' | 'officer' | 'proponent',
+  permissionOverride?: Record<string, boolean> | null,
+) {
   const { sidebarPermissions, fullAccess, ready } = useControlPanelAccess();
   const isProponent = role === 'proponent';
 
@@ -110,10 +98,39 @@ export function ProponentBottomNav({
   };
 
   const tabs = (isProponent ? PROPONENT_ITEMS : STAFF_ITEMS).filter((item) => canView(item.key)).slice(0, MAX_TABS);
+  const showHome = canView('dashboard');
+  const keys = [...tabs.map((t) => t.key), ...(showHome ? ['dashboard'] : [])];
+  return { tabs, showHome, keys };
+}
+
+/**
+ * Persistent mobile bottom tab bar for every role, standing in for the
+ * sidebar drawer's primary items so mobile feels like a native app instead of
+ * a desktop layout with a hamburger bolted on.
+ * Dashboard/Home lives in the raised center FAB (bank-app style notch);
+ * "More" opens the existing drawer for the rest of the menu + Logout rather
+ * than duplicating them here, so those stay in one place.
+ */
+export function ProponentBottomNav({
+  role,
+  view,
+  onViewChange,
+  onOpenMore,
+  moreOpen = false,
+  permissionOverride,
+}: {
+  role: 'admin' | 'officer' | 'proponent';
+  view: string;
+  onViewChange: (view: string) => void;
+  onOpenMore: () => void;
+  /** Highlights "More" while its sheet is open. */
+  moreOpen?: boolean;
+  permissionOverride?: Record<string, boolean> | null;
+}) {
+  const { tabs, showHome } = useBottomNavTabs(role, permissionOverride);
   // Two tabs left of the FAB; the rest (plus "More") on the right.
   const leftItems = tabs.slice(0, 2);
   const rightItems = tabs.slice(2);
-  const showHome = canView('dashboard');
   const homeActive = view === 'dashboard';
   // Fixed slot grid (2 per side of the FAB), padded with empty slots, so every
   // role's tabs line up the same: "More" always sits in the far-right slot and
@@ -182,11 +199,18 @@ export function ProponentBottomNav({
         <button
           type="button"
           onClick={onOpenMore}
-          className="flex-1 flex flex-col items-center justify-center gap-1 min-w-0 cursor-pointer"
-          style={{ color: 'var(--text-secondary)' }}
+          aria-expanded={moreOpen}
+          className="relative flex-1 flex flex-col items-center justify-center gap-1 min-w-0 cursor-pointer"
+          style={{ color: moreOpen ? 'var(--nav-active-bg)' : 'var(--text-secondary)' }}
         >
-          <Menu size={24} />
-          <span className="text-[10px] font-medium tracking-tight">More</span>
+          <Menu size={24} strokeWidth={moreOpen ? 2.4 : 2} />
+          <span className={cn('text-[10px] font-medium tracking-tight', moreOpen && 'font-bold')}>More</span>
+          {moreOpen && (
+            <span
+              className="absolute bottom-0 rounded-full"
+              style={{ width: 22, height: 3, backgroundColor: 'var(--nav-active-bg)' }}
+            />
+          )}
         </button>
       </div>
 

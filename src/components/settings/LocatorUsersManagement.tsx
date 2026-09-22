@@ -905,16 +905,14 @@ export function LocatorUsersManagement({ locationSearch = '' }: { locationSearch
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Field label="Username">
             <input
-              className="w-full rounded-md px-3 py-2 text-sm border focus:outline-none focus:border-[var(--nav-active-bg)]"
-              style={{ borderColor: 'var(--input-border)', color: 'var(--text)', backgroundColor: 'var(--input-bg)' }}
+              className="app-input"
               value={form.username}
               onChange={(e) => setForm((p) => ({ ...p, username: e.target.value }))}
             />
           </Field>
           <Field label="Full name">
             <input
-              className="w-full rounded-md px-3 py-2 text-sm border focus:outline-none focus:border-[var(--nav-active-bg)]"
-              style={{ borderColor: 'var(--input-border)', color: 'var(--text)', backgroundColor: 'var(--input-bg)' }}
+              className="app-input"
               value={form.full_name}
               onChange={(e) => setForm((p) => ({ ...p, full_name: e.target.value }))}
             />
@@ -923,8 +921,7 @@ export function LocatorUsersManagement({ locationSearch = '' }: { locationSearch
             <input
               type="email"
               required
-              className="w-full rounded-md px-3 py-2 text-sm border focus:outline-none focus:border-[var(--nav-active-bg)]"
-              style={{ borderColor: 'var(--input-border)', color: 'var(--text)', backgroundColor: 'var(--input-bg)' }}
+              className="app-input"
               value={form.email}
               onChange={(e) => setForm((p) => ({ ...p, email: e.target.value }))}
             />
@@ -943,8 +940,7 @@ export function LocatorUsersManagement({ locationSearch = '' }: { locationSearch
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <Field label={editing ? 'Business name' : 'Business name *'}>
               <input
-                className="w-full rounded-md px-3 py-2 text-sm border focus:outline-none focus:border-[var(--nav-active-bg)]"
-                style={{ borderColor: 'var(--input-border)', color: 'var(--text)', backgroundColor: 'var(--input-bg)' }}
+                className="app-input"
                 value={form.business_name}
                 onChange={(e) => setForm((p) => ({ ...p, business_name: e.target.value }))}
                 placeholder="e.g. SkyPort Logistics Inc."
@@ -954,8 +950,7 @@ export function LocatorUsersManagement({ locationSearch = '' }: { locationSearch
             </Field>
             <Field label={editing ? 'Contact number' : 'Contact number *'}>
               <input
-                className="w-full rounded-md px-3 py-2 text-sm border focus:outline-none focus:border-[var(--nav-active-bg)]"
-                style={{ borderColor: 'var(--input-border)', color: 'var(--text)', backgroundColor: 'var(--input-bg)' }}
+                className="app-input"
                 value={form.contact_no}
                 onChange={(e) => setForm((p) => ({ ...p, contact_no: e.target.value }))}
                 placeholder="09XX XXX XXXX"
@@ -968,8 +963,7 @@ export function LocatorUsersManagement({ locationSearch = '' }: { locationSearch
                 <AddressAutocomplete
                   value={form.address}
                   onChange={(address) => setForm((p) => ({ ...p, address }))}
-                  className="w-full rounded-md px-3 py-2 text-sm border focus:outline-none focus:border-[var(--nav-active-bg)]"
-                  style={{ borderColor: 'var(--input-border)', color: 'var(--text)', backgroundColor: 'var(--input-bg)' }}
+                  className="app-input"
                   placeholder="Start typing to search, or type the full address"
                 />
               </Field>
