@@ -21,6 +21,22 @@ function businessError(message) {
   return Object.assign(new Error(message), { status: 400 });
 }
 
+// setStage/submitRecommendation both re-check the assessment isn't
+// COMPLETED/RETURNED server-side, not just in the frontend's isClosed —
+// Findings CRUD didn't, so it stayed editable via a direct API call even
+// after a recommendation locked the assessment. Shared here so
+// add/update/deleteFinding all enforce the same rule.
+async function assertAssessmentOpen(assessmentId) {
+  const rows = await selectData(
+    `SELECT TOP (1) stage FROM dbo.application_assessments WHERE id = @param0`,
+    [toInt(assessmentId)]
+  );
+  const stage = String(rows?.[0]?.stage || "").toUpperCase();
+  if (stage === "COMPLETED" || stage === "RETURNED") {
+    throw businessError("This assessment has already been recommended on. An admin must reopen it before findings can change.");
+  }
+}
+
 function toDecimal(v) {
   if (v === null || v === undefined || v === "") return null;
   const n = Number(v);
@@ -559,6 +575,7 @@ async function reopen(applicationId, actorId) {
 async function addFinding(applicationId, payload, actorId) {
   const asm = await getOrCreateAssessment(applicationId, actorId);
   if (!asm) return null;
+  await assertAssessmentOpen(asm.id);
   const description = String(payload?.description ?? "").trim();
   if (!description) throw new Error("description is required");
 
@@ -613,6 +630,7 @@ async function updateFinding(id, payload, actorId) {
   await ensureSchema();
   const existing = await getFindingById(id);
   if (!existing) return null;
+  await assertAssessmentOpen(existing.assessment_id);
   const sets = [];
   const params = [];
   const push = (frag, value) => {
@@ -641,6 +659,7 @@ async function deleteFinding(id, actorId) {
   await ensureSchema();
   const existing = await getFindingById(id);
   if (!existing) return false;
+  await assertAssessmentOpen(existing.assessment_id);
   await updateData(`DELETE FROM dbo.assessment_findings WHERE id = @param0`, [toInt(id)]);
   await logActivity(existing.assessment_id, "FINDING_DELETED", `Finding #${id}`, actorId);
   return true;
@@ -781,6 +800,16 @@ async function submitRecommendation(applicationId, { recommendation, summary, ac
   }
   await logActivity(asm.id, "RECOMMENDED", `${rec}${note ? `: ${note.slice(0, 200)}` : ""}`, actorId);
 
+  // The recommendation write above already committed and is now locked (only
+  // an admin Reopen can undo it), so these two follow-through steps can't be
+  // allowed to fail silently — a swallowed error here used to leave the
+  // assessment COMPLETED with the application stuck on its old status, or
+  // FOR_APPROVAL with no approval_steps for the Account Officer to act on,
+  // and no way to retry short of Reopen. They're collected as `warnings`
+  // and returned to the caller instead, so the officer who just submitted
+  // sees that something needs an admin's attention right away.
+  const warnings = [];
+
   const targetStatus = rec === "RETURN" ? "RETURNED" : rec === "DISAPPROVE" ? "DISAPPROVED" : "FOR_APPROVAL";
   try {
     await Workflow.updateApplicationStatus(applicationId, {
@@ -790,6 +819,9 @@ async function submitRecommendation(applicationId, { recommendation, summary, ac
     });
   } catch (error) {
     console.error("submitRecommendation: application status update failed:", error);
+    warnings.push(
+      `The recommendation was saved, but the application's status could not be updated to ${targetStatus} (${error.message || "unknown error"}). An admin needs to fix this.`
+    );
   }
 
   if (targetStatus === "FOR_APPROVAL") {
@@ -803,10 +835,14 @@ async function submitRecommendation(applicationId, { recommendation, summary, ac
       await ApprovalIssuance.startApproval(applicationId, actorId);
     } catch (error) {
       console.error("submitRecommendation: auto-start approval failed:", error);
+      warnings.push(
+        `The recommendation was saved, but approval routing could not be started (${error.message || "unknown error"}). An admin needs to start it manually or fix the approval-level configuration.`
+      );
     }
   }
 
-  return getAssessmentDetail(applicationId);
+  const detail = await getAssessmentDetail(applicationId);
+  return warnings.length ? { ...detail, warnings } : detail;
 }
 
 module.exports = {

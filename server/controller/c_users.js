@@ -69,6 +69,7 @@ exports.getById = async (req, res) => {
         ...row,
         business_name: proponent?.business_name ?? null,
         address: proponent?.address ?? null,
+        lease_address: proponent?.lease_address ?? null,
         contact_no: proponent?.contact_no ?? null,
       },
     });
@@ -80,8 +81,19 @@ exports.getById = async (req, res) => {
 
 exports.create = async (req, res) => {
   try {
-    const { username, email, phone, full_name, password, is_active, role_id, business_name, address, contact_no } =
-      req.body || {};
+    const {
+      username,
+      email,
+      phone,
+      full_name,
+      password,
+      is_active,
+      role_id,
+      business_name,
+      address,
+      lease_address,
+      contact_no,
+    } = req.body || {};
     if (!username) return res.status(400).json({ success: false, message: "username is required" });
     if (!String(email || "").trim()) return res.status(400).json({ success: false, message: "email is required" });
 
@@ -133,6 +145,7 @@ exports.create = async (req, res) => {
           user_id: row.id,
           business_name: String(business_name).trim(),
           address: address ? String(address).trim() : null,
+          lease_address: lease_address ? String(lease_address).trim() : null,
           contact_no: contact_no ? String(contact_no).trim() : null,
           created_by: req.user?.id ?? null,
         });
@@ -192,8 +205,19 @@ exports.update = async (req, res) => {
     const id = Number(req.params.id);
     if (!Number.isFinite(id)) return res.status(400).json({ success: false, message: "Invalid id" });
 
-    const { username, email, phone, full_name, password, is_active, role_id, business_name, address, contact_no } =
-      req.body || {};
+    const {
+      username,
+      email,
+      phone,
+      full_name,
+      password,
+      is_active,
+      role_id,
+      business_name,
+      address,
+      lease_address,
+      contact_no,
+    } = req.body || {};
     if (email !== undefined && !String(email || "").trim()) {
       return res.status(400).json({ success: false, message: "email is required" });
     }
@@ -208,13 +232,14 @@ exports.update = async (req, res) => {
     // the admin-direct edit path (gated by the same settings:locator-users
     // permission as the rest of this route), separate from the proponent's
     // own self-service change-request flow in c_proponents.js.
-    if (business_name !== undefined || address !== undefined || contact_no !== undefined) {
+    if (business_name !== undefined || address !== undefined || lease_address !== undefined || contact_no !== undefined) {
       try {
         const existing = await Proponent.getProponentByUserId(id);
         if (existing) {
           await Proponent.updateProponent(existing.id, {
             business_name: business_name !== undefined ? String(business_name).trim() : undefined,
             address: address !== undefined ? (address ? String(address).trim() : null) : undefined,
+            lease_address: lease_address !== undefined ? (lease_address ? String(lease_address).trim() : null) : undefined,
             contact_no: contact_no !== undefined ? (contact_no ? String(contact_no).trim() : null) : undefined,
             updated_by: req.user?.id ?? null,
           });
@@ -223,6 +248,7 @@ exports.update = async (req, res) => {
             user_id: id,
             business_name: String(business_name).trim(),
             address: address ? String(address).trim() : null,
+            lease_address: lease_address ? String(lease_address).trim() : null,
             contact_no: contact_no ? String(contact_no).trim() : null,
             created_by: req.user?.id ?? null,
           });

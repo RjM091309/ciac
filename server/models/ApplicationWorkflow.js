@@ -41,6 +41,12 @@ const APPLICATION_STATUSES = [
   "APPROVED",
 ];
 
+// dbo.application_requirements.status — every comparison against this column
+// elsewhere in this file (verified counts, the reupload auto-reset, etc.)
+// hardcodes one of these three, so a value outside this set would silently
+// never match any of them.
+const REQUIREMENT_STATUSES = ["PENDING", "VERIFIED", "REJECTED"];
+
 // Statuses a proponent can submit *from* via submitApplication(), mapped to
 // the status that submission produces.
 const SUBMIT_TRANSITIONS = {
@@ -1125,6 +1131,14 @@ async function listApplicationRequirements(applicationId) {
 }
 
 async function updateApplicationRequirementStatus(id, { status, remarks, updated_by }) {
+  const nextStatus = String(status || "").trim().toUpperCase();
+  if (!REQUIREMENT_STATUSES.includes(nextStatus)) {
+    throw Object.assign(
+      new Error(`Invalid requirement status "${status}" — must be one of ${REQUIREMENT_STATUSES.join(", ")}.`),
+      { status: 400 }
+    );
+  }
+
   await ensureSchema();
   await Notification.ensureSchema();
   const rows = await selectData(
@@ -1144,6 +1158,21 @@ async function updateApplicationRequirementStatus(id, { status, remarks, updated
   const row = rows?.[0];
   if (!row) return null;
 
+  // Once the assessment has been recommended on (ENDORSE/RETURN/DISAPPROVE),
+  // requirement verification shouldn't keep moving underneath an
+  // already-submitted recommendation — an admin Reopen is required first.
+  const assessmentRows = await selectData(
+    `SELECT TOP (1) stage FROM dbo.application_assessments WHERE application_id = @param0`,
+    [row.application_id]
+  );
+  const assessmentStage = String(assessmentRows?.[0]?.stage || "").toUpperCase();
+  if (assessmentStage === "COMPLETED" || assessmentStage === "RETURNED") {
+    throw Object.assign(
+      new Error("This application's assessment has already been recommended on. An admin must reopen it before requirements can change."),
+      { status: 400 }
+    );
+  }
+
   await updateData(
     `
     UPDATE dbo.application_requirements
@@ -1154,7 +1183,7 @@ async function updateApplicationRequirementStatus(id, { status, remarks, updated
       updated_at = SYSUTCDATETIME()
     WHERE id = @param0
     `,
-    [id, String(status || "PENDING").trim(), remarks ?? null, toInt(updated_by)]
+    [id, nextStatus, remarks ?? null, toInt(updated_by)]
   );
 
   const updatedRows = await selectData(
@@ -1182,7 +1211,7 @@ async function updateApplicationRequirementStatus(id, { status, remarks, updated
       applicationRequirementId: row.id,
       requirementCode: row.requirement_code,
       requirementName: row.requirement_name,
-      nextStatus: status,
+      nextStatus,
       remarks,
       actorId: updated_by,
     });
@@ -1190,7 +1219,7 @@ async function updateApplicationRequirementStatus(id, { status, remarks, updated
     const requirementLabel = [String(row.requirement_code || "").trim(), String(row.requirement_name || "").trim()]
       .filter(Boolean)
       .join(" - ") || `Requirement #${row.id}`;
-    const upperStatus = String(status || "").toUpperCase();
+    const upperStatus = nextStatus;
     try {
       // Lazy require: AssessmentEvaluation.js requires this module at the
       // top, so requiring it back at module-load time would be circular.
@@ -1365,6 +1394,21 @@ async function addCustomRequirementToApplication({ applicationId, name, descript
 
   const application = await getApplicationById(applicationId);
   if (!application) return null;
+
+  // Same "already recommended on" lock as updateApplicationRequirementStatus —
+  // no new requirements should attach to a checklist Assessment has already
+  // signed off on.
+  const assessmentRows = await selectData(
+    `SELECT TOP (1) stage FROM dbo.application_assessments WHERE application_id = @param0`,
+    [applicationId]
+  );
+  const assessmentStage = String(assessmentRows?.[0]?.stage || "").toUpperCase();
+  if (assessmentStage === "COMPLETED" || assessmentStage === "RETURNED") {
+    throw Object.assign(
+      new Error("This application's assessment has already been recommended on. An admin must reopen it before adding requirements."),
+      { status: 400 }
+    );
+  }
 
   const code = `ADHOC-${applicationId}-${Date.now()}`;
   const catalogRequirement = await Requirement.createRequirement({

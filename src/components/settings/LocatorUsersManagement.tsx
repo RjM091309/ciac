@@ -159,6 +159,7 @@ export function LocatorUsersManagement({ locationSearch = '' }: { locationSearch
     full_name: '',
     business_name: '',
     address: '',
+    lease_address: '',
     contact_no: '',
   });
   const [originalForm, setOriginalForm] = useState<typeof form | null>(null);
@@ -247,8 +248,12 @@ export function LocatorUsersManagement({ locationSearch = '' }: { locationSearch
 
     // Business name is what actually triggers creating/updating the linked
     // proponent profile server-side — address/contact without it would
-    // silently go nowhere, so require it once either is filled in.
-    if ((form.address.trim() || form.contact_no.trim()) && !form.business_name.trim()) return false;
+    // silently go nowhere, so require it once any of them is filled in.
+    if (
+      (form.address.trim() || form.lease_address.trim() || form.contact_no.trim()) &&
+      !form.business_name.trim()
+    )
+      return false;
 
     if (!editing) {
       // A locator account created without a business profile lands the
@@ -266,6 +271,7 @@ export function LocatorUsersManagement({ locationSearch = '' }: { locationSearch
       fullName !== originalForm.full_name.trim() ||
       form.business_name.trim() !== originalForm.business_name.trim() ||
       form.address.trim() !== originalForm.address.trim() ||
+      form.lease_address.trim() !== originalForm.lease_address.trim() ||
       form.contact_no.trim() !== originalForm.contact_no.trim()
     );
   }, [editing, form, locatorRole, originalForm]);
@@ -281,7 +287,7 @@ export function LocatorUsersManagement({ locationSearch = '' }: { locationSearch
   function openCreate() {
     setEditing(null);
     setOriginalForm(null);
-    setForm({ username: '', email: '', full_name: '', business_name: '', address: '', contact_no: '' });
+    setForm({ username: '', email: '', full_name: '', business_name: '', address: '', lease_address: '', contact_no: '' });
     setIsCreateOpen(true);
   }
 
@@ -294,6 +300,7 @@ export function LocatorUsersManagement({ locationSearch = '' }: { locationSearch
       full_name: u.full_name || '',
       business_name: '',
       address: '',
+      lease_address: '',
       contact_no: '',
     };
     setForm(baseline);
@@ -308,6 +315,7 @@ export function LocatorUsersManagement({ locationSearch = '' }: { locationSearch
           ...baseline,
           business_name: json.data.business_name || '',
           address: json.data.address || '',
+          lease_address: json.data.lease_address || '',
           contact_no: json.data.contact_no || '',
         };
         setForm(withProfile);
@@ -341,6 +349,7 @@ export function LocatorUsersManagement({ locationSearch = '' }: { locationSearch
       // proponent's own self-service change-request flow.
       payload.business_name = form.business_name.trim() || undefined;
       payload.address = form.address.trim() || undefined;
+      payload.lease_address = form.lease_address.trim() || undefined;
       payload.contact_no = form.contact_no.trim() || undefined;
       // No password field on this form: the backend generates one and emails
       // it when none is supplied, same as an admin-triggered reset.
@@ -955,13 +964,25 @@ export function LocatorUsersManagement({ locationSearch = '' }: { locationSearch
               />
             </Field>
             <div className="sm:col-span-2">
-              <Field label={editing ? 'Business address' : 'Business address *'}>
+              <Field label={editing ? 'Principal Address' : 'Principal Address *'}>
                 <AddressAutocomplete
                   value={form.address}
                   onChange={(address) => setForm((p) => ({ ...p, address }))}
                   className="w-full rounded-md px-3 py-2 text-sm border focus:outline-none focus:border-[var(--nav-active-bg)]"
                   style={{ borderColor: 'var(--input-border)', color: 'var(--text)', backgroundColor: 'var(--input-bg)' }}
                   placeholder="Start typing to search, or type the full address"
+                />
+              </Field>
+            </div>
+            <div className="sm:col-span-2">
+              <Field label="Lease Address">
+                <AddressAutocomplete
+                  value={form.lease_address}
+                  onChange={(lease_address) => setForm((p) => ({ ...p, lease_address }))}
+                  className="w-full rounded-md px-3 py-2 text-sm border focus:outline-none focus:border-[var(--nav-active-bg)]"
+                  style={{ borderColor: 'var(--input-border)', color: 'var(--text)', backgroundColor: 'var(--input-bg)' }}
+                  placeholder="Start typing to search, or type the full address"
+                  disabled={loadingProfile}
                 />
               </Field>
             </div>

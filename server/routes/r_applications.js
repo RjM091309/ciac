@@ -1,7 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const controller = require("../controller/c_applications");
-const { requireApplicationsAccess, requireRole } = require("../middleware/m_auth");
+const { requireApplicationsAccess, requireMenuAccess, requireRole } = require("../middleware/m_auth");
 const { upload } = require("../middleware/m_upload");
 
 // Staff-only: full listing.
@@ -15,7 +15,15 @@ router.get("/", requireApplicationsAccess(), controller.list);
 // stays a configurable Control Panel permission any staff role can be
 // granted — this one has no such per-role opt-in.
 router.patch("/:id/status", requireRole("admin"), controller.updateStatus);
-router.patch("/requirements/:id/status", requireApplicationsAccess(), controller.updateRequirementStatus);
+// Verifying/rejecting a requirement is Assessment's job specifically, not
+// "any staff role that can see an applications-adjacent queue" — this is
+// a legacy duplicate of Assessment's own route
+// (POST /api/assessments/requirements/:id/status, requireMenuAccess(MENU_KEY,
+// "edit")), unused by the frontend, but still reachable directly. Gated the
+// same way that route is, instead of the broad requireApplicationsAccess()
+// every other route here uses, so it can't be used to bypass the Assessment
+// Officer permission the intended route enforces.
+router.patch("/requirements/:id/status", requireMenuAccess("assessment:queue", "edit"), controller.updateRequirementStatus);
 
 // Staff + proponent: a proponent may only ever reach their own application —
 // enforced in the controller (loadWithAccess), not here, since that check

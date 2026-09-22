@@ -829,10 +829,19 @@ function AssessmentDetail({
     async (fn: () => Promise<unknown>, successMsg?: string) => {
       setBusy(true);
       try {
-        await fn();
+        const result = await fn();
         await load();
         onMutated();
         if (successMsg) toast.success(successMsg);
+        // submitRecommendation can save the recommendation itself but still
+        // fail to move the application's status or start approval routing —
+        // that used to fail silently server-side (a console.error only).
+        // It's now surfaced here so whoever just submitted knows an admin
+        // needs to step in, instead of assuming everything went through.
+        const warnings = (result as { data?: { warnings?: string[] } } | undefined)?.data?.warnings;
+        if (Array.isArray(warnings)) {
+          warnings.forEach((w) => toast.error(w, { duration: 15000 }));
+        }
       } catch (err) {
         toast.error((err as Error).message);
       } finally {
@@ -1070,6 +1079,11 @@ function ComplianceTab({
   const [rejectRemarks, setRejectRemarks] = useState('');
   const [threadRequirement, setThreadRequirement] = useState<RequirementRow | null>(null);
   const [addingRequirement, setAddingRequirement] = useState(false);
+  // Same lock as FindingsTab/Recommendation — once the assessment is COMPLETED
+  // or RETURNED, requirement verification shouldn't keep moving under an
+  // already-submitted recommendation (or a decision Approval may have acted on).
+  const isClosed = data.assessment.stage === 'COMPLETED' || data.assessment.stage === 'RETURNED';
+  const canEditReqs = canEdit && !isClosed;
 
   const setReq = (id: number, status: string, remarks?: string) =>
     run(
@@ -1087,7 +1101,7 @@ function ComplianceTab({
         <div className="text-[11px] text-secondary">
           Documentary requirements pulled from the application. Regulatory items are captured under Findings.
         </div>
-        {canEdit ? (
+        {canEditReqs ? (
           <button
             className="shrink-0 inline-flex items-center gap-1.5 rounded px-2.5 py-1.5 text-[11px] font-semibold border cursor-pointer"
             style={{ borderColor: 'var(--border)' }}
@@ -1152,7 +1166,7 @@ function ComplianceTab({
                         : { bg: 'rgba(245,158,11,.14)', color: '#f59e0b', border: 'rgba(245,158,11,.38)' }
                   }
                 />
-                {canEdit ? (
+                {canEditReqs ? (
                   <>
                     <button
                       className="rounded px-2 py-1 text-[11px] border cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"

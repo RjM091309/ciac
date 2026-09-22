@@ -562,7 +562,7 @@ export function Dashboard({ data, navigate }: { data: AdminDashboardData | null;
             icon={Building2}
             trend="up"
             trendValue={`${totals.totalBusinesses} on record`}
-            onClick={navigate ? () => navigate('/settings/locator-users?hasBusiness=1') : undefined}
+            onClick={navigate ? () => navigate('/applications/locator-users?hasBusiness=1') : undefined}
           />
           <MetricCard
             title="Pending Review"

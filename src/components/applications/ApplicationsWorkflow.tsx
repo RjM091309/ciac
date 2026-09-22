@@ -237,7 +237,7 @@ export function ApplicationsWorkflow({
   // URL) until the officer clears it — unlike the one-shot notification
   // row-highlight below, a status filter is a standing view, not a flash.
   const [statusFilterCodes, setStatusFilterCodes] = useState<string[]>([]);
-  const [appsPageSize, setAppsPageSize] = useState(5);
+  const [appsPageSize, setAppsPageSize] = useState(20);
   const [appsPage, setAppsPage] = useState(1);
   const [highlightedApplicationId, setHighlightedApplicationId] = useState<number | null>(null);
   const [highlightedApplicationTick, setHighlightedApplicationTick] = useState(0);
@@ -284,8 +284,16 @@ export function ApplicationsWorkflow({
     [proponentsEffective, createForm.proponent_id]
   );
 
+  // "New Application" (renewalMode false) is where staff track applications still
+  // in progress — once one reaches APPROVED it's done, so it drops off this list
+  // (Renewal Tracking is untouched; an approved renewal still belongs there).
   const appsByType = useMemo(
-    () => applicationsEffective.filter((a) => Number(a.is_renewal) === (renewalMode ? 1 : 0)),
+    () =>
+      applicationsEffective.filter(
+        (a) =>
+          Number(a.is_renewal) === (renewalMode ? 1 : 0) &&
+          (renewalMode || String(a.status || '').toUpperCase() !== 'APPROVED')
+      ),
     [applicationsEffective, renewalMode]
   );
   const filteredApps = useMemo(() => {
