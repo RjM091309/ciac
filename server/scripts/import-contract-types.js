@@ -10,6 +10,13 @@
  * contract_type_code is already set.
  * Usage: node server/scripts/import-contract-types.js
  */
+// DEPRECATED — superseded by File Maintenance > Type of Contract (dbo.type_of_contract) and
+// scripts/backfill-contract-types.js. This script stored Type of Contract as "TOC_..." rows in
+// dbo.application_types and wrote that code to contracts; contracts.contract_type_id is now the
+// real link, so running this would create stray catalog rows. Kept only for history.
+console.error("import-contract-types.js is deprecated. Use server/scripts/backfill-contract-types.js instead.");
+process.exit(1);
+
 const { selectData, updateData } = require("../config/database");
 const ApplicationType = require("../models/ApplicationType");
 const Contract = require("../models/Contract");

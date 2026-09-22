@@ -1,5 +1,13 @@
 const { selectData, insertData, updateData, updateSchema, runInTransaction } = require("../config/database");
 const { encryptValue, decryptValue } = require("../lib/crypto");
+const TypeOfContract = require("./TypeOfContract");
+const LandUse = require("./LandUse");
+
+// Stockholder / ContactPerson require this module (for their FK), so they are loaded on
+// first use instead of at the top to avoid a circular require.
+const Stockholder = () => require("./Stockholder");
+const ContactPerson = () => require("./ContactPerson");
+const Signatory = () => require("./Signatory");
 
 function toInt(v) {
   const n = Number(v);
@@ -98,6 +106,8 @@ async function backfillMissingRefNos() {
 }
 
 async function ensureSchema() {
+  // getProponentById joins dbo.type_of_contract for the Type of Contract name.
+  await TypeOfContract.ensureSchema();
   await updateSchema(`
     IF OBJECT_ID('dbo.proponents', 'U') IS NULL
     BEGIN
@@ -225,8 +235,39 @@ async function ensureSchema() {
       CREATE INDEX IX_proponent_properties_proponent_id ON dbo.proponent_properties(proponent_id);
     END
   `);
+  await ensureLookupLinks();
   await migrateLegacyPlaintextTin();
   await backfillMissingRefNos();
+}
+
+let lookupLinksEnsured = false;
+
+async function proponentColumnExists(name) {
+  const rows = await selectData(`SELECT COL_LENGTH('dbo.proponents', @param0) AS l`, [name]);
+  return rows?.[0]?.l !== null && rows?.[0]?.l !== undefined;
+}
+
+/** proponents.land_use_id -> dbo.land_use(id) (File Maintenance > Land Use). Once per
+ * process. The old free-text proponents.land_use column is left untouched — the locator
+ * form shows it as a read-only "Legacy" note. (Industry is not linked here: it keeps
+ * coming from the locator's application type, dbo.application_types.) */
+async function ensureLookupLinks() {
+  if (lookupLinksEnsured) return;
+  await LandUse.ensureSchema(); // the FK target must exist first
+
+  if (!(await proponentColumnExists("land_use_id"))) await updateSchema(`ALTER TABLE dbo.proponents ADD land_use_id INT NULL;`);
+  await updateSchema(`
+    IF OBJECT_ID('dbo.FK_proponents_land_use', 'F') IS NULL
+      ALTER TABLE dbo.proponents ADD CONSTRAINT FK_proponents_land_use FOREIGN KEY (land_use_id) REFERENCES dbo.land_use(id);
+  `);
+  lookupLinksEnsured = true;
+}
+
+/** Stockholders / contact people are edited through the locator form, so both tables must exist. */
+async function ensureChildTables() {
+  await Stockholder().ensureSchema();
+  await ContactPerson().ensureSchema();
+  await Signatory().ensureSchema();
 }
 
 /** Replaces every property-schedule row for a proponent with the given list
@@ -366,6 +407,8 @@ async function getProponentById(id) {
       p.sub_pgro,
       p.sub_pgrr,
       p.land_use,
+      p.land_use_id,
+      lu.name AS land_use_name,
       p.extension_date,
       p.extension_remarks,
       p.authorized_capital,
@@ -391,19 +434,20 @@ async function getProponentById(id) {
       p.is_active,
       ct.effective_start AS start_term,
       ct.effective_end AS end_term,
-      ct.contract_type_code,
+      ct.contract_type_id,
       toctype.name AS contract_type_name,
       apptype.name AS business_type
     FROM dbo.proponents p
     LEFT JOIN dbo.users officer ON officer.id = p.account_officer_id
+    LEFT JOIN dbo.land_use lu ON lu.id = p.land_use_id
     OUTER APPLY (
-      SELECT TOP (1) c.effective_start, c.effective_end, c.contract_type_code
+      SELECT TOP (1) c.effective_start, c.effective_end, c.contract_type_id
       FROM dbo.contracts c
       INNER JOIN dbo.applications a ON a.id = c.application_id
       WHERE a.proponent_id = p.id
       ORDER BY c.effective_end DESC, c.id DESC
     ) ct
-    LEFT JOIN dbo.application_types toctype ON toctype.code = ct.contract_type_code
+    LEFT JOIN dbo.type_of_contract toctype ON toctype.id = ct.contract_type_id
     OUTER APPLY (
       SELECT TOP (1) a2.application_type
       FROM dbo.applications a2
@@ -419,6 +463,11 @@ async function getProponentById(id) {
   const p = rows?.[0] || null;
   if (!p) return null;
   const properties = await getProponentProperties(id);
+  const [stockholders, contact_persons, signatories] = await Promise.all([
+    Stockholder().listForProponent(id),
+    ContactPerson().listForProponent(id),
+    Signatory().listForProponent(id),
+  ]);
   return {
     id: p.id,
     user_id: p.user_id ?? null,
@@ -440,6 +489,8 @@ async function getProponentById(id) {
     sub_pgro: p.sub_pgro ?? null,
     sub_pgrr: p.sub_pgrr ?? null,
     land_use: p.land_use ?? null,
+    land_use_id: p.land_use_id ?? null,
+    land_use_name: p.land_use_name ?? null,
     extension_date: p.extension_date ?? null,
     extension_remarks: p.extension_remarks ?? null,
     authorized_capital: p.authorized_capital ?? null,
@@ -461,10 +512,13 @@ async function getProponentById(id) {
     start_term: p.start_term ?? null,
     end_term: p.end_term ?? null,
     lease_term: formatLeaseTerm(p.start_term, p.end_term),
-    contract_type_code: p.contract_type_code ?? null,
+    contract_type_id: p.contract_type_id ?? null,
     contract_type_name: p.contract_type_name ?? null,
     business_type: p.business_type ?? null,
     properties,
+    stockholders,
+    contact_persons,
+    signatories,
     created_by: p.created_by ?? null,
     updated_by: p.updated_by ?? null,
     created_at: p.created_at ?? null,
@@ -578,10 +632,15 @@ async function createProponent({
   performance_security_amount,
   performance_security_currency,
   properties,
+  land_use_id,
+  stockholders,
+  contact_persons,
+  signatories,
   created_by,
   is_active = 1,
 }) {
   await ensureSchema();
+  await ensureChildTables();
   const active = is_active ? 1 : 0;
   const userId = toInt(user_id);
   const createdBy = toInt(created_by);
@@ -605,6 +664,7 @@ async function createProponent({
          advance_lease_payment_months,advance_lease_payment_amount,advance_lease_payment_currency,
          security_deposit_months,security_deposit_amount,security_deposit_currency,
          performance_security_months,performance_security_amount,performance_security_currency,
+         land_use_id,
          ref_no,created_by,updated_by,created_at,updated_at,is_active)
       OUTPUT INSERTED.id
       VALUES
@@ -617,7 +677,8 @@ async function createProponent({
          @param26,@param27,@param28,
          @param29,@param30,@param31,
          @param32,@param33,@param34,
-         @param35,@param36,NULL,GETDATE(),NULL,@param37)
+         @param35,@param36,
+         @param37,NULL,GETDATE(),NULL,@param38)
       `,
       [
         userId, business_name, registration_no, encryptValue(tin), address, contact_no, location ?? null,
@@ -629,11 +690,15 @@ async function createProponent({
         advance_lease_payment_months ?? null, advance_lease_payment_amount ?? null, advance_lease_payment_currency ?? null,
         security_deposit_months ?? null, security_deposit_amount ?? null, security_deposit_currency ?? null,
         performance_security_months ?? null, performance_security_amount ?? null, performance_security_currency ?? null,
+        toInt(land_use_id),
         refNo, createdBy, active,
       ]
     );
     const insertedId = result?.recordset?.[0]?.id;
     await replaceProponentProperties(tx, insertedId, properties);
+    await Stockholder().syncForProponent(tx, insertedId, stockholders, createdBy);
+    await ContactPerson().syncForProponent(tx, insertedId, contact_persons, createdBy);
+    await Signatory().syncForProponent(tx, insertedId, signatories, createdBy);
     return insertedId;
   });
 
@@ -679,11 +744,16 @@ async function updateProponent(
     performance_security_amount,
     performance_security_currency,
     properties,
+    land_use_id,
+    stockholders,
+    contact_persons,
+    signatories,
     updated_by,
     is_active,
   }
 ) {
   await ensureSchema();
+  await ensureChildTables();
   const sets = [];
   const params = [];
   const pushSet = (sqlFrag, value) => {
@@ -726,6 +796,7 @@ async function updateProponent(
   if (performance_security_months !== undefined) pushSet("performance_security_months = ?", performance_security_months);
   if (performance_security_amount !== undefined) pushSet("performance_security_amount = ?", performance_security_amount);
   if (performance_security_currency !== undefined) pushSet("performance_security_currency = ?", performance_security_currency);
+  if (land_use_id !== undefined) pushSet("land_use_id = ?", toInt(land_use_id));
   if (is_active !== undefined) pushSet("is_active = ?", is_active ? 1 : 0);
 
   const updatedBy = toInt(updated_by);
@@ -741,6 +812,9 @@ async function updateProponent(
       await tx.query(query, [...params, id]);
     }
     await replaceProponentProperties(tx, id, properties);
+    await Stockholder().syncForProponent(tx, id, stockholders, updatedBy);
+    await ContactPerson().syncForProponent(tx, id, contact_persons, updatedBy);
+    await Signatory().syncForProponent(tx, id, signatories, updatedBy);
   });
 
   return await getProponentById(id);
@@ -841,8 +915,52 @@ async function getProponentByUserId(userId) {
   };
 }
 
+async function proponentExists(id) {
+  const rows = await selectData(`SELECT TOP (1) id FROM dbo.proponents WHERE id = @param0`, [id]);
+  return Boolean(rows?.[0]);
+}
+
+/* ------------------------------------------------------------------------------------
+ * Section saves. The locator form's Stockholders / Contact Person (+ Signatory) / Property
+ * schedule sections each have their own Save, because this data is filled in over time,
+ * not in one sitting. Each one writes only its own table(s) (all keyed by proponent_id)
+ * and returns the saved rows — with their ids — so the form can keep editing them in
+ * place. They never touch the locator's own fields.
+ * Each returns null when the locator doesn't exist.
+ * ---------------------------------------------------------------------------------- */
+
+async function saveStockholders(id, stockholders, actorId) {
+  await ensureSchema();
+  await ensureChildTables();
+  if (!(await proponentExists(id))) return null;
+  await runInTransaction((tx) => Stockholder().syncForProponent(tx, id, stockholders, actorId));
+  return { stockholders: await Stockholder().listForProponent(id) };
+}
+
+async function saveContacts(id, { contact_persons, signatories }, actorId) {
+  await ensureSchema();
+  await ensureChildTables();
+  if (!(await proponentExists(id))) return null;
+  await runInTransaction(async (tx) => {
+    await ContactPerson().syncForProponent(tx, id, contact_persons, actorId);
+    await Signatory().syncForProponent(tx, id, signatories, actorId);
+  });
+  const [contacts, signers] = await Promise.all([ContactPerson().listForProponent(id), Signatory().listForProponent(id)]);
+  return { contact_persons: contacts, signatories: signers };
+}
+
+async function saveProperties(id, properties) {
+  await ensureSchema();
+  if (!(await proponentExists(id))) return null;
+  await runInTransaction((tx) => replaceProponentProperties(tx, id, properties));
+  return { properties: await getProponentProperties(id) };
+}
+
 module.exports = {
   ensureSchema,
+  saveStockholders,
+  saveContacts,
+  saveProperties,
   listProponents,
   listProponentsForLocatorList,
   getProponentById,

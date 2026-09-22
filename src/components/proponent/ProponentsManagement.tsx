@@ -53,12 +53,12 @@ type ProponentRow = {
   performance_security_amount: string | null;
   performance_security_currency: string | null;
   // Contract-derived, read-only here — same "no contract yet = blank" rule
-  // as the Locators List columns. contract_type_code IS settable (writes to
+  // as the Locators List columns. contract_type_id IS settable (writes to
   // the current contract, see Contract.setContractTypeForProponent).
   start_term: string | null;
   end_term: string | null;
   lease_term: string | null;
-  contract_type_code: string | null;
+  contract_type_id: number | null;
   contract_type_name: string | null;
   // "Industry" in the legacy BRIDGE form — the Application Type of this
   // locator's most recently filed application, same source as the Locators
@@ -122,20 +122,135 @@ type UserOption = {
   username: string;
   full_name: string | null;
   is_active: number;
+  department_code: string | null;
+  department_name: string | null;
 };
 
-type ApplicationTypeOption = {
-  code: string;
+type ContractTypeOption = {
+  id: number;
   name: string;
   is_active: number;
 };
+
+// File Maintenance lookup (Land Use) — same shape as the contract types.
+type LookupOption = ContractTypeOption;
 
 type LocatorsData = {
   proponents: ProponentRow[];
   dynamic: LocatorDynamicRow[];
   users: UserOption[];
-  applicationTypes: ApplicationTypeOption[];
+  contractTypes: ContractTypeOption[];
+  landUses: LookupOption[];
 };
+
+// "Stockholders Information" / "Contact Person" tabs — child tables (dbo.stockholder,
+// dbo.contact_person) synced by id on every save (rows removed here are deactivated).
+type StockholderRow = {
+  id?: number;
+  name: string;
+  nationality: string;
+  subscribed: string;
+  paid: string;
+  ownership: string;
+};
+
+type ContactPersonRow = {
+  id?: number;
+  name: string;
+  designation: string;
+  contact_no: string;
+  email: string;
+};
+
+// Signatories have exactly the same columns as contact persons.
+type SignatoryRow = ContactPersonRow;
+
+function blankStockholderRow(): StockholderRow {
+  return { name: '', nationality: '', subscribed: '', paid: '', ownership: '' };
+}
+
+function blankContactPersonRow(): ContactPersonRow {
+  return { name: '', designation: '', contact_no: '', email: '' };
+}
+
+const blankSignatoryRow = blankContactPersonRow;
+
+// The three sections that can be saved on their own (see saveSection).
+type SectionKey = 'stockholders' | 'contacts' | 'properties';
+
+// API rows -> form rows.
+function mapStockholderRows(rows: any): StockholderRow[] {
+  return Array.isArray(rows)
+    ? rows.map((r: any) => ({
+        id: r.id,
+        name: r.name || '',
+        nationality: r.nationality || '',
+        subscribed: r.subscribed != null ? String(r.subscribed) : '',
+        paid: r.paid != null ? String(r.paid) : '',
+        ownership: r.ownership != null ? String(r.ownership) : '',
+      }))
+    : [];
+}
+
+// Contact persons and signatories share the same columns.
+function mapContactRows(rows: any): ContactPersonRow[] {
+  return Array.isArray(rows)
+    ? rows.map((r: any) => ({
+        id: r.id,
+        name: r.name || '',
+        designation: r.designation || '',
+        contact_no: r.contact_no || '',
+        email: r.email || '',
+      }))
+    : [];
+}
+
+function mapPropertyRows(rows: any): PropertyRow[] {
+  return Array.isArray(rows)
+    ? rows.map((row: any) => ({
+        id: row.id,
+        year: row.year || '',
+        date_from: toDateInputValue(row.date_from),
+        date_to: toDateInputValue(row.date_to),
+        type_of_property: row.type_of_property || '',
+        area_sqm: row.area_sqm || '',
+        rate_sqm_mo: row.rate_sqm_mo || '',
+        rate_currency: row.rate_currency || 'PHP',
+        mgl_mo: row.mgl_mo || '',
+        mgl_currency: row.mgl_currency || 'PHP',
+      }))
+    : [];
+}
+
+// Form rows -> API rows.
+const toStockholderPayload = (r: StockholderRow) => ({
+  id: r.id,
+  name: r.name.trim(),
+  nationality: r.nationality.trim() || null,
+  subscribed: r.subscribed.trim(),
+  paid: r.paid.trim(),
+  ownership: r.ownership.trim(),
+});
+
+const toContactPayload = (r: ContactPersonRow) => ({
+  id: r.id,
+  name: r.name.trim(),
+  designation: r.designation.trim() || null,
+  contact_no: r.contact_no.trim() || null,
+  email: r.email.trim() || null,
+});
+
+const toPropertyPayload = (row: PropertyRow) => ({
+  year: row.year.trim() || null,
+  date_from: row.date_from || null,
+  date_to: row.date_to || null,
+  type_of_property: row.type_of_property.trim() || null,
+  area_sqm: row.area_sqm.trim() || null,
+  rate_sqm_mo: row.rate_sqm_mo.trim() || null,
+  rate_currency: row.rate_currency || null,
+  mgl_mo: row.mgl_mo.trim() || null,
+  mgl_currency: row.mgl_currency || null,
+});
 
 function api(path: string) {
   return path;
@@ -210,7 +325,7 @@ const BLANK_PROFILE_FORM = {
   subscribed_capital_currency: 'PHP',
   paid_up_capital: '',
   paid_up_capital_currency: 'PHP',
-  contract_type_code: '',
+  contract_type_id: '',
   business_activities: '',
   advance_lease_payment_months: '',
   advance_lease_payment_amount: '',
@@ -222,6 +337,10 @@ const BLANK_PROFILE_FORM = {
   performance_security_amount: '',
   performance_security_currency: 'PHP',
   properties: [] as PropertyRow[],
+  land_use_id: '',
+  stockholders: [] as StockholderRow[],
+  contact_persons: [] as ContactPersonRow[],
+  signatories: [] as SignatoryRow[],
 };
 
 export function ProponentsManagement() {
@@ -241,25 +360,28 @@ export function ProponentsManagement() {
   const [page, setPage] = useState(1);
 
   const { data: locatorsData, isLoading, isRevalidating, refresh } = useSessionStorageCachedResource<LocatorsData>({
-    cacheKey: 'ciac.locators.v3',
+    cacheKey: 'ciac.locators.v8',
     ttlMs: 5 * 60 * 1000,
     fetcher: async () => {
-      const [pRes, dRes, uRes, atRes] = await Promise.all([
+      const [pRes, dRes, uRes, atRes, luRes] = await Promise.all([
         fetch(api('/api/proponents'), { credentials: 'include' }),
         fetch(api('/api/proponents/locator-list'), { credentials: 'include' }),
-        fetch(api('/api/users'), { credentials: 'include' }),
-        fetch(api('/api/application-types'), { credentials: 'include' }),
+        fetch(api('/api/proponents/account-officers'), { credentials: 'include' }),
+        fetch(api('/api/proponents/type-of-contract'), { credentials: 'include' }),
+        fetch(api('/api/proponents/land-uses'), { credentials: 'include' }),
       ]);
 
       const pJson = await pRes.json();
       const dJson = await dRes.json();
       const uJson = await uRes.json();
       const atJson = await atRes.json();
+      const luJson = await luRes.json();
 
       if (!pRes.ok) throw new Error(pJson?.message || 'Failed to load proponents');
       if (!dRes.ok) throw new Error(dJson?.message || 'Failed to load locator list');
-      if (!uRes.ok) throw new Error(uJson?.message || 'Failed to load users');
-      if (!atRes.ok) throw new Error(atJson?.message || 'Failed to load application types');
+      if (!uRes.ok) throw new Error(uJson?.message || 'Failed to load account officers');
+      if (!atRes.ok) throw new Error(atJson?.message || 'Failed to load types of contract');
+      if (!luRes.ok) throw new Error(luJson?.message || 'Failed to load land uses');
 
       const nextProponents: ProponentRow[] = (pJson.data || []).map((p: any) => ({
         ...p,
@@ -273,9 +395,21 @@ export function ProponentsManagement() {
         is_active: Number(u?.is_active) ? 1 : 0,
       }));
 
-      const nextApplicationTypes: ApplicationTypeOption[] = atJson.data || [];
+      const nextContractTypes: ContractTypeOption[] = (atJson.data || []).map((t: any) => ({
+        ...t,
+        is_active: Number(t?.is_active) ? 1 : 0,
+      }));
 
-      return { proponents: nextProponents, dynamic: nextDynamic, users: nextUsers, applicationTypes: nextApplicationTypes };
+      const toLookup = (rows: any[]): LookupOption[] =>
+        (rows || []).map((t: any) => ({ ...t, is_active: Number(t?.is_active) ? 1 : 0 }));
+
+      return {
+        proponents: nextProponents,
+        dynamic: nextDynamic,
+        users: nextUsers,
+        contractTypes: nextContractTypes,
+        landUses: toLookup(luJson.data),
+      };
     },
     onError: (e) => {
       const message = e instanceof Error ? e.message : 'Failed to load data';
@@ -324,25 +458,76 @@ export function ProponentsManagement() {
     return { active, inactive, total: proponents.length };
   }, [proponents]);
 
+  // Account Officer dropdown: ACCOUNT OFFICER-role users only (server-filtered).
+  // New assignments are limited to active officers, but the locator's current
+  // officer stays listed even if since deactivated, so editing doesn't blank it.
   const userOptions = useMemo(
     () =>
-      users.map((u) => ({
-        value: String(u.id),
-        label: u.full_name ? `${u.full_name} (${u.username})` : u.username,
-      })),
-    [users],
+      users
+        .filter((u) => u.is_active === 1 || String(u.id) === form.account_officer_id)
+        .map((u) => {
+          const name = (u.full_name || u.username).replace(/\s*\(Legacy Import\)\s*$/i, '');
+          return {
+            value: String(u.id),
+            label: `${name}${u.is_active === 1 ? '' : ' (inactive)'}`,
+            detail: u.department_name ?? '',
+          };
+        })
+        .sort((a, b) => a.label.localeCompare(b.label)),
+    [users, form.account_officer_id],
   );
-  const applicationTypes = locatorsData?.applicationTypes ?? [];
-  // "TOC_"-prefixed codes are the Type of Contract entries imported into the
-  // shared application_types catalog (see import-contract-types.js) —
-  // distinct from the lease-type/Industry codes the same table also holds.
+  const contractTypes = locatorsData?.contractTypes ?? [];
+  // Type of Contract comes from File Maintenance > Type of Contract. Only active
+  // types are offered, but the locator's current one stays listed even if it was
+  // since deactivated, so editing doesn't blank it.
+  const hasContract = Boolean(editing?.start_term);
   const contractTypeOptions = useMemo(
     () =>
-      applicationTypes
-        .filter((t) => t.is_active && t.code.startsWith('TOC_'))
-        .map((t) => ({ value: t.code, label: t.name })),
-    [applicationTypes],
+      contractTypes
+        .filter((t) => t.is_active === 1 || String(t.id) === form.contract_type_id)
+        .map((t) => ({ value: String(t.id), label: t.is_active === 1 ? t.name : `${t.name} (inactive)` })),
+    [contractTypes, form.contract_type_id],
   );
+  // Land Use comes from File Maintenance too — active rows only, plus the locator's
+  // current pick even if it was since deactivated.
+  const landUses = locatorsData?.landUses ?? [];
+  const lookupOptions = (rows: LookupOption[], current: string) =>
+    rows
+      .filter((t) => t.is_active === 1 || String(t.id) === current)
+      .map((t) => ({ value: String(t.id), label: t.is_active === 1 ? t.name : `${t.name} (inactive)` }));
+  const landUseOptions = useMemo(() => lookupOptions(landUses, form.land_use_id), [landUses, form.land_use_id]);
+
+  // Snapshot of the form once an edit's profile has finished loading. canSubmit only
+  // compared the top few fields, so changing anything else (account officer,
+  // land use, the stockholder / contact tables...) left Save disabled.
+  //
+  // The three tables that have their own Save (stockholders, contacts + signatories, the
+  // property schedule) are tracked separately from the locator's own fields, so saving
+  // one of them clears only its own "unsaved changes" state.
+  const splitForm = (f: typeof form) => {
+    const { stockholders, contact_persons, signatories, properties, ...rest } = f;
+    return {
+      rest: JSON.stringify(rest),
+      sections: {
+        stockholders: JSON.stringify(stockholders),
+        contacts: JSON.stringify([contact_persons, signatories]),
+        properties: JSON.stringify(properties),
+      } as Record<SectionKey, string>,
+    };
+  };
+  const [loaded, setLoaded] = useState<ReturnType<typeof splitForm> | null>(null);
+  useEffect(() => {
+    if (editing && !loadingLocation && loaded === null) setLoaded(splitForm(form));
+  }, [editing, loadingLocation, loaded, form]);
+  const currentParts = splitForm(form);
+  const sectionDirty: Record<SectionKey, boolean> = {
+    stockholders: loaded !== null && currentParts.sections.stockholders !== loaded.sections.stockholders,
+    contacts: loaded !== null && currentParts.sections.contacts !== loaded.sections.contacts,
+    properties: loaded !== null && currentParts.sections.properties !== loaded.sections.properties,
+  };
+  const formChangedSinceLoad =
+    loaded !== null && (currentParts.rest !== loaded.rest || Object.values(sectionDirty).some(Boolean));
+  const [savingSection, setSavingSection] = useState<SectionKey | null>(null);
   const canSubmit = useMemo(() => {
     const userId = form.user_id.trim();
     const businessName = form.business_name.trim();
@@ -368,6 +553,7 @@ export function ProponentsManagement() {
     const location = form.location.trim();
 
     const hasChanged =
+      formChangedSinceLoad ||
       userId !== originalUserId ||
       businessName !== originalBusinessName ||
       registrationNo !== originalRegistrationNo ||
@@ -379,6 +565,7 @@ export function ProponentsManagement() {
     return hasChanged;
   }, [
     editing,
+    formChangedSinceLoad,
     form.address,
     form.business_name,
     form.contact_no,
@@ -452,6 +639,7 @@ export function ProponentsManagement() {
       ...BLANK_PROFILE_FORM,
     });
     setActiveProfileTab('Profile');
+    setLoaded(null);
     setIsCreateOpen(true);
   }
 
@@ -461,6 +649,7 @@ export function ProponentsManagement() {
   function openEdit(p: ProponentRow) {
     setIsCreateOpen(true);
     setActiveProfileTab('Profile');
+    setLoaded(null);
     setEditing(p);
     setForm({
       user_id: p.user_id != null ? String(p.user_id) : '',
@@ -499,7 +688,7 @@ export function ProponentsManagement() {
           subscribed_capital_currency: data.subscribed_capital_currency || 'PHP',
           paid_up_capital: data.paid_up_capital || '',
           paid_up_capital_currency: data.paid_up_capital_currency || 'PHP',
-          contract_type_code: data.contract_type_code || '',
+          contract_type_id: data.contract_type_id != null ? String(data.contract_type_id) : '',
           business_activities: data.business_activities || '',
           advance_lease_payment_months: data.advance_lease_payment_months || '',
           advance_lease_payment_amount: data.advance_lease_payment_amount || '',
@@ -510,20 +699,11 @@ export function ProponentsManagement() {
           performance_security_months: data.performance_security_months || '',
           performance_security_amount: data.performance_security_amount || '',
           performance_security_currency: data.performance_security_currency || 'PHP',
-          properties: Array.isArray(data.properties)
-            ? data.properties.map((row: any) => ({
-                id: row.id,
-                year: row.year || '',
-                date_from: toDateInputValue(row.date_from),
-                date_to: toDateInputValue(row.date_to),
-                type_of_property: row.type_of_property || '',
-                area_sqm: row.area_sqm || '',
-                rate_sqm_mo: row.rate_sqm_mo || '',
-                rate_currency: row.rate_currency || 'PHP',
-                mgl_mo: row.mgl_mo || '',
-                mgl_currency: row.mgl_currency || 'PHP',
-              }))
-            : [],
+          properties: mapPropertyRows(data.properties),
+          land_use_id: data.land_use_id != null ? String(data.land_use_id) : '',
+          stockholders: mapStockholderRows(data.stockholders),
+          contact_persons: mapContactRows(data.contact_persons),
+          signatories: mapContactRows(data.signatories),
         };
         setForm((prev) => ({ ...prev, ...profileFields }));
         setEditing((prev) =>
@@ -549,6 +729,61 @@ export function ProponentsManagement() {
       });
   }
 
+  // Stockholders / Contact Person + Signatory / Property schedule each save on their own
+  // (PUT /api/proponents/:id/<section>): this data is entered over time, not in one sitting,
+  // so it must not depend on re-saving the whole locator. The saved rows come back with
+  // their ids and replace the form's copy, so the next save updates them instead of
+  // adding duplicates. Only available for a locator that already exists.
+  async function saveSection(section: SectionKey) {
+    if (!editing) return;
+    setSavingSection(section);
+    try {
+      const path = section === 'properties' ? 'properties' : section;
+      const body =
+        section === 'stockholders'
+          ? { stockholders: form.stockholders.map(toStockholderPayload) }
+          : section === 'contacts'
+            ? {
+                contact_persons: form.contact_persons.map(toContactPayload),
+                signatories: form.signatories.map(toContactPayload),
+              }
+            : { properties: form.properties.map(toPropertyPayload) };
+
+      const res = await fetch(api(`/api/proponents/${editing.id}/${path}`), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(body),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.message || 'Save failed');
+
+      const data = json.data || {};
+      const saved =
+        section === 'stockholders'
+          ? { stockholders: mapStockholderRows(data.stockholders) }
+          : section === 'contacts'
+            ? { contact_persons: mapContactRows(data.contact_persons), signatories: mapContactRows(data.signatories) }
+            : { properties: mapPropertyRows(data.properties) };
+      const nextForm = { ...form, ...saved };
+      setForm(nextForm);
+      setLoaded((prev) =>
+        prev ? { ...prev, sections: { ...prev.sections, [section]: splitForm(nextForm).sections[section] } } : prev,
+      );
+      toast.success(
+        section === 'stockholders'
+          ? 'Stockholders saved'
+          : section === 'contacts'
+            ? 'Contact persons and signatories saved'
+            : 'Property schedule saved',
+      );
+    } catch (e: any) {
+      toast.error(e?.message || 'Save failed');
+    } finally {
+      setSavingSection(null);
+    }
+  }
+
   async function save() {
     setSaving(true);
     setError(null);
@@ -572,7 +807,8 @@ export function ProponentsManagement() {
         is_sublease: form.is_sublease,
         sub_pgro: form.sub_pgro.trim() || null,
         sub_pgrr: form.sub_pgrr.trim() || null,
-        land_use: form.land_use.trim() || null,
+        // land_use (the old free text) is no longer edited here — it is kept as a legacy note.
+        land_use_id: form.land_use_id ? Number(form.land_use_id) : null,
         extension_date: form.extension_date || null,
         extension_remarks: form.extension_remarks.trim() || null,
         authorized_capital: form.authorized_capital.trim() || null,
@@ -591,24 +827,17 @@ export function ProponentsManagement() {
         performance_security_months: form.performance_security_months.trim() || null,
         performance_security_amount: form.performance_security_amount.trim() || null,
         performance_security_currency: form.performance_security_currency || null,
-        properties: form.properties.map((row) => ({
-          year: row.year.trim() || null,
-          date_from: row.date_from || null,
-          date_to: row.date_to || null,
-          type_of_property: row.type_of_property.trim() || null,
-          area_sqm: row.area_sqm.trim() || null,
-          rate_sqm_mo: row.rate_sqm_mo.trim() || null,
-          rate_currency: row.rate_currency || null,
-          mgl_mo: row.mgl_mo.trim() || null,
-          mgl_currency: row.mgl_currency || null,
-        })),
+        stockholders: form.stockholders.map(toStockholderPayload),
+        contact_persons: form.contact_persons.map(toContactPayload),
+        signatories: form.signatories.map(toContactPayload),
+        properties: form.properties.map(toPropertyPayload),
       };
 
       // Type of Contract lives on the proponent's current contract record,
       // which only exists once editing (create has no contract yet — see
       // Contract.setContractTypeForProponent's no-op note).
       if (editing) {
-        payload.contract_type_code = form.contract_type_code || null;
+        payload.contract_type_id = form.contract_type_id ? Number(form.contract_type_id) : null;
       }
 
       if (!payload.business_name) throw new Error('Business name is required');
@@ -962,19 +1191,31 @@ export function ProponentsManagement() {
 
               <div className="flex flex-col gap-2">
                 <Field compact label="Type of Contract">
-                  <div className="app-form-control app-form-control-sm p-0 overflow-hidden flex items-stretch">
+                  <div
+                    className="app-form-control app-form-control-sm p-0 overflow-hidden flex items-stretch"
+                    title={
+                      !hasContract
+                        ? 'Available once a contract has been issued for this locator (Approval & Issuance).'
+                        : undefined
+                    }
+                  >
                     <AppSelect
                       options={contractTypeOptions}
-                      value={form.contract_type_code}
-                      onChange={(value) => setForm((p) => ({ ...p, contract_type_code: value || '' }))}
-                      placeholder="Select..."
+                      value={form.contract_type_id}
+                      onChange={(value) => setForm((p) => ({ ...p, contract_type_id: value || '' }))}
+                      placeholder={hasContract ? 'Select...' : 'No contract yet'}
                       isClearable
-                      isDisabled={loadingLocation}
+                      isDisabled={loadingLocation || !hasContract}
                       compact
                       boxed
                       minHeight={26}
                     />
                   </div>
+                  {!hasContract ? (
+                    <div className="mt-0.5 text-[10px] text-secondary">
+                      Available once a contract is issued (Approval &amp; Issuance).
+                    </div>
+                  ) : null}
                 </Field>
                 <div className="flex gap-2">
                   <div className="flex-1">
@@ -1149,7 +1390,70 @@ export function ProponentsManagement() {
             </div>
             <div className="contents">
               <div className="content">
-                {activeProfileTab !== 'Profile' ? (
+                {activeProfileTab === 'Stockholders Information' ? (
+                  <div className="flex flex-col gap-3">
+                    <RowsEditor<StockholderRow>
+                      rows={form.stockholders}
+                      disabled={loadingLocation}
+                      emptyText="No stockholders yet — use + to add one."
+                      columns={[
+                        { key: 'name', label: 'Stockholder Name', className: 'min-w-[14rem]' },
+                        { key: 'nationality', label: 'Nationality', className: 'w-40' },
+                        { key: 'subscribed', label: 'Subscribed', className: 'w-32', numeric: true },
+                        { key: 'paid', label: 'Paid', className: 'w-32', numeric: true },
+                        { key: 'ownership', label: 'Ownership %', className: 'w-28', numeric: true },
+                      ]}
+                      onChange={(next) => setForm((p) => ({ ...p, stockholders: next }))}
+                      blankRow={blankStockholderRow}
+                    />
+                    <SectionSaveBar
+                      label="Save Stockholders"
+                      isEditing={Boolean(editing)}
+                      dirty={sectionDirty.stockholders}
+                      saving={savingSection === 'stockholders'}
+                      disabled={saving || loadingLocation}
+                      onSave={() => void saveSection('stockholders')}
+                    />
+                  </div>
+                ) : activeProfileTab === 'Contact Person' ? (
+                  <div className="flex flex-col gap-5">
+                    {/* Contact people on top, the locator's signatories below — two child tables, same tab. */}
+                    <RowsEditor<ContactPersonRow>
+                      rows={form.contact_persons}
+                      disabled={loadingLocation}
+                      emptyText="No contact persons yet — use + to add one."
+                      columns={[
+                        { key: 'name', label: 'Contact Person', className: 'min-w-[14rem]' },
+                        { key: 'designation', label: 'Designation', className: 'w-48' },
+                        { key: 'contact_no', label: 'Contact No.', className: 'w-40' },
+                        { key: 'email', label: 'Email Address', className: 'min-w-[14rem]' },
+                      ]}
+                      onChange={(next) => setForm((p) => ({ ...p, contact_persons: next }))}
+                      blankRow={blankContactPersonRow}
+                    />
+                    <RowsEditor<SignatoryRow>
+                      rows={form.signatories}
+                      disabled={loadingLocation}
+                      emptyText="No signatories yet — use + to add one."
+                      columns={[
+                        { key: 'name', label: 'Signatory', className: 'min-w-[14rem]' },
+                        { key: 'designation', label: 'Designation', className: 'w-48' },
+                        { key: 'contact_no', label: 'Contact No.', className: 'w-40' },
+                        { key: 'email', label: 'Email Address', className: 'min-w-[14rem]' },
+                      ]}
+                      onChange={(next) => setForm((p) => ({ ...p, signatories: next }))}
+                      blankRow={blankSignatoryRow}
+                    />
+                    <SectionSaveBar
+                      label="Save Contacts & Signatories"
+                      isEditing={Boolean(editing)}
+                      dirty={sectionDirty.contacts}
+                      saving={savingSection === 'contacts'}
+                      disabled={saving || loadingLocation}
+                      onSave={() => void saveSection('contacts')}
+                    />
+                  </div>
+                ) : activeProfileTab !== 'Profile' ? (
                   <div className="text-xs text-secondary py-8 text-center">{activeProfileTab} — coming soon.</div>
                 ) : (
                   <div className="flex flex-col gap-3">
@@ -1243,14 +1547,26 @@ export function ProponentsManagement() {
                   <div className="flex-1">
                     <Field compact label="Land Use">
                       <div className="app-form-control app-form-control-sm p-0 overflow-hidden flex items-stretch">
-                        <input
-                          className="flex-1 min-w-0 border-0 bg-transparent outline-none px-2 py-1"
-                          style={{ color: 'var(--text)' }}
-                          value={form.land_use}
-                          disabled={loadingLocation}
-                          onChange={(e) => setForm((p) => ({ ...p, land_use: e.target.value }))}
+                        <AppSelect
+                          options={landUseOptions}
+                          value={form.land_use_id}
+                          onChange={(value) => setForm((p) => ({ ...p, land_use_id: value || '' }))}
+                          placeholder="Select..."
+                          isClearable
+                          isDisabled={loadingLocation}
+                          compact
+                          boxed
+                          minHeight={26}
                         />
                       </div>
+                      {form.land_use.trim() && !form.land_use_id ? (
+                        <div
+                          className="mt-0.5 text-[10px] text-secondary truncate"
+                          title={form.land_use}
+                        >
+                          Legacy: {form.land_use}
+                        </div>
+                      ) : null}
                     </Field>
                   </div>
                 </div>
@@ -1452,6 +1768,14 @@ export function ProponentsManagement() {
                 </button>
               </div>
             </div>
+            <SectionSaveBar
+              label="Save Property Schedule"
+              isEditing={Boolean(editing)}
+              dirty={sectionDirty.properties}
+              saving={savingSection === 'properties'}
+              disabled={saving || loadingLocation}
+              onSave={() => void saveSection('properties')}
+            />
 
             {/* Row 6: Advance Lease Payment | Security Deposit | Performance Security */}
             <div className="grid grid-cols-3 gap-3">
@@ -1585,6 +1909,142 @@ function StatCard({ label, value }: { label: string; value: string }) {
       <span className="text-base sm:text-lg font-bold leading-tight" style={{ color: 'var(--text)' }}>
         {value}
       </span>
+    </div>
+  );
+}
+
+/** The Save button under a section that saves on its own. Disabled until something in that
+ * section changed; for a locator that doesn't exist yet it just says the rows go in with it. */
+function SectionSaveBar({
+  label,
+  isEditing,
+  dirty,
+  saving,
+  disabled,
+  onSave,
+}: {
+  label: string;
+  isEditing: boolean;
+  dirty: boolean;
+  saving: boolean;
+  disabled?: boolean;
+  onSave: () => void;
+}) {
+  return (
+    <div className="flex items-center justify-end gap-3">
+      <span className="text-[10px] text-secondary">
+        {!isEditing ? 'Saved together with the locator.' : dirty ? 'Unsaved changes' : 'All changes saved'}
+      </span>
+      <button
+        type="button"
+        onClick={onSave}
+        disabled={!isEditing || !dirty || saving || disabled}
+        className="rounded-lg px-3 py-1.5 text-[11px] font-semibold shadow-sm cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
+        style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
+      >
+        {saving ? 'Saving…' : label}
+      </button>
+    </div>
+  );
+}
+
+/** Inline editable table for a locator's child rows (stockholders, contact persons):
+ * numbered rows, a text input per cell, "×" to drop a row, "+" to add one. Rows keep
+ * their `id` so the server can update them in place instead of recreating them. */
+function RowsEditor<T extends { id?: number }>({
+  rows,
+  columns,
+  disabled,
+  emptyText,
+  blankRow,
+  onChange,
+}: {
+  rows: T[];
+  columns: { key: keyof T & string; label: string; className?: string; numeric?: boolean }[];
+  disabled?: boolean;
+  emptyText: string;
+  blankRow: () => T;
+  onChange: (next: T[]) => void;
+}) {
+  return (
+    <div className="flex gap-2 items-start">
+      <div className="flex-1 overflow-x-auto rounded-lg border" style={{ borderColor: 'var(--input-border)' }}>
+        <table className="w-full text-xs border-collapse">
+          <thead>
+            <tr style={{ backgroundColor: 'var(--control-bg)' }}>
+              <th
+                className="px-2 py-1.5 text-left font-semibold uppercase tracking-wide text-[9px] border-b w-10"
+                style={{ borderColor: 'var(--input-border)', color: 'var(--text-muted)' }}
+              >
+                No.
+              </th>
+              {columns.map((c) => (
+                <th
+                  key={c.key}
+                  className="px-2 py-1.5 text-left font-semibold uppercase tracking-wide text-[9px] border-b"
+                  style={{ borderColor: 'var(--input-border)', color: 'var(--text-muted)' }}
+                >
+                  {c.label}
+                </th>
+              ))}
+              <th className="w-8 border-b" style={{ borderColor: 'var(--input-border)' }} />
+            </tr>
+          </thead>
+          <tbody>
+            {rows.length === 0 ? (
+              <tr>
+                <td colSpan={columns.length + 2} className="px-2 py-6 text-center text-secondary">
+                  {emptyText}
+                </td>
+              </tr>
+            ) : (
+              rows.map((row, i) => (
+                <tr key={row.id ?? `new-${i}`}>
+                  <td className="px-2 py-1 border-b text-center" style={{ borderColor: 'var(--input-border)' }}>
+                    {i + 1}
+                  </td>
+                  {columns.map((c) => (
+                    <td key={c.key} className="px-1 py-1 border-b" style={{ borderColor: 'var(--input-border)' }}>
+                      <input
+                        className={cn('app-form-control app-form-control-sm w-full', c.className)}
+                        inputMode={c.numeric ? 'decimal' : undefined}
+                        value={String(row[c.key] ?? '')}
+                        disabled={disabled}
+                        onChange={(e) => {
+                          const value = c.numeric ? e.target.value.replace(/[^0-9.,]/g, '') : e.target.value;
+                          onChange(rows.map((r, ri) => (ri === i ? { ...r, [c.key]: value } : r)));
+                        }}
+                      />
+                    </td>
+                  ))}
+                  <td className="px-1 py-1 border-b text-center" style={{ borderColor: 'var(--input-border)' }}>
+                    <button
+                      type="button"
+                      disabled={disabled}
+                      onClick={() => onChange(rows.filter((_, ri) => ri !== i))}
+                      className="w-6 h-6 rounded-md text-secondary cursor-pointer hover:bg-[var(--hover-bg)] disabled:cursor-not-allowed disabled:opacity-60"
+                      title="Remove row"
+                      aria-label={`Remove row ${i + 1}`}
+                    >
+                      ×
+                    </button>
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => onChange([...rows, blankRow()])}
+        className="w-7 h-7 shrink-0 rounded-md flex items-center justify-center text-white font-bold cursor-pointer disabled:cursor-not-allowed disabled:opacity-60"
+        style={{ backgroundColor: '#22c55e' }}
+        title="Add row"
+      >
+        +
+      </button>
     </div>
   );
 }

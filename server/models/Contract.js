@@ -1,6 +1,7 @@
 const { selectData, insertData, updateData, updateSchema, runInTransaction } = require("../config/database");
 const Notification = require("./Notification");
 const Permit = require("./Permit");
+const TypeOfContract = require("./TypeOfContract");
 const { sendMail } = require("../lib/mailer");
 
 function toInt(v) {
@@ -74,15 +75,46 @@ async function ensureSchema() {
       IF COL_LENGTH('dbo.contracts', 'certificate_path') IS NULL
         ALTER TABLE dbo.contracts ADD certificate_path NVARCHAR(1000) NULL;
 
-      -- "Type of Contract" (Lease Agreement/Sublease Agreement/etc.) — a
-      -- contract-level attribute, distinct from applications.application_type
-      -- (which this app repurposes for Business Type/Industry). References
-      -- dbo.application_types.code, the same shared catalog table, just a
-      -- different column/purpose.
-      IF COL_LENGTH('dbo.contracts', 'contract_type_code') IS NULL
-        ALTER TABLE dbo.contracts ADD contract_type_code NVARCHAR(50) NULL;
     END;
   `);
+  await ensureContractTypeLink();
+}
+
+let contractTypeLinkEnsured = false;
+
+/** "Type of Contract" (Lease Agreement/Sublease Agreement/etc.) — a contract-level
+ * attribute, distinct from applications.application_type (which this app repurposes
+ * for Business Type/Industry). contracts.contract_type_id is a real FK to
+ * dbo.type_of_contract(id) (File Maintenance > Type of Contract). Once per process. */
+async function ensureContractTypeLink() {
+  if (contractTypeLinkEnsured) return;
+  await TypeOfContract.ensureSchema(); // the FK target must exist first
+  // Column and FK in separate batches: SQL Server validates a whole batch up front.
+  await updateSchema(`
+    IF COL_LENGTH('dbo.contracts', 'contract_type_id') IS NULL
+      ALTER TABLE dbo.contracts ADD contract_type_id INT NULL;
+  `);
+  await updateSchema(`
+    IF OBJECT_ID('dbo.FK_contracts_type_of_contract', 'F') IS NULL
+      ALTER TABLE dbo.contracts ADD CONSTRAINT FK_contracts_type_of_contract
+        FOREIGN KEY (contract_type_id) REFERENCES dbo.type_of_contract(id);
+  `);
+  // Earlier builds stored a "TOC_..." code (dbo.application_types) in the now-unused
+  // contracts.contract_type_code. Carry any such value over by name so no locator
+  // silently loses its contract type. EXEC keeps the batch valid on databases that
+  // never had that column.
+  await updateSchema(`
+    IF COL_LENGTH('dbo.contracts', 'contract_type_code') IS NOT NULL
+       AND OBJECT_ID('dbo.application_types', 'U') IS NOT NULL
+      EXEC('
+        UPDATE c SET c.contract_type_id = t.id
+        FROM dbo.contracts c
+        INNER JOIN dbo.application_types a ON a.code = c.contract_type_code
+        INNER JOIN dbo.type_of_contract t ON UPPER(LTRIM(RTRIM(t.name))) = UPPER(LTRIM(RTRIM(a.name)))
+        WHERE c.contract_type_id IS NULL AND c.contract_type_code LIKE ''TOC[_]%''
+      ');
+  `);
+  contractTypeLinkEnsured = true;
 }
 
 /** Finds the given proponent's current/latest contract (same "most recent by
@@ -90,7 +122,8 @@ async function ensureSchema() {
  * listProponentsForLocatorList) and sets its Type of Contract. No-op if the
  * proponent has no contract yet — same as Start/End/Lease Term, this only
  * ever describes a contract that already exists. */
-async function setContractTypeForProponent(proponentId, contractTypeCode, updatedBy) {
+async function setContractTypeForProponent(proponentId, contractTypeId, updatedBy) {
+  await ensureSchema();
   const rows = await selectData(
     `
     SELECT TOP (1) c.id
@@ -107,10 +140,10 @@ async function setContractTypeForProponent(proponentId, contractTypeCode, update
   await updateData(
     `
     UPDATE dbo.contracts
-    SET contract_type_code = @param1, updated_by = @param2, updated_at = GETDATE()
+    SET contract_type_id = @param1, updated_by = @param2, updated_at = GETDATE()
     WHERE id = @param0
     `,
-    [contractId, contractTypeCode || null, toInt(updatedBy)]
+    [contractId, toInt(contractTypeId), toInt(updatedBy)]
   );
   return true;
 }

@@ -10,6 +10,14 @@ const { csrfGuard } = require("./middleware/m_csrf");
 const { initializeDatabase } = require("./config/database");
 const Role = require("./models/Role");
 const User = require("./models/User");
+const TypeOfContract = require("./models/TypeOfContract");
+const AccountOfficer = require("./models/AccountOfficer");
+const Stockholder = require("./models/Stockholder");
+const ContactPerson = require("./models/ContactPerson");
+const Signatory = require("./models/Signatory");
+const Building = require("./models/Building");
+const LandUse = require("./models/LandUse");
+const Contract = require("./models/Contract");
 
 const app = express();
 
@@ -91,8 +99,28 @@ app.use((err, req, res, next) => {
 const PORT = process.env.PORT || 3100;
 initializeDatabase()
   .then(async () => {
-    await Role.ensureSchema();
-    await User.ensureSchema();
+    // Every step is idempotent and independent: one failing must not stop the
+    // rest from being created (the old single try/catch swallowed the first error
+    // and silently skipped everything after it). Order matters only where noted.
+    const steps = [
+      ["roles", () => Role.ensureSchema()],
+      ["users (+ departments, users.department_id)", () => User.ensureSchema()], // after roles
+      ["type of contract", () => TypeOfContract.ensureSchema()],
+      ["contracts (+ contract_type_id FK)", () => Contract.ensureSchema()], // after type of contract
+      ["legacy account officers", () => AccountOfficer.applyLegacyOfficerDefaults()], // after users + departments
+      ["stockholder", () => Stockholder.ensureSchema()], // creates proponents first (FK)
+      ["contact person", () => ContactPerson.ensureSchema()],
+      ["signatory", () => Signatory.ensureSchema()],
+      ["building", () => Building.ensureSchema()],
+      ["land use", () => LandUse.ensureSchema()],
+    ];
+    for (const [name, run] of steps) {
+      try {
+        await run();
+      } catch (error) {
+        console.error(`Schema step failed (${name}):`, error.message);
+      }
+    }
   })
   .catch(() => {
     // If DB is down, you can still view login page.

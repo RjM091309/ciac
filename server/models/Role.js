@@ -130,6 +130,15 @@ async function ensureSchema() {
       INSERT INTO dbo.roles (name, description, is_active)
       VALUES ('proponent', 'External proponent / locator self-service portal', 1);
   `);
+
+  // File Maintenance > Account Officers creates users under this role, and
+  // AccountOfficer.applyLegacyOfficerDefaults() needs it. Matched case-insensitively
+  // so an environment that already has it (any casing) is left untouched.
+  await updateSchema(`
+    IF NOT EXISTS (SELECT 1 FROM dbo.roles WHERE LOWER(name) = 'account officer')
+      INSERT INTO dbo.roles (name, description, is_active)
+      VALUES ('ACCOUNT OFFICER', 'For renewal process', 1);
+  `);
 }
 
 module.exports = {

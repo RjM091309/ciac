@@ -25,6 +25,10 @@ export type AppView =
   | 'settings:inspection-types'
   | 'settings:compliance-types'
   | 'settings:application-types'
+  | 'settings:account-officers'
+  | 'settings:type-of-contract'
+  | 'settings:building'
+  | 'settings:land-use'
   | 'settings:control-panel'
   | 'settings:audit-log';
 

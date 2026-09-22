@@ -52,9 +52,16 @@ router.get("/", requireStaffRole, proponentsController.list);
 // Locators/Proponent List admin page — before "/:id" for the same reason as
 // "me"/"change-requests" above.
 router.get("/locator-list", requireMenuAccess(MENU_KEY, "view"), proponentsController.listForLocatorList);
+router.get("/account-officers", requireMenuAccess(MENU_KEY, "view"), proponentsController.listAccountOfficerOptions);
+router.get("/type-of-contract", requireMenuAccess(MENU_KEY, "view"), proponentsController.listTypeOfContractOptions);
+router.get("/land-uses", requireMenuAccess(MENU_KEY, "view"), proponentsController.listLandUseOptions);
 router.get("/:id", requireMenuAccess(MENU_KEY, "view"), proponentsController.getById);
 router.post("/", requireMenuAccess(MENU_KEY, "add"), proponentsController.create);
 router.put("/:id", requireMenuAccess(MENU_KEY, "edit"), proponentsController.update);
+// Section saves (Stockholders / Contact Person + Signatory / Property schedule) — see the controller.
+router.put("/:id/stockholders", requireMenuAccess(MENU_KEY, "edit"), proponentsController.saveStockholders);
+router.put("/:id/contacts", requireMenuAccess(MENU_KEY, "edit"), proponentsController.saveContacts);
+router.put("/:id/properties", requireMenuAccess(MENU_KEY, "edit"), proponentsController.saveProperties);
 router.patch("/:id/deactivate", requireMenuAccess(MENU_KEY, "delete"), proponentsController.deactivate);
 router.patch("/:id/reactivate", requireMenuAccess(MENU_KEY, "edit"), proponentsController.reactivate);
 

@@ -39,6 +39,11 @@ module.exports = function pageRouter(app) {
   app.use("/api/inspection-types", require("./r_inspection_types"));
   app.use("/api/compliance-types", require("./r_compliance_types"));
   app.use("/api/application-types", require("./r_application_types"));
+  app.use("/api/account-officers", require("./r_account_officers"));
+  app.use("/api/departments", require("./r_departments"));
+  app.use("/api/type-of-contract", require("./r_type_of_contract"));
+  app.use("/api/building", require("./r_building"));
+  app.use("/api/land-use", require("./r_land_use"));
   app.use("/api/control-panel", require("./r_control_panel"));
   app.use("/api/dashboard", require("./r_dashboard"));
   app.use("/api/quick-tasks", require("./r_quick_tasks"));

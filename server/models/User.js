@@ -1,5 +1,6 @@
 const { selectData, insertData, updateData, updateSchema } = require("../config/database");
 const bcrypt = require("bcryptjs");
+const Department = require("./Department");
 
 let hasPhoneColumnCache = null;
 let hasTotpColumnsCache = null;
@@ -175,6 +176,20 @@ async function ensureSchema() {
   await updateSchema(`
     IF COL_LENGTH('dbo.users', 'password_reset_expires') IS NULL
       ALTER TABLE dbo.users ADD password_reset_expires DATETIME2(3) NULL;
+  `);
+
+  // Department (File Maintenance > Account Officers). Only meaningful for the
+  // ACCOUNT OFFICER role today; nullable so every other account is unaffected.
+  await Department.ensureSchema();
+  await updateSchema(`
+    IF COL_LENGTH('dbo.users', 'department_id') IS NULL
+      ALTER TABLE dbo.users ADD department_id INT NULL;
+  `);
+  // Separate batch: SQL Server validates the whole batch up front, so the FK
+  // can't reference a column added earlier in the same batch.
+  await updateSchema(`
+    IF OBJECT_ID('dbo.FK_users_department', 'F') IS NULL
+      ALTER TABLE dbo.users ADD CONSTRAINT FK_users_department FOREIGN KEY (department_id) REFERENCES dbo.department(id);
   `);
 
   // user_roles
@@ -762,6 +777,7 @@ module.exports = {
   listUsers,
   getUserById,
   createUser,
+  setUserPrimaryRole,
   updateUser,
   deactivateUser,
   reactivateUser,

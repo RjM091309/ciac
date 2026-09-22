@@ -3,6 +3,20 @@ const ChangeRequest = require("../models/ProponentChangeRequest");
 const Notification = require("../models/Notification");
 const ActivityLog = require("../models/ActivityLog");
 const Contract = require("../models/Contract");
+const AccountOfficer = require("../models/AccountOfficer");
+const TypeOfContract = require("../models/TypeOfContract");
+const LandUse = require("../models/LandUse");
+
+/** "", null, undefined -> null; otherwise the id as a number (NaN passes through and is rejected below). */
+function toNullableId(value) {
+  return value === null || value === undefined || value === "" ? null : Number(value);
+}
+
+/** Checks that a submitted lookup id points at a real File Maintenance row. Returns an error message or null. */
+async function unknownLookup(id, list, label) {
+  if (id === null || id === undefined) return null;
+  return (await list()).some((row) => row.id === id) ? null : `Unknown ${label}`;
+}
 
 exports.list = async (req, res) => {
   try {
@@ -23,6 +37,58 @@ exports.listForLocatorList = async (req, res) => {
     return res.json({ success: true, data: rows });
   } catch (error) {
     console.error("List locators error:", error);
+    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+  }
+};
+
+// Lookup for the Account Officer dropdown on the New/Edit Locator form: only
+// users holding the ACCOUNT OFFICER role, with their department. Deactivated
+// officers are included (flagged) so a locator still assigned to one can show it;
+// the form itself only offers active ones for new assignments.
+exports.listAccountOfficerOptions = async (req, res) => {
+  try {
+    const rows = await AccountOfficer.listAccountOfficers();
+    return res.json({
+      success: true,
+      data: rows.map((o) => ({
+        id: o.id,
+        username: o.username,
+        full_name: o.full_name,
+        is_active: o.is_active,
+        department_code: o.department_code,
+        department_name: o.department_name,
+      })),
+    });
+  } catch (error) {
+    console.error("List account officer options error:", error);
+    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+  }
+};
+
+// Lookup for the Type of Contract dropdown on the New/Edit Locator form
+// (File Maintenance > Type of Contract). Inactive types are included, flagged, so
+// a locator whose contract still uses one can display it.
+exports.listTypeOfContractOptions = async (req, res) => {
+  try {
+    const rows = await TypeOfContract.listTypeOfContracts();
+    return res.json({
+      success: true,
+      data: rows.map((t) => ({ id: t.id, name: t.name, is_active: t.is_active })),
+    });
+  } catch (error) {
+    console.error("List type of contract options error:", error);
+    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+  }
+};
+
+// Lookup for the Land Use dropdown on the New/Edit Locator form (File Maintenance > Land
+// Use). Inactive rows are included, flagged, so a locator that still uses one can display it.
+exports.listLandUseOptions = async (req, res) => {
+  try {
+    const rows = await LandUse.listLandUses();
+    return res.json({ success: true, data: rows.map((r) => ({ id: r.id, name: r.name, is_active: r.is_active })) });
+  } catch (error) {
+    console.error("List land use options error:", error);
     return res.status(500).json({ success: false, message: error.message || "Internal server error" });
   }
 };
@@ -339,9 +405,17 @@ exports.create = async (req, res) => {
       performance_security_amount,
       performance_security_currency,
       properties,
+      land_use_id,
+      stockholders,
+      contact_persons,
+      signatories,
       is_active,
     } = req.body || {};
     if (!business_name) return res.status(400).json({ success: false, message: "business_name is required" });
+
+    const landUseId = toNullableId(land_use_id);
+    const lookupError = await unknownLookup(landUseId, () => LandUse.listLandUses(), "land use");
+    if (lookupError) return res.status(400).json({ success: false, message: lookupError });
 
     const row = await Proponent.createProponent({
       user_id,
@@ -380,6 +454,10 @@ exports.create = async (req, res) => {
       performance_security_amount,
       performance_security_currency,
       properties,
+      land_use_id: landUseId,
+      stockholders,
+      contact_persons,
+      signatories,
       created_by: req.user?.id ?? null,
       is_active,
     });
@@ -389,6 +467,51 @@ exports.create = async (req, res) => {
     return res.status(500).json({ success: false, message: error.message || "Internal server error" });
   }
 };
+
+// Section saves for the locator form's Stockholders / Contact Person + Signatory / Property
+// schedule tabs — each writes only its own child table(s), independently of the main Save.
+function sectionHandler(label, run) {
+  return async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (!Number.isFinite(id)) return res.status(400).json({ success: false, message: "Invalid id" });
+      const problem = run.validate(req.body || {});
+      if (problem) return res.status(400).json({ success: false, message: problem });
+      const data = await run.save(id, req.body || {}, req.user?.id ?? null);
+      if (!data) return res.status(404).json({ success: false, message: "Proponent not found" });
+      return res.json({ success: true, data });
+    } catch (error) {
+      console.error(`Save ${label} error:`, error);
+      // Amount fields that aren't numbers are the caller's mistake, not a server fault.
+      const status = /must be a number/.test(error?.message || "") ? 400 : 500;
+      return res.status(status).json({ success: false, message: error.message || "Internal server error" });
+    }
+  };
+}
+
+exports.saveStockholders = sectionHandler("stockholders", {
+  validate: (b) => (Array.isArray(b.stockholders) ? null : "stockholders must be a list"),
+  save: (id, b, actor) => Proponent.saveStockholders(id, b.stockholders, actor),
+});
+
+exports.saveContacts = sectionHandler("contacts", {
+  validate: (b) =>
+    Array.isArray(b.contact_persons) || Array.isArray(b.signatories) ? null : "contact_persons or signatories must be a list",
+  save: (id, b, actor) =>
+    Proponent.saveContacts(
+      id,
+      {
+        contact_persons: Array.isArray(b.contact_persons) ? b.contact_persons : undefined,
+        signatories: Array.isArray(b.signatories) ? b.signatories : undefined,
+      },
+      actor
+    ),
+});
+
+exports.saveProperties = sectionHandler("properties", {
+  validate: (b) => (Array.isArray(b.properties) ? null : "properties must be a list"),
+  save: (id, b) => Proponent.saveProperties(id, b.properties),
+});
 
 exports.update = async (req, res) => {
   try {
@@ -432,9 +555,26 @@ exports.update = async (req, res) => {
       performance_security_amount,
       performance_security_currency,
       properties,
-      contract_type_code,
+      land_use_id,
+      stockholders,
+      contact_persons,
+      signatories,
+      contract_type_id,
       is_active,
     } = req.body || {};
+
+    // Validate the Type of Contract up front so a bad code can't leave the rest of
+    // the edit half-saved.
+    const typeId = contract_type_id === null || contract_type_id === undefined || contract_type_id === "" ? null : Number(contract_type_id);
+    if (typeId !== null) {
+      const known = (await TypeOfContract.listTypeOfContracts()).find((t) => t.id === typeId);
+      if (!known) return res.status(400).json({ success: false, message: "Unknown type of contract" });
+    }
+    // undefined = "not sent, leave alone"; null = "cleared".
+    const landUseId = land_use_id === undefined ? undefined : toNullableId(land_use_id);
+    const lookupError = await unknownLookup(landUseId, () => LandUse.listLandUses(), "land use");
+    if (lookupError) return res.status(400).json({ success: false, message: lookupError });
+
     const row = await Proponent.updateProponent(id, {
       user_id,
       business_name,
@@ -472,6 +612,10 @@ exports.update = async (req, res) => {
       performance_security_amount,
       performance_security_currency,
       properties,
+      land_use_id: landUseId,
+      stockholders,
+      contact_persons,
+      signatories,
       is_active,
       updated_by: req.user?.id ?? null,
     });
@@ -480,8 +624,8 @@ exports.update = async (req, res) => {
     // Type of Contract lives on the proponent's current contract, not the
     // proponent record — a no-op if there's no contract yet (same as
     // Start/End/Lease Term, it only ever describes one that already exists).
-    if (contract_type_code !== undefined) {
-      await Contract.setContractTypeForProponent(id, contract_type_code, req.user?.id ?? null);
+    if (contract_type_id !== undefined) {
+      await Contract.setContractTypeForProponent(id, typeId, req.user?.id ?? null);
     }
     const refreshed = await Proponent.getProponentById(id);
 

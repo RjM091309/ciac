@@ -4,6 +4,10 @@ import Select, { type StylesConfig } from 'react-select';
 export type AppSelectOption = {
   value: string;
   label: string;
+  /** Optional secondary text (e.g. an officer's department). When any option has
+   * one (even empty), the menu renders two aligned columns — label | detail — and
+   * search also matches the detail. Options without it render exactly as before. */
+  detail?: string;
 };
 
 type AppSelectProps = {
@@ -125,6 +129,7 @@ export function AppSelect({
   onChange,
 }: AppSelectProps) {
   const selected = options.find((option) => option.value === value) ?? null;
+  const hasDetail = options.some((option) => option.detail !== undefined);
 
   return (
     <Select<AppSelectOption, false>
@@ -142,6 +147,32 @@ export function AppSelect({
       isSearchable
       onChange={(option) => onChange(option?.value ?? '')}
       noOptionsMessage={() => 'No matches found'}
+      {...(hasDetail
+        ? {
+            filterOption: (option: { data: AppSelectOption }, input: string) => {
+              const q = input.trim().toLowerCase();
+              if (!q) return true;
+              return `${option.data.label} ${option.data.detail ?? ''}`.toLowerCase().includes(q);
+            },
+            formatOptionLabel: (option: AppSelectOption, { context }: { context: 'menu' | 'value' }) =>
+              context === 'menu' ? (
+                <div className="grid items-center gap-3" style={{ gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)' }}>
+                  <span className="truncate" title={option.label}>
+                    {option.label}
+                  </span>
+                  <span
+                    className="truncate text-[11px] uppercase tracking-wide"
+                    style={{ opacity: 0.65 }}
+                    title={option.detail || undefined}
+                  >
+                    {option.detail || '—'}
+                  </span>
+                </div>
+              ) : (
+                <span>{option.detail ? `${option.label} — ${option.detail}` : option.label}</span>
+              ),
+          }
+        : {})}
     />
   );
 }

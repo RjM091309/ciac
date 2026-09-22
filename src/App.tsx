@@ -29,6 +29,10 @@ const ComplianceInspections = lazy(() => import('./components/compliance/Complia
 const InspectionTypesManagement = lazy(() => import('./components/FileMaintenance/InspectionTypes').then((m) => ({ default: m.InspectionTypesManagement })));
 const ComplianceTypesManagement = lazy(() => import('./components/FileMaintenance/ComplianceTypes').then((m) => ({ default: m.ComplianceTypesManagement })));
 const ApplicationTypesManagement = lazy(() => import('./components/FileMaintenance/ApplicationTypes').then((m) => ({ default: m.ApplicationTypesManagement })));
+const AccountOfficersManagement = lazy(() => import('./components/FileMaintenance/AccountOfficers').then((m) => ({ default: m.AccountOfficersManagement })));
+const TypeOfContractManagement = lazy(() => import('./components/FileMaintenance/TypeOfContract').then((m) => ({ default: m.TypeOfContractManagement })));
+const BuildingManagement = lazy(() => import('./components/FileMaintenance/Building').then((m) => ({ default: m.BuildingManagement })));
+const LandUseManagement = lazy(() => import('./components/FileMaintenance/LandUse').then((m) => ({ default: m.LandUseManagement })));
 const AuditLog = lazy(() => import('./components/settings/AuditLog').then((m) => ({ default: m.AuditLog })));
 const ReportsAnalytics = lazy(() => import('./components/reports/ReportsAnalytics').then((m) => ({ default: m.ReportsAnalytics })));
 
@@ -68,6 +72,10 @@ const VIEW_TO_PATH: Record<AppView, string> = {
   'settings:inspection-types': '/settings/inspection-types',
   'settings:compliance-types': '/settings/compliance-types',
   'settings:application-types': '/settings/application-types',
+  'settings:account-officers': '/settings/account-officers',
+  'settings:type-of-contract': '/settings/type-of-contract',
+  'settings:building': '/settings/building',
+  'settings:land-use': '/settings/land-use',
   'settings:audit-log': '/settings/audit-log',
   'settings:control-panel': '/settings/control-panel',
 };
@@ -601,6 +609,14 @@ export default function App() {
                 <ComplianceTypesManagement />
               ) : view === 'settings:application-types' ? (
                 <ApplicationTypesManagement />
+              ) : view === 'settings:account-officers' ? (
+                <AccountOfficersManagement />
+              ) : view === 'settings:type-of-contract' ? (
+                <TypeOfContractManagement />
+              ) : view === 'settings:building' ? (
+                <BuildingManagement />
+              ) : view === 'settings:land-use' ? (
+                <LandUseManagement />
               ) : view === 'settings:audit-log' ? (
                 <AuditLog />
               ) : view === 'settings:control-panel' ? (
@@ -909,6 +925,66 @@ const LANDING_CONFIG: Record<AppView, LandingConfig> = {
         ['WAREHOUSE_LEASE', 'Warehouse Lease', 'Warehouse lease', 'Active'],
         ['SUBLEASE', 'Sublease', 'Sublease', 'Active'],
       ],
+    },
+  },
+  'settings:account-officers': {
+    title: 'Account Officers',
+    description: 'Manage account officers and their departments for file maintenance.',
+    badge: 'File Maintenance',
+    icon: Users,
+    stats: [
+      { label: 'Total Officers', value: '—' },
+      { label: 'Active', value: '—' },
+      { label: 'Deactivated', value: '—' },
+    ],
+    table: {
+      columns: ['Name', 'Department', 'Locators', 'Status'],
+      rows: [['—', '—', '—', '—']],
+    },
+  },
+  'settings:type-of-contract': {
+    title: 'Type of Contract',
+    description: 'Manage types of contract for file maintenance.',
+    badge: 'File Maintenance',
+    icon: FileCheck,
+    stats: [
+      { label: 'Total Types', value: '—' },
+      { label: 'Active', value: '—' },
+      { label: 'Deactivated', value: '—' },
+    ],
+    table: {
+      columns: ['Name', 'Status'],
+      rows: [['—', '—']],
+    },
+  },
+  'settings:land-use': {
+    title: 'Land Use',
+    description: 'Manage land uses for file maintenance.',
+    badge: 'File Maintenance',
+    icon: FolderTree,
+    stats: [
+      { label: 'Total Land Uses', value: '—' },
+      { label: 'Active', value: '—' },
+      { label: 'Deactivated', value: '—' },
+    ],
+    table: {
+      columns: ['Name', 'Status'],
+      rows: [['—', '—']],
+    },
+  },
+  'settings:building': {
+    title: 'Building',
+    description: 'Manage buildings for file maintenance.',
+    badge: 'File Maintenance',
+    icon: FolderTree,
+    stats: [
+      { label: 'Total Buildings', value: '—' },
+      { label: 'Active', value: '—' },
+      { label: 'Deactivated', value: '—' },
+    ],
+    table: {
+      columns: ['Name', 'Status'],
+      rows: [['—', '—']],
     },
   },
   'settings:audit-log': {

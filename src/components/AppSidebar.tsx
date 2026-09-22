@@ -320,6 +320,10 @@ export function AppSidebar({
     canView('settings:inspection-types') ||
     canView('settings:compliance-types') ||
     canView('settings:application-types') ||
+    canView('settings:account-officers') ||
+    canView('settings:type-of-contract') ||
+    canView('settings:building') ||
+    canView('settings:land-use') ||
     canView('settings:requirement-categories');
   const showSystemGroup = showSystemSettings || showFileMaintenance;
 
@@ -356,6 +360,10 @@ export function AppSidebar({
     canView('settings:inspection-types') && { key: 'settings:inspection-types', label: 'Inspection Types', active: view === 'settings:inspection-types', onClick: () => onViewChange('settings:inspection-types') },
     canView('settings:compliance-types') && { key: 'settings:compliance-types', label: 'Compliance Types', active: view === 'settings:compliance-types', onClick: () => onViewChange('settings:compliance-types') },
     canView('settings:application-types') && { key: 'settings:application-types', label: 'Application Types', active: view === 'settings:application-types', onClick: () => onViewChange('settings:application-types') },
+    canView('settings:account-officers') && { key: 'settings:account-officers', label: 'Account Officers', active: view === 'settings:account-officers', onClick: () => onViewChange('settings:account-officers') },
+    canView('settings:type-of-contract') && { key: 'settings:type-of-contract', label: 'Type of Contract', active: view === 'settings:type-of-contract', onClick: () => onViewChange('settings:type-of-contract') },
+    canView('settings:building') && { key: 'settings:building', label: 'Building', active: view === 'settings:building', onClick: () => onViewChange('settings:building') },
+    canView('settings:land-use') && { key: 'settings:land-use', label: 'Land Use', active: view === 'settings:land-use', onClick: () => onViewChange('settings:land-use') },
   ].filter(Boolean) as SidebarLeaf[];
 
   return (
