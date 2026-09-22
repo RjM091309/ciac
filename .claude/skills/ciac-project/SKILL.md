@@ -93,6 +93,14 @@ Auth/session guard on startup: `server/app.js` calls `initializeDatabase()` then
 
 ## Application workflow (Locator → Assessment Officer → Account Officer)
 
+**Quick summary (high-level mental model — see Stages 1-4 below for the exact code-level mechanics):**
+1. A staff user with **Locator Accounts** access (`settings:locator-users`, `LocatorUsersManagement.tsx` → `POST /api/users`) creates the Locator's login account up front — it starts `PENDING`/inactive with a placeholder password. Filing the Locator's first real application does **not** create the account; it *activates* an already-existing PENDING one — `activateLocatorIfPending()` in `c_applications.js` no-ops if there's no linked user yet or it isn't PENDING. So a locator needs a Locator Account created *before* anyone can file for them.
+2. **Locator** submits their requirements — uploads documents against the requirement checklist in their own portal (`ProponentApplications.tsx`, `POST /api/proponents/me/applications/:id/documents`, then `POST /api/applications/:id/submit` for DRAFT→SUBMITTED or RETURNED→RESUBMITTED — Stage 2).
+3. **Assessment Officer** evaluates and approves the Locator's requirements (Compliance tab + Recommendation submit — Stage 3).
+4. **Account Officer** handles the master list of registered business locators and renewals (Approval/Issuance module — Stage 4, plus the Locators/Proponent List page).
+
+None of "Locator Accounts," "Applications," or "Assessment Officer" access is a hardcoded role check — they're generic Control Panel menu permissions (`settings:locator-users`, `applications:new`/`applications:renewals`/`assessment:queue`/`approval:queue`) that an admin assigns to whatever role they name; see the permission note right below.
+
 Staff files applications on the locator's behalf now (not locator self-service filing). Roles are **not hardcoded** — access is driven by Control Panel per-role menu permissions (`assessment:queue`, `approval:queue`, `applications:new`, `applications:renewals`), checked live per request (`requireMenuAccess`/`requireApplicationsAccess` in `server/middleware/m_auth.js`). "Assessment Officer"/"Account Officer" are just conventional role names an admin assigns those permissions to — nothing in code checks the literal role string except `admin` and `proponent`.
 
 **Statuses** (`APPLICATION_STATUSES`, `server/models/ApplicationWorkflow.js`): `DRAFT, SUBMITTED, UNDER_REVIEW (dead — nothing sets it), RESUBMITTED, RETURNED, REJECTED, FOR_APPROVAL, DISAPPROVED, APPROVED`.

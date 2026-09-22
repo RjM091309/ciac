@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Plus, Search } from 'lucide-react';
+import { Plus, Save, Search } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { toast } from 'sonner';
 import { SidePanel } from '../ui/SidePanel';
@@ -180,46 +180,43 @@ type SectionKey = 'stockholders' | 'contacts' | 'properties';
 
 // API rows -> form rows.
 function mapStockholderRows(rows: any): StockholderRow[] {
-  return Array.isArray(rows)
-    ? rows.map((r: any) => ({
-        id: r.id,
-        name: r.name || '',
-        nationality: r.nationality || '',
-        subscribed: r.subscribed != null ? String(r.subscribed) : '',
-        paid: r.paid != null ? String(r.paid) : '',
-        ownership: r.ownership != null ? String(r.ownership) : '',
-      }))
-    : [];
+  if (!Array.isArray(rows) || !rows.length) return [blankStockholderRow()];
+  return rows.map((r: any) => ({
+    id: r.id,
+    name: r.name || '',
+    nationality: r.nationality || '',
+    subscribed: r.subscribed != null ? String(r.subscribed) : '',
+    paid: r.paid != null ? String(r.paid) : '',
+    ownership: r.ownership != null ? String(r.ownership) : '',
+  }));
 }
 
 // Contact persons and signatories share the same columns.
 function mapContactRows(rows: any): ContactPersonRow[] {
-  return Array.isArray(rows)
-    ? rows.map((r: any) => ({
-        id: r.id,
-        name: r.name || '',
-        designation: r.designation || '',
-        contact_no: r.contact_no || '',
-        email: r.email || '',
-      }))
-    : [];
+  if (!Array.isArray(rows) || !rows.length) return [blankContactPersonRow()];
+  return rows.map((r: any) => ({
+    id: r.id,
+    name: r.name || '',
+    designation: r.designation || '',
+    contact_no: r.contact_no || '',
+    email: r.email || '',
+  }));
 }
 
 function mapPropertyRows(rows: any): PropertyRow[] {
-  return Array.isArray(rows)
-    ? rows.map((row: any) => ({
-        id: row.id,
-        year: row.year || '',
-        date_from: toDateInputValue(row.date_from),
-        date_to: toDateInputValue(row.date_to),
-        type_of_property: row.type_of_property || '',
-        area_sqm: row.area_sqm || '',
-        rate_sqm_mo: row.rate_sqm_mo || '',
-        rate_currency: row.rate_currency || 'PHP',
-        mgl_mo: row.mgl_mo || '',
-        mgl_currency: row.mgl_currency || 'PHP',
-      }))
-    : [];
+  if (!Array.isArray(rows) || !rows.length) return [blankPropertyRow()];
+  return rows.map((row: any) => ({
+    id: row.id,
+    year: row.year || '',
+    date_from: toDateInputValue(row.date_from),
+    date_to: toDateInputValue(row.date_to),
+    type_of_property: row.type_of_property || '',
+    area_sqm: row.area_sqm || '',
+    rate_sqm_mo: row.rate_sqm_mo || '',
+    rate_currency: row.rate_currency || 'PHP',
+    mgl_mo: row.mgl_mo || '',
+    mgl_currency: row.mgl_currency || 'PHP',
+  }));
 }
 
 // Form rows -> API rows.
@@ -336,11 +333,11 @@ const BLANK_PROFILE_FORM = {
   performance_security_months: '',
   performance_security_amount: '',
   performance_security_currency: 'PHP',
-  properties: [] as PropertyRow[],
+  properties: [blankPropertyRow()],
   land_use_id: '',
-  stockholders: [] as StockholderRow[],
-  contact_persons: [] as ContactPersonRow[],
-  signatories: [] as SignatoryRow[],
+  stockholders: [blankStockholderRow()],
+  contact_persons: [blankContactPersonRow()],
+  signatories: [blankSignatoryRow()],
 };
 
 export function ProponentsManagement() {
@@ -1405,53 +1402,71 @@ export function ProponentsManagement() {
                       ]}
                       onChange={(next) => setForm((p) => ({ ...p, stockholders: next }))}
                       blankRow={blankStockholderRow}
-                    />
-                    <SectionSaveBar
-                      label="Save Stockholders"
-                      isEditing={Boolean(editing)}
-                      dirty={sectionDirty.stockholders}
-                      saving={savingSection === 'stockholders'}
-                      disabled={saving || loadingLocation}
-                      onSave={() => void saveSection('stockholders')}
+                      extraActions={
+                        form.stockholders.length > 0 ? (
+                          <SectionSaveBar
+                            label="Save Stockholders"
+                            isEditing={Boolean(editing)}
+                            dirty={sectionDirty.stockholders}
+                            saving={savingSection === 'stockholders'}
+                            disabled={saving || loadingLocation}
+                            onSave={() => void saveSection('stockholders')}
+                          />
+                        ) : undefined
+                      }
                     />
                   </div>
                 ) : activeProfileTab === 'Contact Person' ? (
                   <div className="flex flex-col gap-5">
                     {/* Contact people on top, the locator's signatories below — two child tables, same tab. */}
-                    <RowsEditor<ContactPersonRow>
-                      rows={form.contact_persons}
-                      disabled={loadingLocation}
-                      emptyText="No contact persons yet — use + to add one."
-                      columns={[
-                        { key: 'name', label: 'Contact Person', className: 'min-w-[14rem]' },
-                        { key: 'designation', label: 'Designation', className: 'w-48' },
-                        { key: 'contact_no', label: 'Contact No.', className: 'w-40' },
-                        { key: 'email', label: 'Email Address', className: 'min-w-[14rem]' },
-                      ]}
-                      onChange={(next) => setForm((p) => ({ ...p, contact_persons: next }))}
-                      blankRow={blankContactPersonRow}
-                    />
-                    <RowsEditor<SignatoryRow>
-                      rows={form.signatories}
-                      disabled={loadingLocation}
-                      emptyText="No signatories yet — use + to add one."
-                      columns={[
-                        { key: 'name', label: 'Signatory', className: 'min-w-[14rem]' },
-                        { key: 'designation', label: 'Designation', className: 'w-48' },
-                        { key: 'contact_no', label: 'Contact No.', className: 'w-40' },
-                        { key: 'email', label: 'Email Address', className: 'min-w-[14rem]' },
-                      ]}
-                      onChange={(next) => setForm((p) => ({ ...p, signatories: next }))}
-                      blankRow={blankSignatoryRow}
-                    />
-                    <SectionSaveBar
-                      label="Save Contacts & Signatories"
-                      isEditing={Boolean(editing)}
-                      dirty={sectionDirty.contacts}
-                      saving={savingSection === 'contacts'}
-                      disabled={saving || loadingLocation}
-                      onSave={() => void saveSection('contacts')}
-                    />
+                    <div className="flex flex-col gap-2">
+                      <div className="text-sm font-bold" style={{ color: 'var(--text)' }}>
+                        Contact Person
+                      </div>
+                      <RowsEditor<ContactPersonRow>
+                        rows={form.contact_persons}
+                        disabled={loadingLocation}
+                        emptyText="No contact persons yet — use + to add one."
+                        columns={[
+                          { key: 'name', label: 'Contact Person', className: 'min-w-[14rem]' },
+                          { key: 'designation', label: 'Designation', className: 'w-48' },
+                          { key: 'contact_no', label: 'Contact No.', className: 'w-40' },
+                          { key: 'email', label: 'Email Address', className: 'min-w-[14rem]' },
+                        ]}
+                        onChange={(next) => setForm((p) => ({ ...p, contact_persons: next }))}
+                        blankRow={blankContactPersonRow}
+                      />
+                    </div>
+                    <div className="flex flex-col gap-2">
+                      <div className="text-sm font-bold" style={{ color: 'var(--text)' }}>
+                        Authorized Person / Signatory
+                      </div>
+                      <RowsEditor<SignatoryRow>
+                        rows={form.signatories}
+                        disabled={loadingLocation}
+                        emptyText="No signatories yet — use + to add one."
+                        columns={[
+                          { key: 'name', label: 'Signatory', className: 'min-w-[14rem]' },
+                          { key: 'designation', label: 'Designation', className: 'w-48' },
+                          { key: 'contact_no', label: 'Contact No.', className: 'w-40' },
+                          { key: 'email', label: 'Email Address', className: 'min-w-[14rem]' },
+                        ]}
+                        onChange={(next) => setForm((p) => ({ ...p, signatories: next }))}
+                        blankRow={blankSignatoryRow}
+                        extraActions={
+                          form.contact_persons.length > 0 || form.signatories.length > 0 ? (
+                            <SectionSaveBar
+                              label="Save Contacts & Signatories"
+                              isEditing={Boolean(editing)}
+                              dirty={sectionDirty.contacts}
+                              saving={savingSection === 'contacts'}
+                              disabled={saving || loadingLocation}
+                              onSave={() => void saveSection('contacts')}
+                            />
+                          ) : undefined
+                        }
+                      />
+                    </div>
                   </div>
                 ) : activeProfileTab !== 'Profile' ? (
                   <div className="text-xs text-secondary py-8 text-center">{activeProfileTab} — coming soon.</div>
@@ -1559,14 +1574,6 @@ export function ProponentsManagement() {
                           minHeight={26}
                         />
                       </div>
-                      {form.land_use.trim() && !form.land_use_id ? (
-                        <div
-                          className="mt-0.5 text-[10px] text-secondary truncate"
-                          title={form.land_use}
-                        >
-                          Legacy: {form.land_use}
-                        </div>
-                      ) : null}
                     </Field>
                   </div>
                 </div>
@@ -1766,16 +1773,18 @@ export function ProponentsManagement() {
                 >
                   −
                 </button>
+                {form.properties.length > 0 && (
+                  <SectionSaveBar
+                    label="Save Property Schedule"
+                    isEditing={Boolean(editing)}
+                    dirty={sectionDirty.properties}
+                    saving={savingSection === 'properties'}
+                    disabled={saving || loadingLocation}
+                    onSave={() => void saveSection('properties')}
+                  />
+                )}
               </div>
             </div>
-            <SectionSaveBar
-              label="Save Property Schedule"
-              isEditing={Boolean(editing)}
-              dirty={sectionDirty.properties}
-              saving={savingSection === 'properties'}
-              disabled={saving || loadingLocation}
-              onSave={() => void saveSection('properties')}
-            />
 
             {/* Row 6: Advance Lease Payment | Security Deposit | Performance Security */}
             <div className="grid grid-cols-3 gap-3">
@@ -1913,8 +1922,10 @@ function StatCard({ label, value }: { label: string; value: string }) {
   );
 }
 
-/** The Save button under a section that saves on its own. Disabled until something in that
- * section changed; for a locator that doesn't exist yet it just says the rows go in with it. */
+/** The Save button under a section that saves on its own — an icon-only square
+ * button (matches the +/- row buttons) so it can sit in the same vertical
+ * stack instead of its own full-width row. Disabled until something in that
+ * section changed; the label is only used as the tooltip/title now. */
 function SectionSaveBar({
   label,
   isEditing,
@@ -1931,20 +1942,16 @@ function SectionSaveBar({
   onSave: () => void;
 }) {
   return (
-    <div className="flex items-center justify-end gap-3">
-      <span className="text-[10px] text-secondary">
-        {!isEditing ? 'Saved together with the locator.' : dirty ? 'Unsaved changes' : 'All changes saved'}
-      </span>
-      <button
-        type="button"
-        onClick={onSave}
-        disabled={!isEditing || !dirty || saving || disabled}
-        className="rounded-lg px-3 py-1.5 text-[11px] font-semibold shadow-sm cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
-        style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
-      >
-        {saving ? 'Saving…' : label}
-      </button>
-    </div>
+    <button
+      type="button"
+      onClick={onSave}
+      disabled={!isEditing || !dirty || saving || disabled}
+      title={saving ? 'Saving…' : label}
+      className="w-7 h-7 rounded-md flex items-center justify-center cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
+      style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
+    >
+      <Save size={14} />
+    </button>
   );
 }
 
@@ -1958,6 +1965,7 @@ function RowsEditor<T extends { id?: number }>({
   emptyText,
   blankRow,
   onChange,
+  extraActions,
 }: {
   rows: T[];
   columns: { key: keyof T & string; label: string; className?: string; numeric?: boolean }[];
@@ -1965,6 +1973,9 @@ function RowsEditor<T extends { id?: number }>({
   emptyText: string;
   blankRow: () => T;
   onChange: (next: T[]) => void;
+  /** Extra buttons (e.g. a section's SectionSaveBar) stacked below +/- in the
+   * same vertical column — same layout as the Profile tab's Property Schedule. */
+  extraActions?: React.ReactNode;
 }) {
   return (
     <div className="flex gap-2 items-start">
@@ -1987,13 +1998,12 @@ function RowsEditor<T extends { id?: number }>({
                   {c.label}
                 </th>
               ))}
-              <th className="w-8 border-b" style={{ borderColor: 'var(--input-border)' }} />
             </tr>
           </thead>
           <tbody>
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={columns.length + 2} className="px-2 py-6 text-center text-secondary">
+                <td colSpan={columns.length + 1} className="px-2 py-6 text-center text-secondary">
                   {emptyText}
                 </td>
               </tr>
@@ -2017,34 +2027,35 @@ function RowsEditor<T extends { id?: number }>({
                       />
                     </td>
                   ))}
-                  <td className="px-1 py-1 border-b text-center" style={{ borderColor: 'var(--input-border)' }}>
-                    <button
-                      type="button"
-                      disabled={disabled}
-                      onClick={() => onChange(rows.filter((_, ri) => ri !== i))}
-                      className="w-6 h-6 rounded-md text-secondary cursor-pointer hover:bg-[var(--hover-bg)] disabled:cursor-not-allowed disabled:opacity-60"
-                      title="Remove row"
-                      aria-label={`Remove row ${i + 1}`}
-                    >
-                      ×
-                    </button>
-                  </td>
                 </tr>
               ))
             )}
           </tbody>
         </table>
       </div>
-      <button
-        type="button"
-        disabled={disabled}
-        onClick={() => onChange([...rows, blankRow()])}
-        className="w-7 h-7 shrink-0 rounded-md flex items-center justify-center text-white font-bold cursor-pointer disabled:cursor-not-allowed disabled:opacity-60"
-        style={{ backgroundColor: '#22c55e' }}
-        title="Add row"
-      >
-        +
-      </button>
+      <div className="flex flex-col gap-1.5 shrink-0">
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={() => onChange([...rows, blankRow()])}
+          className="w-7 h-7 rounded-md flex items-center justify-center text-white font-bold cursor-pointer disabled:cursor-not-allowed disabled:opacity-60"
+          style={{ backgroundColor: '#22c55e' }}
+          title="Add row"
+        >
+          +
+        </button>
+        <button
+          type="button"
+          disabled={disabled || rows.length === 0}
+          onClick={() => onChange(rows.slice(0, -1))}
+          className="w-7 h-7 rounded-md flex items-center justify-center text-white font-bold cursor-pointer disabled:cursor-not-allowed disabled:opacity-60"
+          style={{ backgroundColor: '#ef4444' }}
+          title="Remove last row"
+        >
+          −
+        </button>
+        {extraActions}
+      </div>
     </div>
   );
 }
