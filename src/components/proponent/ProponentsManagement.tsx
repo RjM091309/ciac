@@ -175,8 +175,8 @@ function blankContactPersonRow(): ContactPersonRow {
 
 const blankSignatoryRow = blankContactPersonRow;
 
-// The three sections that can be saved on their own (see saveSection).
-type SectionKey = 'stockholders' | 'contacts' | 'properties';
+// The sections that can be saved on their own (see saveSection).
+type SectionKey = 'stockholders' | 'contacts' | 'properties' | 'investment';
 
 // API rows -> form rows.
 function mapStockholderRows(rows: any): StockholderRow[] {
@@ -333,6 +333,10 @@ const BLANK_PROFILE_FORM = {
   performance_security_months: '',
   performance_security_amount: '',
   performance_security_currency: 'PHP',
+  investment_commitment: '',
+  investment_actual: '',
+  employee_commitment: '',
+  employee_actual: '',
   properties: [blankPropertyRow()],
   land_use_id: '',
   stockholders: [blankStockholderRow()],
@@ -502,13 +506,24 @@ export function ProponentsManagement() {
   // property schedule) are tracked separately from the locator's own fields, so saving
   // one of them clears only its own "unsaved changes" state.
   const splitForm = (f: typeof form) => {
-    const { stockholders, contact_persons, signatories, properties, ...rest } = f;
+    const {
+      stockholders,
+      contact_persons,
+      signatories,
+      properties,
+      investment_commitment,
+      investment_actual,
+      employee_commitment,
+      employee_actual,
+      ...rest
+    } = f;
     return {
       rest: JSON.stringify(rest),
       sections: {
         stockholders: JSON.stringify(stockholders),
         contacts: JSON.stringify([contact_persons, signatories]),
         properties: JSON.stringify(properties),
+        investment: JSON.stringify([investment_commitment, investment_actual, employee_commitment, employee_actual]),
       } as Record<SectionKey, string>,
     };
   };
@@ -521,6 +536,7 @@ export function ProponentsManagement() {
     stockholders: loaded !== null && currentParts.sections.stockholders !== loaded.sections.stockholders,
     contacts: loaded !== null && currentParts.sections.contacts !== loaded.sections.contacts,
     properties: loaded !== null && currentParts.sections.properties !== loaded.sections.properties,
+    investment: loaded !== null && currentParts.sections.investment !== loaded.sections.investment,
   };
   const formChangedSinceLoad =
     loaded !== null && (currentParts.rest !== loaded.rest || Object.values(sectionDirty).some(Boolean));
@@ -696,6 +712,10 @@ export function ProponentsManagement() {
           performance_security_months: data.performance_security_months || '',
           performance_security_amount: data.performance_security_amount || '',
           performance_security_currency: data.performance_security_currency || 'PHP',
+          investment_commitment: data.investment_commitment || '',
+          investment_actual: data.investment_actual || '',
+          employee_commitment: data.employee_commitment || '',
+          employee_actual: data.employee_actual || '',
           properties: mapPropertyRows(data.properties),
           land_use_id: data.land_use_id != null ? String(data.land_use_id) : '',
           stockholders: mapStockholderRows(data.stockholders),
@@ -735,7 +755,6 @@ export function ProponentsManagement() {
     if (!editing) return;
     setSavingSection(section);
     try {
-      const path = section === 'properties' ? 'properties' : section;
       const body =
         section === 'stockholders'
           ? { stockholders: form.stockholders.map(toStockholderPayload) }
@@ -744,9 +763,16 @@ export function ProponentsManagement() {
                 contact_persons: form.contact_persons.map(toContactPayload),
                 signatories: form.signatories.map(toContactPayload),
               }
-            : { properties: form.properties.map(toPropertyPayload) };
+            : section === 'investment'
+              ? {
+                  investment_commitment: form.investment_commitment.trim() || null,
+                  investment_actual: form.investment_actual.trim() || null,
+                  employee_commitment: form.employee_commitment.trim() || null,
+                  employee_actual: form.employee_actual.trim() || null,
+                }
+              : { properties: form.properties.map(toPropertyPayload) };
 
-      const res = await fetch(api(`/api/proponents/${editing.id}/${path}`), {
+      const res = await fetch(api(`/api/proponents/${editing.id}/${section}`), {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -761,7 +787,14 @@ export function ProponentsManagement() {
           ? { stockholders: mapStockholderRows(data.stockholders) }
           : section === 'contacts'
             ? { contact_persons: mapContactRows(data.contact_persons), signatories: mapContactRows(data.signatories) }
-            : { properties: mapPropertyRows(data.properties) };
+            : section === 'investment'
+              ? {
+                  investment_commitment: data.investment_commitment || '',
+                  investment_actual: data.investment_actual || '',
+                  employee_commitment: data.employee_commitment || '',
+                  employee_actual: data.employee_actual || '',
+                }
+              : { properties: mapPropertyRows(data.properties) };
       const nextForm = { ...form, ...saved };
       setForm(nextForm);
       setLoaded((prev) =>
@@ -772,7 +805,9 @@ export function ProponentsManagement() {
           ? 'Stockholders saved'
           : section === 'contacts'
             ? 'Contact persons and signatories saved'
-            : 'Property schedule saved',
+            : section === 'investment'
+              ? 'Investment figures saved'
+              : 'Property schedule saved',
       );
     } catch (e: any) {
       toast.error(e?.message || 'Save failed');
@@ -824,6 +859,10 @@ export function ProponentsManagement() {
         performance_security_months: form.performance_security_months.trim() || null,
         performance_security_amount: form.performance_security_amount.trim() || null,
         performance_security_currency: form.performance_security_currency || null,
+        investment_commitment: form.investment_commitment.trim() || null,
+        investment_actual: form.investment_actual.trim() || null,
+        employee_commitment: form.employee_commitment.trim() || null,
+        employee_actual: form.employee_actual.trim() || null,
         stockholders: form.stockholders.map(toStockholderPayload),
         contact_persons: form.contact_persons.map(toContactPayload),
         signatories: form.signatories.map(toContactPayload),
@@ -1468,6 +1507,84 @@ export function ProponentsManagement() {
                       />
                     </div>
                   </div>
+                ) : activeProfileTab === 'Investment' ? (
+                  <div className="flex flex-col gap-4">
+                    <div className="overflow-x-auto rounded-lg border" style={{ borderColor: 'var(--input-border)' }}>
+                      <table className="w-full text-xs border-collapse">
+                        <thead>
+                          <tr style={{ backgroundColor: 'var(--control-bg)' }}>
+                            <th
+                              className="px-3 py-2 text-left font-semibold uppercase tracking-wide text-[9px] border-b"
+                              style={{ borderColor: 'var(--input-border)', color: 'var(--text-muted)' }}
+                            />
+                            {['Commitment', 'Actual'].map((h) => (
+                              <th
+                                key={h}
+                                className="px-3 py-2 text-left font-semibold uppercase tracking-wide text-[9px] border-b"
+                                style={{ borderColor: 'var(--input-border)', color: 'var(--text-muted)' }}
+                              >
+                                {h}
+                              </th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <tr>
+                            <td className="px-3 py-2 border-b font-semibold" style={{ borderColor: 'var(--input-border)', color: 'var(--text)' }}>
+                              Investment
+                            </td>
+                            <td className="px-2 py-1.5 border-b" style={{ borderColor: 'var(--input-border)' }}>
+                              <input
+                                className="app-form-control app-form-control-sm w-full"
+                                inputMode="decimal"
+                                value={form.investment_commitment}
+                                disabled={loadingLocation}
+                                onChange={(e) => setForm((p) => ({ ...p, investment_commitment: e.target.value }))}
+                              />
+                            </td>
+                            <td className="px-2 py-1.5 border-b" style={{ borderColor: 'var(--input-border)' }}>
+                              <input
+                                className="app-form-control app-form-control-sm w-full"
+                                inputMode="decimal"
+                                value={form.investment_actual}
+                                disabled={loadingLocation}
+                                onChange={(e) => setForm((p) => ({ ...p, investment_actual: e.target.value }))}
+                              />
+                            </td>
+                          </tr>
+                          <tr>
+                            <td className="px-3 py-2 font-semibold" style={{ color: 'var(--text)' }}>No. Employee</td>
+                            <td className="px-2 py-1.5">
+                              <input
+                                className="app-form-control app-form-control-sm w-full"
+                                inputMode="decimal"
+                                value={form.employee_commitment}
+                                disabled={loadingLocation}
+                                onChange={(e) => setForm((p) => ({ ...p, employee_commitment: e.target.value }))}
+                              />
+                            </td>
+                            <td className="px-2 py-1.5">
+                              <input
+                                className="app-form-control app-form-control-sm w-full"
+                                inputMode="decimal"
+                                value={form.employee_actual}
+                                disabled={loadingLocation}
+                                onChange={(e) => setForm((p) => ({ ...p, employee_actual: e.target.value }))}
+                              />
+                            </td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                    <SectionSaveBar
+                      label="Save Investment"
+                      isEditing={Boolean(editing)}
+                      dirty={sectionDirty.investment}
+                      saving={savingSection === 'investment'}
+                      disabled={saving || loadingLocation}
+                      onSave={() => void saveSection('investment')}
+                    />
+                  </div>
                 ) : activeProfileTab !== 'Profile' ? (
                   <div className="text-xs text-secondary py-8 text-center">{activeProfileTab} — coming soon.</div>
                 ) : (
@@ -1588,9 +1705,9 @@ export function ProponentsManagement() {
                   <thead>
                     <tr style={{ backgroundColor: 'var(--control-bg)' }}>
                       {['No.', 'Year', 'Date From', 'Date To', 'Type of Property', 'Area (SQM)', 'Rate/SQM/MO', 'Currency', 'MGL/MO', 'Currency'].map(
-                        (h) => (
+                        (h, i) => (
                           <th
-                            key={h}
+                            key={`${h}-${i}`}
                             className="px-2 py-1.5 text-left font-semibold uppercase tracking-wide text-[9px] border-b"
                             style={{ borderColor: 'var(--input-border)', color: 'var(--text-muted)' }}
                           >

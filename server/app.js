@@ -15,6 +15,8 @@ const AccountOfficer = require("./models/AccountOfficer");
 const Stockholder = require("./models/Stockholder");
 const ContactPerson = require("./models/ContactPerson");
 const Signatory = require("./models/Signatory");
+const FinancialTerms = require("./models/FinancialTerms");
+const Investment = require("./models/Investment");
 const Building = require("./models/Building");
 const LandUse = require("./models/LandUse");
 const Contract = require("./models/Contract");
@@ -111,6 +113,8 @@ initializeDatabase()
       ["stockholder", () => Stockholder.ensureSchema()], // creates proponents first (FK)
       ["contact person", () => ContactPerson.ensureSchema()],
       ["signatory", () => Signatory.ensureSchema()],
+      ["financial terms (+ legacy column carry-over)", () => FinancialTerms.ensureSchema()],
+      ["investment", () => Investment.ensureSchema()],
       ["building", () => Building.ensureSchema()],
       ["land use", () => LandUse.ensureSchema()],
     ];

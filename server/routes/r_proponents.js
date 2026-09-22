@@ -62,6 +62,7 @@ router.put("/:id", requireMenuAccess(MENU_KEY, "edit"), proponentsController.upd
 router.put("/:id/stockholders", requireMenuAccess(MENU_KEY, "edit"), proponentsController.saveStockholders);
 router.put("/:id/contacts", requireMenuAccess(MENU_KEY, "edit"), proponentsController.saveContacts);
 router.put("/:id/properties", requireMenuAccess(MENU_KEY, "edit"), proponentsController.saveProperties);
+router.put("/:id/investment", requireMenuAccess(MENU_KEY, "edit"), proponentsController.saveInvestment);
 router.patch("/:id/deactivate", requireMenuAccess(MENU_KEY, "delete"), proponentsController.deactivate);
 router.patch("/:id/reactivate", requireMenuAccess(MENU_KEY, "edit"), proponentsController.reactivate);
 

@@ -8,8 +8,11 @@ const LandUse = require("./LandUse");
 const Stockholder = () => require("./Stockholder");
 const ContactPerson = () => require("./ContactPerson");
 const Signatory = () => require("./Signatory");
+const FinancialTerms = () => require("./FinancialTerms");
+const Investment = () => require("./Investment");
 
 function toInt(v) {
+  if (v === null || v === undefined || v === "") return null; // Number(null) is 0, not "no value"
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
 }
@@ -187,27 +190,18 @@ async function ensureSchema() {
         paid_up_capital_currency NVARCHAR(10) NULL,
         CONSTRAINT FK_proponents_account_officer FOREIGN KEY (account_officer_id) REFERENCES dbo.users(id);
   `);
-  // Rest of the legacy BRIDGE "Profile" tab: business activities plus the
-  // three Months MGL/Amount/Currency blocks (Advance Lease Payment,
-  // Security Deposit, Performance Security). "Months MGL" is free text, not
-  // a number — the legacy form itself shows values like "15 CALENDAR DAYS
-  // FROM RECEIPT OF BILLING" in that field.
+  // Rest of the legacy BRIDGE "Profile" tab: business activities free text.
+  // The three Months MGL/Amount/Currency blocks (Advance Lease Payment,
+  // Security Deposit, Performance Security) used to be nine columns here too
+  // — they now live in dbo.proponent_financial_terms instead (see
+  // FinancialTerms.js), one row per category instead of three columns each,
+  // so a future fourth category doesn't need new columns on this table.
   await updateSchema(`
     IF NOT EXISTS (
       SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
       WHERE TABLE_NAME = 'proponents' AND COLUMN_NAME = 'business_activities'
     )
-      ALTER TABLE dbo.proponents ADD
-        business_activities NVARCHAR(MAX) NULL,
-        advance_lease_payment_months NVARCHAR(255) NULL,
-        advance_lease_payment_amount NVARCHAR(50) NULL,
-        advance_lease_payment_currency NVARCHAR(10) NULL,
-        security_deposit_months NVARCHAR(255) NULL,
-        security_deposit_amount NVARCHAR(50) NULL,
-        security_deposit_currency NVARCHAR(10) NULL,
-        performance_security_months NVARCHAR(255) NULL,
-        performance_security_amount NVARCHAR(50) NULL,
-        performance_security_currency NVARCHAR(10) NULL;
+      ALTER TABLE dbo.proponents ADD business_activities NVARCHAR(MAX) NULL;
   `);
   // The legacy "Profile" tab's property schedule table (No./Year/Date
   // From--To/Type of Property/Area/Rate/MGL, add-a-row via the +/- buttons)
@@ -268,6 +262,8 @@ async function ensureChildTables() {
   await Stockholder().ensureSchema();
   await ContactPerson().ensureSchema();
   await Signatory().ensureSchema();
+  await FinancialTerms().ensureSchema();
+  await Investment().ensureSchema();
 }
 
 /** Replaces every property-schedule row for a proponent with the given list
@@ -418,15 +414,6 @@ async function getProponentById(id) {
       p.paid_up_capital,
       p.paid_up_capital_currency,
       p.business_activities,
-      p.advance_lease_payment_months,
-      p.advance_lease_payment_amount,
-      p.advance_lease_payment_currency,
-      p.security_deposit_months,
-      p.security_deposit_amount,
-      p.security_deposit_currency,
-      p.performance_security_months,
-      p.performance_security_amount,
-      p.performance_security_currency,
       p.created_by,
       p.updated_by,
       p.created_at,
@@ -463,10 +450,12 @@ async function getProponentById(id) {
   const p = rows?.[0] || null;
   if (!p) return null;
   const properties = await getProponentProperties(id);
-  const [stockholders, contact_persons, signatories] = await Promise.all([
+  const [stockholders, contact_persons, signatories, financialTerms, investment] = await Promise.all([
     Stockholder().listForProponent(id),
     ContactPerson().listForProponent(id),
     Signatory().listForProponent(id),
+    FinancialTerms().getForProponent(id),
+    Investment().getForProponent(id),
   ]);
   return {
     id: p.id,
@@ -500,15 +489,8 @@ async function getProponentById(id) {
     paid_up_capital: p.paid_up_capital ?? null,
     paid_up_capital_currency: p.paid_up_capital_currency ?? null,
     business_activities: p.business_activities ?? null,
-    advance_lease_payment_months: p.advance_lease_payment_months ?? null,
-    advance_lease_payment_amount: p.advance_lease_payment_amount ?? null,
-    advance_lease_payment_currency: p.advance_lease_payment_currency ?? null,
-    security_deposit_months: p.security_deposit_months ?? null,
-    security_deposit_amount: p.security_deposit_amount ?? null,
-    security_deposit_currency: p.security_deposit_currency ?? null,
-    performance_security_months: p.performance_security_months ?? null,
-    performance_security_amount: p.performance_security_amount ?? null,
-    performance_security_currency: p.performance_security_currency ?? null,
+    ...financialTerms,
+    ...investment,
     start_term: p.start_term ?? null,
     end_term: p.end_term ?? null,
     lease_term: formatLeaseTerm(p.start_term, p.end_term),
@@ -631,6 +613,10 @@ async function createProponent({
   performance_security_months,
   performance_security_amount,
   performance_security_currency,
+  investment_commitment,
+  investment_actual,
+  employee_commitment,
+  employee_actual,
   properties,
   land_use_id,
   stockholders,
@@ -661,9 +647,6 @@ async function createProponent({
          authorized_capital,authorized_capital_currency,subscribed_capital,subscribed_capital_currency,
          paid_up_capital,paid_up_capital_currency,
          business_activities,
-         advance_lease_payment_months,advance_lease_payment_amount,advance_lease_payment_currency,
-         security_deposit_months,security_deposit_amount,security_deposit_currency,
-         performance_security_months,performance_security_amount,performance_security_currency,
          land_use_id,
          ref_no,created_by,updated_by,created_at,updated_at,is_active)
       OUTPUT INSERTED.id
@@ -674,11 +657,8 @@ async function createProponent({
          @param19,@param20,@param21,@param22,
          @param23,@param24,
          @param25,
-         @param26,@param27,@param28,
-         @param29,@param30,@param31,
-         @param32,@param33,@param34,
-         @param35,@param36,
-         @param37,NULL,GETDATE(),NULL,@param38)
+         @param26,
+         @param27,@param28,NULL,GETDATE(),NULL,@param29)
       `,
       [
         userId, business_name, registration_no, encryptValue(tin), address, contact_no, location ?? null,
@@ -687,9 +667,6 @@ async function createProponent({
         authorized_capital ?? null, authorized_capital_currency ?? null, subscribed_capital ?? null, subscribed_capital_currency ?? null,
         paid_up_capital ?? null, paid_up_capital_currency ?? null,
         business_activities ?? null,
-        advance_lease_payment_months ?? null, advance_lease_payment_amount ?? null, advance_lease_payment_currency ?? null,
-        security_deposit_months ?? null, security_deposit_amount ?? null, security_deposit_currency ?? null,
-        performance_security_months ?? null, performance_security_amount ?? null, performance_security_currency ?? null,
         toInt(land_use_id),
         refNo, createdBy, active,
       ]
@@ -699,6 +676,33 @@ async function createProponent({
     await Stockholder().syncForProponent(tx, insertedId, stockholders, createdBy);
     await ContactPerson().syncForProponent(tx, insertedId, contact_persons, createdBy);
     await Signatory().syncForProponent(tx, insertedId, signatories, createdBy);
+    await FinancialTerms().upsertForProponent(
+      tx,
+      insertedId,
+      {
+        advance_lease_payment_months,
+        advance_lease_payment_amount,
+        advance_lease_payment_currency,
+        security_deposit_months,
+        security_deposit_amount,
+        security_deposit_currency,
+        performance_security_months,
+        performance_security_amount,
+        performance_security_currency,
+      },
+      createdBy
+    );
+    await Investment().upsertForProponent(
+      tx,
+      insertedId,
+      {
+        investment_commitment,
+        investment_actual,
+        employee_commitment,
+        employee_actual,
+      },
+      createdBy
+    );
     return insertedId;
   });
 
@@ -743,6 +747,10 @@ async function updateProponent(
     performance_security_months,
     performance_security_amount,
     performance_security_currency,
+    investment_commitment,
+    investment_actual,
+    employee_commitment,
+    employee_actual,
     properties,
     land_use_id,
     stockholders,
@@ -787,15 +795,6 @@ async function updateProponent(
   if (paid_up_capital !== undefined) pushSet("paid_up_capital = ?", paid_up_capital);
   if (paid_up_capital_currency !== undefined) pushSet("paid_up_capital_currency = ?", paid_up_capital_currency);
   if (business_activities !== undefined) pushSet("business_activities = ?", business_activities);
-  if (advance_lease_payment_months !== undefined) pushSet("advance_lease_payment_months = ?", advance_lease_payment_months);
-  if (advance_lease_payment_amount !== undefined) pushSet("advance_lease_payment_amount = ?", advance_lease_payment_amount);
-  if (advance_lease_payment_currency !== undefined) pushSet("advance_lease_payment_currency = ?", advance_lease_payment_currency);
-  if (security_deposit_months !== undefined) pushSet("security_deposit_months = ?", security_deposit_months);
-  if (security_deposit_amount !== undefined) pushSet("security_deposit_amount = ?", security_deposit_amount);
-  if (security_deposit_currency !== undefined) pushSet("security_deposit_currency = ?", security_deposit_currency);
-  if (performance_security_months !== undefined) pushSet("performance_security_months = ?", performance_security_months);
-  if (performance_security_amount !== undefined) pushSet("performance_security_amount = ?", performance_security_amount);
-  if (performance_security_currency !== undefined) pushSet("performance_security_currency = ?", performance_security_currency);
   if (land_use_id !== undefined) pushSet("land_use_id = ?", toInt(land_use_id));
   if (is_active !== undefined) pushSet("is_active = ?", is_active ? 1 : 0);
 
@@ -815,6 +814,33 @@ async function updateProponent(
     await Stockholder().syncForProponent(tx, id, stockholders, updatedBy);
     await ContactPerson().syncForProponent(tx, id, contact_persons, updatedBy);
     await Signatory().syncForProponent(tx, id, signatories, updatedBy);
+    await FinancialTerms().upsertForProponent(
+      tx,
+      id,
+      {
+        advance_lease_payment_months,
+        advance_lease_payment_amount,
+        advance_lease_payment_currency,
+        security_deposit_months,
+        security_deposit_amount,
+        security_deposit_currency,
+        performance_security_months,
+        performance_security_amount,
+        performance_security_currency,
+      },
+      updatedBy
+    );
+    await Investment().upsertForProponent(
+      tx,
+      id,
+      {
+        investment_commitment,
+        investment_actual,
+        employee_commitment,
+        employee_actual,
+      },
+      updatedBy
+    );
   });
 
   return await getProponentById(id);
@@ -956,11 +982,20 @@ async function saveProperties(id, properties) {
   return { properties: await getProponentProperties(id) };
 }
 
+async function saveInvestment(id, fields, actorId) {
+  await ensureSchema();
+  await ensureChildTables();
+  if (!(await proponentExists(id))) return null;
+  await runInTransaction((tx) => Investment().upsertForProponent(tx, id, fields, actorId));
+  return Investment().getForProponent(id);
+}
+
 module.exports = {
   ensureSchema,
   saveStockholders,
   saveContacts,
   saveProperties,
+  saveInvestment,
   listProponents,
   listProponentsForLocatorList,
   getProponentById,

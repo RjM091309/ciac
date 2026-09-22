@@ -404,6 +404,10 @@ exports.create = async (req, res) => {
       performance_security_months,
       performance_security_amount,
       performance_security_currency,
+      investment_commitment,
+      investment_actual,
+      employee_commitment,
+      employee_actual,
       properties,
       land_use_id,
       stockholders,
@@ -453,6 +457,10 @@ exports.create = async (req, res) => {
       performance_security_months,
       performance_security_amount,
       performance_security_currency,
+      investment_commitment,
+      investment_actual,
+      employee_commitment,
+      employee_actual,
       properties,
       land_use_id: landUseId,
       stockholders,
@@ -513,6 +521,26 @@ exports.saveProperties = sectionHandler("properties", {
   save: (id, b) => Proponent.saveProperties(id, b.properties),
 });
 
+exports.saveInvestment = sectionHandler("investment", {
+  validate: (b) =>
+    ["investment_commitment", "investment_actual", "employee_commitment", "employee_actual"].some(
+      (k) => b[k] !== undefined
+    )
+      ? null
+      : "at least one investment field is required",
+  save: (id, b, actor) =>
+    Proponent.saveInvestment(
+      id,
+      {
+        investment_commitment: b.investment_commitment,
+        investment_actual: b.investment_actual,
+        employee_commitment: b.employee_commitment,
+        employee_actual: b.employee_actual,
+      },
+      actor
+    ),
+});
+
 exports.update = async (req, res) => {
   try {
     const id = Number(req.params.id);
@@ -554,6 +582,10 @@ exports.update = async (req, res) => {
       performance_security_months,
       performance_security_amount,
       performance_security_currency,
+      investment_commitment,
+      investment_actual,
+      employee_commitment,
+      employee_actual,
       properties,
       land_use_id,
       stockholders,
@@ -611,6 +643,10 @@ exports.update = async (req, res) => {
       performance_security_months,
       performance_security_amount,
       performance_security_currency,
+      investment_commitment,
+      investment_actual,
+      employee_commitment,
+      employee_actual,
       properties,
       land_use_id: landUseId,
       stockholders,
