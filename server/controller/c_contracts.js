@@ -1,4 +1,5 @@
 const Contract = require("../models/Contract");
+const AuditLog = require("../models/AuditLog");
 
 exports.getByApplicationId = async (req, res) => {
   try {
@@ -52,6 +53,15 @@ exports.create = async (req, res) => {
     });
 
     if (!row) return res.status(500).json({ success: false, message: "Failed to create contract" });
+    await AuditLog.record({
+      actorId: req.user?.id,
+      actorUsername: req.user?.username,
+      action: "CONTRACT_CREATED",
+      entityType: "contract",
+      entityId: row?.id,
+      details: { contract_no: row?.contract_no },
+      ipAddress: req.ip,
+    });
     return res.status(201).json({ success: true, data: row });
   } catch (error) {
     console.error("Create contract error:", error);
@@ -82,6 +92,15 @@ exports.update = async (req, res) => {
     });
 
     if (!row) return res.status(404).json({ success: false, message: "Contract not found" });
+    await AuditLog.record({
+      actorId: req.user?.id,
+      actorUsername: req.user?.username,
+      action: "CONTRACT_UPDATED",
+      entityType: "contract",
+      entityId: id,
+      details: { contract_no: row?.contract_no },
+      ipAddress: req.ip,
+    });
     return res.json({ success: true, data: row });
   } catch (error) {
     console.error("Update contract error:", error);

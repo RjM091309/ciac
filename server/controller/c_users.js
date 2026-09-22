@@ -264,7 +264,7 @@ exports.update = async (req, res) => {
       action: password ? "USER_PASSWORD_RESET" : "USER_UPDATED",
       entityType: "user",
       entityId: id,
-      details: { fields: Object.keys(req.body || {}) },
+      details: { username: row?.username, fields: Object.keys(req.body || {}) },
       ipAddress: req.ip,
     });
 
@@ -301,6 +301,7 @@ exports.deactivate = async (req, res) => {
       action: "USER_DEACTIVATED",
       entityType: "user",
       entityId: id,
+      details: { username: row?.username },
       ipAddress: req.ip,
     });
     return res.json({ success: true, data: row });
@@ -323,6 +324,7 @@ exports.reactivate = async (req, res) => {
       action: "USER_REACTIVATED",
       entityType: "user",
       entityId: id,
+      details: { username: row?.username },
       ipAddress: req.ip,
     });
     return res.json({ success: true, data: row });
@@ -346,6 +348,7 @@ exports.suspend = async (req, res) => {
       action: "USER_SUSPENDED",
       entityType: "user",
       entityId: id,
+      details: { username: row?.username },
       ipAddress: req.ip,
     });
     return res.json({ success: true, data: row });
@@ -368,6 +371,7 @@ exports.unsuspend = async (req, res) => {
       action: "USER_UNSUSPENDED",
       entityType: "user",
       entityId: id,
+      details: { username: row?.username },
       ipAddress: req.ip,
     });
     return res.json({ success: true, data: row });
@@ -392,6 +396,7 @@ exports.revokeSessions = async (req, res) => {
       action: "USER_SESSIONS_REVOKED",
       entityType: "user",
       entityId: id,
+      details: { username: row?.username },
       ipAddress: req.ip,
     });
     return res.json({ success: true, data: row });
@@ -433,7 +438,7 @@ exports.resetPassword = async (req, res) => {
       action: "USER_PASSWORD_RESET",
       entityType: "user",
       entityId: id,
-      details: { emailSent: mailResult.sent },
+      details: { username: user?.username, emailSent: mailResult.sent },
       ipAddress: req.ip,
     });
     ActivityLog.record({
@@ -481,6 +486,7 @@ exports.approve = async (req, res) => {
       action: "USER_APPROVED",
       entityType: "user",
       entityId: id,
+      details: { username: user?.username, business_name: approvedProponent?.business_name },
       ipAddress: req.ip,
     });
     ActivityLog.record({
@@ -530,7 +536,7 @@ exports.reject = async (req, res) => {
       action: "USER_REJECTED",
       entityType: "user",
       entityId: id,
-      details: note ? { note } : undefined,
+      details: { username: user?.username, note: note || undefined },
       ipAddress: req.ip,
     });
     ActivityLog.record({
@@ -613,6 +619,7 @@ exports.resetTotp = async (req, res) => {
       action: "USER_TOTP_RESET",
       entityType: "user",
       entityId: id,
+      details: { username: record?.username },
       ipAddress: req.ip,
     });
     return res.json({ success: true, data: { enabled: false } });

@@ -6,6 +6,7 @@ const Workflow = require("../models/ApplicationWorkflow");
 const User = require("../models/User");
 const Contract = require("../models/Contract");
 const ComplianceType = require("../models/ComplianceType");
+const AuditLog = require("../models/AuditLog");
 const { renderPermitCertificate } = require("../lib/permitCertificate");
 const { STORAGE_ROOT, relativeStoragePath, resolveStoredPath } = require("../lib/fileStorage");
 
@@ -89,6 +90,15 @@ exports.create = async (req, res) => {
     let row = await Permit.create({ ...req.body, created_by: req.user?.id ?? null });
     await generateAndAttachCertificate(row);
     row = await Permit.getById(row.id);
+    await AuditLog.record({
+      actorId: req.user?.id,
+      actorUsername: req.user?.username,
+      action: "PERMIT_CREATED",
+      entityType: "permit",
+      entityId: row?.id,
+      details: { permit_no: row?.permit_no, permit_type: row?.permit_type },
+      ipAddress: req.ip,
+    });
     return res.status(201).json({ success: true, data: row });
   } catch (error) {
     console.error("Create permit error:", error);
@@ -106,6 +116,15 @@ exports.update = async (req, res) => {
     // (dates, permit no, issuing authority, etc. may have just changed).
     await generateAndAttachCertificate(row);
     row = await Permit.getById(id);
+    await AuditLog.record({
+      actorId: req.user?.id,
+      actorUsername: req.user?.username,
+      action: "PERMIT_UPDATED",
+      entityType: "permit",
+      entityId: id,
+      details: { permit_no: row?.permit_no, permit_type: row?.permit_type, fields: Object.keys(req.body || {}) },
+      ipAddress: req.ip,
+    });
     return res.json({ success: true, data: row });
   } catch (error) {
     console.error("Update permit error:", error);
@@ -119,6 +138,15 @@ exports.deactivate = async (req, res) => {
     if (!Number.isFinite(id)) return res.status(400).json({ success: false, message: "Invalid id" });
     const row = await Permit.deactivate(id, req.user?.id ?? null);
     if (!row) return res.status(404).json({ success: false, message: "Permit not found" });
+    await AuditLog.record({
+      actorId: req.user?.id,
+      actorUsername: req.user?.username,
+      action: "PERMIT_DEACTIVATED",
+      entityType: "permit",
+      entityId: id,
+      details: { permit_no: row?.permit_no },
+      ipAddress: req.ip,
+    });
     return res.json({ success: true, data: row });
   } catch (error) {
     console.error("Deactivate permit error:", error);

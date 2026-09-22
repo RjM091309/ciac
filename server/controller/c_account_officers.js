@@ -112,7 +112,7 @@ exports.update = async (req, res) => {
       department_id,
     });
     if (!row) return res.status(404).json({ success: false, message: "Account officer not found" });
-    await audit(req, "USER_UPDATED", id, { fields: Object.keys(req.body || {}), via: "account-officers" });
+    await audit(req, "USER_UPDATED", id, { username: row?.username, fields: Object.keys(req.body || {}), via: "account-officers" });
     return res.json({ success: true, data: row });
   } catch (error) {
     return fail(res, "Update account officer", error);
@@ -125,7 +125,7 @@ exports.deactivate = async (req, res) => {
     if (!Number.isFinite(id)) return res.status(400).json({ success: false, message: "Invalid id" });
     const row = await AccountOfficer.deactivateAccountOfficer(id);
     if (!row) return res.status(404).json({ success: false, message: "Account officer not found" });
-    await audit(req, "USER_DEACTIVATED", id);
+    await audit(req, "USER_DEACTIVATED", id, { username: row?.username });
     return res.json({ success: true, data: row });
   } catch (error) {
     return fail(res, "Deactivate account officer", error);
@@ -138,7 +138,7 @@ exports.reactivate = async (req, res) => {
     if (!Number.isFinite(id)) return res.status(400).json({ success: false, message: "Invalid id" });
     const row = await AccountOfficer.reactivateAccountOfficer(id);
     if (!row) return res.status(404).json({ success: false, message: "Account officer not found" });
-    await audit(req, "USER_REACTIVATED", id);
+    await audit(req, "USER_REACTIVATED", id, { username: row?.username });
     return res.json({ success: true, data: row });
   } catch (error) {
     return fail(res, "Reactivate account officer", error);

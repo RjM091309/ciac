@@ -1,6 +1,8 @@
 const fs = require("fs");
 const Approval = require("../models/ApprovalIssuance");
 const Contract = require("../models/Contract");
+const Assessment = require("../models/AssessmentEvaluation");
+const AuditLog = require("../models/AuditLog");
 const { resolveStoredPath } = require("../lib/fileStorage");
 
 function fail(res, error, label) {
@@ -89,6 +91,15 @@ exports.start = async (req, res) => {
     if (id === null) return undefined;
     const data = await Approval.startApproval(id, req.user?.id ?? null);
     if (!data) return res.status(404).json({ success: false, message: "Application not found" });
+    await AuditLog.record({
+      actorId: req.user?.id,
+      actorUsername: req.user?.username,
+      action: "APPROVAL_STARTED",
+      entityType: "application",
+      entityId: id,
+      details: { application_no: data?.approval?.application_no, proponent_name: data?.approval?.proponent_name },
+      ipAddress: req.ip,
+    });
     return res.json({ success: true, data });
   } catch (error) {
     return fail(res, error, "Start approval");
@@ -102,6 +113,15 @@ exports.reopen = async (req, res) => {
     if (id === null) return undefined;
     const data = await Approval.reopenApproval(id, req.user?.id ?? null);
     if (!data) return res.status(404).json({ success: false, message: "Application not found" });
+    await AuditLog.record({
+      actorId: req.user?.id,
+      actorUsername: req.user?.username,
+      action: "APPROVAL_REOPENED",
+      entityType: "application",
+      entityId: id,
+      details: { application_no: data?.approval?.application_no, proponent_name: data?.approval?.proponent_name },
+      ipAddress: req.ip,
+    });
     return res.json({ success: true, data });
   } catch (error) {
     return fail(res, error, "Reopen approval");
@@ -115,6 +135,26 @@ exports.actOnStep = async (req, res) => {
     const { action, remarks } = req.body || {};
     const data = await Approval.actOnStep(id, { action, remarks, actorId: req.user?.id ?? null });
     if (!data) return res.status(404).json({ success: false, message: "Approval step not found" });
+    const settledStatus = data?.approval?.approval_status;
+    await AuditLog.record({
+      actorId: req.user?.id,
+      actorUsername: req.user?.username,
+      action:
+        settledStatus === "APPROVED"
+          ? "APPLICATION_APPROVED"
+          : settledStatus === "DISAPPROVED"
+            ? "APPLICATION_DISAPPROVED"
+            : "APPROVAL_STEP_DECIDED",
+      entityType: "application",
+      entityId: data?.approval?.application_id,
+      details: {
+        application_no: data?.approval?.application_no,
+        proponent_name: data?.approval?.proponent_name,
+        step_action: action,
+        remarks: remarks || undefined,
+      },
+      ipAddress: req.ip,
+    });
     return res.json({ success: true, data });
   } catch (error) {
     return fail(res, error, "Act on approval step");
@@ -136,6 +176,15 @@ exports.endorseStep = async (req, res) => {
       actorId: req.user?.id ?? null,
     });
     if (!data) return res.status(404).json({ success: false, message: "Approval step not found" });
+    await AuditLog.record({
+      actorId: req.user?.id,
+      actorUsername: req.user?.username,
+      action: "APPROVAL_STEP_ENDORSED",
+      entityType: "application",
+      entityId: data?.approval?.application_id,
+      details: { application_no: data?.approval?.application_no, office, note: note || undefined },
+      ipAddress: req.ip,
+    });
     return res.json({ success: true, data });
   } catch (error) {
     return fail(res, error, "Endorse approval step");
@@ -149,6 +198,15 @@ exports.assignStep = async (req, res) => {
     const { user_id } = req.body || {};
     const data = await Approval.assignStep(id, user_id, req.user?.id ?? null);
     if (!data) return res.status(404).json({ success: false, message: "Approval step not found" });
+    await AuditLog.record({
+      actorId: req.user?.id,
+      actorUsername: req.user?.username,
+      action: "APPROVAL_STEP_ASSIGNED",
+      entityType: "application",
+      entityId: data?.approval?.application_id,
+      details: { application_no: data?.approval?.application_no },
+      ipAddress: req.ip,
+    });
     return res.json({ success: true, data });
   } catch (error) {
     return fail(res, error, "Assign approval step");
@@ -166,6 +224,15 @@ exports.addIssuance = async (req, res) => {
     }
     const row = await Approval.addIssuance(id, req.body || {}, req.user?.id ?? null);
     if (!row) return res.status(404).json({ success: false, message: "Application not found" });
+    await AuditLog.record({
+      actorId: req.user?.id,
+      actorUsername: req.user?.username,
+      action: "ISSUANCE_ADDED",
+      entityType: "application",
+      entityId: id,
+      details: { title: row?.title, doc_type: row?.doc_type, reference_no: row?.reference_no },
+      ipAddress: req.ip,
+    });
     return res.status(201).json({ success: true, data: row });
   } catch (error) {
     return fail(res, error, "Add issuance");
@@ -176,8 +243,18 @@ exports.deleteIssuance = async (req, res) => {
   try {
     const id = idParam(req, res);
     if (id === null) return undefined;
+    const before = await Approval.getIssuanceById(id);
     const ok = await Approval.deleteIssuance(id, req.user?.id ?? null);
     if (!ok) return res.status(404).json({ success: false, message: "Issuance not found" });
+    await AuditLog.record({
+      actorId: req.user?.id,
+      actorUsername: req.user?.username,
+      action: "ISSUANCE_DELETED",
+      entityType: "application",
+      entityId: before?.application_id,
+      details: { title: before?.title, doc_type: before?.doc_type },
+      ipAddress: req.ip,
+    });
     return res.json({ success: true });
   } catch (error) {
     return fail(res, error, "Delete issuance");
@@ -190,6 +267,15 @@ exports.saveContract = async (req, res) => {
     if (id === null) return undefined;
     const row = await Approval.saveContract(id, req.body || {}, req.user?.id ?? null);
     if (!row) return res.status(404).json({ success: false, message: "Application not found" });
+    await AuditLog.record({
+      actorId: req.user?.id,
+      actorUsername: req.user?.username,
+      action: "CONTRACT_SAVED",
+      entityType: "application",
+      entityId: id,
+      details: { contract_no: row?.contract_no },
+      ipAddress: req.ip,
+    });
     return res.json({ success: true, data: row });
   } catch (error) {
     return fail(res, error, "Save contract");
@@ -246,6 +332,15 @@ exports.addCharge = async (req, res) => {
     }
     const data = await Approval.addCharge(id, req.body || {}, req.user?.id ?? null);
     if (!data) return res.status(404).json({ success: false, message: "Application not found" });
+    await AuditLog.record({
+      actorId: req.user?.id,
+      actorUsername: req.user?.username,
+      action: "APPROVAL_CHARGE_ADDED",
+      entityType: "application",
+      entityId: id,
+      details: { description: String(req.body?.description ?? "").trim().slice(0, 200), amount: req.body?.amount },
+      ipAddress: req.ip,
+    });
     return res.status(201).json({ success: true, data });
   } catch (error) {
     return fail(res, error, "Add charge");
@@ -258,6 +353,15 @@ exports.updateCharge = async (req, res) => {
     if (id === null) return undefined;
     const data = await Approval.updateCharge(id, req.body || {}, req.user?.id ?? null);
     if (!data) return res.status(404).json({ success: false, message: "Charge not found" });
+    await AuditLog.record({
+      actorId: req.user?.id,
+      actorUsername: req.user?.username,
+      action: "APPROVAL_CHARGE_UPDATED",
+      entityType: "assessment_charge",
+      entityId: id,
+      details: { description: String(data?.description ?? "").trim().slice(0, 200), amount: data?.amount },
+      ipAddress: req.ip,
+    });
     return res.json({ success: true, data });
   } catch (error) {
     return fail(res, error, "Update charge");
@@ -268,8 +372,18 @@ exports.deleteCharge = async (req, res) => {
   try {
     const id = idParam(req, res);
     if (id === null) return undefined;
+    const before = await Assessment.getChargeById(id);
     const ok = await Approval.deleteCharge(id, req.user?.id ?? null);
     if (!ok) return res.status(404).json({ success: false, message: "Charge not found" });
+    await AuditLog.record({
+      actorId: req.user?.id,
+      actorUsername: req.user?.username,
+      action: "APPROVAL_CHARGE_DELETED",
+      entityType: "assessment_charge",
+      entityId: id,
+      details: { description: String(before?.description ?? "").trim().slice(0, 200) },
+      ipAddress: req.ip,
+    });
     return res.json({ success: true });
   } catch (error) {
     return fail(res, error, "Delete charge");
@@ -294,6 +408,15 @@ exports.createLevel = async (req, res) => {
       return res.status(400).json({ success: false, message: "name is required" });
     }
     const row = await Approval.createLevel({ level_no, name, role_hint, actorId: req.user?.id ?? null });
+    await AuditLog.record({
+      actorId: req.user?.id,
+      actorUsername: req.user?.username,
+      action: "APPROVAL_LEVEL_CREATED",
+      entityType: "approval_level",
+      entityId: row?.id,
+      details: { name: row?.name, level_no: row?.level_no },
+      ipAddress: req.ip,
+    });
     return res.status(201).json({ success: true, data: row });
   } catch (error) {
     return fail(res, error, "Create approval level");
@@ -306,6 +429,15 @@ exports.updateLevel = async (req, res) => {
     if (id === null) return undefined;
     const row = await Approval.updateLevel(id, req.body || {}, req.user?.id ?? null);
     if (!row) return res.status(404).json({ success: false, message: "Approval level not found" });
+    await AuditLog.record({
+      actorId: req.user?.id,
+      actorUsername: req.user?.username,
+      action: "APPROVAL_LEVEL_UPDATED",
+      entityType: "approval_level",
+      entityId: id,
+      details: { name: row?.name, level_no: row?.level_no },
+      ipAddress: req.ip,
+    });
     return res.json({ success: true, data: row });
   } catch (error) {
     return fail(res, error, "Update approval level");
@@ -316,8 +448,18 @@ exports.deleteLevel = async (req, res) => {
   try {
     const id = idParam(req, res);
     if (id === null) return undefined;
+    const before = await Approval.getLevelById(id);
     const ok = await Approval.deleteLevel(id, req.user?.id ?? null);
     if (!ok) return res.status(404).json({ success: false, message: "Approval level not found" });
+    await AuditLog.record({
+      actorId: req.user?.id,
+      actorUsername: req.user?.username,
+      action: "APPROVAL_LEVEL_DELETED",
+      entityType: "approval_level",
+      entityId: id,
+      details: { name: before?.name, level_no: before?.level_no },
+      ipAddress: req.ip,
+    });
     return res.json({ success: true });
   } catch (error) {
     return fail(res, error, "Delete approval level");

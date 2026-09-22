@@ -99,8 +99,15 @@ app.use((err, req, res, next) => {
 });
 
 const PORT = process.env.PORT || 3100;
+// Listen immediately so Vite's /api proxy is not ECONNREFUSED while SQL
+// connect/schema (or a 15s timeout) is still running.
+app.listen(PORT, () => {
+  console.log(`🚀 CIAC server running on http://localhost:${PORT}`);
+});
+
 initializeDatabase()
-  .then(async () => {
+  .then(async (pool) => {
+    if (!pool) return;
     // Every step is idempotent and independent: one failing must not stop the
     // rest from being created (the old single try/catch swallowed the first error
     // and silently skipped everything after it). Order matters only where noted.
@@ -128,10 +135,5 @@ initializeDatabase()
   })
   .catch(() => {
     // If DB is down, you can still view login page.
-  })
-  .finally(() => {
-    app.listen(PORT, () => {
-      console.log(`🚀 CIAC server running on http://localhost:${PORT}`);
-    });
   });
 

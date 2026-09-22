@@ -46,6 +46,117 @@ const ACTION_LABELS: Record<string, string> = {
   USER_PASSWORD_SELF_CHANGE: 'Password changed',
   PASSWORD_RESET_REQUESTED: 'Password reset requested',
   PASSWORD_RESET_VIA_EMAIL: 'Password reset via email',
+  // Locators / Proponents
+  PROPONENT_CREATED: 'Locator created',
+  PROPONENT_UPDATED: 'Locator updated',
+  PROPONENT_DEACTIVATED: 'Locator deactivated',
+  PROPONENT_REACTIVATED: 'Locator reactivated',
+  PROPONENT_CHANGE_APPROVED: 'Profile change approved',
+  PROPONENT_CHANGE_REJECTED: 'Profile change declined',
+  PROPONENT_SELF_SETUP: 'Locator set up own profile',
+  PROPONENT_CHANGE_REQUESTED: 'Locator requested profile change',
+  PROPONENT_STOCKHOLDERS_UPDATED: 'Stockholders updated',
+  PROPONENT_CONTACTS_UPDATED: 'Contacts updated',
+  PROPONENT_PROPERTIES_UPDATED: 'Properties updated',
+  PROPONENT_INVESTMENT_UPDATED: 'Investment info updated',
+  // Applications
+  APPLICATION_DRAFT_SAVED: 'Draft saved',
+  APPLICATION_SUBMITTED: 'Application submitted',
+  APPLICATION_RESUBMITTED: 'Application resubmitted',
+  APPLICATION_UPDATED: 'Application updated',
+  APPLICATION_DELETED: 'Draft deleted',
+  APPLICATION_STATUS_FORCED: 'Status changed (admin override)',
+  APPLICATION_APPROVED: 'Application approved',
+  APPLICATION_DISAPPROVED: 'Application disapproved',
+  DOCUMENT_UPLOADED: 'Document uploaded',
+  REQUIREMENT_VERIFIED: 'Requirement verified',
+  REQUIREMENT_REJECTED: 'Requirement rejected',
+  REQUIREMENT_STATUS_CHANGED: 'Requirement status changed',
+  // Assessment
+  ASSESSMENT_REOPENED: 'Assessment reopened',
+  ASSESSMENT_RECOMMENDATION_SUBMITTED: 'Recommendation submitted',
+  ASSESSMENT_FINDING_ADDED: 'Deficiency noted',
+  ASSESSMENT_EVALUATOR_ASSIGNED: 'Evaluator assigned',
+  ASSESSMENT_STAGE_CHANGED: 'Assessment stage changed',
+  ASSESSMENT_FINDING_UPDATED: 'Deficiency updated',
+  ASSESSMENT_FINDING_DELETED: 'Deficiency removed',
+  ASSESSMENT_CHARGE_ADDED: 'Charge added',
+  ASSESSMENT_CHARGE_UPDATED: 'Charge updated',
+  ASSESSMENT_CHARGE_DELETED: 'Charge removed',
+  REQUIREMENT_ADDED_ADHOC: 'Ad-hoc requirement added',
+  // Approval / Issuance
+  APPROVAL_REOPENED: 'Approval reopened',
+  APPROVAL_STARTED: 'Approval routing started',
+  APPROVAL_STEP_DECIDED: 'Approval level decided',
+  APPROVAL_STEP_ENDORSED: 'Approval level endorsed',
+  APPROVAL_STEP_ASSIGNED: 'Approval level assigned',
+  ISSUANCE_ADDED: 'Document issued',
+  ISSUANCE_DELETED: 'Issued document removed',
+  APPROVAL_CHARGE_ADDED: 'Charge added',
+  APPROVAL_CHARGE_UPDATED: 'Charge updated',
+  APPROVAL_CHARGE_DELETED: 'Charge removed',
+  APPROVAL_LEVEL_CREATED: 'Approval level configured',
+  APPROVAL_LEVEL_UPDATED: 'Approval level configuration updated',
+  APPROVAL_LEVEL_DELETED: 'Approval level retired',
+  CONTRACT_SAVED: 'Contract recorded',
+  CONTRACT_CREATED: 'Contract created',
+  CONTRACT_UPDATED: 'Contract updated',
+  // Permits
+  PERMIT_CREATED: 'Permit created',
+  PERMIT_UPDATED: 'Permit updated',
+  PERMIT_DEACTIVATED: 'Permit deactivated',
+  // Inspections
+  INSPECTION_SCHEDULED: 'Inspection scheduled',
+  INSPECTION_UPDATED: 'Inspection updated',
+  INSPECTION_INSPECTOR_ASSIGNED: 'Inspector assigned',
+  INSPECTION_STATUS_CHANGED: 'Inspection status changed',
+  INSPECTION_RESULT_RECORDED: 'Inspection result recorded',
+  INSPECTION_FAILED: 'Inspection failed',
+  INSPECTION_FINDING_ADDED: 'Deficiency noted',
+  INSPECTION_FINDING_UPDATED: 'Deficiency updated',
+  INSPECTION_FINDING_DELETED: 'Deficiency removed',
+  INSPECTION_ACTION_ADDED: 'Corrective action added',
+  INSPECTION_ACTION_UPDATED: 'Corrective action updated',
+  INSPECTION_ACTION_DELETED: 'Corrective action removed',
+  INSPECTION_DOCUMENT_ADDED: 'Document attached',
+  INSPECTION_DOCUMENT_DELETED: 'Document removed',
+  // File Maintenance (requirements catalog, categories, and lookup tables)
+  REQUIREMENT_CREATED: 'Requirement created',
+  REQUIREMENT_UPDATED: 'Requirement updated',
+  REQUIREMENT_DEACTIVATED: 'Requirement deactivated',
+  REQUIREMENT_REACTIVATED: 'Requirement reactivated',
+  REQUIREMENT_CATEGORY_CREATED: 'Requirement category created',
+  REQUIREMENT_CATEGORY_UPDATED: 'Requirement category updated',
+  REQUIREMENT_CATEGORY_DEACTIVATED: 'Requirement category deactivated',
+  REQUIREMENT_CATEGORY_REACTIVATED: 'Requirement category reactivated',
+  COMPLIANCE_TYPE_CREATED: 'Compliance type created',
+  COMPLIANCE_TYPE_UPDATED: 'Compliance type updated',
+  COMPLIANCE_TYPE_DEACTIVATED: 'Compliance type deactivated',
+  COMPLIANCE_TYPE_REACTIVATED: 'Compliance type reactivated',
+  INSPECTION_TYPE_CREATED: 'Inspection type created',
+  INSPECTION_TYPE_UPDATED: 'Inspection type updated',
+  INSPECTION_TYPE_DEACTIVATED: 'Inspection type deactivated',
+  INSPECTION_TYPE_REACTIVATED: 'Inspection type reactivated',
+  APPLICATION_TYPE_CREATED: 'Application type created',
+  APPLICATION_TYPE_UPDATED: 'Application type updated',
+  APPLICATION_TYPE_DEACTIVATED: 'Application type deactivated',
+  APPLICATION_TYPE_REACTIVATED: 'Application type reactivated',
+  DEPARTMENT_CREATED: 'Department created',
+  DEPARTMENT_UPDATED: 'Department updated',
+  DEPARTMENT_DEACTIVATED: 'Department deactivated',
+  DEPARTMENT_REACTIVATED: 'Department reactivated',
+  BUILDING_CREATED: 'Building created',
+  BUILDING_UPDATED: 'Building updated',
+  BUILDING_DEACTIVATED: 'Building deactivated',
+  BUILDING_REACTIVATED: 'Building reactivated',
+  LAND_USE_CREATED: 'Land use created',
+  LAND_USE_UPDATED: 'Land use updated',
+  LAND_USE_DEACTIVATED: 'Land use deactivated',
+  LAND_USE_REACTIVATED: 'Land use reactivated',
+  TYPE_OF_CONTRACT_CREATED: 'Type of contract created',
+  TYPE_OF_CONTRACT_UPDATED: 'Type of contract updated',
+  TYPE_OF_CONTRACT_DEACTIVATED: 'Type of contract deactivated',
+  TYPE_OF_CONTRACT_REACTIVATED: 'Type of contract reactivated',
 };
 
 const FIELD_LABELS: Record<string, string> = {
@@ -76,13 +187,101 @@ function joinList(items: string[]) {
   return `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`;
 }
 
+// Human word for each entity_type, shown in the Entity column ahead of the
+// real name — e.g. "locator" rather than the raw "proponent" table name.
+const ENTITY_TYPE_LABELS: Record<string, string> = {
+  user: 'user',
+  role: 'role',
+  role_sidebar_menu: 'role',
+  role_menu_crud: 'role',
+  role_dashboard_widgets: 'role',
+  proponent: 'locator',
+  application: 'application',
+  application_requirement: 'requirement',
+  assessment_finding: 'finding',
+  assessment_charge: 'charge',
+  inspection: 'inspection',
+  inspection_finding: 'finding',
+  inspection_action: 'corrective action',
+  permit: 'permit',
+  contract: 'contract',
+  approval_level: 'approval level',
+  requirement: 'requirement',
+  requirement_category: 'requirement category',
+  compliance_type: 'compliance type',
+  inspection_type: 'inspection type',
+  application_type: 'application type',
+  department: 'department',
+  building: 'building',
+  land_use: 'land use',
+  type_of_contract: 'type of contract',
+};
+
+// Which `details` field holds the real, human-readable name for each
+// entity_type — same payloads describeActivity() already reads, reused here
+// so the Entity column shows "locator \"Acme Corp\"" instead of a raw
+// "proponent #1175" foreign key.
+const ENTITY_NAME_FIELDS: Record<string, string[]> = {
+  user: ['username'],
+  role: ['name'],
+  role_sidebar_menu: ['name'],
+  role_menu_crud: ['name'],
+  role_dashboard_widgets: ['name'],
+  proponent: ['business_name'],
+  application: ['application_no'],
+  application_requirement: ['requirement_name'],
+  assessment_finding: ['description'],
+  assessment_charge: ['description'],
+  inspection: ['title'],
+  inspection_finding: ['description'],
+  inspection_action: ['action_required'],
+  permit: ['permit_no'],
+  contract: ['contract_no'],
+  approval_level: ['name'],
+  requirement: ['name', 'code'],
+  requirement_category: ['name'],
+  compliance_type: ['name', 'code'],
+  inspection_type: ['name', 'code'],
+  application_type: ['name', 'code'],
+  department: ['name', 'code'],
+  building: ['name'],
+  land_use: ['name'],
+  type_of_contract: ['name'],
+};
+
+/** Entity column text: the real name from `details` when available, falling
+ * back to the raw "#id" only when nothing more human was ever recorded
+ * (e.g. an old row from before that entity_type carried a name, or the
+ * target was hard-deleted and no longer resolvable). */
+function entityLabel(row: AuditLogRow): string {
+  const type = row.entity_type;
+  if (!type) return '—';
+  const d = (row.details || {}) as Record<string, unknown>;
+  const typeLabel = ENTITY_TYPE_LABELS[type] || humanizeKey(type);
+
+  const fields = ENTITY_NAME_FIELDS[type] || [];
+  for (const field of fields) {
+    const value = d[field];
+    if (typeof value === 'string' && value.trim()) {
+      return `${typeLabel} "${value.trim()}"`;
+    }
+  }
+
+  return row.entity_id != null ? `${typeLabel} #${row.entity_id}` : typeLabel;
+}
+
 /** Plain-language description of what the actor did, built from the action
  * code plus its stored details — so reviewers never have to read raw JSON. */
 function describeActivity(row: AuditLogRow): string {
   const d = (row.details || {}) as Record<string, unknown>;
+  // Prefer a real, human name over the raw database id — the id is still
+  // shown in the Entity column, but Details should read like something a
+  // reviewer recognizes, not a foreign key.
+  const usernameHint = typeof d.username === 'string' && d.username ? d.username : null;
+  const roleNameHint = typeof d.name === 'string' && d.name ? d.name : null;
   const target = row.entity_id != null ? `#${row.entity_id}` : '';
-  const user = `user ${target}`.trim();
-  const role = `role ${target}`.trim();
+  const user = usernameHint ? `user "${usernameHint}"` : `user ${target}`.trim();
+  const role = roleNameHint ? `role "${roleNameHint}"` : `role ${target}`.trim();
 
   switch (row.action) {
     case 'LOGIN_SUCCESS':
@@ -135,29 +334,214 @@ function describeActivity(row: AuditLogRow): string {
       return 'Set a new password using the emailed reset link';
     case 'ROLE_CREATED':
       return d.name ? `Created role "${String(d.name)}"` : 'Created a role';
-    case 'ROLE_UPDATED':
-      return `Updated ${role}`;
+    case 'ROLE_UPDATED': {
+      const prev = typeof d.previousName === 'string' && d.previousName ? d.previousName : null;
+      return prev ? `Renamed role "${prev}" to "${roleNameHint}"` : `Updated ${role}`;
+    }
     case 'ROLE_DEACTIVATED':
       return `Retired ${role}`;
     case 'ROLE_REACTIVATED':
       return `Restored ${role}`;
     case 'PERMISSIONS_CHANGED': {
       const scope = PERMISSION_SCOPES[row.entity_type || ''] || 'permissions';
-      return `Changed ${scope} for ${role}`;
+      const count = typeof d.menuCount === 'number' ? d.menuCount : typeof d.widgetCount === 'number' ? d.widgetCount : null;
+      return count != null ? `Changed ${scope} for ${role} (${count} entries)` : `Changed ${scope} for ${role}`;
     }
+
+    // --- Locators / Proponents ---
+    case 'PROPONENT_CREATED':
+      return d.business_name ? `Added locator "${String(d.business_name)}"` : 'Added a locator';
+    case 'PROPONENT_UPDATED':
+      return d.business_name ? `Updated locator "${String(d.business_name)}"` : 'Updated a locator';
+    case 'PROPONENT_DEACTIVATED':
+      return d.business_name ? `Deactivated locator "${String(d.business_name)}"` : 'Deactivated a locator';
+    case 'PROPONENT_REACTIVATED':
+      return d.business_name ? `Reactivated locator "${String(d.business_name)}"` : 'Reactivated a locator';
+    case 'PROPONENT_CHANGE_APPROVED':
+      return d.business_name ? `Approved profile changes for "${String(d.business_name)}"` : 'Approved a profile change request';
+    case 'PROPONENT_CHANGE_REJECTED':
+      return d.remarks
+        ? `Declined profile changes for "${String(d.business_name ?? '')}" — "${String(d.remarks)}"`
+        : `Declined profile changes for "${String(d.business_name ?? '')}"`;
+    case 'PROPONENT_SELF_SETUP':
+      return d.business_name ? `Set up business profile "${String(d.business_name)}"` : 'Set up their business profile';
+    case 'PROPONENT_CHANGE_REQUESTED': {
+      const fields = Array.isArray(d.fields) ? (d.fields as string[]) : [];
+      const labels = fields.map((f) => FIELD_LABELS[f] || humanizeKey(f));
+      return labels.length
+        ? `Requested changes to "${String(d.business_name ?? '')}": ${joinList(labels)}`
+        : `Requested profile changes for "${String(d.business_name ?? '')}"`;
+    }
+    case 'PROPONENT_STOCKHOLDERS_UPDATED':
+      return `Updated stockholders for "${String(d.business_name ?? '')}"`;
+    case 'PROPONENT_CONTACTS_UPDATED':
+      return `Updated contacts/signatories for "${String(d.business_name ?? '')}"`;
+    case 'PROPONENT_PROPERTIES_UPDATED':
+      return `Updated property schedule for "${String(d.business_name ?? '')}"`;
+    case 'PROPONENT_INVESTMENT_UPDATED':
+      return `Updated investment info for "${String(d.business_name ?? '')}"`;
+
+    // --- Applications ---
+    case 'APPLICATION_DRAFT_SAVED':
+      return `Saved draft application ${String(d.application_no ?? '')} for ${String(d.proponent_name ?? '')}`.trim();
+    case 'APPLICATION_SUBMITTED':
+      return `Filed application ${String(d.application_no ?? '')} for ${String(d.proponent_name ?? '')}`.trim();
+    case 'APPLICATION_RESUBMITTED':
+      return `Resubmitted application ${String(d.application_no ?? '')} for ${String(d.proponent_name ?? '')}`.trim();
+    case 'APPLICATION_UPDATED':
+      return `Updated application ${String(d.application_no ?? '')}`.trim();
+    case 'APPLICATION_DELETED':
+      return `Deleted draft application ${String(d.application_no ?? '')}`.trim();
+    case 'APPLICATION_STATUS_FORCED':
+      return `Forced application ${String(d.application_no ?? '')} to ${String(d.to_status ?? '')}${d.remarks ? ` — "${String(d.remarks)}"` : ''}`;
+    case 'DOCUMENT_UPLOADED':
+      return `Uploaded "${String(d.file_name ?? 'a document')}" to application ${String(d.application_no ?? '')}`.trim();
+    case 'REQUIREMENT_VERIFIED':
+      return `Verified requirement "${String(d.requirement_name ?? '')}"`;
+    case 'REQUIREMENT_REJECTED':
+      return d.remarks
+        ? `Rejected requirement "${String(d.requirement_name ?? '')}" — "${String(d.remarks)}"`
+        : `Rejected requirement "${String(d.requirement_name ?? '')}"`;
+    case 'REQUIREMENT_STATUS_CHANGED':
+      return `Updated requirement "${String(d.requirement_name ?? '')}"`;
+
+    // --- Assessment ---
+    case 'ASSESSMENT_REOPENED':
+      return `Reopened assessment for ${String(d.application_no ?? '')} (${String(d.proponent_name ?? '')})`;
+    case 'ASSESSMENT_RECOMMENDATION_SUBMITTED':
+      return `Recommended "${String(d.recommendation ?? '')}" for ${String(d.application_no ?? '')}${d.summary ? ` — "${String(d.summary)}"` : ''}`;
+    case 'ASSESSMENT_FINDING_ADDED':
+      return `Noted a deficiency: "${String(d.description ?? '')}"`;
+    case 'ASSESSMENT_EVALUATOR_ASSIGNED':
+      return `Assigned ${String(d.evaluator_name ?? 'an evaluator')} to ${String(d.application_no ?? '')} (${String(d.proponent_name ?? '')})`;
+    case 'ASSESSMENT_STAGE_CHANGED':
+      return `Moved ${String(d.application_no ?? '')} to stage "${String(d.stage ?? '')}"`;
+    case 'ASSESSMENT_FINDING_UPDATED':
+      return `Updated a deficiency: "${String(d.description ?? '')}"`;
+    case 'ASSESSMENT_FINDING_DELETED':
+      return `Removed a deficiency: "${String(d.description ?? '')}"`;
+    case 'ASSESSMENT_CHARGE_ADDED':
+      return `Added charge "${String(d.description ?? '')}"${d.amount ? ` (₱${String(d.amount)})` : ''}`;
+    case 'ASSESSMENT_CHARGE_UPDATED':
+      return `Updated charge "${String(d.description ?? '')}"`;
+    case 'ASSESSMENT_CHARGE_DELETED':
+      return `Removed charge "${String(d.description ?? '')}"`;
+    case 'REQUIREMENT_ADDED_ADHOC':
+      return `Added a one-off requirement: "${String(d.requirement_name ?? '')}"`;
+
+    // --- Approval / Issuance ---
+    case 'APPROVAL_REOPENED':
+      return `Reopened approval for ${String(d.application_no ?? '')} (${String(d.proponent_name ?? '')})`;
+    case 'APPROVAL_STARTED':
+      return `Started approval routing for ${String(d.application_no ?? '')} (${String(d.proponent_name ?? '')})`;
+    case 'APPLICATION_APPROVED':
+      return `Approved application ${String(d.application_no ?? '')} for ${String(d.proponent_name ?? '')}`;
+    case 'APPLICATION_DISAPPROVED':
+      return `Disapproved application ${String(d.application_no ?? '')} for ${String(d.proponent_name ?? '')}${d.remarks ? ` — "${String(d.remarks)}"` : ''}`;
+    case 'APPROVAL_STEP_DECIDED':
+      return `Decided an approval level for ${String(d.application_no ?? '')} (${String(d.step_action ?? '')})`;
+    case 'APPROVAL_STEP_ENDORSED':
+      return `Endorsed ${String(d.application_no ?? '')} to ${String(d.office ?? '')}`;
+    case 'APPROVAL_STEP_ASSIGNED':
+      return `Assigned an approval level for ${String(d.application_no ?? '')}`;
+    case 'ISSUANCE_ADDED':
+      return `Issued "${String(d.title ?? '')}"${d.reference_no ? ` (${String(d.reference_no)})` : ''}`;
+    case 'ISSUANCE_DELETED':
+      return `Removed issued document "${String(d.title ?? '')}"`;
+    case 'APPROVAL_CHARGE_ADDED':
+      return `Added charge "${String(d.description ?? '')}"${d.amount ? ` (₱${String(d.amount)})` : ''}`;
+    case 'APPROVAL_CHARGE_UPDATED':
+      return `Updated charge "${String(d.description ?? '')}"`;
+    case 'APPROVAL_CHARGE_DELETED':
+      return `Removed charge "${String(d.description ?? '')}"`;
+    case 'APPROVAL_LEVEL_CREATED':
+      return `Configured approval level "${String(d.name ?? '')}"`;
+    case 'APPROVAL_LEVEL_UPDATED':
+      return `Updated approval level "${String(d.name ?? '')}"`;
+    case 'APPROVAL_LEVEL_DELETED':
+      return `Retired approval level "${String(d.name ?? '')}"`;
+    case 'CONTRACT_SAVED':
+      return d.contract_no ? `Recorded contract ${String(d.contract_no)}` : 'Recorded a contract';
+
+    // --- Contracts / Permits ---
+    case 'CONTRACT_CREATED':
+      return `Created contract ${String(d.contract_no ?? '')}`;
+    case 'CONTRACT_UPDATED':
+      return `Updated contract ${String(d.contract_no ?? '')}`;
+    case 'PERMIT_CREATED':
+      return `Issued permit ${String(d.permit_no ?? '')} (${String(d.permit_type ?? '')})`;
+    case 'PERMIT_UPDATED':
+      return `Updated permit ${String(d.permit_no ?? '')}`;
+    case 'PERMIT_DEACTIVATED':
+      return `Deactivated permit ${String(d.permit_no ?? '')}`;
+
+    // --- Inspections ---
+    case 'INSPECTION_SCHEDULED':
+      return `Scheduled inspection "${String(d.title ?? '')}" for ${String(d.proponent_name ?? '')}`;
+    case 'INSPECTION_UPDATED':
+      return `Updated inspection "${String(d.title ?? '')}"`;
+    case 'INSPECTION_INSPECTOR_ASSIGNED':
+      return `Assigned ${String(d.inspector_name ?? 'an inspector')} to inspection "${String(d.title ?? '')}"`;
+    case 'INSPECTION_STATUS_CHANGED':
+      return `Changed inspection "${String(d.title ?? '')}" to ${String(d.status ?? '')}`;
+    case 'INSPECTION_RESULT_RECORDED':
+      return `Recorded ${String(d.result ?? '')} result for inspection "${String(d.title ?? '')}"`;
+    case 'INSPECTION_FAILED':
+      return `Inspection "${String(d.title ?? '')}" failed${d.summary ? ` — "${String(d.summary)}"` : ''}`;
+    case 'INSPECTION_FINDING_ADDED':
+      return `Noted a deficiency: "${String(d.description ?? '')}"`;
+    case 'INSPECTION_FINDING_UPDATED':
+      return `Updated a deficiency: "${String(d.description ?? '')}"`;
+    case 'INSPECTION_FINDING_DELETED':
+      return `Removed a deficiency: "${String(d.description ?? '')}"`;
+    case 'INSPECTION_ACTION_ADDED':
+      return `Added corrective action: "${String(d.action_required ?? '')}"`;
+    case 'INSPECTION_ACTION_UPDATED':
+      return `Updated corrective action: "${String(d.action_required ?? '')}"${d.status ? ` (${String(d.status)})` : ''}`;
+    case 'INSPECTION_ACTION_DELETED':
+      return `Removed corrective action: "${String(d.action_required ?? '')}"`;
+    case 'INSPECTION_DOCUMENT_ADDED':
+      return `Attached "${String(d.file_name ?? 'a document')}" to an inspection`;
+    case 'INSPECTION_DOCUMENT_DELETED':
+      return `Removed "${String(d.file_name ?? 'a document')}" from an inspection`;
+
     default: {
-      const entries = Object.entries(d).filter(([, v]) => v != null && typeof v !== 'object');
-      if (entries.length === 0) return ACTION_LABELS[row.action] || humanizeKey(row.action);
-      return entries.map(([k, v]) => `${humanizeKey(k)}: ${String(v)}`).join(', ');
+      // Safety net for any action without a dedicated case above: never
+      // surface a raw foreign-key column (…_id / id) here — those belong in
+      // the Entity column, not Details, and are meaningless to a reviewer.
+      const entries = Object.entries(d).filter(
+        ([k, v]) => v != null && typeof v !== 'object' && k !== 'id' && !k.toLowerCase().endsWith('_id')
+      );
+      const label = ACTION_LABELS[row.action] || humanizeKey(row.action);
+      if (entries.length === 0) return label;
+      return `${label} — ${entries.map(([k, v]) => `${humanizeKey(k)}: ${String(v)}`).join(', ')}`;
     }
   }
 }
 
 function actionTone(action: string): 'good' | 'bad' | 'neutral' {
-  if (action === 'LOGIN_FAILED' || action.includes('DEACTIVATED') || action.includes('SUSPENDED') || action.includes('REVOKED')) {
+  if (
+    action === 'LOGIN_FAILED' ||
+    action.includes('DEACTIVATED') ||
+    action.includes('SUSPENDED') ||
+    action.includes('REVOKED') ||
+    action.includes('REJECTED') ||
+    action.includes('DISAPPROVED') ||
+    action.includes('FAILED') ||
+    action.includes('DELETED')
+  ) {
     return 'bad';
   }
-  if (action === 'LOGIN_SUCCESS' || action.includes('CREATED') || action.includes('REACTIVATED') || action.includes('RESTORED') || action.includes('UNSUSPENDED')) {
+  if (
+    action === 'LOGIN_SUCCESS' ||
+    action.includes('CREATED') ||
+    action.includes('REACTIVATED') ||
+    action.includes('RESTORED') ||
+    action.includes('UNSUSPENDED') ||
+    action.includes('APPROVED') ||
+    action.includes('VERIFIED') ||
+    action.includes('SUBMITTED')
+  ) {
     return 'good';
   }
   return 'neutral';
@@ -326,7 +710,7 @@ export function AuditLog() {
                   {row.actor_username || '—'}
                 </div>
                 <div className="mt-0.5 text-[11px] text-secondary break-all">
-                  {row.entity_type ? `${row.entity_type}${row.entity_id != null ? ` #${row.entity_id}` : ''}` : 'No entity'}
+                  {row.entity_type ? entityLabel(row) : 'No entity'}
                   {row.ip_address ? ` · ${row.ip_address}` : ''}
                 </div>
                 <div
@@ -372,7 +756,7 @@ export function AuditLog() {
                         </span>
                       </td>
                       <td className="px-3 py-2 text-[11px] text-secondary">
-                        {row.entity_type ? `${row.entity_type}${row.entity_id != null ? ` #${row.entity_id}` : ''}` : '—'}
+                        {row.entity_type ? entityLabel(row) : '—'}
                       </td>
                       <td className="px-3 py-2 text-[11px] text-secondary">{row.ip_address || '—'}</td>
                       <td className="px-3 py-2 text-[11px] text-secondary min-w-[220px] max-w-[360px]">

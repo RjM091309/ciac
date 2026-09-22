@@ -2,6 +2,7 @@ const Proponent = require("../models/Proponent");
 const ChangeRequest = require("../models/ProponentChangeRequest");
 const Notification = require("../models/Notification");
 const ActivityLog = require("../models/ActivityLog");
+const AuditLog = require("../models/AuditLog");
 const Contract = require("../models/Contract");
 const AccountOfficer = require("../models/AccountOfficer");
 const TypeOfContract = require("../models/TypeOfContract");
@@ -164,6 +165,15 @@ exports.setupMine = async (req, res) => {
       entityId: row.id,
       action: "PROFILE_SETUP_COMPLETED",
     });
+    await AuditLog.record({
+      actorId: req.user?.id,
+      actorUsername: req.user?.username,
+      action: "PROPONENT_SELF_SETUP",
+      entityType: "proponent",
+      entityId: row?.id,
+      details: { business_name: row?.business_name },
+      ipAddress: req.ip,
+    });
 
     return res.status(201).json({ success: true, data: row });
   } catch (error) {
@@ -215,6 +225,15 @@ exports.updateMine = async (req, res) => {
       entityId: current.id,
       action: "PROFILE_CHANGE_REQUESTED",
       meta: { fields: Object.keys(payload) },
+    });
+    await AuditLog.record({
+      actorId: req.user?.id,
+      actorUsername: req.user?.username,
+      action: "PROPONENT_CHANGE_REQUESTED",
+      entityType: "proponent",
+      entityId: current.id,
+      details: { business_name: current?.business_name, fields: Object.keys(payload) },
+      ipAddress: req.ip,
     });
 
     try {
@@ -271,6 +290,7 @@ exports.approveChangeRequest = async (req, res) => {
     const remarks = String(req.body?.remarks ?? "").trim() || null;
     const reviewed = await ChangeRequest.markReviewed(id, "APPROVED", req.user?.id ?? null, remarks);
 
+    const patchedProponent = await Proponent.getProponentById(request.proponent_id);
     ActivityLog.record({
       actorUserId: req.user?.id ?? null,
       proponentId: request.proponent_id,
@@ -280,9 +300,18 @@ exports.approveChangeRequest = async (req, res) => {
       meta: { request_id: id, fields: Object.keys(patch) },
       ip: req.ip,
     });
+    await AuditLog.record({
+      actorId: req.user?.id,
+      actorUsername: req.user?.username,
+      action: "PROPONENT_CHANGE_APPROVED",
+      entityType: "proponent",
+      entityId: request.proponent_id,
+      details: { business_name: patchedProponent?.business_name, fields: Object.keys(patch) },
+      ipAddress: req.ip,
+    });
 
     try {
-      const proponent = await Proponent.getProponentById(request.proponent_id);
+      const proponent = patchedProponent;
       if (proponent?.user_id) {
         await Notification.createNotification({
           userId: proponent.user_id,
@@ -317,6 +346,7 @@ exports.rejectChangeRequest = async (req, res) => {
     const remarks = String(req.body?.remarks ?? "").trim() || null;
     const reviewed = await ChangeRequest.markReviewed(id, "REJECTED", req.user?.id ?? null, remarks);
 
+    const rejectedProponent = await Proponent.getProponentById(request.proponent_id);
     ActivityLog.record({
       actorUserId: req.user?.id ?? null,
       proponentId: request.proponent_id,
@@ -326,9 +356,18 @@ exports.rejectChangeRequest = async (req, res) => {
       meta: remarks ? { request_id: id, remarks } : { request_id: id },
       ip: req.ip,
     });
+    await AuditLog.record({
+      actorId: req.user?.id,
+      actorUsername: req.user?.username,
+      action: "PROPONENT_CHANGE_REJECTED",
+      entityType: "proponent",
+      entityId: request.proponent_id,
+      details: { business_name: rejectedProponent?.business_name, remarks: remarks || undefined },
+      ipAddress: req.ip,
+    });
 
     try {
-      const proponent = await Proponent.getProponentById(request.proponent_id);
+      const proponent = rejectedProponent;
       if (proponent?.user_id) {
         await Notification.createNotification({
           userId: proponent.user_id,
@@ -469,6 +508,15 @@ exports.create = async (req, res) => {
       created_by: req.user?.id ?? null,
       is_active,
     });
+    await AuditLog.record({
+      actorId: req.user?.id,
+      actorUsername: req.user?.username,
+      action: "PROPONENT_CREATED",
+      entityType: "proponent",
+      entityId: row?.id,
+      details: { business_name: row?.business_name },
+      ipAddress: req.ip,
+    });
     return res.status(201).json({ success: true, data: row });
   } catch (error) {
     console.error("Create proponent error:", error);
@@ -478,7 +526,7 @@ exports.create = async (req, res) => {
 
 // Section saves for the locator form's Stockholders / Contact Person + Signatory / Property
 // schedule tabs — each writes only its own child table(s), independently of the main Save.
-function sectionHandler(label, run) {
+function sectionHandler(label, action, run) {
   return async (req, res) => {
     try {
       const id = Number(req.params.id);
@@ -487,6 +535,18 @@ function sectionHandler(label, run) {
       if (problem) return res.status(400).json({ success: false, message: problem });
       const data = await run.save(id, req.body || {}, req.user?.id ?? null);
       if (!data) return res.status(404).json({ success: false, message: "Proponent not found" });
+
+      const proponent = await Proponent.getProponentById(id).catch(() => null);
+      await AuditLog.record({
+        actorId: req.user?.id,
+        actorUsername: req.user?.username,
+        action,
+        entityType: "proponent",
+        entityId: id,
+        details: { business_name: proponent?.business_name, section: label },
+        ipAddress: req.ip,
+      });
+
       return res.json({ success: true, data });
     } catch (error) {
       console.error(`Save ${label} error:`, error);
@@ -497,12 +557,12 @@ function sectionHandler(label, run) {
   };
 }
 
-exports.saveStockholders = sectionHandler("stockholders", {
+exports.saveStockholders = sectionHandler("stockholders", "PROPONENT_STOCKHOLDERS_UPDATED", {
   validate: (b) => (Array.isArray(b.stockholders) ? null : "stockholders must be a list"),
   save: (id, b, actor) => Proponent.saveStockholders(id, b.stockholders, actor),
 });
 
-exports.saveContacts = sectionHandler("contacts", {
+exports.saveContacts = sectionHandler("contacts", "PROPONENT_CONTACTS_UPDATED", {
   validate: (b) =>
     Array.isArray(b.contact_persons) || Array.isArray(b.signatories) ? null : "contact_persons or signatories must be a list",
   save: (id, b, actor) =>
@@ -516,12 +576,12 @@ exports.saveContacts = sectionHandler("contacts", {
     ),
 });
 
-exports.saveProperties = sectionHandler("properties", {
+exports.saveProperties = sectionHandler("properties", "PROPONENT_PROPERTIES_UPDATED", {
   validate: (b) => (Array.isArray(b.properties) ? null : "properties must be a list"),
   save: (id, b) => Proponent.saveProperties(id, b.properties),
 });
 
-exports.saveInvestment = sectionHandler("investment", {
+exports.saveInvestment = sectionHandler("investment", "PROPONENT_INVESTMENT_UPDATED", {
   validate: (b) =>
     ["investment_commitment", "investment_actual", "employee_commitment", "employee_actual"].some(
       (k) => b[k] !== undefined
@@ -665,6 +725,16 @@ exports.update = async (req, res) => {
     }
     const refreshed = await Proponent.getProponentById(id);
 
+    await AuditLog.record({
+      actorId: req.user?.id,
+      actorUsername: req.user?.username,
+      action: "PROPONENT_UPDATED",
+      entityType: "proponent",
+      entityId: id,
+      details: { business_name: (refreshed || row)?.business_name, fields: Object.keys(req.body || {}) },
+      ipAddress: req.ip,
+    });
+
     return res.json({ success: true, data: refreshed || row });
   } catch (error) {
     console.error("Update proponent error:", error);
@@ -680,6 +750,16 @@ exports.deactivate = async (req, res) => {
     const row = await Proponent.deactivateProponent(id, req.user?.id ?? null);
     if (!row) return res.status(404).json({ success: false, message: "Proponent not found" });
 
+    await AuditLog.record({
+      actorId: req.user?.id,
+      actorUsername: req.user?.username,
+      action: "PROPONENT_DEACTIVATED",
+      entityType: "proponent",
+      entityId: id,
+      details: { business_name: row?.business_name },
+      ipAddress: req.ip,
+    });
+
     return res.json({ success: true, data: row });
   } catch (error) {
     console.error("Deactivate proponent error:", error);
@@ -694,6 +774,16 @@ exports.reactivate = async (req, res) => {
 
     const row = await Proponent.reactivateProponent(id, req.user?.id ?? null);
     if (!row) return res.status(404).json({ success: false, message: "Proponent not found" });
+
+    await AuditLog.record({
+      actorId: req.user?.id,
+      actorUsername: req.user?.username,
+      action: "PROPONENT_REACTIVATED",
+      entityType: "proponent",
+      entityId: id,
+      details: { business_name: row?.business_name },
+      ipAddress: req.ip,
+    });
 
     return res.json({ success: true, data: row });
   } catch (error) {

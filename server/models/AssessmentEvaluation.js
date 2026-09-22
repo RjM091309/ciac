@@ -866,8 +866,10 @@ module.exports = {
   addFinding,
   updateFinding,
   deleteFinding,
+  getFindingById,
   addCharge,
   updateCharge,
   deleteCharge,
+  getChargeById,
   submitRecommendation,
 };

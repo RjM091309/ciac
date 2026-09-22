@@ -4,6 +4,7 @@ const Role = require("../models/Role");
 const User = require("../models/User");
 const ApplicationType = require("../models/ApplicationType");
 const ControlPanelPermission = require("../models/ControlPanelPermission");
+const AuditLog = require("../models/AuditLog");
 const { generateTempPassword } = require("../lib/password");
 const { sendTempPasswordEmail } = require("./c_users");
 
@@ -151,6 +152,21 @@ exports.create = async (req, res) => {
     // isn't a commitment yet, so it shouldn't hand out login access.
     const activation = save_as_draft ? null : await activateLocatorIfPending(proponent_id, req.user?.id ?? null);
 
+    await AuditLog.record({
+      actorId: req.user?.id,
+      actorUsername: req.user?.username,
+      action: save_as_draft ? "APPLICATION_DRAFT_SAVED" : "APPLICATION_SUBMITTED",
+      entityType: "application",
+      entityId: row?.id,
+      details: {
+        application_no: row?.application_no,
+        proponent_name: row?.proponent_name,
+        application_type: normalizedType,
+        is_renewal: Boolean(Number(is_renewal)),
+      },
+      ipAddress: req.ip,
+    });
+
     return res.status(201).json({
       success: true,
       data: row,
@@ -177,6 +193,21 @@ exports.updateStatus = async (req, res) => {
       changed_by: req.user?.id ?? null,
     });
     if (!row) return res.status(404).json({ success: false, message: "Application not found" });
+
+    // This is the admin-only raw status escape hatch (requireRole("admin")
+    // at the route level) — it bypasses the normal Assessment/Approval
+    // gates, so it's worth its own clearly-labeled trail entry distinct from
+    // the regular workflow transitions below.
+    await AuditLog.record({
+      actorId: req.user?.id,
+      actorUsername: req.user?.username,
+      action: "APPLICATION_STATUS_FORCED",
+      entityType: "application",
+      entityId: id,
+      details: { application_no: row?.application_no, to_status: String(to_status).trim(), remarks: remarks || undefined },
+      ipAddress: req.ip,
+    });
+
     return res.json({ success: true, data: row });
   } catch (error) {
     console.error("Update application status error:", error);
@@ -201,6 +232,16 @@ exports.submit = async (req, res) => {
     // real submission" moment, just reached via Continue Draft/Resubmit
     // instead. No-ops if the locator's account is already ACTIVE.
     const activation = await activateLocatorIfPending(row.proponent_id, req.user?.id ?? null);
+
+    await AuditLog.record({
+      actorId: req.user?.id,
+      actorUsername: req.user?.username,
+      action: row?.status === "RESUBMITTED" ? "APPLICATION_RESUBMITTED" : "APPLICATION_SUBMITTED",
+      entityType: "application",
+      entityId: id,
+      details: { application_no: row?.application_no, proponent_name: row?.proponent_name },
+      ipAddress: req.ip,
+    });
 
     return res.json({
       success: true,
@@ -233,6 +274,17 @@ exports.updateDraft = async (req, res) => {
       proponent_id,
       changed_by: req.user?.id ?? null,
     });
+
+    await AuditLog.record({
+      actorId: req.user?.id,
+      actorUsername: req.user?.username,
+      action: "APPLICATION_UPDATED",
+      entityType: "application",
+      entityId: id,
+      details: { application_no: row?.application_no, proponent_name: row?.proponent_name, fields: Object.keys(req.body || {}) },
+      ipAddress: req.ip,
+    });
+
     return res.json({ success: true, data: row });
   } catch (error) {
     console.error("Update draft application error:", error);
@@ -259,6 +311,17 @@ exports.remove = async (req, res) => {
       const code = result.reason === "NOT_FOUND" ? 404 : 409;
       return res.status(code).json({ success: false, message: messages[result.reason] || "Cannot delete this application." });
     }
+
+    await AuditLog.record({
+      actorId: req.user?.id,
+      actorUsername: req.user?.username,
+      action: "APPLICATION_DELETED",
+      entityType: "application",
+      entityId: id,
+      details: { application_no: application?.application_no, proponent_name: application?.proponent_name },
+      ipAddress: req.ip,
+    });
+
     return res.json({ success: true });
   } catch (error) {
     console.error("Delete application error:", error);
@@ -290,12 +353,27 @@ exports.updateRequirementStatus = async (req, res) => {
       return res.status(400).json({ success: false, message: "status is required" });
     }
 
+    const before = await Workflow.getApplicationRequirementById(id);
     const row = await Workflow.updateApplicationRequirementStatus(id, {
       status: String(status).trim(),
       remarks: remarks ?? null,
       updated_by: req.user?.id ?? null,
     });
     if (!row) return res.status(404).json({ success: false, message: "Application requirement not found" });
+
+    const nextStatus = String(status).trim().toUpperCase();
+    await AuditLog.record({
+      actorId: req.user?.id,
+      actorUsername: req.user?.username,
+      action: nextStatus === "VERIFIED" ? "REQUIREMENT_VERIFIED" : nextStatus === "REJECTED" ? "REQUIREMENT_REJECTED" : "REQUIREMENT_STATUS_CHANGED",
+      entityType: "application_requirement",
+      entityId: id,
+      details: {
+        requirement_name: before?.requirement_name || before?.requirement_code,
+        remarks: remarks || undefined,
+      },
+      ipAddress: req.ip,
+    });
     return res.json({ success: true, data: row });
   } catch (error) {
     console.error("Update application requirement status error:", error);
@@ -416,6 +494,15 @@ exports.createDocument = async (req, res) => {
       content_type: req.file.mimetype,
       file_size_bytes: req.file.size,
       created_by: req.user?.id ?? null,
+    });
+    await AuditLog.record({
+      actorId: req.user?.id,
+      actorUsername: req.user?.username,
+      action: "DOCUMENT_UPLOADED",
+      entityType: "application",
+      entityId: applicationId,
+      details: { application_no: application?.application_no, file_name: req.file.originalname },
+      ipAddress: req.ip,
     });
     return res.status(201).json({ success: true, data: row });
   } catch (error) {

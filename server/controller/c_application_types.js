@@ -1,4 +1,17 @@
 const ApplicationType = require("../models/ApplicationType");
+const AuditLog = require("../models/AuditLog");
+
+function audit(req, action, entityId, details) {
+  return AuditLog.record({
+    actorId: req.user?.id,
+    actorUsername: req.user?.username,
+    action,
+    entityType: "application_type",
+    entityId,
+    details,
+    ipAddress: req.ip,
+  });
+}
 
 exports.list = async (req, res) => {
   try {
@@ -35,6 +48,7 @@ exports.create = async (req, res) => {
       created_by: req.user?.id ?? null,
       is_active,
     });
+    await audit(req, "APPLICATION_TYPE_CREATED", row?.id, { code: row?.code, name: row?.name });
     return res.status(201).json({ success: true, data: row });
   } catch (error) {
     if (error?.number === 2627 || error?.number === 2601) {
@@ -58,6 +72,7 @@ exports.update = async (req, res) => {
       updated_by: req.user?.id ?? null,
     });
     if (!row) return res.status(404).json({ success: false, message: "Application type not found" });
+    await audit(req, "APPLICATION_TYPE_UPDATED", id, { code: row?.code, name: row?.name });
     return res.json({ success: true, data: row });
   } catch (error) {
     if (error?.number === 2627 || error?.number === 2601) {
@@ -74,6 +89,7 @@ exports.deactivate = async (req, res) => {
     if (!Number.isFinite(id)) return res.status(400).json({ success: false, message: "Invalid id" });
     const row = await ApplicationType.deactivateApplicationType(id, req.user?.id ?? null);
     if (!row) return res.status(404).json({ success: false, message: "Application type not found" });
+    await audit(req, "APPLICATION_TYPE_DEACTIVATED", id, { code: row?.code, name: row?.name });
     return res.json({ success: true, data: row });
   } catch (error) {
     console.error("Deactivate application type error:", error);
@@ -87,6 +103,7 @@ exports.reactivate = async (req, res) => {
     if (!Number.isFinite(id)) return res.status(400).json({ success: false, message: "Invalid id" });
     const row = await ApplicationType.reactivateApplicationType(id, req.user?.id ?? null);
     if (!row) return res.status(404).json({ success: false, message: "Application type not found" });
+    await audit(req, "APPLICATION_TYPE_REACTIVATED", id, { code: row?.code, name: row?.name });
     return res.json({ success: true, data: row });
   } catch (error) {
     console.error("Reactivate application type error:", error);

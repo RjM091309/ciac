@@ -1,5 +1,6 @@
 const Assessment = require("../models/AssessmentEvaluation");
 const Workflow = require("../models/ApplicationWorkflow");
+const AuditLog = require("../models/AuditLog");
 
 function fail(res, error, label) {
   console.error(`${label} error:`, error);
@@ -73,6 +74,19 @@ exports.assign = async (req, res) => {
       actorId: req.user?.id ?? null,
     });
     if (!data) return res.status(404).json({ success: false, message: "Application not found" });
+    await AuditLog.record({
+      actorId: req.user?.id,
+      actorUsername: req.user?.username,
+      action: "ASSESSMENT_EVALUATOR_ASSIGNED",
+      entityType: "application",
+      entityId: id,
+      details: {
+        application_no: data?.assessment?.application_no,
+        proponent_name: data?.assessment?.proponent_name,
+        evaluator_name: data?.assessment?.evaluator_name || data?.assessment?.evaluator_username,
+      },
+      ipAddress: req.ip,
+    });
     return res.json({ success: true, data });
   } catch (error) {
     return fail(res, error, "Assign evaluator");
@@ -86,6 +100,15 @@ exports.setStage = async (req, res) => {
     const { stage } = req.body || {};
     const data = await Assessment.setStage(id, { stage, actorId: req.user?.id ?? null });
     if (!data) return res.status(404).json({ success: false, message: "Application not found" });
+    await AuditLog.record({
+      actorId: req.user?.id,
+      actorUsername: req.user?.username,
+      action: "ASSESSMENT_STAGE_CHANGED",
+      entityType: "application",
+      entityId: id,
+      details: { application_no: data?.assessment?.application_no, proponent_name: data?.assessment?.proponent_name, stage },
+      ipAddress: req.ip,
+    });
     return res.json({ success: true, data });
   } catch (error) {
     return fail(res, error, "Set assessment stage");
@@ -99,6 +122,15 @@ exports.reopen = async (req, res) => {
     if (id === null) return undefined;
     const data = await Assessment.reopen(id, req.user?.id ?? null);
     if (!data) return res.status(404).json({ success: false, message: "Application not found" });
+    await AuditLog.record({
+      actorId: req.user?.id,
+      actorUsername: req.user?.username,
+      action: "ASSESSMENT_REOPENED",
+      entityType: "application",
+      entityId: id,
+      details: { application_no: data?.assessment?.application_no, proponent_name: data?.assessment?.proponent_name },
+      ipAddress: req.ip,
+    });
     return res.json({ success: true, data });
   } catch (error) {
     return fail(res, error, "Reopen assessment");
@@ -116,6 +148,20 @@ exports.recommendation = async (req, res) => {
       actorId: req.user?.id ?? null,
     });
     if (!data) return res.status(404).json({ success: false, message: "Application not found" });
+    await AuditLog.record({
+      actorId: req.user?.id,
+      actorUsername: req.user?.username,
+      action: "ASSESSMENT_RECOMMENDATION_SUBMITTED",
+      entityType: "application",
+      entityId: id,
+      details: {
+        application_no: data?.assessment?.application_no,
+        proponent_name: data?.assessment?.proponent_name,
+        recommendation,
+        summary: summary || undefined,
+      },
+      ipAddress: req.ip,
+    });
     return res.json({ success: true, data });
   } catch (error) {
     return fail(res, error, "Submit recommendation");
@@ -194,6 +240,15 @@ exports.addCustomRequirement = async (req, res) => {
       createdBy: req.user?.id ?? null,
     });
     if (!row) return res.status(404).json({ success: false, message: "Application not found" });
+    await AuditLog.record({
+      actorId: req.user?.id,
+      actorUsername: req.user?.username,
+      action: "REQUIREMENT_ADDED_ADHOC",
+      entityType: "application",
+      entityId: id,
+      details: { requirement_name: name, is_mandatory: Boolean(is_mandatory) },
+      ipAddress: req.ip,
+    });
     return res.status(201).json({ success: true, data: row });
   } catch (error) {
     return fail(res, error, "Add custom requirement (assessment)");
@@ -209,6 +264,15 @@ exports.addFinding = async (req, res) => {
     }
     const data = await Assessment.addFinding(id, req.body || {}, req.user?.id ?? null);
     if (!data) return res.status(404).json({ success: false, message: "Application not found" });
+    await AuditLog.record({
+      actorId: req.user?.id,
+      actorUsername: req.user?.username,
+      action: "ASSESSMENT_FINDING_ADDED",
+      entityType: "application",
+      entityId: id,
+      details: { description: String(req.body?.description ?? "").trim().slice(0, 200), finding_type: req.body?.finding_type },
+      ipAddress: req.ip,
+    });
     return res.status(201).json({ success: true, data });
   } catch (error) {
     return fail(res, error, "Add finding");
@@ -221,6 +285,15 @@ exports.updateFinding = async (req, res) => {
     if (!Number.isFinite(id)) return res.status(400).json({ success: false, message: "Invalid id" });
     const data = await Assessment.updateFinding(id, req.body || {}, req.user?.id ?? null);
     if (!data) return res.status(404).json({ success: false, message: "Finding not found" });
+    await AuditLog.record({
+      actorId: req.user?.id,
+      actorUsername: req.user?.username,
+      action: "ASSESSMENT_FINDING_UPDATED",
+      entityType: "assessment_finding",
+      entityId: id,
+      details: { description: String(data?.description ?? "").trim().slice(0, 200) },
+      ipAddress: req.ip,
+    });
     return res.json({ success: true, data });
   } catch (error) {
     return fail(res, error, "Update finding");
@@ -231,8 +304,18 @@ exports.deleteFinding = async (req, res) => {
   try {
     const id = Number(req.params.id);
     if (!Number.isFinite(id)) return res.status(400).json({ success: false, message: "Invalid id" });
+    const before = await Assessment.getFindingById(id);
     const ok = await Assessment.deleteFinding(id, req.user?.id ?? null);
     if (!ok) return res.status(404).json({ success: false, message: "Finding not found" });
+    await AuditLog.record({
+      actorId: req.user?.id,
+      actorUsername: req.user?.username,
+      action: "ASSESSMENT_FINDING_DELETED",
+      entityType: "assessment_finding",
+      entityId: id,
+      details: { description: String(before?.description ?? "").trim().slice(0, 200) },
+      ipAddress: req.ip,
+    });
     return res.json({ success: true });
   } catch (error) {
     return fail(res, error, "Delete finding");
@@ -248,6 +331,15 @@ exports.addCharge = async (req, res) => {
     }
     const data = await Assessment.addCharge(id, req.body || {}, req.user?.id ?? null);
     if (!data) return res.status(404).json({ success: false, message: "Application not found" });
+    await AuditLog.record({
+      actorId: req.user?.id,
+      actorUsername: req.user?.username,
+      action: "ASSESSMENT_CHARGE_ADDED",
+      entityType: "application",
+      entityId: id,
+      details: { description: String(req.body?.description ?? "").trim().slice(0, 200), amount: req.body?.amount },
+      ipAddress: req.ip,
+    });
     return res.status(201).json({ success: true, data });
   } catch (error) {
     return fail(res, error, "Add charge");
@@ -260,6 +352,15 @@ exports.updateCharge = async (req, res) => {
     if (!Number.isFinite(id)) return res.status(400).json({ success: false, message: "Invalid id" });
     const data = await Assessment.updateCharge(id, req.body || {}, req.user?.id ?? null);
     if (!data) return res.status(404).json({ success: false, message: "Charge not found" });
+    await AuditLog.record({
+      actorId: req.user?.id,
+      actorUsername: req.user?.username,
+      action: "ASSESSMENT_CHARGE_UPDATED",
+      entityType: "assessment_charge",
+      entityId: id,
+      details: { description: String(data?.description ?? "").trim().slice(0, 200), amount: data?.amount },
+      ipAddress: req.ip,
+    });
     return res.json({ success: true, data });
   } catch (error) {
     return fail(res, error, "Update charge");
@@ -270,8 +371,18 @@ exports.deleteCharge = async (req, res) => {
   try {
     const id = Number(req.params.id);
     if (!Number.isFinite(id)) return res.status(400).json({ success: false, message: "Invalid id" });
+    const before = await Assessment.getChargeById(id);
     const ok = await Assessment.deleteCharge(id, req.user?.id ?? null);
     if (!ok) return res.status(404).json({ success: false, message: "Charge not found" });
+    await AuditLog.record({
+      actorId: req.user?.id,
+      actorUsername: req.user?.username,
+      action: "ASSESSMENT_CHARGE_DELETED",
+      entityType: "assessment_charge",
+      entityId: id,
+      details: { description: String(before?.description ?? "").trim().slice(0, 200) },
+      ipAddress: req.ip,
+    });
     return res.json({ success: true });
   } catch (error) {
     return fail(res, error, "Delete charge");

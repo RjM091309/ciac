@@ -146,6 +146,7 @@ exports.update = async (req, res) => {
       action: "ROLE_UPDATED",
       entityType: "role",
       entityId: id,
+      details: { name: row?.name, previousName: current?.name !== row?.name ? current?.name : undefined },
       ipAddress: req.ip,
     });
     return res.json({ success: true, data: row });
@@ -175,6 +176,7 @@ exports.deactivate = async (req, res) => {
       action: "ROLE_DEACTIVATED",
       entityType: "role",
       entityId: id,
+      details: { name: current?.name },
       ipAddress: req.ip,
     });
     return res.json({ success: true, data: row });
@@ -196,6 +198,7 @@ exports.reactivate = async (req, res) => {
       action: "ROLE_REACTIVATED",
       entityType: "role",
       entityId: id,
+      details: { name: row?.name },
       ipAddress: req.ip,
     });
     return res.json({ success: true, data: row });

@@ -45,12 +45,14 @@ exports.setSidebarPermissions = async (req, res) => {
 
     const permissions = Array.isArray(req.body?.permissions) ? req.body.permissions : [];
     await ControlPanelPermission.setSidebarPermissions(roleId, permissions);
+    const roleForLog = await Role.getRoleById(roleId);
     await AuditLog.record({
       actorId: req.user?.id,
       actorUsername: req.user?.username,
       action: "PERMISSIONS_CHANGED",
       entityType: "role_sidebar_menu",
       entityId: roleId,
+      details: { name: roleForLog?.name, menuCount: permissions.length },
       ipAddress: req.ip,
     });
     await notifyRolePermissionsChanged(roleId);
@@ -84,12 +86,14 @@ exports.setMenuCrudPermissions = async (req, res) => {
 
     const permissions = Array.isArray(req.body?.permissions) ? req.body.permissions : [];
     await ControlPanelPermission.setMenuCrudPermissions(roleId, permissions);
+    const roleForLog = await Role.getRoleById(roleId);
     await AuditLog.record({
       actorId: req.user?.id,
       actorUsername: req.user?.username,
       action: "PERMISSIONS_CHANGED",
       entityType: "role_menu_crud",
       entityId: roleId,
+      details: { name: roleForLog?.name, menuCount: permissions.length },
       ipAddress: req.ip,
     });
     await notifyRolePermissionsChanged(roleId);
@@ -160,12 +164,14 @@ exports.setDashboardWidgetPermissions = async (req, res) => {
     }
     const permissions = Array.isArray(req.body?.permissions) ? req.body.permissions : [];
     await ControlPanelPermission.setDashboardWidgetPermissions(roleId, permissions);
+    const roleForLog = await Role.getRoleById(roleId);
     await AuditLog.record({
       actorId: req.user?.id,
       actorUsername: req.user?.username,
       action: "PERMISSIONS_CHANGED",
       entityType: "role_dashboard_widgets",
       entityId: roleId,
+      details: { name: roleForLog?.name, widgetCount: permissions.length },
       ipAddress: req.ip,
     });
     await notifyRolePermissionsChanged(roleId);

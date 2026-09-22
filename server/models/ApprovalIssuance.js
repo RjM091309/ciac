@@ -909,10 +909,14 @@ async function addIssuance(applicationId, payload, actorId) {
   return rows?.[0] || null;
 }
 
+async function getIssuanceById(id) {
+  const rows = await selectData(`SELECT * FROM dbo.approval_issuances WHERE id = @param0`, [toInt(id)]);
+  return rows?.[0] || null;
+}
+
 async function deleteIssuance(id, actorId) {
   await ensureSchema();
-  const rows = await selectData(`SELECT * FROM dbo.approval_issuances WHERE id = @param0`, [toInt(id)]);
-  const existing = rows?.[0];
+  const existing = await getIssuanceById(id);
   if (!existing) return false;
   await updateData(`DELETE FROM dbo.approval_issuances WHERE id = @param0`, [toInt(id)]);
   await logActivity(existing.approval_id, "ISSUANCE_DELETED", `Issuance #${id}`, actorId);
@@ -972,6 +976,7 @@ module.exports = {
   createLevel,
   updateLevel,
   deleteLevel,
+  getLevelById,
   listApprovals,
   getSummary,
   listApprovers,
@@ -984,6 +989,7 @@ module.exports = {
   reopenApproval,
   addIssuance,
   deleteIssuance,
+  getIssuanceById,
   saveContract,
   previewContractNo,
   CHARGE_TYPES: Assessment.CHARGE_TYPES,

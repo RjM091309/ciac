@@ -3,6 +3,7 @@ const Workflow = require("../models/ApplicationWorkflow");
 const Contract = require("../models/Contract");
 const Permit = require("../models/Permit");
 const ActivityLog = require("../models/ActivityLog");
+const AuditLog = require("../models/AuditLog");
 const { relativeStoragePath, resolveStoredPath } = require("../lib/fileStorage");
 
 // All handlers below assume requireProponentSelf (req.proponent) has run, and
@@ -79,6 +80,15 @@ exports.uploadMyApplicationDocument = async (req, res) => {
       entityId: document?.id ?? null,
       action: "DOCUMENT_UPLOADED",
       meta: { application_id: req.application.id, file_name: req.file.originalname, requirement_id: requirementId },
+    });
+    await AuditLog.record({
+      actorId: req.user?.id,
+      actorUsername: req.user?.username,
+      action: "DOCUMENT_UPLOADED",
+      entityType: "application",
+      entityId: req.application.id,
+      details: { application_no: req.application.application_no, file_name: req.file.originalname, uploaded_by: "locator" },
+      ipAddress: req.ip,
     });
 
     return res.status(201).json({ success: true, data: document });

@@ -739,10 +739,14 @@ async function addDocument(inspectionId, payload, actorId) {
   return rows?.[0] || null;
 }
 
+async function getDocumentById(id) {
+  const rows = await selectData(`SELECT * FROM dbo.inspection_documents WHERE id = @param0`, [toInt(id)]);
+  return rows?.[0] || null;
+}
+
 async function deleteDocument(id, actorId) {
   await ensureSchema();
-  const rows = await selectData(`SELECT * FROM dbo.inspection_documents WHERE id = @param0`, [toInt(id)]);
-  const existing = rows?.[0];
+  const existing = await getDocumentById(id);
   if (!existing) return false;
   await updateData(`DELETE FROM dbo.inspection_documents WHERE id = @param0`, [toInt(id)]);
   await logActivity(existing.inspection_id, "DOCUMENT_DELETED", existing.file_name, actorId);
@@ -771,9 +775,12 @@ module.exports = {
   addFinding,
   updateFinding,
   deleteFinding,
+  getFindingById,
   addCorrectiveAction,
   updateCorrectiveAction,
   deleteCorrectiveAction,
+  getActionById,
   addDocument,
   deleteDocument,
+  getDocumentById,
 };

@@ -1,4 +1,17 @@
 const RequirementCategory = require("../models/RequirementCategory");
+const AuditLog = require("../models/AuditLog");
+
+function audit(req, action, entityId, details) {
+  return AuditLog.record({
+    actorId: req.user?.id,
+    actorUsername: req.user?.username,
+    action,
+    entityType: "requirement_category",
+    entityId,
+    details,
+    ipAddress: req.ip,
+  });
+}
 
 exports.list = async (req, res) => {
   try {
@@ -40,6 +53,7 @@ exports.create = async (req, res) => {
       application_types,
     });
 
+    await audit(req, "REQUIREMENT_CATEGORY_CREATED", row?.id, { name: row?.name });
     return res.status(201).json({ success: true, data: row });
   } catch (error) {
     console.error("Create requirement category error:", error);
@@ -62,6 +76,7 @@ exports.update = async (req, res) => {
     });
     if (!row) return res.status(404).json({ success: false, message: "Requirement category not found" });
 
+    await audit(req, "REQUIREMENT_CATEGORY_UPDATED", id, { name: row?.name });
     return res.json({ success: true, data: row });
   } catch (error) {
     console.error("Update requirement category error:", error);
@@ -77,6 +92,7 @@ exports.deactivate = async (req, res) => {
     const row = await RequirementCategory.deactivateRequirementCategory(id, req.user?.id ?? null);
     if (!row) return res.status(404).json({ success: false, message: "Requirement category not found" });
 
+    await audit(req, "REQUIREMENT_CATEGORY_DEACTIVATED", id, { name: row?.name });
     return res.json({ success: true, data: row });
   } catch (error) {
     console.error("Deactivate requirement category error:", error);
@@ -92,6 +108,7 @@ exports.reactivate = async (req, res) => {
     const row = await RequirementCategory.reactivateRequirementCategory(id, req.user?.id ?? null);
     if (!row) return res.status(404).json({ success: false, message: "Requirement category not found" });
 
+    await audit(req, "REQUIREMENT_CATEGORY_REACTIVATED", id, { name: row?.name });
     return res.json({ success: true, data: row });
   } catch (error) {
     console.error("Reactivate requirement category error:", error);

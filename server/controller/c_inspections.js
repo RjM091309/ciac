@@ -1,4 +1,5 @@
 const Inspection = require("../models/ComplianceInspection");
+const AuditLog = require("../models/AuditLog");
 
 function fail(res, error, label) {
   console.error(`${label} error:`, error);
@@ -73,6 +74,15 @@ exports.create = async (req, res) => {
       return res.status(400).json({ success: false, message: "title is required" });
     }
     const data = await Inspection.createInspection(b, req.user?.id ?? null);
+    await AuditLog.record({
+      actorId: req.user?.id,
+      actorUsername: req.user?.username,
+      action: "INSPECTION_SCHEDULED",
+      entityType: "inspection",
+      entityId: data?.inspection?.id,
+      details: { title: data?.inspection?.title, proponent_name: data?.inspection?.proponent_name },
+      ipAddress: req.ip,
+    });
     return res.status(201).json({ success: true, data });
   } catch (error) {
     return fail(res, error, "Create inspection");
@@ -85,6 +95,15 @@ exports.update = async (req, res) => {
     if (id === null) return undefined;
     const data = await Inspection.updateInspection(id, req.body || {}, req.user?.id ?? null);
     if (!data) return res.status(404).json({ success: false, message: "Inspection not found" });
+    await AuditLog.record({
+      actorId: req.user?.id,
+      actorUsername: req.user?.username,
+      action: "INSPECTION_UPDATED",
+      entityType: "inspection",
+      entityId: id,
+      details: { title: data?.inspection?.title, proponent_name: data?.inspection?.proponent_name, fields: Object.keys(req.body || {}) },
+      ipAddress: req.ip,
+    });
     return res.json({ success: true, data });
   } catch (error) {
     return fail(res, error, "Update inspection");
@@ -103,6 +122,19 @@ exports.assign = async (req, res) => {
       actorId: req.user?.id ?? null,
     });
     if (!data) return res.status(404).json({ success: false, message: "Inspection not found" });
+    await AuditLog.record({
+      actorId: req.user?.id,
+      actorUsername: req.user?.username,
+      action: "INSPECTION_INSPECTOR_ASSIGNED",
+      entityType: "inspection",
+      entityId: id,
+      details: {
+        title: data?.inspection?.title,
+        proponent_name: data?.inspection?.proponent_name,
+        inspector_name: data?.inspection?.inspector_name || data?.inspection?.inspector_username,
+      },
+      ipAddress: req.ip,
+    });
     return res.json({ success: true, data });
   } catch (error) {
     return fail(res, error, "Assign inspector");
@@ -115,6 +147,15 @@ exports.setStatus = async (req, res) => {
     if (id === null) return undefined;
     const data = await Inspection.setStatus(id, { status: req.body?.status, actorId: req.user?.id ?? null });
     if (!data) return res.status(404).json({ success: false, message: "Inspection not found" });
+    await AuditLog.record({
+      actorId: req.user?.id,
+      actorUsername: req.user?.username,
+      action: "INSPECTION_STATUS_CHANGED",
+      entityType: "inspection",
+      entityId: id,
+      details: { title: data?.inspection?.title, proponent_name: data?.inspection?.proponent_name, status: data?.inspection?.status },
+      ipAddress: req.ip,
+    });
     return res.json({ success: true, data });
   } catch (error) {
     return fail(res, error, "Set inspection status");
@@ -131,6 +172,20 @@ exports.setResult = async (req, res) => {
       actorId: req.user?.id ?? null,
     });
     if (!data) return res.status(404).json({ success: false, message: "Inspection not found" });
+    await AuditLog.record({
+      actorId: req.user?.id,
+      actorUsername: req.user?.username,
+      action: data?.inspection?.result === "FAILED" ? "INSPECTION_FAILED" : "INSPECTION_RESULT_RECORDED",
+      entityType: "inspection",
+      entityId: id,
+      details: {
+        title: data?.inspection?.title,
+        proponent_name: data?.inspection?.proponent_name,
+        result: data?.inspection?.result,
+        summary: req.body?.summary || undefined,
+      },
+      ipAddress: req.ip,
+    });
     return res.json({ success: true, data });
   } catch (error) {
     return fail(res, error, "Set inspection result");
@@ -147,6 +202,15 @@ exports.addFinding = async (req, res) => {
     }
     const data = await Inspection.addFinding(id, req.body || {}, req.user?.id ?? null);
     if (!data) return res.status(404).json({ success: false, message: "Inspection not found" });
+    await AuditLog.record({
+      actorId: req.user?.id,
+      actorUsername: req.user?.username,
+      action: "INSPECTION_FINDING_ADDED",
+      entityType: "inspection",
+      entityId: id,
+      details: { description: String(req.body?.description ?? "").trim().slice(0, 200) },
+      ipAddress: req.ip,
+    });
     return res.status(201).json({ success: true, data });
   } catch (error) {
     return fail(res, error, "Add inspection finding");
@@ -159,6 +223,15 @@ exports.updateFinding = async (req, res) => {
     if (id === null) return undefined;
     const data = await Inspection.updateFinding(id, req.body || {}, req.user?.id ?? null);
     if (!data) return res.status(404).json({ success: false, message: "Finding not found" });
+    await AuditLog.record({
+      actorId: req.user?.id,
+      actorUsername: req.user?.username,
+      action: "INSPECTION_FINDING_UPDATED",
+      entityType: "inspection_finding",
+      entityId: id,
+      details: { description: String(data?.description ?? "").trim().slice(0, 200) },
+      ipAddress: req.ip,
+    });
     return res.json({ success: true, data });
   } catch (error) {
     return fail(res, error, "Update inspection finding");
@@ -169,8 +242,18 @@ exports.deleteFinding = async (req, res) => {
   try {
     const id = idParam(req, res);
     if (id === null) return undefined;
+    const before = await Inspection.getFindingById(id);
     const ok = await Inspection.deleteFinding(id, req.user?.id ?? null);
     if (!ok) return res.status(404).json({ success: false, message: "Finding not found" });
+    await AuditLog.record({
+      actorId: req.user?.id,
+      actorUsername: req.user?.username,
+      action: "INSPECTION_FINDING_DELETED",
+      entityType: "inspection_finding",
+      entityId: id,
+      details: { description: String(before?.description ?? "").trim().slice(0, 200) },
+      ipAddress: req.ip,
+    });
     return res.json({ success: true });
   } catch (error) {
     return fail(res, error, "Delete inspection finding");
@@ -187,6 +270,15 @@ exports.addAction = async (req, res) => {
     }
     const data = await Inspection.addCorrectiveAction(id, req.body || {}, req.user?.id ?? null);
     if (!data) return res.status(404).json({ success: false, message: "Inspection not found" });
+    await AuditLog.record({
+      actorId: req.user?.id,
+      actorUsername: req.user?.username,
+      action: "INSPECTION_ACTION_ADDED",
+      entityType: "inspection",
+      entityId: id,
+      details: { action_required: String(data?.action_required ?? "").trim().slice(0, 200) },
+      ipAddress: req.ip,
+    });
     return res.status(201).json({ success: true, data });
   } catch (error) {
     return fail(res, error, "Add corrective action");
@@ -199,6 +291,15 @@ exports.updateAction = async (req, res) => {
     if (id === null) return undefined;
     const data = await Inspection.updateCorrectiveAction(id, req.body || {}, req.user?.id ?? null);
     if (!data) return res.status(404).json({ success: false, message: "Corrective action not found" });
+    await AuditLog.record({
+      actorId: req.user?.id,
+      actorUsername: req.user?.username,
+      action: "INSPECTION_ACTION_UPDATED",
+      entityType: "inspection_action",
+      entityId: id,
+      details: { action_required: String(data?.action_required ?? "").trim().slice(0, 200), status: data?.status },
+      ipAddress: req.ip,
+    });
     return res.json({ success: true, data });
   } catch (error) {
     return fail(res, error, "Update corrective action");
@@ -209,8 +310,18 @@ exports.deleteAction = async (req, res) => {
   try {
     const id = idParam(req, res);
     if (id === null) return undefined;
+    const before = await Inspection.getActionById(id);
     const ok = await Inspection.deleteCorrectiveAction(id, req.user?.id ?? null);
     if (!ok) return res.status(404).json({ success: false, message: "Corrective action not found" });
+    await AuditLog.record({
+      actorId: req.user?.id,
+      actorUsername: req.user?.username,
+      action: "INSPECTION_ACTION_DELETED",
+      entityType: "inspection_action",
+      entityId: id,
+      details: { action_required: String(before?.action_required ?? "").trim().slice(0, 200) },
+      ipAddress: req.ip,
+    });
     return res.json({ success: true });
   } catch (error) {
     return fail(res, error, "Delete corrective action");
@@ -224,6 +335,15 @@ exports.addDocument = async (req, res) => {
     if (id === null) return undefined;
     const data = await Inspection.addDocument(id, req.body || {}, req.user?.id ?? null);
     if (!data) return res.status(404).json({ success: false, message: "Inspection not found" });
+    await AuditLog.record({
+      actorId: req.user?.id,
+      actorUsername: req.user?.username,
+      action: "INSPECTION_DOCUMENT_ADDED",
+      entityType: "inspection",
+      entityId: id,
+      details: { file_name: data?.original_file_name || data?.file_name },
+      ipAddress: req.ip,
+    });
     return res.status(201).json({ success: true, data });
   } catch (error) {
     return fail(res, error, "Add inspection document");
@@ -234,8 +354,18 @@ exports.deleteDocument = async (req, res) => {
   try {
     const id = idParam(req, res);
     if (id === null) return undefined;
+    const before = await Inspection.getDocumentById(id);
     const ok = await Inspection.deleteDocument(id, req.user?.id ?? null);
     if (!ok) return res.status(404).json({ success: false, message: "Document not found" });
+    await AuditLog.record({
+      actorId: req.user?.id,
+      actorUsername: req.user?.username,
+      action: "INSPECTION_DOCUMENT_DELETED",
+      entityType: "inspection",
+      entityId: before?.inspection_id,
+      details: { file_name: before?.original_file_name || before?.file_name },
+      ipAddress: req.ip,
+    });
     return res.json({ success: true });
   } catch (error) {
     return fail(res, error, "Delete inspection document");

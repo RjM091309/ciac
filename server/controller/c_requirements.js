@@ -1,7 +1,20 @@
 const Requirement = require("../models/Requirement");
+const AuditLog = require("../models/AuditLog");
 
 function isForeignKeyViolation(error) {
   return error?.number === 547 || /FOREIGN KEY constraint/i.test(String(error?.message || ""));
+}
+
+function audit(req, action, entityId, details) {
+  return AuditLog.record({
+    actorId: req.user?.id,
+    actorUsername: req.user?.username,
+    action,
+    entityType: "requirement",
+    entityId,
+    details,
+    ipAddress: req.ip,
+  });
 }
 
 exports.list = async (req, res) => {
@@ -45,6 +58,7 @@ exports.create = async (req, res) => {
       application_types,
       created_by: req.user?.id ?? null,
     });
+    await audit(req, "REQUIREMENT_CREATED", row?.id, { code: row?.code, name: row?.name });
     return res.status(201).json({ success: true, data: row });
   } catch (error) {
     console.error("Create requirement error:", error);
@@ -77,6 +91,7 @@ exports.update = async (req, res) => {
       updated_by: req.user?.id ?? null,
     });
     if (!row) return res.status(404).json({ success: false, message: "Requirement not found" });
+    await audit(req, "REQUIREMENT_UPDATED", id, { code: row?.code, name: row?.name });
     return res.json({ success: true, data: row });
   } catch (error) {
     console.error("Update requirement error:", error);
@@ -96,6 +111,7 @@ exports.deactivate = async (req, res) => {
     if (!Number.isFinite(id)) return res.status(400).json({ success: false, message: "Invalid id" });
     const row = await Requirement.deactivateRequirement(id, req.user?.id ?? null);
     if (!row) return res.status(404).json({ success: false, message: "Requirement not found" });
+    await audit(req, "REQUIREMENT_DEACTIVATED", id, { code: row?.code, name: row?.name });
     return res.json({ success: true, data: row });
   } catch (error) {
     console.error("Deactivate requirement error:", error);
@@ -109,6 +125,7 @@ exports.reactivate = async (req, res) => {
     if (!Number.isFinite(id)) return res.status(400).json({ success: false, message: "Invalid id" });
     const row = await Requirement.reactivateRequirement(id, req.user?.id ?? null);
     if (!row) return res.status(404).json({ success: false, message: "Requirement not found" });
+    await audit(req, "REQUIREMENT_REACTIVATED", id, { code: row?.code, name: row?.name });
     return res.json({ success: true, data: row });
   } catch (error) {
     console.error("Reactivate requirement error:", error);

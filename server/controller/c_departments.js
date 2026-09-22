@@ -1,4 +1,17 @@
 const Department = require("../models/Department");
+const AuditLog = require("../models/AuditLog");
+
+function audit(req, action, entityId, details) {
+  return AuditLog.record({
+    actorId: req.user?.id,
+    actorUsername: req.user?.username,
+    action,
+    entityType: "department",
+    entityId,
+    details,
+    ipAddress: req.ip,
+  });
+}
 
 function fail(res, label, error) {
   console.error(`${label} error:`, error);
@@ -28,6 +41,7 @@ exports.create = async (req, res) => {
       created_by: req.user?.id ?? null,
       is_active,
     });
+    await audit(req, "DEPARTMENT_CREATED", row?.id, { code: row?.code, name: row?.name });
     return res.status(201).json({ success: true, data: row });
   } catch (error) {
     return fail(res, "Create department", error);
@@ -46,6 +60,7 @@ exports.update = async (req, res) => {
       updated_by: req.user?.id ?? null,
     });
     if (!row) return res.status(404).json({ success: false, message: "Department not found" });
+    await audit(req, "DEPARTMENT_UPDATED", id, { code: row?.code, name: row?.name });
     return res.json({ success: true, data: row });
   } catch (error) {
     return fail(res, "Update department", error);
@@ -58,6 +73,7 @@ exports.deactivate = async (req, res) => {
     if (!Number.isFinite(id)) return res.status(400).json({ success: false, message: "Invalid id" });
     const row = await Department.deactivateDepartment(id, req.user?.id ?? null);
     if (!row) return res.status(404).json({ success: false, message: "Department not found" });
+    await audit(req, "DEPARTMENT_DEACTIVATED", id, { code: row?.code, name: row?.name });
     return res.json({ success: true, data: row });
   } catch (error) {
     return fail(res, "Deactivate department", error);
@@ -70,6 +86,7 @@ exports.reactivate = async (req, res) => {
     if (!Number.isFinite(id)) return res.status(400).json({ success: false, message: "Invalid id" });
     const row = await Department.reactivateDepartment(id, req.user?.id ?? null);
     if (!row) return res.status(404).json({ success: false, message: "Department not found" });
+    await audit(req, "DEPARTMENT_REACTIVATED", id, { code: row?.code, name: row?.name });
     return res.json({ success: true, data: row });
   } catch (error) {
     return fail(res, "Reactivate department", error);

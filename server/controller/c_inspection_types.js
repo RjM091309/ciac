@@ -1,4 +1,17 @@
 const InspectionType = require("../models/InspectionType");
+const AuditLog = require("../models/AuditLog");
+
+function audit(req, action, entityId, details) {
+  return AuditLog.record({
+    actorId: req.user?.id,
+    actorUsername: req.user?.username,
+    action,
+    entityType: "inspection_type",
+    entityId,
+    details,
+    ipAddress: req.ip,
+  });
+}
 
 exports.list = async (req, res) => {
   try {
@@ -35,6 +48,7 @@ exports.create = async (req, res) => {
       created_by: req.user?.id ?? null,
       is_active,
     });
+    await audit(req, "INSPECTION_TYPE_CREATED", row?.id, { code: row?.code, name: row?.name });
     return res.status(201).json({ success: true, data: row });
   } catch (error) {
     console.error("Create inspection type error:", error);
@@ -55,6 +69,7 @@ exports.update = async (req, res) => {
       updated_by: req.user?.id ?? null,
     });
     if (!row) return res.status(404).json({ success: false, message: "Inspection type not found" });
+    await audit(req, "INSPECTION_TYPE_UPDATED", id, { code: row?.code, name: row?.name });
     return res.json({ success: true, data: row });
   } catch (error) {
     console.error("Update inspection type error:", error);
@@ -68,6 +83,7 @@ exports.deactivate = async (req, res) => {
     if (!Number.isFinite(id)) return res.status(400).json({ success: false, message: "Invalid id" });
     const row = await InspectionType.deactivateInspectionType(id, req.user?.id ?? null);
     if (!row) return res.status(404).json({ success: false, message: "Inspection type not found" });
+    await audit(req, "INSPECTION_TYPE_DEACTIVATED", id, { code: row?.code, name: row?.name });
     return res.json({ success: true, data: row });
   } catch (error) {
     console.error("Deactivate inspection type error:", error);
@@ -81,6 +97,7 @@ exports.reactivate = async (req, res) => {
     if (!Number.isFinite(id)) return res.status(400).json({ success: false, message: "Invalid id" });
     const row = await InspectionType.reactivateInspectionType(id, req.user?.id ?? null);
     if (!row) return res.status(404).json({ success: false, message: "Inspection type not found" });
+    await audit(req, "INSPECTION_TYPE_REACTIVATED", id, { code: row?.code, name: row?.name });
     return res.json({ success: true, data: row });
   } catch (error) {
     console.error("Reactivate inspection type error:", error);

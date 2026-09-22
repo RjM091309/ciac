@@ -1,4 +1,17 @@
 const TypeOfContract = require("../models/TypeOfContract");
+const AuditLog = require("../models/AuditLog");
+
+function audit(req, action, entityId, details) {
+  return AuditLog.record({
+    actorId: req.user?.id,
+    actorUsername: req.user?.username,
+    action,
+    entityType: "type_of_contract",
+    entityId,
+    details,
+    ipAddress: req.ip,
+  });
+}
 
 function fail(res, label, error) {
   console.error(`${label} error:`, error);
@@ -26,6 +39,7 @@ exports.create = async (req, res) => {
       created_by: req.user?.id ?? null,
       is_active,
     });
+    await audit(req, "TYPE_OF_CONTRACT_CREATED", row?.id, { name: row?.name });
     return res.status(201).json({ success: true, data: row });
   } catch (error) {
     return fail(res, "Create type of contract", error);
@@ -46,6 +60,7 @@ exports.update = async (req, res) => {
       updated_by: req.user?.id ?? null,
     });
     if (!row) return res.status(404).json({ success: false, message: "Type of Contract not found" });
+    await audit(req, "TYPE_OF_CONTRACT_UPDATED", id, { name: row?.name });
     return res.json({ success: true, data: row });
   } catch (error) {
     return fail(res, "Update type of contract", error);
@@ -58,6 +73,7 @@ exports.deactivate = async (req, res) => {
     if (!Number.isFinite(id)) return res.status(400).json({ success: false, message: "Invalid id" });
     const row = await TypeOfContract.deactivateTypeOfContract(id, req.user?.id ?? null);
     if (!row) return res.status(404).json({ success: false, message: "Type of Contract not found" });
+    await audit(req, "TYPE_OF_CONTRACT_DEACTIVATED", id, { name: row?.name });
     return res.json({ success: true, data: row });
   } catch (error) {
     return fail(res, "Deactivate type of contract", error);
@@ -70,6 +86,7 @@ exports.reactivate = async (req, res) => {
     if (!Number.isFinite(id)) return res.status(400).json({ success: false, message: "Invalid id" });
     const row = await TypeOfContract.reactivateTypeOfContract(id, req.user?.id ?? null);
     if (!row) return res.status(404).json({ success: false, message: "Type of Contract not found" });
+    await audit(req, "TYPE_OF_CONTRACT_REACTIVATED", id, { name: row?.name });
     return res.json({ success: true, data: row });
   } catch (error) {
     return fail(res, "Reactivate type of contract", error);

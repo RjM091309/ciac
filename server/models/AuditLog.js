@@ -109,20 +109,61 @@ async function list({ actor, action, from, to, limit = 50, offset = 0 } = {}) {
     params
   );
 
+  const mapped = rows.map((r) => ({
+    id: r.id,
+    actor_id: r.actor_id,
+    actor_username: r.actor_username,
+    action: r.action,
+    entity_type: r.entity_type,
+    entity_id: r.entity_id,
+    details: r.metadata_json ? JSON.parse(r.metadata_json) : null,
+    ip_address: r.ip_address,
+    created_at: r.created_at,
+  }));
+
+  await backfillEntityNames(mapped);
+
   return {
-    rows: rows.map((r) => ({
-      id: r.id,
-      actor_id: r.actor_id,
-      actor_username: r.actor_username,
-      action: r.action,
-      entity_type: r.entity_type,
-      entity_id: r.entity_id,
-      details: r.metadata_json ? JSON.parse(r.metadata_json) : null,
-      ip_address: r.ip_address,
-      created_at: r.created_at,
-    })),
+    rows: mapped,
     total: Number(countRows?.[0]?.total || 0),
   };
+}
+
+const ROLE_ENTITY_TYPES = ["role", "role_sidebar_menu", "role_menu_crud", "role_dashboard_widgets"];
+
+/** Rows written before their call site started passing a real name in
+ * `details` (or any future call site that forgets to) fall back to showing
+ * "user #12" / "role #3" in the Details column — this resolves the actual
+ * current username/role name straight from entity_id at read time instead,
+ * so the Details column never has to show a raw database id even for old
+ * rows already sitting in audit_logs. Mutates `rows` in place. */
+async function backfillEntityNames(rows) {
+  const userIds = new Set();
+  const roleIds = new Set();
+  for (const r of rows) {
+    if (r.entity_id == null || !Number.isFinite(Number(r.entity_id))) continue;
+    if (r.entity_type === "user" && !r.details?.username) userIds.add(Number(r.entity_id));
+    if (ROLE_ENTITY_TYPES.includes(r.entity_type) && !r.details?.name) roleIds.add(Number(r.entity_id));
+  }
+  if (!userIds.size && !roleIds.size) return;
+
+  const [userRows, roleRows] = await Promise.all([
+    userIds.size ? selectData(`SELECT id, username FROM users WHERE id IN (${[...userIds].join(",")})`) : [],
+    roleIds.size ? selectData(`SELECT id, name FROM roles WHERE id IN (${[...roleIds].join(",")})`) : [],
+  ]);
+  const usernameById = new Map(userRows.map((u) => [u.id, u.username]));
+  const roleNameById = new Map(roleRows.map((r) => [r.id, r.name]));
+
+  for (const r of rows) {
+    if (r.entity_id == null) continue;
+    const id = Number(r.entity_id);
+    if (r.entity_type === "user" && !r.details?.username && usernameById.has(id)) {
+      r.details = { ...(r.details || {}), username: usernameById.get(id) };
+    }
+    if (ROLE_ENTITY_TYPES.includes(r.entity_type) && !r.details?.name && roleNameById.has(id)) {
+      r.details = { ...(r.details || {}), name: roleNameById.get(id) };
+    }
+  }
 }
 
 async function listDistinctActions() {
