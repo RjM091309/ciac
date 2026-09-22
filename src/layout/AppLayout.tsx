@@ -4,6 +4,7 @@ import { AppHeader } from '../components/AppHeader';
 import { AppSidebar } from '../components/AppSidebar';
 import { ProponentSidebar } from '../components/proponent/ProponentSidebar';
 import { ProponentBottomNav, BOTTOM_NAV_HEIGHT } from '../components/proponent/ProponentBottomNav';
+import { ChangePasswordModal } from '../components/ChangePasswordModal';
 import { ControlPanelAccessProvider } from '../context/ControlPanelAccessContext';
 import { cn } from '../lib/utils';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
@@ -146,6 +147,8 @@ export function AppLayout({
     window.localStorage.setItem('themeMode', themeMode);
   }, [theme, themeMode]);
 
+  const [changePasswordOpen, setChangePasswordOpen] = useState(false);
+
   const closeSidebar = () => setSidebarCollapsed(true);
   const toggleSidebar = () => setSidebarCollapsed((prev) => !prev);
   const toggleTheme = () => {
@@ -262,6 +265,16 @@ export function AppLayout({
                   collapsed={false}
                   variant="drawer"
                   permissionOverride={sidebarPermissionOverride}
+                  accountActions={{
+                    onOpenSettings: () => {
+                      closeSidebar();
+                      navigate('/me/profile');
+                    },
+                    onChangePassword: () => {
+                      closeSidebar();
+                      setChangePasswordOpen(true);
+                    },
+                  }}
                 />
               </div>
             </>
@@ -300,6 +313,10 @@ export function AppLayout({
             permissionOverride={sidebarPermissionOverride}
           />
         )}
+
+        {/* Mobile drawer's Change Password (the header's own modal is
+            unreachable there since its account menu is hidden below md). */}
+        <ChangePasswordModal open={changePasswordOpen} onClose={() => setChangePasswordOpen(false)} />
       </div>
     </ControlPanelAccessProvider>
     </ThemeProvider>

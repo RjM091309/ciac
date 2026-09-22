@@ -6,6 +6,7 @@ import {
   ClipboardList,
   FileCheck,
   FilePlus2,
+  KeyRound,
   LayoutDashboard,
   LogOut,
   RefreshCw,
@@ -267,6 +268,7 @@ export function AppSidebar({
   collapsed,
   variant = 'default',
   permissionOverride,
+  accountActions,
 }: {
   view: string;
   onViewChange: (view: string) => void;
@@ -277,6 +279,9 @@ export function AppSidebar({
    * role's actual saved sidebar permissions, shown in place of the logged-in
    * admin's own fullAccess so the preview reflects what that role really sees. */
   permissionOverride?: Record<string, boolean> | null;
+  /** Mobile drawer only: stands in for the header's account menu, which is
+   * hidden below md. */
+  accountActions?: { onOpenSettings: () => void; onChangePassword: () => void };
 }) {
   const isDrawer = variant === 'drawer';
   const [openDropdownId, setOpenDropdownId] = useState<string | null>(null);
@@ -476,6 +481,15 @@ export function AppSidebar({
                 onToggle={() => toggleDropdown('file-maintenance')}
                 singleItemIsGroup={false}
               />
+            </div>
+          </SidebarGroup>
+          )}
+
+          {isDrawer && accountActions && (
+          <SidebarGroup title="Account" collapsed={collapsed}>
+            <div className="flex flex-col gap-1.5">
+              <SidebarItem icon={Settings} label="Settings" onClick={accountActions.onOpenSettings} collapsed={collapsed} />
+              <SidebarItem icon={KeyRound} label="Change Password" onClick={accountActions.onChangePassword} collapsed={collapsed} />
             </div>
           </SidebarGroup>
           )}

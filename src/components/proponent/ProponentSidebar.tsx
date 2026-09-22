@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { LayoutDashboard, LogOut } from 'lucide-react';
+import { KeyRound, LayoutDashboard, LogOut, Settings } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { useControlPanelAccess } from '../../context/ControlPanelAccessContext';
 
@@ -118,6 +118,7 @@ export function ProponentSidebar({
   collapsed,
   variant = 'default',
   permissionOverride,
+  accountActions,
 }: {
   view: string;
   onViewChange: (view: string) => void;
@@ -128,6 +129,9 @@ export function ProponentSidebar({
    * preview endpoint's `sidebarPermissions`), so the preview sidebar matches
    * what a real locator would see instead of always showing all five items. */
   permissionOverride?: Record<string, boolean> | null;
+  /** Mobile drawer only: stands in for the header's account menu, which is
+   * hidden below md. */
+  accountActions?: { onOpenSettings: () => void; onChangePassword: () => void };
 }) {
   const isDrawer = variant === 'drawer';
   const { sidebarPermissions: mySidebarPermissions, ready } = useControlPanelAccess();
@@ -183,6 +187,13 @@ export function ProponentSidebar({
                   collapsed={collapsed}
                 />
               ))}
+            </SidebarGroup>
+          )}
+
+          {isDrawer && accountActions && (
+            <SidebarGroup title="Account" collapsed={collapsed}>
+              <SidebarItem icon={Settings} label="Settings" onClick={accountActions.onOpenSettings} collapsed={collapsed} />
+              <SidebarItem icon={KeyRound} label="Change Password" onClick={accountActions.onChangePassword} collapsed={collapsed} />
             </SidebarGroup>
           )}
         </nav>

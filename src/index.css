@@ -676,3 +676,23 @@ input[type='week']:not(:disabled)::-webkit-calendar-picker-indicator {
 .content {
   padding: 1rem;
 }
+/* Mobile: tab strip scrolls sideways instead of squashing/overflowing, with
+   tighter tabs and content padding so forms get more width. */
+@media (max-width: 767px) {
+  .tabs {
+    scrollbar-width: none;
+  }
+  .tabs::-webkit-scrollbar {
+    display: none;
+  }
+  .tab {
+    flex-shrink: 0;
+    height: 36px;
+    line-height: 36px;
+    padding: 0 14px;
+    margin-right: 12px;
+  }
+  .content {
+    padding: 0.75rem;
+  }
+}

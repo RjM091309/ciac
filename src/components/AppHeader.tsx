@@ -12,9 +12,11 @@ import {
   Settings,
   ShieldCheck,
   SunMedium,
+  X,
   Zap,
 } from 'lucide-react';
 import { ChangePasswordModal } from './ChangePasswordModal';
+import { cn } from '../lib/utils';
 import {
   countUnread,
   filterNotificationsForUser,
@@ -203,6 +205,7 @@ export function AppHeader({
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchLoading, setSearchLoading] = useState(false);
+  const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
   const searchWrapRef = useRef<HTMLDivElement | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const userMenuWrapRef = useRef<HTMLDivElement | null>(null);
@@ -402,6 +405,7 @@ export function AppHeader({
       }
       if (searchWrapRef.current && !searchWrapRef.current.contains(event.target as Node)) {
         setSearchOpen(false);
+        setMobileSearchOpen(false);
       }
     }
     function onEsc(event: KeyboardEvent) {
@@ -409,6 +413,7 @@ export function AppHeader({
         setNotificationOpen(false);
         setUserMenuOpen(false);
         setSearchOpen(false);
+        setMobileSearchOpen(false);
       }
     }
     document.addEventListener('mousedown', onDocumentClick);
@@ -456,8 +461,20 @@ export function AppHeader({
     return () => window.clearTimeout(handle);
   }, [searchQuery, userRole]);
 
+  function closeMobileSearch() {
+    setMobileSearchOpen(false);
+    setSearchOpen(false);
+  }
+
+  // Focus the input as soon as the mobile overlay opens, so a tap on the
+  // search icon goes straight to typing.
+  useEffect(() => {
+    if (mobileSearchOpen) searchInputRef.current?.focus();
+  }, [mobileSearchOpen]);
+
   function goToSearchResult(result: SearchResult) {
     navigate(`${result.target_path}?applicationId=${result.id}`);
+    setMobileSearchOpen(false);
     setSearchOpen(false);
     setSearchQuery('');
     setSearchResults([]);
@@ -507,7 +524,7 @@ export function AppHeader({
   return (
     <header className="relative z-40 shrink-0 px-2 sm:px-3 md:px-4 pt-2 sm:pt-2.5 md:pt-3 mb-2 safe-top">
       <div
-        className="min-h-11 sm:min-h-12 md:min-h-14 rounded-2xl backdrop-blur-xl px-2.5 sm:px-3 md:px-5 flex items-center justify-between gap-1.5 sm:gap-2 md:gap-3 flex-nowrap"
+        className="relative min-h-11 sm:min-h-12 md:min-h-14 rounded-2xl backdrop-blur-xl px-2.5 sm:px-3 md:px-5 flex items-center justify-between gap-1.5 sm:gap-2 md:gap-3 flex-nowrap"
         style={{
           backgroundColor: 'color-mix(in oklab, var(--surface) 65%, transparent)',
           boxShadow:
@@ -520,7 +537,8 @@ export function AppHeader({
             type="button"
             onClick={onToggleSidebar}
             aria-label="Toggle sidebar"
-            className="h-9 w-9 sm:h-9 sm:w-9 rounded-full flex flex-col items-center justify-center gap-[3px] text-[var(--text-muted)] hover:text-[var(--text)] transition-colors shrink-0"
+            // Hidden on mobile (< md) — the bottom nav's "More" tab opens the drawer there.
+            className="h-9 w-9 sm:h-9 sm:w-9 rounded-full hidden md:flex flex-col items-center justify-center gap-[3px] text-[var(--text-muted)] hover:text-[var(--text)] transition-colors shrink-0"
             style={{
               backgroundColor: 'color-mix(in oklab, var(--control-bg) 88%, transparent)',
             }}
@@ -547,10 +565,32 @@ export function AppHeader({
         {/* Right: search (desktop) + actions + profile */}
         <div className="flex items-center gap-1 sm:gap-2 md:gap-2.5 flex-shrink min-w-0">
           {userRole === 'proponent' ? null : (
+            <button
+              type="button"
+              aria-label="Search"
+              onClick={() => setMobileSearchOpen(true)}
+              className="sm:hidden h-9 w-9 inline-flex items-center justify-center rounded-full text-[var(--text-muted)] hover:text-[var(--text)] transition-colors shrink-0 cursor-pointer"
+              style={{
+                backgroundColor: 'color-mix(in oklab, var(--control-bg) 88%, transparent)',
+              }}
+            >
+              <Search size={16} />
+            </button>
+          )}
+
+          {userRole === 'proponent' ? null : (
             <div
               ref={searchWrapRef}
-              className="relative group hidden sm:block w-full sm:w-36 md:w-44 lg:w-64 xl:w-72 max-w-[170px] lg:max-w-none"
+              // Mobile (< sm): hidden until the search icon is tapped, then
+              // overlays the whole header bar. sm+: the usual inline box.
+              className={cn(
+                mobileSearchOpen
+                  ? 'absolute inset-0 z-10 flex items-center gap-2 px-2.5 rounded-2xl bg-[var(--surface)]'
+                  : 'hidden',
+                'sm:relative sm:inset-auto sm:z-auto sm:block sm:px-0 sm:rounded-none sm:bg-transparent sm:w-36 md:w-44 lg:w-64 xl:w-72 sm:max-w-[170px] lg:max-w-none',
+              )}
             >
+              <div className="relative group flex-1 min-w-0">
               <Search
                 className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)] group-focus-within:text-[var(--text)] transition-colors pointer-events-none"
                 size={14}
@@ -581,6 +621,16 @@ export function AppHeader({
                 </span>
                 <span className="text-[9px] text-[var(--text-muted)] font-bold">K</span>
               </div>
+              </div>
+
+              <button
+                type="button"
+                aria-label="Close search"
+                onClick={closeMobileSearch}
+                className="sm:hidden h-9 w-9 inline-flex items-center justify-center rounded-full text-[var(--text-muted)] hover:text-[var(--text)] transition-colors shrink-0 cursor-pointer"
+              >
+                <X size={16} />
+              </button>
 
               {searchOpen && searchQuery.trim().length >= 2 ? (
                 <div
@@ -808,12 +858,15 @@ export function AppHeader({
           </div>
 
           <div
-            className="h-6 sm:h-9 w-px mx-0.5 sm:mx-1 shrink-0 hidden sm:block"
+            className="h-9 w-px mx-1 shrink-0 hidden md:block"
             aria-hidden
             style={{ backgroundColor: 'var(--border-subtle)' }}
           />
 
-          <div className="relative shrink-0" ref={userMenuWrapRef}>
+          {/* Desktop/tablet only — on mobile (< md, same as AppLayout's
+              MOBILE_BREAKPOINT) Settings and Change Password live in the
+              sidebar drawer instead. */}
+          <div className="relative shrink-0 hidden md:block" ref={userMenuWrapRef}>
             <button
               aria-label="Account menu"
               aria-expanded={userMenuOpen}

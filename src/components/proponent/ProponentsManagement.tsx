@@ -1097,7 +1097,7 @@ export function ProponentsManagement() {
             </>
           ) : undefined
         }
-        widthClassName="max-w-[75vw]"
+        widthClassName="md:max-w-[75vw]"
       >
         {(() => {
           // Same field layout for New and Edit — same grouping/positions as
@@ -1115,7 +1115,7 @@ export function ProponentsManagement() {
                 same column count) so their edges line up vertically — Row 2 nests
                 Principal/Lease Address and TIN/SEC/Ref inside their own cells rather than
                 adding extra top-level columns, which would throw off the gap math. */}
-            <div className="grid grid-cols-[1.8fr_1.6fr_0.7fr] gap-3">
+            <div className="grid grid-cols-1 md:grid-cols-[1.8fr_1.6fr_0.7fr] gap-3">
               <div>
                 <Field compact label="Locator's Name">
                   <div className="app-form-control app-form-control-sm p-0 overflow-hidden flex items-stretch">
@@ -1162,12 +1162,12 @@ export function ProponentsManagement() {
             {/* Row 2: same grid-cols-[1.8fr_1.6fr_0.7fr] track sizes as Row 1 (see note above) —
                 Principal/Lease Address share the first cell via a nested flex row instead of
                 being separate top-level columns, so Row 1/Row 2 edges stay pixel-aligned. */}
-            <div className="grid grid-cols-[1.8fr_1.6fr_0.7fr] gap-3 items-stretch">
-              <div className="flex gap-3 items-stretch">
+            <div className="grid grid-cols-1 md:grid-cols-[1.8fr_1.6fr_0.7fr] gap-3 items-stretch">
+              <div className="flex flex-col sm:flex-row gap-3 items-stretch">
                 <div className="flex-1 flex">
                   <Field compact label="Principal Address" className="h-full flex-1">
                     <textarea
-                      className="app-form-control app-form-control-sm flex-1 min-h-0"
+                      className="app-form-control app-form-control-sm flex-1 min-h-[4.5rem] md:min-h-0"
                       value={form.address}
                       onChange={(e) => setForm((p) => ({ ...p, address: e.target.value }))}
                     />
@@ -1177,7 +1177,7 @@ export function ProponentsManagement() {
                 <div className="flex-1 flex">
                   <Field compact label="Lease Address" className="h-full flex-1">
                     <textarea
-                      className="app-form-control app-form-control-sm flex-1 min-h-0"
+                      className="app-form-control app-form-control-sm flex-1 min-h-[4.5rem] md:min-h-0"
                       value={form.lease_address}
                       disabled={loadingLocation}
                       onChange={(e) => setForm((p) => ({ ...p, lease_address: e.target.value }))}
@@ -1214,8 +1214,8 @@ export function ProponentsManagement() {
                     </div>
                   ) : null}
                 </Field>
-                <div className="flex gap-2">
-                  <div className="flex-1">
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <div className="flex-1 min-w-0">
                     <Field compact label="TIN Number">
                       <div className="app-form-control app-form-control-sm p-0 overflow-hidden flex items-stretch">
                         <input
@@ -1227,7 +1227,7 @@ export function ProponentsManagement() {
                       </div>
                     </Field>
                   </div>
-                  <div className="flex-1">
+                  <div className="flex-1 min-w-0">
                     <Field compact label="SEC Registration">
                       <DatePicker
                         mode="single"
@@ -1239,7 +1239,7 @@ export function ProponentsManagement() {
                       />
                     </Field>
                   </div>
-                  <div className="flex-1">
+                  <div className="flex-1 min-w-0">
                     <Field compact label="Ref. Code">
                       <div className="app-form-control app-form-control-sm p-0 overflow-hidden flex items-stretch">
                         <input
@@ -1258,7 +1258,7 @@ export function ProponentsManagement() {
               <div className="flex">
                 <Field compact label="Extension Remarks" className="h-full flex-1">
                   <textarea
-                    className="app-form-control app-form-control-sm flex-1 min-h-0"
+                    className="app-form-control app-form-control-sm flex-1 min-h-[4.5rem] md:min-h-0"
                     value={form.extension_remarks}
                     disabled={loadingLocation}
                     onChange={(e) => setForm((p) => ({ ...p, extension_remarks: e.target.value }))}
@@ -1268,8 +1268,8 @@ export function ProponentsManagement() {
             </div>
 
             {/* Row 3: Authorized | Subscribed | Paid-up | Date Signed | Start/End/Lease Term */}
-            <div className="flex gap-3">
-              <div className="flex-1">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:flex gap-3">
+              <div className="flex-1 min-w-0">
                 <CapitalField
                   label="Authorized Capital Stock"
                   amount={form.authorized_capital}
@@ -1279,7 +1279,7 @@ export function ProponentsManagement() {
                   onCurrencyChange={(v) => setForm((p) => ({ ...p, authorized_capital_currency: v }))}
                 />
               </div>
-              <div className="flex-[0.7]">
+              <div className="flex-[0.7] min-w-0">
                 <CapitalField
                   label="Subscribed Capital"
                   amount={form.subscribed_capital}
@@ -1289,7 +1289,7 @@ export function ProponentsManagement() {
                   onCurrencyChange={(v) => setForm((p) => ({ ...p, subscribed_capital_currency: v }))}
                 />
               </div>
-              <div className="flex-1">
+              <div className="flex-1 min-w-0">
                 <CapitalField
                   label="Paid-up Capital"
                   amount={form.paid_up_capital}
@@ -1299,7 +1299,7 @@ export function ProponentsManagement() {
                   onCurrencyChange={(v) => setForm((p) => ({ ...p, paid_up_capital_currency: v }))}
                 />
               </div>
-              <div className="flex-[0.6]">
+              <div className="flex-[0.6] min-w-0">
                 <Field compact label="Date Signed">
                   <DatePicker
                     mode="single"
@@ -1311,8 +1311,8 @@ export function ProponentsManagement() {
                   />
                 </Field>
               </div>
-              <div className="flex-[1.2] flex gap-1.5">
-                <div className="flex-1">
+              <div className="sm:col-span-2 flex-[1.2] min-w-0 flex gap-1.5">
+                <div className="flex-1 min-w-0">
                   <Field compact label="Start Term">
                     <div className="app-form-control app-form-control-sm p-0 overflow-hidden flex items-stretch">
                       <input
@@ -1325,7 +1325,7 @@ export function ProponentsManagement() {
                     </div>
                   </Field>
                 </div>
-                <div className="flex-1">
+                <div className="flex-1 min-w-0">
                   <Field compact label="End Term">
                     <div className="app-form-control app-form-control-sm p-0 overflow-hidden flex items-stretch">
                       <input
@@ -1338,7 +1338,7 @@ export function ProponentsManagement() {
                     </div>
                   </Field>
                 </div>
-                <div className="flex-1">
+                <div className="flex-1 min-w-0">
                   <Field compact label="Lease Term">
                     <div
                       className="app-form-control app-form-control-sm p-0 overflow-hidden flex items-stretch"
@@ -1373,7 +1373,7 @@ export function ProponentsManagement() {
             {/* Folder-tab strip mirroring the legacy BRIDGE system's Locator's
                 Information form — only Profile has content built out so far. */}
             <div className="folders">
-              <div className="tabs">
+              <div className="tabs overflow-x-auto">
                 {(['Profile', 'Stockholders Information', 'Contact Person', 'Documents', 'Investment'] as const).map((tab) => (
                   <div
                     key={tab}
@@ -1476,11 +1476,11 @@ export function ProponentsManagement() {
             {/* Business Activities (left, tall) beside Grace Period/%PGRO/%PGRR/Land Use
                 (right, two stacked mini-rows) — matches the legacy BRIDGE layout where
                 the two sit side by side, not stacked as separate full-width rows. */}
-            <div className="flex gap-3 items-stretch">
+            <div className="flex flex-col md:flex-row gap-3 items-stretch">
               <div className="flex-[0.9] flex">
                 <Field compact label="Business Activities" className="h-full flex-1">
                   <textarea
-                    className="app-form-control app-form-control-sm flex-1 min-h-0"
+                    className="app-form-control app-form-control-sm flex-1 min-h-[4.5rem] md:min-h-0"
                     value={form.business_activities}
                     disabled={loadingLocation}
                     onChange={(e) => setForm((p) => ({ ...p, business_activities: e.target.value }))}
@@ -1489,8 +1489,8 @@ export function ProponentsManagement() {
               </div>
 
               <div className="flex-1 flex flex-col gap-2">
-                <div className="flex gap-3">
-                  <div className="w-[204px]">
+                <div className="grid grid-cols-2 md:flex gap-3">
+                  <div className="col-span-2 md:w-[204px]">
                     <Field compact label="Grace Period">
                       <div className="app-form-control app-form-control-sm p-0 overflow-hidden flex items-stretch">
                         <input
@@ -1532,8 +1532,8 @@ export function ProponentsManagement() {
                     </Field>
                   </div>
                 </div>
-                <div className="flex gap-3">
-                  <div className="w-24">
+                <div className="grid grid-cols-2 md:flex gap-3">
+                  <div className="md:w-24">
                     <Field compact label="% PGRO">
                       <div className="app-form-control app-form-control-sm p-0 overflow-hidden flex items-stretch">
                         <input
@@ -1546,7 +1546,7 @@ export function ProponentsManagement() {
                       </div>
                     </Field>
                   </div>
-                  <div className="w-24">
+                  <div className="md:w-24">
                     <Field compact label="% PGRR">
                       <div className="app-form-control app-form-control-sm p-0 overflow-hidden flex items-stretch">
                         <input
@@ -1559,7 +1559,7 @@ export function ProponentsManagement() {
                       </div>
                     </Field>
                   </div>
-                  <div className="flex-1">
+                  <div className="col-span-2 flex-1">
                     <Field compact label="Land Use">
                       <div className="app-form-control app-form-control-sm p-0 overflow-hidden flex items-stretch">
                         <AppSelect
@@ -1582,8 +1582,8 @@ export function ProponentsManagement() {
 
             {/* Property schedule (dbo.proponent_properties) — an inline editable
                 table synced wholesale on Save, add/remove-row buttons on the right. */}
-            <div className="flex gap-2 items-start">
-              <div className="flex-1 overflow-x-auto rounded-lg border" style={{ borderColor: 'var(--input-border)' }}>
+            <div className="flex flex-col sm:flex-row gap-2 sm:items-start">
+              <div className="flex-1 min-w-0 overflow-x-auto rounded-lg border" style={{ borderColor: 'var(--input-border)' }}>
                 <table className="w-full text-xs border-collapse">
                   <thead>
                     <tr style={{ backgroundColor: 'var(--control-bg)' }}>
@@ -1752,7 +1752,7 @@ export function ProponentsManagement() {
                   </tbody>
                 </table>
               </div>
-              <div className="flex flex-col gap-1.5 shrink-0">
+              <div className="flex flex-row sm:flex-col justify-end gap-1.5 shrink-0">
                 <button
                   type="button"
                   disabled={loadingLocation}
@@ -1787,9 +1787,9 @@ export function ProponentsManagement() {
             </div>
 
             {/* Row 6: Advance Lease Payment | Security Deposit | Performance Security */}
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div className="flex flex-col gap-2">
-                <div className="text-[9px] font-semibold uppercase tracking-widest text-center" style={{ color: 'var(--nav-active-bg)' }}>
+                <div className="text-[9px] font-semibold uppercase tracking-widest sm:text-center" style={{ color: 'var(--nav-active-bg)' }}>
                   Advance Lease Payment
                 </div>
                 <Field compact label="Months MGL">
@@ -1814,7 +1814,7 @@ export function ProponentsManagement() {
               </div>
 
               <div className="flex flex-col gap-2">
-                <div className="text-[9px] font-semibold uppercase tracking-widest text-center" style={{ color: 'var(--nav-active-bg)' }}>
+                <div className="text-[9px] font-semibold uppercase tracking-widest sm:text-center" style={{ color: 'var(--nav-active-bg)' }}>
                   Security Deposit
                 </div>
                 <Field compact label="Months MGL">
@@ -1839,7 +1839,7 @@ export function ProponentsManagement() {
               </div>
 
               <div className="flex flex-col gap-2">
-                <div className="text-[9px] font-semibold uppercase tracking-widest text-center" style={{ color: 'var(--nav-active-bg)' }}>
+                <div className="text-[9px] font-semibold uppercase tracking-widest sm:text-center" style={{ color: 'var(--nav-active-bg)' }}>
                   Performance Security
                 </div>
                 <Field compact label="Months MGL">
@@ -1978,8 +1978,8 @@ function RowsEditor<T extends { id?: number }>({
   extraActions?: React.ReactNode;
 }) {
   return (
-    <div className="flex gap-2 items-start">
-      <div className="flex-1 overflow-x-auto rounded-lg border" style={{ borderColor: 'var(--input-border)' }}>
+    <div className="flex flex-col sm:flex-row gap-2 sm:items-start">
+      <div className="flex-1 min-w-0 overflow-x-auto rounded-lg border" style={{ borderColor: 'var(--input-border)' }}>
         <table className="w-full text-xs border-collapse">
           <thead>
             <tr style={{ backgroundColor: 'var(--control-bg)' }}>
@@ -2033,7 +2033,7 @@ function RowsEditor<T extends { id?: number }>({
           </tbody>
         </table>
       </div>
-      <div className="flex flex-col gap-1.5 shrink-0">
+      <div className="flex flex-row sm:flex-col justify-end gap-1.5 shrink-0">
         <button
           type="button"
           disabled={disabled}
