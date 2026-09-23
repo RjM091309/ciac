@@ -1,6 +1,19 @@
 const { selectData } = require("../config/database");
 const { effectiveStatus } = require("./Permit");
 
+// Applications with a blank/NULL type code are reported (and filterable) as
+// "Unspecified" under this sentinel code instead of an empty label.
+const NO_TYPE_CODE = "__NONE__";
+const TYPE_CODE_SQL = "NULLIF(LTRIM(RTRIM(a.application_type)), '')";
+const TYPE_NAME_SQL = `COALESCE(NULLIF(at.name, ''), ${TYPE_CODE_SQL}, 'Unspecified')`;
+
+function typeFilterClause(applicationType, params) {
+  if (applicationType === NO_TYPE_CODE) return `${TYPE_CODE_SQL} IS NULL`;
+  const clause = `a.application_type = @param${params.length}`;
+  params.push(applicationType);
+  return clause;
+}
+
 function toDateOrNull(v) {
   if (!v) return null;
   const d = new Date(v);
@@ -25,8 +38,7 @@ function buildApplicationsFilter({ dateFrom, dateTo, applicationType, status, is
     params.push(to);
   }
   if (applicationType) {
-    where.push(`a.application_type = @param${params.length}`);
-    params.push(applicationType);
+    where.push(typeFilterClause(applicationType, params));
   }
   if (status) {
     where.push(`a.status = @param${params.length}`);
@@ -59,8 +71,7 @@ function buildLinkedFilter({ dateFrom, dateTo, applicationType } = {}, alias) {
     params.push(to);
   }
   if (applicationType) {
-    where.push(`a.application_type = @param${params.length}`);
-    params.push(applicationType);
+    where.push(typeFilterClause(applicationType, params));
   }
   return { whereSql: where.length ? `WHERE ${where.join(" AND ")}` : "", params };
 }
@@ -78,11 +89,15 @@ async function getOverview(filters = {}) {
       ),
       selectData(
         `
-        SELECT a.application_type, ISNULL(at.name, a.application_type) AS type_name, COUNT(1) AS total
-        FROM dbo.applications a
-        LEFT JOIN dbo.application_types at ON at.code = a.application_type
-        ${whereSql}
-        GROUP BY a.application_type, ISNULL(at.name, a.application_type)
+        SELECT t.application_type, t.type_name, COUNT(1) AS total
+        FROM (
+          SELECT ISNULL(${TYPE_CODE_SQL}, '${NO_TYPE_CODE}') AS application_type, ${TYPE_NAME_SQL} AS type_name
+          FROM dbo.applications a
+          LEFT JOIN dbo.application_types at ON at.code = a.application_type
+          ${whereSql}
+        ) t
+        GROUP BY t.application_type, t.type_name
+        ORDER BY total DESC
         `,
         params
       ),
@@ -197,7 +212,7 @@ async function listApplications(filters = {}) {
       a.application_no,
       p.business_name AS proponent_name,
       a.application_type,
-      ISNULL(at.name, a.application_type) AS application_type_name,
+      ${TYPE_NAME_SQL} AS application_type_name,
       a.is_renewal,
       a.status,
       a.submitted_at,

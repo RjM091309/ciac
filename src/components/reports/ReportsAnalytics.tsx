@@ -1,18 +1,16 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowDown, ArrowUp, ArrowUpDown, Download, FileSpreadsheet, FileText, RotateCcw, Search } from 'lucide-react';
+import { ArrowDown, ArrowUp, ArrowUpDown, Download, FileSpreadsheet, FileText, RotateCcw, Search, X } from 'lucide-react';
 import { toast } from 'sonner';
 import {
+  Area,
+  AreaChart,
   Bar,
   BarChart,
   CartesianGrid,
-  Cell,
   LabelList,
-  Line,
-  LineChart,
-  Pie,
-  PieChart,
   ResponsiveContainer,
   Tooltip,
+  Treemap,
   XAxis,
   YAxis,
 } from 'recharts';
@@ -35,6 +33,32 @@ const STATUS_LABELS: Record<string, string> = {
   APPROVED: 'Approved',
 };
 const STATUS_ORDER = Object.keys(STATUS_LABELS);
+// Applications-by-Status is split in two so the ever-growing Approved total
+// never dwarfs the handful of applications still moving through the queue —
+// each group gets its own bar scale.
+const IN_PROGRESS_STATUSES = ['SUBMITTED', 'UNDER_REVIEW', 'RESUBMITTED', 'RETURNED', 'FOR_APPROVAL'];
+const OUTCOME_STATUSES = ['APPROVED', 'DISAPPROVED', 'REJECTED'];
+
+// Matches NO_TYPE_CODE in server/models/Report.js — applications with no type.
+const NO_TYPE_CODE = '__NONE__';
+// Treemap shows this many types as their own tiles; the rest merge into "Other".
+const TYPE_TILE_LIMIT = 7;
+// A type whose tile would get less area than this (px², at the card's current
+// width) folds into "Other" instead of rendering as an unlabeled sliver —
+// on a phone that's ~3% of the total, on desktop ~2%.
+const MIN_TYPE_TILE_AREA = 2400;
+const OTHER_TILE_COLOR = '#94a3b8';
+
+// Every chart body in the Applications row shares this height so the three
+// cards stay equal no matter how many statuses/types/months there are.
+const CHART_BODY_HEIGHT = 240;
+
+type TrendRange = '12M' | '24M' | 'ALL';
+const TREND_RANGES: { value: TrendRange; label: string }[] = [
+  { value: '12M', label: '12M' },
+  { value: '24M', label: '24M' },
+  { value: 'ALL', label: 'All' },
+];
 const MOBILE_SORT_OPTIONS = [
   { value: 'submitted_at', label: 'Submitted date' },
   { value: 'proponent_name', label: 'Locator' },
@@ -146,6 +170,57 @@ function monthLabel(ym: string) {
   return new Date(y, m - 1, 1).toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
 }
 
+// Month arithmetic on "yyyy-MM" keys as a single integer (year*12 + month0),
+// so gap-filling the trend is plain counting.
+function ymIndex(ym: string) {
+  const [y, m] = String(ym || '').split('-').map(Number);
+  return y && m ? y * 12 + (m - 1) : NaN;
+}
+function ymFromIndex(i: number) {
+  return `${Math.floor(i / 12)}-${String((i % 12) + 1).padStart(2, '0')}`;
+}
+
+type TrendPoint = { key: string; label: string; total: number; unit: 'month' | 'year' };
+
+/** Turns the server's sparse month list (only months that have applications)
+ * into an evenly spaced series: the last 12/24 months with empty months as 0,
+ * or for "All" the whole history — by month when it spans ≤ 24 months,
+ * otherwise rolled up by year so a decade of data stays readable. */
+function buildTrendSeries(monthly: { month: string; total: number }[], range: TrendRange, dateFrom: Date | null): TrendPoint[] {
+  const counts = new Map<number, number>();
+  monthly.forEach((m) => {
+    const i = ymIndex(m.month);
+    if (!Number.isNaN(i)) counts.set(i, (counts.get(i) || 0) + m.total);
+  });
+  if (counts.size === 0) return [];
+  const idx = [...counts.keys()];
+  const last = Math.max(...idx);
+  const first = Math.min(...idx);
+
+  let start: number;
+  if (range === 'ALL') {
+    if (last - first + 1 > 24) {
+      const byYear = new Map<number, number>();
+      counts.forEach((total, i) => byYear.set(Math.floor(i / 12), (byYear.get(Math.floor(i / 12)) || 0) + total));
+      const firstYear = Math.floor(first / 12);
+      const lastYear = Math.floor(last / 12);
+      return Array.from({ length: lastYear - firstYear + 1 }, (_, k) => {
+        const y = firstYear + k;
+        return { key: String(y), label: String(y), total: byYear.get(y) || 0, unit: 'year' as const };
+      });
+    }
+    start = first;
+  } else {
+    start = last - (range === '12M' ? 12 : 24) + 1;
+    // A From-date filter means nothing earlier can have data — don't pad with zeros.
+    if (dateFrom) start = Math.max(start, Math.min(last, dateFrom.getFullYear() * 12 + dateFrom.getMonth()));
+  }
+  return Array.from({ length: last - start + 1 }, (_, k) => {
+    const ym = ymFromIndex(start + k);
+    return { key: ym, label: monthLabel(ym), total: counts.get(start + k) || 0, unit: 'month' as const };
+  });
+}
+
 function csvEscape(v: string | number) {
   const s = String(v ?? '');
   return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
@@ -182,6 +257,20 @@ function readFiltersFromUrl() {
 
 // Phones get chart layouts that fit a ~350px card (horizontal status bars,
 // thinned month ticks) — recharts needs this in JS, not CSS.
+// Callback ref (not useRef) so measuring starts whenever the element mounts —
+// the treemap box only exists once data has loaded.
+function useElementWidth<T extends HTMLElement>() {
+  const [el, setEl] = useState<T | null>(null);
+  const [width, setWidth] = useState(0);
+  useEffect(() => {
+    if (!el) return;
+    const ro = new ResizeObserver(([entry]) => setWidth(Math.round(entry.contentRect.width)));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [el]);
+  return [setEl, width] as const;
+}
+
 function useIsPhone() {
   const query = '(max-width: 639px)';
   const [isPhone, setIsPhone] = useState(() => typeof window !== 'undefined' && window.matchMedia(query).matches);
@@ -238,6 +327,10 @@ export function ReportsAnalytics({ navigate }: { navigate?: (to: string, opts?: 
   >(null);
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
 
+  const [trendRange, setTrendRange] = useState<TrendRange>('12M');
+  const [otherTypesOpen, setOtherTypesOpen] = useState(false);
+  const [typeCardRef, typeCardWidth] = useElementWidth<HTMLDivElement>();
+
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
 
@@ -257,11 +350,18 @@ export function ReportsAnalytics({ navigate }: { navigate?: (to: string, opts?: 
     setTypeFilter(code);
     scrollToTable();
   }
-  function drillToMonth(ym: string) {
-    const [y, m] = String(ym || '').split('-').map(Number);
-    if (!y || !m) return;
-    setDateFrom(new Date(y, m - 1, 1));
-    setDateTo(new Date(y, m, 0));
+  function drillToTrendPoint(p: TrendPoint) {
+    if (p.unit === 'year') {
+      const y = Number(p.key);
+      if (!y) return;
+      setDateFrom(new Date(y, 0, 1));
+      setDateTo(new Date(y, 11, 31));
+    } else {
+      const [y, m] = p.key.split('-').map(Number);
+      if (!y || !m) return;
+      setDateFrom(new Date(y, m - 1, 1));
+      setDateTo(new Date(y, m, 0));
+    }
     scrollToTable();
   }
 
@@ -387,19 +487,47 @@ export function ReportsAnalytics({ navigate }: { navigate?: (to: string, opts?: 
 
   const pg = usePagination(sortedRows, pageSize, page);
 
-  const statusChartData = useMemo(() => {
-    const src = overview?.applications_by_status || {};
-    return STATUS_ORDER.filter((s) => src[s]).map((s) => ({ key: s, status: STATUS_LABELS[s], total: src[s] }));
-  }, [overview]);
+  const statusCounts = overview?.applications_by_status || {};
+  const hasStatusData = STATUS_ORDER.some((st) => statusCounts[st]);
 
-  const typeChartData = useMemo(
-    () => (overview?.applications_by_type || []).map((t) => ({ code: t.code, name: t.name, total: t.total })),
-    [overview]
-  );
+  const typeTiles = useMemo(() => {
+    const sorted = [...(overview?.applications_by_type || [])].filter((t) => t.total > 0).sort((a, b) => b.total - a.total);
+    const grandTotal = sorted.reduce((sum, t) => sum + t.total, 0);
+    // Smallest share of the total that still gets a labelable tile at this
+    // width (0 until the card has been measured).
+    const minShare = typeCardWidth ? MIN_TYPE_TILE_AREA / (typeCardWidth * CHART_BODY_HEIGHT) : 0;
+    const share = (n: number) => (grandTotal ? n / grandTotal : 0);
+    let cut = 0;
+    while (cut < sorted.length && cut < TYPE_TILE_LIMIT && share(sorted[cut].total) >= minShare) cut++;
+    // A single leftover type big enough for its own tile beats "Other (1 type)".
+    if (sorted.length - cut === 1 && share(sorted[cut].total) >= minShare) cut++;
+    // The "Other" tile itself must be big enough to label — pull in more types until it is.
+    while (cut > 1 && cut < sorted.length && share(sorted.slice(cut).reduce((sum, t) => sum + t.total, 0)) < minShare) cut--;
+    const tiles: TypeTileDatum[] = sorted.slice(0, cut).map((t, i) => ({
+      code: t.code,
+      name: t.name,
+      total: t.total,
+      pct: grandTotal ? (t.total / grandTotal) * 100 : 0,
+      color: CHART_COLORS[i % CHART_COLORS.length],
+    }));
+    const rest = sorted.slice(cut);
+    if (rest.length) {
+      const restTotal = rest.reduce((sum, t) => sum + t.total, 0);
+      tiles.push({
+        code: '',
+        name: `Other (${rest.length} ${rest.length === 1 ? 'type' : 'types'})`,
+        total: restTotal,
+        pct: grandTotal ? (restTotal / grandTotal) * 100 : 0,
+        color: OTHER_TILE_COLOR,
+        isOther: true,
+      });
+    }
+    return { tiles, rest, grandTotal };
+  }, [overview, typeCardWidth]);
 
-  const trendChartData = useMemo(
-    () => (overview?.monthly_trend || []).map((m) => ({ key: m.month, month: monthLabel(m.month), total: m.total })),
-    [overview]
+  const trendSeries = useMemo(
+    () => buildTrendSeries(overview?.monthly_trend || [], trendRange, dateFrom),
+    [overview, trendRange, dateFrom]
   );
 
   const permitStatusChartData = useMemo(() => {
@@ -416,6 +544,14 @@ export function ReportsAnalytics({ navigate }: { navigate?: (to: string, opts?: 
     const src = overview?.inspections_by_result || {};
     return INSPECTION_RESULT_ORDER.filter((s) => src[s]).map((s) => ({ key: s, label: INSPECTION_RESULT_LABELS[s], total: src[s] }));
   }, [overview]);
+
+  // "Unspecified" isn't a real application type, so it's only offered in the
+  // Type filter while there are such applications (or it's already selected).
+  const typeSelectOptions = useMemo(() => {
+    const hasNone =
+      typeFilter === NO_TYPE_CODE || (overview?.applications_by_type || []).some((t) => t.code === NO_TYPE_CODE);
+    return hasNone ? [...typeOptions, { value: NO_TYPE_CODE, label: 'Unspecified' }] : typeOptions;
+  }, [typeOptions, overview, typeFilter]);
 
   const totalPermits = useMemo(
     () => Object.values(overview?.permits_by_status || {}).reduce((a, b) => a + b, 0),
@@ -570,7 +706,7 @@ export function ReportsAnalytics({ navigate }: { navigate?: (to: string, opts?: 
                   placeholder="All types"
                   value={typeFilter}
                   onChange={setTypeFilter}
-                  options={typeOptions}
+                  options={typeSelectOptions}
                   isClearable
                 />
               </div>
@@ -684,128 +820,81 @@ export function ReportsAnalytics({ navigate }: { navigate?: (to: string, opts?: 
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <ChartCard title="Applications by Status">
-          {statusChartData.length === 0 ? (
-            <ChartEmpty />
+          {hasStatusData ? (
+            <StatusSplit counts={statusCounts} onPick={drillToStatus} />
           ) : (
-            isPhone ? (
-              // Phones: horizontal bars so status names read level instead of
-              // as squeezed, angled ticks; counts sit at each bar's end since
-              // hover tooltips are awkward on touch.
-              <ResponsiveContainer width="100%" height={statusChartData.length * 30 + 12}>
-                <BarChart data={statusChartData} layout="vertical" margin={{ top: 4, right: 32, left: 0, bottom: 4 }} barCategoryGap={6}>
-                  <XAxis type="number" hide allowDecimals={false} />
-                  <YAxis
-                    type="category"
-                    dataKey="status"
-                    width={92}
-                    tick={{ fontSize: 10, fill: 'var(--text-muted)' }}
-                    axisLine={false}
-                    tickLine={false}
-                  />
-                  <Tooltip {...CHART_TOOLTIP_PROPS} />
-                  <Bar
-                    dataKey="total"
-                    radius={[0, 4, 4, 0]}
-                    className="cursor-pointer"
-                    onClick={(d: any) => d?.key && drillToStatus(d.key)}
-                  >
-                    {statusChartData.map((d, i) => (
-                      <Cell key={i} fill={STATUS_TONE[d.key]?.color || CHART_COLORS[i % CHART_COLORS.length]} />
-                    ))}
-                    <LabelList dataKey="total" position="right" style={{ fontSize: 10, fill: 'var(--text)' }} />
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            ) : (
-            <ResponsiveContainer width="100%" height={220}>
-              <BarChart data={statusChartData} margin={{ top: 4, right: 8, left: -20, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" vertical={false} />
-                <XAxis dataKey="status" tick={{ fontSize: 10, fill: 'var(--text-muted)' }} interval={0} angle={-20} textAnchor="end" height={50} />
-                <YAxis tick={{ fontSize: 10, fill: 'var(--text-muted)' }} allowDecimals={false} />
-                <Tooltip {...CHART_TOOLTIP_PROPS} />
-                <Bar
-                  dataKey="total"
-                  radius={[4, 4, 0, 0]}
-                  className="cursor-pointer"
-                  onClick={(d: any) => d?.key && drillToStatus(d.key)}
-                >
-                  {statusChartData.map((d, i) => (
-                    <Cell key={i} fill={STATUS_TONE[d.key]?.color || CHART_COLORS[i % CHART_COLORS.length]} />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-            )
+            <ChartEmpty />
           )}
         </ChartCard>
 
         <ChartCard title="Applications by Type">
-          {typeChartData.length === 0 ? (
+          {typeTiles.tiles.length === 0 ? (
             <ChartEmpty />
           ) : (
-            <ResponsiveContainer width="100%" height={isPhone ? 180 : 220}>
-              <PieChart>
-                <Tooltip {...CHART_TOOLTIP_PROPS} />
-                <Pie
-                  data={typeChartData}
+            <div ref={typeCardRef} className="relative" style={{ height: CHART_BODY_HEIGHT }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <Treemap
+                  data={typeTiles.tiles}
                   dataKey="total"
                   nameKey="name"
-                  innerRadius={45}
-                  outerRadius={75}
-                  paddingAngle={2}
-                  stroke="none"
-                  className="cursor-pointer"
-                  onClick={(d: any) => d?.code && drillToType(d.code)}
+                  aspectRatio={4 / 3}
+                  isAnimationActive={false}
+                  content={
+                    <TypeTile
+                      onPick={(t: TypeTileDatum) => (t.isOther ? setOtherTypesOpen(true) : drillToType(t.code))}
+                    />
+                  }
                 >
-                  {typeChartData.map((_, i) => (
-                    <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
-                  ))}
-                </Pie>
-              </PieChart>
-            </ResponsiveContainer>
-          )}
-          {typeChartData.length > 0 && (
-            <div className="flex flex-wrap gap-x-3 gap-y-1 justify-center mt-1">
-              {typeChartData.map((t, i) => (
-                <button
-                  key={t.name}
-                  type="button"
-                  onClick={() => drillToType(t.code)}
-                  className="inline-flex items-center gap-1.5 text-[10px] text-secondary cursor-pointer hover:underline"
-                  title={`Filter the table to ${t.name}`}
-                >
-                  <span className="w-2 h-2 rounded-full" style={{ backgroundColor: CHART_COLORS[i % CHART_COLORS.length] }} />
-                  {t.name} ({t.total})
-                </button>
-              ))}
+                  <Tooltip {...CHART_TOOLTIP_PROPS} content={<TypeTooltip />} />
+                </Treemap>
+              </ResponsiveContainer>
+              {otherTypesOpen && typeTiles.rest.length > 0 && (
+                <OtherTypesPanel
+                  items={typeTiles.rest}
+                  grandTotal={typeTiles.grandTotal}
+                  onClose={() => setOtherTypesOpen(false)}
+                  onPick={(code) => {
+                    setOtherTypesOpen(false);
+                    drillToType(code);
+                  }}
+                />
+              )}
             </div>
           )}
         </ChartCard>
 
-        <ChartCard title="Monthly Application Volume">
-          {trendChartData.length === 0 ? (
+        <ChartCard
+          title="Application Volume"
+          action={
+            <div
+              className="inline-flex rounded-md p-0.5 gap-0.5"
+              style={{ backgroundColor: 'var(--border-subtle)' }}
+              role="group"
+              aria-label="Volume range"
+            >
+              {TREND_RANGES.map((r) => (
+                <button
+                  key={r.value}
+                  type="button"
+                  onClick={() => setTrendRange(r.value)}
+                  aria-pressed={trendRange === r.value}
+                  className="px-2 py-0.5 rounded text-[10px] font-semibold cursor-pointer"
+                  style={
+                    trendRange === r.value
+                      ? { backgroundColor: 'var(--surface)', color: 'var(--text)' }
+                      : { color: 'var(--text-muted)' }
+                  }
+                >
+                  {r.label}
+                </button>
+              ))}
+            </div>
+          }
+        >
+          {trendSeries.length === 0 ? (
             <ChartEmpty />
           ) : (
-            <ResponsiveContainer width="100%" height={isPhone ? 190 : 220}>
-              <LineChart data={trendChartData} margin={{ top: 4, right: isPhone ? 12 : 8, left: -20, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" vertical={false} />
-                <XAxis
-                  dataKey="month"
-                  tick={{ fontSize: 10, fill: 'var(--text-muted)' }}
-                  interval={isPhone ? 'preserveStartEnd' : undefined}
-                  minTickGap={isPhone ? 16 : undefined}
-                />
-                <YAxis tick={{ fontSize: 10, fill: 'var(--text-muted)' }} allowDecimals={false} />
-                <Tooltip {...CHART_TOOLTIP_PROPS} />
-                <Line
-                  type="monotone"
-                  dataKey="total"
-                  stroke={CHART_COLORS[0]}
-                  strokeWidth={2}
-                  dot={<ClickableDot onDotClick={(payload: any) => payload?.key && drillToMonth(payload.key)} />}
-                />
-              </LineChart>
-            </ResponsiveContainer>
+            <TrendChart points={trendSeries} onPick={drillToTrendPoint} isPhone={isPhone} />
           )}
         </ChartCard>
       </div>
@@ -1121,10 +1210,14 @@ function StatTile({
   );
 }
 
-function ChartCard({ title, children }: { title: string; children: React.ReactNode }) {
+function ChartCard({ title, action, children }: { title: string; action?: React.ReactNode; children: React.ReactNode }) {
   return (
     <div className="glass-card p-3.5 sm:p-4 !border-transparent min-w-0" style={{ backgroundColor: 'var(--surface)' }}>
-      <h4 className="text-[11px] font-semibold text-secondary uppercase tracking-widest mb-2">{title}</h4>
+      {/* Fixed header height so a card with a toggle lines up with those without. */}
+      <div className="flex items-center justify-between gap-2 min-h-[22px] mb-2">
+        <h4 className="text-[11px] font-semibold text-secondary uppercase tracking-widest">{title}</h4>
+        {action}
+      </div>
       {children}
     </div>
   );
@@ -1132,9 +1225,325 @@ function ChartCard({ title, children }: { title: string; children: React.ReactNo
 
 function ChartEmpty() {
   return (
-    <div className="h-[220px] flex items-center justify-center text-[11px] text-secondary">
+    <div className="flex items-center justify-center text-[11px] text-secondary" style={{ height: CHART_BODY_HEIGHT }}>
       No data for the selected filters
     </div>
+  );
+}
+
+// ---- Applications by Status: in-progress vs outcomes -----------------------
+
+function StatusSplit({ counts, onPick }: { counts: Record<string, number>; onPick: (status: string) => void }) {
+  const outcomeTotal = OUTCOME_STATUSES.reduce((sum, st) => sum + (counts[st] || 0), 0);
+  const approvalRate = outcomeTotal ? Math.round(((counts.APPROVED || 0) / outcomeTotal) * 100) : null;
+  return (
+    <div className="flex flex-col justify-between" style={{ height: CHART_BODY_HEIGHT }}>
+      <StatusGroup
+        title="In progress"
+        aside={`${IN_PROGRESS_STATUSES.reduce((sum, st) => sum + (counts[st] || 0), 0)} open`}
+        statuses={IN_PROGRESS_STATUSES}
+        counts={counts}
+        onPick={onPick}
+      />
+      <div className="h-px" style={{ backgroundColor: 'var(--border-subtle)' }} />
+      <StatusGroup
+        title="Outcomes"
+        aside={
+          approvalRate !== null ? (
+            <span>
+              <span className="text-sm font-bold" style={{ color: STATUS_TONE.APPROVED.color }}>
+                {approvalRate}%
+              </span>{' '}
+              approved
+            </span>
+          ) : null
+        }
+        statuses={OUTCOME_STATUSES}
+        counts={counts}
+        onPick={onPick}
+      />
+    </div>
+  );
+}
+
+/** Horizontal bars scaled to the group's own max. Zero-count statuses stay
+ * listed (dimmed) so the layout doesn't jump around as filters change. */
+function StatusGroup({
+  title,
+  aside,
+  statuses,
+  counts,
+  onPick,
+}: {
+  title: string;
+  aside: React.ReactNode;
+  statuses: string[];
+  counts: Record<string, number>;
+  onPick: (status: string) => void;
+}) {
+  const max = Math.max(0, ...statuses.map((st) => counts[st] || 0));
+  const groupTotal = statuses.reduce((sum, st) => sum + (counts[st] || 0), 0);
+  return (
+    <div className="space-y-1">
+      <div className="flex items-baseline justify-between text-[10px] text-secondary">
+        <span className="font-semibold uppercase tracking-wider">{title}</span>
+        <span>{aside}</span>
+      </div>
+      {statuses.map((st) => {
+        const n = counts[st] || 0;
+        const color = STATUS_TONE[st]?.color || CHART_COLORS[0];
+        return (
+          <button
+            key={st}
+            type="button"
+            disabled={n === 0}
+            onClick={() => onPick(st)}
+            title={n ? `${STATUS_LABELS[st]}: ${n} (${Math.round((n / groupTotal) * 100)}% of ${title.toLowerCase()}) — filter the table` : undefined}
+            className={cn(
+              'group w-full grid grid-cols-[84px_1fr_32px] items-center gap-2 h-[20px] text-left',
+              n ? 'cursor-pointer' : 'opacity-40 cursor-default'
+            )}
+          >
+            <span className="text-[10px] text-secondary truncate group-enabled:group-hover:underline">{STATUS_LABELS[st]}</span>
+            <span className="h-2 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--border-subtle)' }}>
+              <span
+                className="block h-full rounded-full"
+                style={{ width: n ? `${Math.max(3, (n / max) * 100)}%` : 0, backgroundColor: color }}
+              />
+            </span>
+            <span className="text-[11px] font-semibold text-right tabular-nums" style={{ color: 'var(--text)' }}>
+              {n}
+            </span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+// ---- Applications by Type: treemap ----------------------------------------
+
+type TypeTileDatum = { code: string; name: string; total: number; pct: number; color: string; isOther?: boolean };
+
+/** Custom treemap cell: a tinted tile with a solid accent edge, labelled with
+ * as much as fits — name over count, then a one-line "name · count" for short
+ * wide strips, then the count alone. Types too small for any label are folded
+ * into "Other" upstream (MIN_TYPE_TILE_AREA). recharts clones this element
+ * with the node's geometry plus the datum's own fields. */
+function TypeTile(props: any) {
+  const { x, y, width, height, depth, name, total, pct, color, isOther, code, onPick } = props;
+  if (depth !== 1 || !(width > 0) || !(height > 0)) return null;
+  const w = Math.max(0, width - 3);
+  const h = Math.max(0, height - 3);
+  const CHAR_W = 5.6;
+  const fit = (text: string, room: number) => {
+    const maxChars = Math.max(3, Math.floor(room / CHAR_W));
+    return text && text.length > maxChars ? `${text.slice(0, maxChars - 1)}…` : text;
+  };
+  const label = fit(name, w - 12);
+  // One-line room for the name after " · <count>"; a 2-letter stub is noise,
+  // so below ~6 characters the tile falls back to the count alone.
+  const inlineRoom = w - 12 - CHAR_W * (String(total).length + 3);
+  const showName = w > 60 && h > 34;
+  const showInline = !showName && h >= 12 && inlineRoom >= CHAR_W * 6;
+  const showCount = w > 16 && h > 12;
+  return (
+    <g
+      style={{ cursor: 'pointer' }}
+      onClick={() => onPick?.({ code, name, total, pct, color, isOther })}
+    >
+      <rect x={x + 1.5} y={y + 1.5} width={w} height={h} rx={6} style={{ fill: color, fillOpacity: 0.2 }} />
+      <rect x={x + 1.5} y={y + 1.5} width={Math.min(3, w)} height={h} rx={1.5} style={{ fill: color }} />
+      {showName ? (
+        <>
+          <text x={x + 10} y={y + 17} style={{ fill: 'var(--text)', fontSize: 10, fontWeight: 600 }}>
+            {label}
+          </text>
+          <text x={x + 10} y={y + 31} style={{ fill: 'var(--text-muted)', fontSize: 10 }}>
+            {total} · {pct < 1 ? '<1' : Math.round(pct)}%
+          </text>
+        </>
+      ) : showInline ? (
+        <text x={x + 10} y={y + 1.5 + h / 2} dominantBaseline="central" style={{ fontSize: 9 }}>
+          <tspan style={{ fill: 'var(--text)', fontWeight: 600 }}>{fit(name, inlineRoom)}</tspan>
+          <tspan style={{ fill: 'var(--text-muted)' }}> · {total}</tspan>
+        </text>
+      ) : showCount ? (
+        <text
+          x={x + 1.5 + w / 2 + 1}
+          y={y + 1.5 + h / 2}
+          textAnchor="middle"
+          dominantBaseline="central"
+          style={{ fill: 'var(--text)', fontSize: 10, fontWeight: 600 }}
+        >
+          {total}
+        </text>
+      ) : null}
+    </g>
+  );
+}
+
+function TypeTooltip({ active, payload }: any) {
+  const d: TypeTileDatum | undefined = payload?.[0]?.payload;
+  if (!active || !d?.name) return null;
+  return (
+    <div style={{ ...CHART_TOOLTIP_PROPS.contentStyle, padding: '6px 10px' }}>
+      <div style={CHART_TOOLTIP_PROPS.labelStyle}>{d.name}</div>
+      <div style={CHART_TOOLTIP_PROPS.itemStyle}>
+        {d.total} applications ({d.pct < 1 ? '<1' : Math.round(d.pct)}%)
+        {d.isOther ? ' · click to list' : ''}
+      </div>
+    </div>
+  );
+}
+
+/** In-card overlay listing the types folded into the "Other" tile. */
+function OtherTypesPanel({
+  items,
+  grandTotal,
+  onClose,
+  onPick,
+}: {
+  items: { code: string; name: string; total: number }[];
+  grandTotal: number;
+  onClose: () => void;
+  onPick: (code: string) => void;
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+  return (
+    <div
+      className="absolute inset-0 z-10 flex flex-col rounded-lg border"
+      style={{ backgroundColor: 'var(--tooltip-bg)', borderColor: 'var(--tooltip-border)' }}
+    >
+      <div className="flex items-center justify-between px-3 py-2 border-b" style={{ borderColor: 'var(--tooltip-border)' }}>
+        <span className="text-[10px] font-semibold uppercase tracking-wider text-secondary">Other types ({items.length})</span>
+        <button type="button" onClick={onClose} className="p-0.5 rounded cursor-pointer text-secondary" aria-label="Close">
+          <X size={13} />
+        </button>
+      </div>
+      <div className="flex-1 overflow-y-auto py-1">
+        {items.map((t) => (
+          <button
+            key={t.code}
+            type="button"
+            onClick={() => onPick(t.code)}
+            className="w-full flex items-center justify-between gap-3 px-3 py-1.5 text-left text-[11px] cursor-pointer hover:bg-[var(--border-subtle)]"
+            style={{ color: 'var(--text)' }}
+            title={`Filter the table to ${t.name}`}
+          >
+            <span className="truncate">{t.name}</span>
+            <span className="text-secondary tabular-nums shrink-0">
+              {t.total} · {grandTotal ? Math.max(1, Math.round((t.total / grandTotal) * 100)) : 0}%
+            </span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ---- Application volume: gap-filled area (months) / columns (years) -------
+
+function TrendChart({
+  points,
+  onPick,
+  isPhone,
+}: {
+  points: TrendPoint[];
+  onPick: (p: TrendPoint) => void;
+  isPhone: boolean;
+}) {
+  // Label only the peak so a spike reads as a number, not just a shape.
+  // (Matched by value — Bar's LabelList doesn't pass an index.)
+  const peak = Math.max(...points.map((p) => p.total));
+  const peakLabel = (p: any) =>
+    Number(p.value) === peak && peak > 0 ? (
+      <text
+        x={Number(p.x) + (Number(p.width) || 0) / 2}
+        y={Number(p.y) - 6}
+        textAnchor="middle"
+        style={{ fill: 'var(--text)', fontSize: 10, fontWeight: 600 }}
+      >
+        {p.value}
+      </text>
+    ) : null;
+  const margin = { top: 16, right: isPhone ? 12 : 8, left: -20, bottom: 0 };
+  const xAxis = (
+    <XAxis
+      dataKey="label"
+      tick={{ fontSize: 10, fill: 'var(--text-muted)' }}
+      interval="preserveStartEnd"
+      minTickGap={isPhone ? 16 : 10}
+      tickLine={false}
+    />
+  );
+  const yAxis = <YAxis tick={{ fontSize: 10, fill: 'var(--text-muted)' }} allowDecimals={false} axisLine={false} tickLine={false} />;
+  const grid = <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" vertical={false} />;
+
+  // Clicks are handled at the chart level off the hovered column, so the whole
+  // month/year column is a target — not just the dot or bar (a tiny bar is
+  // hard to hit, and recharts' hover dot sits on top of the data dot and
+  // swallowed its clicks).
+  const pickHovered = (state: any) => {
+    const i = Number(state?.activeTooltipIndex ?? state?.activeIndex);
+    const p = Number.isInteger(i) ? points[i] : undefined;
+    if (p) onPick(p);
+  };
+  const chartEvents = { onClick: pickHovered, style: { cursor: 'pointer' } };
+
+  return (
+    <ResponsiveContainer width="100%" height={CHART_BODY_HEIGHT}>
+      {points[0].unit === 'year' ? (
+        <BarChart data={points} margin={margin} {...chartEvents}>
+          {grid}
+          {xAxis}
+          {yAxis}
+          {/* Hover shades the whole year column — a tint of the text color, so
+              it's a light band in dark mode and a dark one in light mode. */}
+          <Tooltip
+            {...CHART_TOOLTIP_PROPS}
+            cursor={{ fill: 'var(--text)', fillOpacity: 0.08, radius: 4 }}
+            formatter={(v: any) => [v, 'Applications']}
+          />
+          <Bar dataKey="total" fill={CHART_COLORS[0]} radius={[3, 3, 0, 0]} maxBarSize={28}>
+            <LabelList dataKey="total" content={peakLabel} />
+          </Bar>
+        </BarChart>
+      ) : (
+        <AreaChart data={points} margin={margin} {...chartEvents}>
+          <defs>
+            <linearGradient id="volumeFill" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor={CHART_COLORS[0]} stopOpacity={0.35} />
+              <stop offset="100%" stopColor={CHART_COLORS[0]} stopOpacity={0.02} />
+            </linearGradient>
+          </defs>
+          {grid}
+          {xAxis}
+          {yAxis}
+          <Tooltip
+            {...CHART_TOOLTIP_PROPS}
+            cursor={{ stroke: 'var(--text-muted)', strokeDasharray: '3 3' }}
+            formatter={(v: any) => [v, 'Applications']}
+          />
+          <Area
+            type="monotone"
+            dataKey="total"
+            stroke={CHART_COLORS[0]}
+            strokeWidth={2}
+            fill="url(#volumeFill)"
+            isAnimationActive={false}
+            dot={{ r: points.length > 12 ? 2.5 : 3.5, fill: CHART_COLORS[0], stroke: 'none' }}
+            activeDot={{ r: 5 }}
+          >
+            <LabelList dataKey="total" content={peakLabel} />
+          </Area>
+        </AreaChart>
+      )}
+    </ResponsiveContainer>
   );
 }
 
@@ -1203,19 +1612,5 @@ function ProportionRibbon({
         ))}
       </div>
     </div>
-  );
-}
-
-function ClickableDot({ cx, cy, payload, onDotClick }: any) {
-  return (
-    <circle
-      cx={cx}
-      cy={cy}
-      r={4}
-      fill={CHART_COLORS[0]}
-      stroke="none"
-      style={{ cursor: 'pointer' }}
-      onClick={() => onDotClick(payload)}
-    />
   );
 }
