@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Plus, Save, Search } from 'lucide-react';
+import { Save, Search } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { toast } from 'sonner';
 import { SidePanel } from '../ui/SidePanel';
@@ -719,22 +719,6 @@ export function ProponentsManagement({
     navigate(`${nextPathname}${cleanedSearch}`, { replace: true });
   }, [highlightedProponentId, locationSearch, navigate, shouldCleanProponentQuery]);
 
-  function openCreate() {
-    setEditing(null);
-    setForm({
-      user_id: '',
-      business_name: '',
-      registration_no: '',
-      tin: '',
-      address: '',
-      contact_no: '',
-      ...BLANK_PROFILE_FORM,
-    });
-    setActiveProfileTab('Profile');
-    setLoaded(null);
-    setIsCreateOpen(true);
-  }
-
   // Profile fields aren't part of the bulk /api/proponents list — they're
   // fetched on demand here, only when a specific locator's panel is opened,
   // rather than pulled for every row up front.
@@ -1036,7 +1020,11 @@ export function ProponentsManagement({
           </div>
         )}
 
-        {/* Search + New Locator share one row on every size. */}
+        {/* No "New Locator" entry point here anymore — a locator only ever
+            reaches this registry via the real pipeline (Locator Account ->
+            New Application -> Assessment -> Approval), so manually creating
+            one straight into dbo.proponents would never show up here (it has
+            no approved application backing it) and would just be a dead end. */}
         <div className="flex items-center justify-between gap-2 mb-3">
           <div className="relative group flex-1 min-w-0 sm:flex-none sm:w-72">
             <Search
@@ -1054,15 +1042,6 @@ export function ProponentsManagement({
               }}
             />
           </div>
-          <button
-            className="shrink-0 h-9 rounded-lg px-3 text-xs sm:text-sm font-semibold inline-flex items-center gap-1.5 shadow-sm cursor-pointer whitespace-nowrap"
-            style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
-            onClick={openCreate}
-          >
-            <Plus size={15} />
-            <span className="sm:hidden">New</span>
-            <span className="hidden sm:inline">New Locator</span>
-          </button>
         </div>
 
         {isLoading ? (
@@ -1075,18 +1054,7 @@ export function ProponentsManagement({
             description={
               searchQuery
                 ? 'Try adjusting your search filters.'
-                : 'There are no locators to show here yet. Create a new locator to get started.'
-            }
-            action={
-              !searchQuery ? (
-                <button
-                  className="rounded-lg px-4 py-2 text-sm font-semibold shadow-sm transition-colors"
-                  style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
-                  onClick={openCreate}
-                >
-                  Create Locator
-                </button>
-              ) : undefined
+                : 'No locators are registered yet — a locator appears here automatically once one of their applications is approved.'
             }
           />
         ) : (
