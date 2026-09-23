@@ -4,6 +4,7 @@ const ControlPanelPermission = require("../models/ControlPanelPermission");
 const User = require("../models/User");
 const Proponent = require("../models/Proponent");
 const ApplicationWorkflow = require("../models/ApplicationWorkflow");
+const UserSession = require("../models/UserSession");
 
 function getJwtSecret() {
   const secret = process.env.JWT_SECRET;
@@ -28,6 +29,9 @@ async function attachUserFromJwt(req, res, next) {
       id: decoded.id,
       username: decoded.username,
       role: decoded.role,
+      // Session id + issued-at, for the audit log (UserSession.js).
+      sid: decoded.sid,
+      iat: decoded.iat,
     };
     res.locals.user = req.user;
 
@@ -41,6 +45,7 @@ async function attachUserFromJwt(req, res, next) {
     } catch {
       // DB unreachable — fall back to trusting the JWT alone this request.
     }
+    if (req.user) UserSession.touch(req.user.sid);
   } catch {
     res.clearCookie("jwt");
   }

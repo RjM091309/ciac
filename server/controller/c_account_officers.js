@@ -1,5 +1,6 @@
 const AccountOfficer = require("../models/AccountOfficer");
 const AuditLog = require("../models/AuditLog");
+const { diffChanges } = require("../lib/auditDiff");
 const User = require("../models/User");
 const { validatePasswordStrength, generateTempPassword } = require("../lib/password");
 const { sendTempPasswordEmail } = require("./c_users");
@@ -21,7 +22,7 @@ function audit(req, action, id, details) {
     entityType: "user",
     entityId: id,
     details,
-    ipAddress: req.ip,
+    req,
   });
 }
 
@@ -104,6 +105,7 @@ exports.update = async (req, res) => {
     if (department_id !== undefined && !Number(department_id)) {
       return res.status(400).json({ success: false, message: "department is required" });
     }
+    const before = await AccountOfficer.getAccountOfficerById(id);
     const row = await AccountOfficer.updateAccountOfficer(id, {
       username: username !== undefined ? String(username).trim() : undefined,
       email: email !== undefined ? String(email).trim() : undefined,
@@ -112,7 +114,11 @@ exports.update = async (req, res) => {
       department_id,
     });
     if (!row) return res.status(404).json({ success: false, message: "Account officer not found" });
-    await audit(req, "USER_UPDATED", id, { username: row?.username, fields: Object.keys(req.body || {}), via: "account-officers" });
+    await audit(req, "USER_UPDATED", id, {
+      username: row?.username,
+      changes: diffChanges(before, row, ["username", "email", "phone", "full_name", "department_id"]),
+      via: "account-officers",
+    });
     return res.json({ success: true, data: row });
   } catch (error) {
     return fail(res, "Update account officer", error);

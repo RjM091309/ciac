@@ -5,6 +5,7 @@ const User = require("../models/User");
 const ApplicationType = require("../models/ApplicationType");
 const ControlPanelPermission = require("../models/ControlPanelPermission");
 const AuditLog = require("../models/AuditLog");
+const { diffChanges } = require("../lib/auditDiff");
 const { generateTempPassword } = require("../lib/password");
 const { sendTempPasswordEmail } = require("./c_users");
 
@@ -164,7 +165,7 @@ exports.create = async (req, res) => {
         application_type: normalizedType,
         is_renewal: Boolean(Number(is_renewal)),
       },
-      ipAddress: req.ip,
+      req,
     });
 
     return res.status(201).json({
@@ -205,7 +206,7 @@ exports.updateStatus = async (req, res) => {
       entityType: "application",
       entityId: id,
       details: { application_no: row?.application_no, to_status: String(to_status).trim(), remarks: remarks || undefined },
-      ipAddress: req.ip,
+      req,
     });
 
     return res.json({ success: true, data: row });
@@ -240,7 +241,7 @@ exports.submit = async (req, res) => {
       entityType: "application",
       entityId: id,
       details: { application_no: row?.application_no, proponent_name: row?.proponent_name },
-      ipAddress: req.ip,
+      req,
     });
 
     return res.json({
@@ -281,8 +282,12 @@ exports.updateDraft = async (req, res) => {
       action: "APPLICATION_UPDATED",
       entityType: "application",
       entityId: id,
-      details: { application_no: row?.application_no, proponent_name: row?.proponent_name, fields: Object.keys(req.body || {}) },
-      ipAddress: req.ip,
+      details: {
+        application_no: row?.application_no,
+        proponent_name: row?.proponent_name,
+        changes: diffChanges(application, row, ["application_type", "is_renewal", "proponent_id"]),
+      },
+      req,
     });
 
     return res.json({ success: true, data: row });
@@ -319,7 +324,7 @@ exports.remove = async (req, res) => {
       entityType: "application",
       entityId: id,
       details: { application_no: application?.application_no, proponent_name: application?.proponent_name },
-      ipAddress: req.ip,
+      req,
     });
 
     return res.json({ success: true });
@@ -372,7 +377,7 @@ exports.updateRequirementStatus = async (req, res) => {
         requirement_name: before?.requirement_name || before?.requirement_code,
         remarks: remarks || undefined,
       },
-      ipAddress: req.ip,
+      req,
     });
     return res.json({ success: true, data: row });
   } catch (error) {
@@ -502,7 +507,7 @@ exports.createDocument = async (req, res) => {
       entityType: "application",
       entityId: applicationId,
       details: { application_no: application?.application_no, file_name: req.file.originalname },
-      ipAddress: req.ip,
+      req,
     });
     return res.status(201).json({ success: true, data: row });
   } catch (error) {
@@ -522,10 +527,17 @@ exports.downloadDocument = async (req, res) => {
     const document = await Workflow.getDocumentById(id);
     if (!document) return res.status(404).json({ success: false, message: "Document not found" });
 
-    const { forbidden } = await loadWithAccess(req, document.application_id);
+    const { application, forbidden } = await loadWithAccess(req, document.application_id);
     if (forbidden) return res.status(403).json({ success: false, message: "Forbidden" });
 
-    return res.download(document.storage_path, document.original_file_name || document.file_name);
+    const downloadName = document.original_file_name || document.file_name;
+    AuditLog.recordFileAccess(req, {
+      kind: "DOCUMENT",
+      entityType: "application",
+      entityId: document.application_id,
+      details: { application_no: application?.application_no, file_name: downloadName },
+    });
+    return res.download(document.storage_path, downloadName);
   } catch (error) {
     console.error("Download document error:", error);
     return res.status(500).json({ success: false, message: error.message || "Internal server error" });

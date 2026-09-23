@@ -53,7 +53,7 @@ exports.setSidebarPermissions = async (req, res) => {
       entityType: "role_sidebar_menu",
       entityId: roleId,
       details: { name: roleForLog?.name, menuCount: permissions.length },
-      ipAddress: req.ip,
+      req,
     });
     await notifyRolePermissionsChanged(roleId);
     return res.json({ success: true });
@@ -94,7 +94,7 @@ exports.setMenuCrudPermissions = async (req, res) => {
       entityType: "role_menu_crud",
       entityId: roleId,
       details: { name: roleForLog?.name, menuCount: permissions.length },
-      ipAddress: req.ip,
+      req,
     });
     await notifyRolePermissionsChanged(roleId);
     return res.json({ success: true });
@@ -172,7 +172,7 @@ exports.setDashboardWidgetPermissions = async (req, res) => {
       entityType: "role_dashboard_widgets",
       entityId: roleId,
       details: { name: roleForLog?.name, widgetCount: permissions.length },
-      ipAddress: req.ip,
+      req,
     });
     await notifyRolePermissionsChanged(roleId);
     return res.json({ success: true });

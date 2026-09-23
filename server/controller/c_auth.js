@@ -1,7 +1,11 @@
 const Auth = require("../models/Auth");
 const AuditLog = require("../models/AuditLog");
 const ActivityLog = require("../models/ActivityLog");
+const UserSession = require("../models/UserSession");
 const { sendMail } = require("../lib/mailer");
+
+// How far back the audit log looks when counting repeat failed sign-ins.
+const RECENT_FAILURE_WINDOW_MINUTES = 15;
 
 exports.login = async (req, res) => {
   try {
@@ -23,12 +27,26 @@ exports.login = async (req, res) => {
       // genuine wrong-password, wrong-code, or locked-account attempts.
       const isInitialPrompt = (result.mfaRequired || result.enrollmentRequired || result.mustChangePassword) && !token && !newPassword;
       if (!isInitialPrompt) {
+        // Includes this attempt: earlier failures for the same name in the
+        // window, plus one. Spots guessing across accounts that don't exist
+        // (no lockout counter there) as well as against real ones.
+        const recentFailures = (await AuditLog.countRecentLoginFailures(username, RECENT_FAILURE_WINDOW_MINUTES)) + 1;
         await AuditLog.record({
+          actorId: result.userId,
           actorUsername: username,
           action: "LOGIN_FAILED",
           entityType: "user",
-          details: { message: result.message, locked: Boolean(result.locked) },
-          ipAddress: req.ip,
+          entityId: result.userId,
+          details: {
+            reason: result.reason || "unknown",
+            message: result.message,
+            locked: Boolean(result.locked),
+            attempt: result.attempt,
+            maxAttempts: result.maxAttempts,
+            recentFailures,
+            windowMinutes: RECENT_FAILURE_WINDOW_MINUTES,
+          },
+          req,
         });
       }
       return res.status(401).json({
@@ -48,6 +66,17 @@ exports.login = async (req, res) => {
       maxAge: 24 * 60 * 60 * 1000,
     });
 
+    if (result.session) {
+      await UserSession.start({
+        id: result.session.id,
+        userId: result.user?.id,
+        username: result.user?.username,
+        tokenVersion: result.session.tokenVersion,
+        expiresAt: result.session.expiresAt,
+        ipAddress: AuditLog.normalizeIp(req.ip),
+        userAgent: req.get("user-agent"),
+      });
+    }
     // Security trail (append-only, admin-facing).
     await AuditLog.record({
       actorId: result.user?.id,
@@ -55,7 +84,8 @@ exports.login = async (req, res) => {
       action: "LOGIN_SUCCESS",
       entityType: "user",
       entityId: result.user?.id,
-      ipAddress: req.ip,
+      sessionId: result.session?.id,
+      req,
     });
     // Proponent-facing activity timeline ("Signed in" entries).
     ActivityLog.record({
@@ -75,13 +105,19 @@ exports.login = async (req, res) => {
 
 exports.logout = async (req, res) => {
   if (req.user) {
+    const ended = await UserSession.end(req.user.sid, "logout");
+    // Tokens issued before session tracking have no sid — their own
+    // issued-at time still gives the session length.
+    const durationSeconds =
+      ended?.durationSeconds ?? (req.user.iat ? Math.max(0, Math.round(Date.now() / 1000 - req.user.iat)) : null);
     await AuditLog.record({
       actorId: req.user.id,
       actorUsername: req.user.username,
       action: "LOGOUT",
       entityType: "user",
       entityId: req.user.id,
-      ipAddress: req.ip,
+      details: durationSeconds != null ? { duration_seconds: durationSeconds } : undefined,
+      req,
     });
   }
   res.clearCookie("jwt");
@@ -125,7 +161,7 @@ exports.forgotPassword = async (req, res) => {
         entityType: "user",
         entityId: result.user.id,
         details: { emailSent: mailResult.sent },
-        ipAddress: req.ip,
+        req,
       });
     }
 
@@ -160,7 +196,7 @@ exports.resetPassword = async (req, res) => {
       action: "PASSWORD_RESET_VIA_EMAIL",
       entityType: "user",
       entityId: result.user.id,
-      ipAddress: req.ip,
+      req,
     });
 
     return res.json({ success: true, message: "Password updated. You can now sign in." });

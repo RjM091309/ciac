@@ -98,7 +98,7 @@ exports.start = async (req, res) => {
       entityType: "application",
       entityId: id,
       details: { application_no: data?.approval?.application_no, proponent_name: data?.approval?.proponent_name },
-      ipAddress: req.ip,
+      req,
     });
     return res.json({ success: true, data });
   } catch (error) {
@@ -120,7 +120,7 @@ exports.reopen = async (req, res) => {
       entityType: "application",
       entityId: id,
       details: { application_no: data?.approval?.application_no, proponent_name: data?.approval?.proponent_name },
-      ipAddress: req.ip,
+      req,
     });
     return res.json({ success: true, data });
   } catch (error) {
@@ -153,7 +153,7 @@ exports.actOnStep = async (req, res) => {
         step_action: action,
         remarks: remarks || undefined,
       },
-      ipAddress: req.ip,
+      req,
     });
     return res.json({ success: true, data });
   } catch (error) {
@@ -183,7 +183,7 @@ exports.endorseStep = async (req, res) => {
       entityType: "application",
       entityId: data?.approval?.application_id,
       details: { application_no: data?.approval?.application_no, office, note: note || undefined },
-      ipAddress: req.ip,
+      req,
     });
     return res.json({ success: true, data });
   } catch (error) {
@@ -209,7 +209,7 @@ exports.addIssuance = async (req, res) => {
       entityType: "application",
       entityId: id,
       details: { title: row?.title, doc_type: row?.doc_type, reference_no: row?.reference_no },
-      ipAddress: req.ip,
+      req,
     });
     return res.status(201).json({ success: true, data: row });
   } catch (error) {
@@ -231,7 +231,7 @@ exports.deleteIssuance = async (req, res) => {
       entityType: "application",
       entityId: before?.application_id,
       details: { title: before?.title, doc_type: before?.doc_type },
-      ipAddress: req.ip,
+      req,
     });
     return res.json({ success: true });
   } catch (error) {
@@ -252,7 +252,7 @@ exports.saveContract = async (req, res) => {
       entityType: "application",
       entityId: id,
       details: { contract_no: row?.contract_no },
-      ipAddress: req.ip,
+      req,
     });
     return res.json({ success: true, data: row });
   } catch (error) {
@@ -276,6 +276,13 @@ exports.downloadContractCertificate = async (req, res) => {
       return res.status(404).json({ success: false, message: "Certificate file is no longer available." });
     }
     const filename = `Contract-Certificate-${id}.pdf`;
+    const contract = await Contract.getById(id).catch(() => null);
+    AuditLog.recordFileAccess(req, {
+      kind: "CERTIFICATE",
+      entityType: "contract",
+      entityId: id,
+      details: { certificate: "contract", contract_no: contract?.contract_no, file_name: filename },
+    });
     res.type("application/pdf");
     if (req.query.view === "1") {
       res.setHeader("Content-Disposition", `inline; filename="${filename}"`);
@@ -317,7 +324,7 @@ exports.addCharge = async (req, res) => {
       entityType: "application",
       entityId: id,
       details: { description: String(req.body?.description ?? "").trim().slice(0, 200), amount: req.body?.amount },
-      ipAddress: req.ip,
+      req,
     });
     return res.status(201).json({ success: true, data });
   } catch (error) {
@@ -338,7 +345,7 @@ exports.updateCharge = async (req, res) => {
       entityType: "assessment_charge",
       entityId: id,
       details: { description: String(data?.description ?? "").trim().slice(0, 200), amount: data?.amount },
-      ipAddress: req.ip,
+      req,
     });
     return res.json({ success: true, data });
   } catch (error) {
@@ -360,7 +367,7 @@ exports.deleteCharge = async (req, res) => {
       entityType: "assessment_charge",
       entityId: id,
       details: { description: String(before?.description ?? "").trim().slice(0, 200) },
-      ipAddress: req.ip,
+      req,
     });
     return res.json({ success: true });
   } catch (error) {
@@ -393,7 +400,7 @@ exports.createLevel = async (req, res) => {
       entityType: "approval_level",
       entityId: row?.id,
       details: { name: row?.name, level_no: row?.level_no },
-      ipAddress: req.ip,
+      req,
     });
     return res.status(201).json({ success: true, data: row });
   } catch (error) {
@@ -414,7 +421,7 @@ exports.updateLevel = async (req, res) => {
       entityType: "approval_level",
       entityId: id,
       details: { name: row?.name, level_no: row?.level_no },
-      ipAddress: req.ip,
+      req,
     });
     return res.json({ success: true, data: row });
   } catch (error) {
@@ -436,7 +443,7 @@ exports.deleteLevel = async (req, res) => {
       entityType: "approval_level",
       entityId: id,
       details: { name: before?.name, level_no: before?.level_no },
-      ipAddress: req.ip,
+      req,
     });
     return res.json({ success: true });
   } catch (error) {

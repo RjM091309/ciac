@@ -7,6 +7,7 @@ const User = require("../models/User");
 const Contract = require("../models/Contract");
 const ComplianceType = require("../models/ComplianceType");
 const AuditLog = require("../models/AuditLog");
+const { diffChanges } = require("../lib/auditDiff");
 const { renderPermitCertificate } = require("../lib/permitCertificate");
 const { STORAGE_ROOT, relativeStoragePath, resolveStoredPath } = require("../lib/fileStorage");
 
@@ -97,7 +98,7 @@ exports.create = async (req, res) => {
       entityType: "permit",
       entityId: row?.id,
       details: { permit_no: row?.permit_no, permit_type: row?.permit_type },
-      ipAddress: req.ip,
+      req,
     });
     return res.status(201).json({ success: true, data: row });
   } catch (error) {
@@ -110,6 +111,7 @@ exports.update = async (req, res) => {
   try {
     const id = Number(req.params.id);
     if (!Number.isFinite(id)) return res.status(400).json({ success: false, message: "Invalid id" });
+    const before = await Permit.getById(id);
     let row = await Permit.update(id, { ...req.body, updated_by: req.user?.id ?? null });
     if (!row) return res.status(404).json({ success: false, message: "Permit not found" });
     // Regenerate so the certificate always reflects the latest details
@@ -122,8 +124,8 @@ exports.update = async (req, res) => {
       action: "PERMIT_UPDATED",
       entityType: "permit",
       entityId: id,
-      details: { permit_no: row?.permit_no, permit_type: row?.permit_type, fields: Object.keys(req.body || {}) },
-      ipAddress: req.ip,
+      details: { permit_no: row?.permit_no, permit_type: row?.permit_type, changes: diffChanges(before, row, Object.keys(req.body || {})) },
+      req,
     });
     return res.json({ success: true, data: row });
   } catch (error) {
@@ -145,7 +147,7 @@ exports.deactivate = async (req, res) => {
       entityType: "permit",
       entityId: id,
       details: { permit_no: row?.permit_no },
-      ipAddress: req.ip,
+      req,
     });
     return res.json({ success: true, data: row });
   } catch (error) {
@@ -169,6 +171,13 @@ exports.downloadCertificate = async (req, res) => {
       return res.status(404).json({ success: false, message: "Certificate file is no longer available." });
     }
     const filename = `Permit-Certificate-${id}.pdf`;
+    const permit = await Permit.getById(id).catch(() => null);
+    AuditLog.recordFileAccess(req, {
+      kind: "CERTIFICATE",
+      entityType: "permit",
+      entityId: id,
+      details: { certificate: "permit", permit_no: permit?.permit_no, file_name: filename },
+    });
     res.type("application/pdf");
     if (req.query.view === "1") {
       res.setHeader("Content-Disposition", `inline; filename="${filename}"`);
@@ -207,6 +216,12 @@ exports.downloadContractCertificate = async (req, res) => {
       return res.status(404).json({ success: false, message: "Certificate file is no longer available." });
     }
     const filename = `Contract-Certificate-${contract.id}.pdf`;
+    AuditLog.recordFileAccess(req, {
+      kind: "CERTIFICATE",
+      entityType: "contract",
+      entityId: contract.id,
+      details: { certificate: "contract", contract_no: contract.contract_no, permit_no: permit.permit_no, file_name: filename },
+    });
     res.type("application/pdf");
     if (req.query.view === "1") {
       res.setHeader("Content-Disposition", `inline; filename="${filename}"`);

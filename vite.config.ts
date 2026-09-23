@@ -25,6 +25,10 @@ export default defineConfig(({mode}) => {
           target: backendTarget,
           changeOrigin: true,
           secure: false,
+          // Pass the browser's address on as X-Forwarded-For — without it
+          // the backend sees every request as coming from this proxy (::1),
+          // and the audit log records that instead of the real client IP.
+          xfwd: true,
         },
       },
       // HMR is disabled in AI Studio via DISABLE_HMR env var.

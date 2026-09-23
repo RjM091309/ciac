@@ -87,7 +87,7 @@ exports.create = async (req, res) => {
       entityType: "role",
       entityId: row?.id,
       details: { name: row?.name },
-      ipAddress: req.ip,
+      req,
     });
     return res.status(201).json({ success: true, data: row });
   } catch (error) {
@@ -147,7 +147,7 @@ exports.update = async (req, res) => {
       entityType: "role",
       entityId: id,
       details: { name: row?.name, previousName: current?.name !== row?.name ? current?.name : undefined },
-      ipAddress: req.ip,
+      req,
     });
     return res.json({ success: true, data: row });
   } catch (error) {
@@ -177,7 +177,7 @@ exports.deactivate = async (req, res) => {
       entityType: "role",
       entityId: id,
       details: { name: current?.name },
-      ipAddress: req.ip,
+      req,
     });
     return res.json({ success: true, data: row });
   } catch (error) {
@@ -199,7 +199,7 @@ exports.reactivate = async (req, res) => {
       entityType: "role",
       entityId: id,
       details: { name: row?.name },
-      ipAddress: req.ip,
+      req,
     });
     return res.json({ success: true, data: row });
   } catch (error) {

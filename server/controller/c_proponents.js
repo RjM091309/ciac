@@ -3,6 +3,7 @@ const ChangeRequest = require("../models/ProponentChangeRequest");
 const Notification = require("../models/Notification");
 const ActivityLog = require("../models/ActivityLog");
 const AuditLog = require("../models/AuditLog");
+const { diffChanges } = require("../lib/auditDiff");
 const Contract = require("../models/Contract");
 const AccountOfficer = require("../models/AccountOfficer");
 const TypeOfContract = require("../models/TypeOfContract");
@@ -172,7 +173,7 @@ exports.setupMine = async (req, res) => {
       entityType: "proponent",
       entityId: row?.id,
       details: { business_name: row?.business_name },
-      ipAddress: req.ip,
+      req,
     });
 
     return res.status(201).json({ success: true, data: row });
@@ -232,8 +233,11 @@ exports.updateMine = async (req, res) => {
       action: "PROPONENT_CHANGE_REQUESTED",
       entityType: "proponent",
       entityId: current.id,
-      details: { business_name: current?.business_name, fields: Object.keys(payload) },
-      ipAddress: req.ip,
+      details: {
+        business_name: current?.business_name,
+        changes: diffChanges(current, { ...current, ...payload }, Object.keys(payload)),
+      },
+      req,
     });
 
     try {
@@ -283,6 +287,7 @@ exports.approveChangeRequest = async (req, res) => {
     for (const field of ChangeRequest.EDITABLE_FIELDS) {
       if (field in request.payload) patch[field] = request.payload[field];
     }
+    const before = await Proponent.getProponentById(request.proponent_id);
     if (Object.keys(patch).length) {
       await Proponent.updateProponent(request.proponent_id, { ...patch, updated_by: req.user?.id ?? null });
     }
@@ -306,8 +311,8 @@ exports.approveChangeRequest = async (req, res) => {
       action: "PROPONENT_CHANGE_APPROVED",
       entityType: "proponent",
       entityId: request.proponent_id,
-      details: { business_name: patchedProponent?.business_name, fields: Object.keys(patch) },
-      ipAddress: req.ip,
+      details: { business_name: patchedProponent?.business_name, changes: diffChanges(before, patchedProponent, Object.keys(patch)) },
+      req,
     });
 
     try {
@@ -363,7 +368,7 @@ exports.rejectChangeRequest = async (req, res) => {
       entityType: "proponent",
       entityId: request.proponent_id,
       details: { business_name: rejectedProponent?.business_name, remarks: remarks || undefined },
-      ipAddress: req.ip,
+      req,
     });
 
     try {
@@ -515,7 +520,7 @@ exports.create = async (req, res) => {
       entityType: "proponent",
       entityId: row?.id,
       details: { business_name: row?.business_name },
-      ipAddress: req.ip,
+      req,
     });
     return res.status(201).json({ success: true, data: row });
   } catch (error) {
@@ -544,7 +549,7 @@ function sectionHandler(label, action, run) {
         entityType: "proponent",
         entityId: id,
         details: { business_name: proponent?.business_name, section: label },
-        ipAddress: req.ip,
+        req,
       });
 
       return res.json({ success: true, data });
@@ -667,6 +672,7 @@ exports.update = async (req, res) => {
     const lookupError = await unknownLookup(landUseId, () => LandUse.listLandUses(), "land use");
     if (lookupError) return res.status(400).json({ success: false, message: lookupError });
 
+    const before = await Proponent.getProponentById(id);
     const row = await Proponent.updateProponent(id, {
       user_id,
       business_name,
@@ -731,8 +737,11 @@ exports.update = async (req, res) => {
       action: "PROPONENT_UPDATED",
       entityType: "proponent",
       entityId: id,
-      details: { business_name: (refreshed || row)?.business_name, fields: Object.keys(req.body || {}) },
-      ipAddress: req.ip,
+      details: {
+        business_name: (refreshed || row)?.business_name,
+        changes: diffChanges(before, refreshed, Object.keys(req.body || {})),
+      },
+      req,
     });
 
     return res.json({ success: true, data: refreshed || row });
@@ -757,7 +766,7 @@ exports.deactivate = async (req, res) => {
       entityType: "proponent",
       entityId: id,
       details: { business_name: row?.business_name },
-      ipAddress: req.ip,
+      req,
     });
 
     return res.json({ success: true, data: row });
@@ -782,7 +791,7 @@ exports.reactivate = async (req, res) => {
       entityType: "proponent",
       entityId: id,
       details: { business_name: row?.business_name },
-      ipAddress: req.ip,
+      req,
     });
 
     return res.json({ success: true, data: row });

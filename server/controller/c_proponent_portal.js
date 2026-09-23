@@ -88,7 +88,7 @@ exports.uploadMyApplicationDocument = async (req, res) => {
       entityType: "application",
       entityId: req.application.id,
       details: { application_no: req.application.application_no, file_name: req.file.originalname, uploaded_by: "locator" },
-      ipAddress: req.ip,
+      req,
     });
 
     return res.status(201).json({ success: true, data: document });
@@ -163,6 +163,12 @@ exports.downloadMyContractCertificate = async (req, res) => {
       return res.status(404).json({ success: false, message: "Certificate file is no longer available." });
     }
     const filename = `Contract-Certificate-${id}.pdf`;
+    AuditLog.recordFileAccess(req, {
+      kind: "CERTIFICATE",
+      entityType: "contract",
+      entityId: id,
+      details: { certificate: "contract", contract_no: contract.contract_no, file_name: filename },
+    });
     res.type("application/pdf");
     if (req.query.view === "1") {
       res.setHeader("Content-Disposition", `inline; filename="${filename}"`);
@@ -202,6 +208,12 @@ exports.downloadMyPermitCertificate = async (req, res) => {
       return res.status(404).json({ success: false, message: "Certificate file is no longer available." });
     }
     const filename = `Permit-Certificate-${id}.pdf`;
+    AuditLog.recordFileAccess(req, {
+      kind: "CERTIFICATE",
+      entityType: "permit",
+      entityId: id,
+      details: { certificate: "permit", permit_no: permit.permit_no, file_name: filename },
+    });
     res.type("application/pdf");
     if (req.query.view === "1") {
       res.setHeader("Content-Disposition", `inline; filename="${filename}"`);

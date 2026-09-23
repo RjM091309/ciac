@@ -2,6 +2,7 @@ const jwt = require("jsonwebtoken");
 const bcrypt = require("bcryptjs");
 const { selectData } = require("../config/database");
 const User = require("./User");
+const UserSession = require("./UserSession");
 const { decryptSecret, encryptSecret, newSecret, buildEnrollment, verifyToken } = require("../lib/totp");
 const { validatePasswordStrength } = require("../lib/password");
 
@@ -86,23 +87,28 @@ async function loginViaDatabase(username, password, totpCode, newPassword) {
       if (status === "PENDING") {
         return {
           success: false,
+          reason: "pending_approval",
+          userId: inactive.id,
           message: "Your account is still awaiting approval by CIAC. You'll be able to sign in once it's activated.",
         };
       }
       if (status === "REJECTED") {
         return {
           success: false,
+          reason: "registration_rejected",
+          userId: inactive.id,
           message: "Your registration was not approved. Please contact CIAC for details.",
         };
       }
       if (status === "SUSPENDED") {
-        return { success: false, message: "Your account has been suspended. Contact the administrator." };
+        return { success: false, reason: "suspended", userId: inactive.id, message: "Your account has been suspended. Contact the administrator." };
       }
-      return { success: false, message: "Your account has been deactivated. Contact the administrator." };
+      return { success: false, reason: "deactivated", userId: inactive.id, message: "Your account has been deactivated. Contact the administrator." };
     }
     // Same message as a wrong password below — a distinct "User not found"
     // here would let a caller enumerate valid usernames/emails one at a time.
-    return { success: false, message: "Username and Password incorrect!" };
+    // `reason` is only for the audit log; the client never sees it.
+    return { success: false, reason: "unknown_user", message: "Username and Password incorrect!" };
   }
 
   const id = row.id ?? row.user_id ?? 0;
@@ -121,25 +127,29 @@ async function loginViaDatabase(username, password, totpCode, newPassword) {
     return {
       success: false,
       locked: true,
+      reason: "account_locked",
+      userId: id,
       message: `Too many failed attempts. Try again in ${minutesLeft} minute${minutesLeft === 1 ? "" : "s"}.`,
     };
   }
 
   const passField = pickPasswordField(row);
   if (!passField) {
-    return { success: false, message: "Password field not found in users. Configure your schema or update Auth model." };
+    return { success: false, reason: "config_error", userId: id, message: "Password field not found in users. Configure your schema or update Auth model." };
   }
   const stored = String(row[passField] ?? "");
   if (!stored.startsWith("$2")) {
     return {
       success: false,
+      reason: "unsupported_password_format",
+      userId: id,
       message: "Account password is using an unsupported format. Ask admin to reset your password.",
     };
   }
   const matches = await bcrypt.compare(pass, stored);
   if (!matches) {
     if (isAdminRow) {
-      return { success: false, message: "Username and Password incorrect!" };
+      return { success: false, reason: "wrong_password", userId: id, message: "Username and Password incorrect!" };
     }
     const { maxAttempts, lockoutMinutes } = getLockoutConfig();
     await User.registerFailedLogin(id, maxAttempts, lockoutMinutes);
@@ -148,10 +158,21 @@ async function loginViaDatabase(username, password, totpCode, newPassword) {
       return {
         success: false,
         locked: true,
+        reason: "wrong_password",
+        userId: id,
+        attempt: attemptsSoFar,
+        maxAttempts,
         message: `Too many failed attempts. Your account is locked for ${lockoutMinutes} minutes.`,
       };
     }
-    return { success: false, message: "Username and Password incorrect!" };
+    return {
+      success: false,
+      reason: "wrong_password",
+      userId: id,
+      attempt: attemptsSoFar,
+      maxAttempts,
+      message: "Username and Password incorrect!",
+    };
   }
 
   // Password confirmed — the attack this throttles (guessing the password)
@@ -175,7 +196,7 @@ async function loginViaDatabase(username, password, totpCode, newPassword) {
     }
     const passwordError = validatePasswordStrength(newPassword);
     if (passwordError) {
-      return { success: false, mustChangePassword: true, message: passwordError };
+      return { success: false, mustChangePassword: true, reason: "weak_new_password", userId: id, message: passwordError };
     }
     await User.setPasswordAndClearMustChange(id, newPassword);
   }
@@ -194,13 +215,13 @@ async function loginViaDatabase(username, password, totpCode, newPassword) {
       try {
         secret = decryptSecret(row.totp_secret);
       } catch {
-        return { success: false, message: "Authenticator is misconfigured. Contact the administrator." };
+        return { success: false, reason: "config_error", userId: id, message: "Authenticator is misconfigured. Contact the administrator." };
       }
       if (!code) {
         return { success: false, mfaRequired: true, message: "Enter the 6-digit code from your authenticator app." };
       }
       if (!(await verifyToken(code, secret))) {
-        return { success: false, mfaRequired: true, message: "Invalid authenticator code. Try again." };
+        return { success: false, mfaRequired: true, reason: "invalid_mfa_code", userId: id, message: "Invalid authenticator code. Try again." };
       }
     } else if (!isAdmin) {
       // First-time enrollment. Reuse any pending secret so a re-submit doesn't
@@ -230,6 +251,8 @@ async function loginViaDatabase(username, password, totpCode, newPassword) {
           success: false,
           enrollmentRequired: true,
           enrollment: await buildEnrollment(secret, label),
+          reason: "invalid_mfa_code",
+          userId: id,
           message: "That code didn't match. Enter the current 6-digit code.",
         };
       }
@@ -239,8 +262,18 @@ async function loginViaDatabase(username, password, totpCode, newPassword) {
 
   const user = { id, username: row.username || row.email || userKey, role: effectiveRole };
   const tokenVersion = Number(row.token_version || 0);
-  const token = jwt.sign({ ...user, tv: tokenVersion }, getJwtSecret(), { expiresIn: "24h" });
-  return { success: true, message: "Login successful", user, token };
+  // sid ties every audit entry made with this token back to this sign-in
+  // (see UserSession.js).
+  const sessionId = UserSession.newSessionId();
+  const token = jwt.sign({ ...user, tv: tokenVersion, sid: sessionId }, getJwtSecret(), { expiresIn: "24h" });
+  const { exp } = jwt.decode(token);
+  return {
+    success: true,
+    message: "Login successful",
+    user,
+    token,
+    session: { id: sessionId, tokenVersion, expiresAt: new Date(exp * 1000) },
+  };
 }
 
 async function login(username, password, totpCode, newPassword) {
@@ -251,17 +284,17 @@ async function login(username, password, totpCode, newPassword) {
     // Only fallback if DB isn't configured; otherwise surface the real issue.
     const msg = err && typeof err === "object" && "message" in err ? String(err.message) : "";
     if (msg && !msg.toLowerCase().includes("database is not configured") && !msg.toLowerCase().includes("db env not set")) {
-      return { success: false, message: msg || "Login failed" };
+      return { success: false, reason: "server_error", message: msg || "Login failed" };
     }
 
     const { username: adminUser, password: adminPass, passwordHash: adminPassHash } = getDemoAdminCreds();
     if (normalizeString(username) !== normalizeString(adminUser)) {
-      return { success: false, message: "Username and Password incorrect!" };
+      return { success: false, reason: "unknown_user", message: "Username and Password incorrect!" };
     }
     const stored = String(adminPassHash || "");
     const hashForCompare = stored.startsWith("$2") ? stored : await bcrypt.hash(String(adminPass), 10);
     const matches = await bcrypt.compare(String(password), hashForCompare);
-    if (!matches) return { success: false, message: "Username and Password incorrect!" };
+    if (!matches) return { success: false, reason: "wrong_password", message: "Username and Password incorrect!" };
 
     const user = { id: 1, username: adminUser, role: "admin" };
     const token = jwt.sign(user, getJwtSecret(), { expiresIn: "24h" });

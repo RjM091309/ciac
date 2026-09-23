@@ -60,7 +60,7 @@ exports.create = async (req, res) => {
       entityType: "contract",
       entityId: row?.id,
       details: { contract_no: row?.contract_no },
-      ipAddress: req.ip,
+      req,
     });
     return res.status(201).json({ success: true, data: row });
   } catch (error) {
@@ -99,7 +99,7 @@ exports.update = async (req, res) => {
       entityType: "contract",
       entityId: id,
       details: { contract_no: row?.contract_no },
-      ipAddress: req.ip,
+      req,
     });
     return res.json({ success: true, data: row });
   } catch (error) {

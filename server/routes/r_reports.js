@@ -7,5 +7,6 @@ const MENU_KEY = "reports:analytics";
 
 router.get("/overview", requireMenuAccess(MENU_KEY, "view"), controller.overview);
 router.get("/applications", requireMenuAccess(MENU_KEY, "view"), controller.applications);
+router.post("/export-log", requireMenuAccess(MENU_KEY, "view"), controller.logExport);
 
 module.exports = router;

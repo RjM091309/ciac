@@ -7,6 +7,30 @@ const Notification = require("../models/Notification");
 const ActivityLog = require("../models/ActivityLog");
 const { validatePasswordStrength, generateTempPassword } = require("../lib/password");
 const { sendMail } = require("../lib/mailer");
+const { diffChanges } = require("../lib/auditDiff");
+
+/** The fields an admin can edit on a user, in the shape the audit diff
+ * compares — role by name rather than id, plus the linked locator profile
+ * fields this same form writes. */
+async function userAuditSnapshot(id) {
+  const [user, proponent] = await Promise.all([
+    User.getUserById(id),
+    Proponent.getProponentByUserId(id).catch(() => null),
+  ]);
+  if (!user) return null;
+  return {
+    username: user.username,
+    email: user.email,
+    phone: user.phone,
+    full_name: user.full_name,
+    is_active: Boolean(user.is_active),
+    role: (user.roles || []).map((r) => r.name).join(", ") || null,
+    business_name: proponent?.business_name ?? null,
+    address: proponent?.address ?? null,
+    lease_address: proponent?.lease_address ?? null,
+    contact_no: proponent?.contact_no ?? null,
+  };
+}
 
 /** Shared by account creation (no admin-chosen password) and admin-triggered
  * reset — same email either way, since both hand the owner a one-time temp
@@ -179,7 +203,7 @@ exports.create = async (req, res) => {
         emailSent: mailResult.sent,
         deferredActivation: isDeferredLocator || undefined,
       },
-      ipAddress: req.ip,
+      req,
     });
     return res.status(201).json({
       success: true,
@@ -225,6 +249,7 @@ exports.update = async (req, res) => {
       const passwordError = validatePasswordStrength(password);
       if (passwordError) return res.status(400).json({ success: false, message: passwordError });
     }
+    const before = await userAuditSnapshot(id);
     const row = await User.updateUser(id, { username, email, phone, full_name, password, is_active, role_id });
     if (!row) return res.status(404).json({ success: false, message: "User not found" });
 
@@ -258,14 +283,16 @@ exports.update = async (req, res) => {
       }
     }
 
+    const changes = diffChanges(before, await userAuditSnapshot(id));
+    if (password) changes.push({ field: "password", masked: true });
     await AuditLog.record({
       actorId: req.user?.id,
       actorUsername: req.user?.username,
       action: password ? "USER_PASSWORD_RESET" : "USER_UPDATED",
       entityType: "user",
       entityId: id,
-      details: { username: row?.username, fields: Object.keys(req.body || {}) },
-      ipAddress: req.ip,
+      details: { username: row?.username, changes },
+      req,
     });
 
     // Proponent-facing "Password changed" activity entry.
@@ -302,7 +329,7 @@ exports.deactivate = async (req, res) => {
       entityType: "user",
       entityId: id,
       details: { username: row?.username },
-      ipAddress: req.ip,
+      req,
     });
     return res.json({ success: true, data: row });
   } catch (error) {
@@ -325,7 +352,7 @@ exports.reactivate = async (req, res) => {
       entityType: "user",
       entityId: id,
       details: { username: row?.username },
-      ipAddress: req.ip,
+      req,
     });
     return res.json({ success: true, data: row });
   } catch (error) {
@@ -349,7 +376,7 @@ exports.suspend = async (req, res) => {
       entityType: "user",
       entityId: id,
       details: { username: row?.username },
-      ipAddress: req.ip,
+      req,
     });
     return res.json({ success: true, data: row });
   } catch (error) {
@@ -372,7 +399,7 @@ exports.unsuspend = async (req, res) => {
       entityType: "user",
       entityId: id,
       details: { username: row?.username },
-      ipAddress: req.ip,
+      req,
     });
     return res.json({ success: true, data: row });
   } catch (error) {
@@ -397,7 +424,7 @@ exports.revokeSessions = async (req, res) => {
       entityType: "user",
       entityId: id,
       details: { username: row?.username },
-      ipAddress: req.ip,
+      req,
     });
     return res.json({ success: true, data: row });
   } catch (error) {
@@ -439,7 +466,7 @@ exports.resetPassword = async (req, res) => {
       entityType: "user",
       entityId: id,
       details: { username: user?.username, emailSent: mailResult.sent },
-      ipAddress: req.ip,
+      req,
     });
     ActivityLog.record({
       actorUserId: req.user?.id ?? null,
@@ -487,7 +514,7 @@ exports.approve = async (req, res) => {
       entityType: "user",
       entityId: id,
       details: { username: user?.username, business_name: approvedProponent?.business_name },
-      ipAddress: req.ip,
+      req,
     });
     ActivityLog.record({
       actorUserId: req.user?.id ?? null,
@@ -537,7 +564,7 @@ exports.reject = async (req, res) => {
       entityType: "user",
       entityId: id,
       details: { username: user?.username, note: note || undefined },
-      ipAddress: req.ip,
+      req,
     });
     ActivityLog.record({
       actorUserId: req.user?.id ?? null,
@@ -590,7 +617,7 @@ exports.changeMyPassword = async (req, res) => {
       action: "USER_PASSWORD_SELF_CHANGE",
       entityType: "user",
       entityId: userId,
-      ipAddress: req.ip,
+      req,
     });
 
     return res.json({ success: true, message: "Password updated." });
@@ -620,7 +647,7 @@ exports.resetTotp = async (req, res) => {
       entityType: "user",
       entityId: id,
       details: { username: record?.username },
-      ipAddress: req.ip,
+      req,
     });
     return res.json({ success: true, data: { enabled: false } });
   } catch (error) {

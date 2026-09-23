@@ -20,8 +20,26 @@ const Investment = require("./models/Investment");
 const Building = require("./models/Building");
 const LandUse = require("./models/LandUse");
 const Contract = require("./models/Contract");
+const UserSession = require("./models/UserSession");
 
 const app = express();
+
+// Requests normally reach this server through a proxy (Vite's /api proxy in
+// dev, a reverse proxy in production), so req.ip would be the proxy's own
+// address. Trusting X-Forwarded-For only when the connection comes from that
+// proxy gives the real client IP for the audit log. The default "loopback"
+// covers a proxy on the same machine; set TRUST_PROXY (an Express
+// "trust proxy" value: IP/subnet list, hop count, or true/false) when the
+// proxy runs elsewhere. Avoid `true` unless this port is reachable only
+// through the proxy — otherwise any client can fake its IP with the header.
+function parseTrustProxy(value) {
+  if (value === undefined || value === "") return "loopback";
+  if (value === "true") return true;
+  if (value === "false") return false;
+  if (/^\d+$/.test(value)) return Number(value);
+  return value;
+}
+app.set("trust proxy", parseTrustProxy(process.env.TRUST_PROXY));
 
 // Baseline HTTP security headers (X-Frame-Options, X-Content-Type-Options,
 // Strict-Transport-Security, Referrer-Policy, etc.). CSP is left to helmet's
@@ -132,6 +150,9 @@ initializeDatabase()
         console.error(`Schema step failed (${name}):`, error.message);
       }
     }
+    // Closes sessions that expired or were revoked without a sign-out, and
+    // logs each one to the audit trail (see models/UserSession.js).
+    UserSession.startSweeper();
   })
   .catch(() => {
     // If DB is down, you can still view login page.

@@ -1,6 +1,7 @@
 const fs = require("fs");
 const path = require("path");
 const Workflow = require("../models/ApplicationWorkflow");
+const AuditLog = require("../models/AuditLog");
 const Proponent = require("../models/Proponent");
 const Role = require("../models/Role");
 const ControlPanelPermission = require("../models/ControlPanelPermission");
@@ -55,6 +56,13 @@ exports.download = async (req, res) => {
 
     if (document.content_type) res.type(document.content_type);
     const downloadName = document.original_file_name || document.file_name || path.basename(abs);
+    const application = await Workflow.getApplicationById(document.application_id).catch(() => null);
+    AuditLog.recordFileAccess(req, {
+      kind: "DOCUMENT",
+      entityType: "application",
+      entityId: document.application_id,
+      details: { application_no: application?.application_no, file_name: downloadName },
+    });
 
     // ?view=1 renders the PDF in the browser (officer clicking a requirement
     // to check what the locator submitted) instead of forcing a download —

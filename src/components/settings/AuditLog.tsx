@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { Search, ShieldAlert } from 'lucide-react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { ArrowLeft, ChevronRight, Download, Search, ShieldAlert, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { AppSelect } from '../ui/AppSelect';
 import { DataTableControls } from '../ui/DataTableControls';
@@ -16,7 +16,45 @@ type AuditLogRow = {
   entity_id: number | null;
   details: Record<string, unknown> | null;
   ip_address: string | null;
+  user_agent: string | null;
+  /** Sign-in session the action happened in (null for older rows). */
+  session_id: string | null;
+  category: string;
   created_at: string;
+};
+
+// Server-side groups (AuditLog.categoryOf) for the Category filter.
+const CATEGORY_LABELS: Record<string, string> = {
+  auth: 'Sign-ins & sessions',
+  accounts: 'Accounts & permissions',
+  access: 'File access & exports',
+  locators: 'Locators',
+  workflow: 'Applications & workflow',
+  maintenance: 'File maintenance',
+};
+const CATEGORY_OPTIONS = Object.entries(CATEGORY_LABELS).map(([value, label]) => ({ value, label }));
+
+/** "45s", "12m", "2h 14m", "1d 3h". */
+function formatDuration(seconds: unknown): string | null {
+  if (typeof seconds !== 'number' || !Number.isFinite(seconds) || seconds < 0) return null;
+  if (seconds < 60) return `${Math.round(seconds)}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ${minutes % 60}m`;
+  return `${Math.floor(hours / 24)}d ${hours % 24}h`;
+}
+
+/** One entry of `details.changes` (server/lib/auditDiff.js): a field that
+ * actually changed, with its old/new value, or only a flag when the value is
+ * secret (masked) or a list (item counts). */
+type AuditChange = {
+  field: string;
+  from?: string | null;
+  to?: string | null;
+  masked?: boolean;
+  from_count?: number;
+  to_count?: number;
 };
 
 function api(path: string) {
@@ -27,6 +65,8 @@ const ACTION_LABELS: Record<string, string> = {
   LOGIN_SUCCESS: 'Login succeeded',
   LOGIN_FAILED: 'Login failed',
   LOGOUT: 'Logged out',
+  SESSION_EXPIRED: 'Session expired',
+  SESSION_REVOKED: 'Session ended',
   USER_CREATED: 'User created',
   USER_UPDATED: 'User updated',
   USER_PASSWORD_RESET: 'Password reset',
@@ -157,7 +197,97 @@ const ACTION_LABELS: Record<string, string> = {
   TYPE_OF_CONTRACT_UPDATED: 'Type of contract updated',
   TYPE_OF_CONTRACT_DEACTIVATED: 'Type of contract deactivated',
   TYPE_OF_CONTRACT_REACTIVATED: 'Type of contract reactivated',
+  // File access / exports
+  DOCUMENT_VIEWED: 'Document viewed',
+  DOCUMENT_DOWNLOADED: 'Document downloaded',
+  CERTIFICATE_VIEWED: 'Certificate viewed',
+  CERTIFICATE_DOWNLOADED: 'Certificate downloaded',
+  REPORT_EXPORTED: 'Report exported',
+  AUDIT_LOG_EXPORTED: 'Audit log exported',
 };
+
+// `details.reason` on LOGIN_FAILED (server/models/Auth.js). Admin-facing only
+// — the person signing in still just sees the generic message.
+const LOGIN_FAILURE_REASONS: Record<string, string> = {
+  unknown_user: 'No account with this username or email',
+  wrong_password: 'Wrong password',
+  account_locked: 'Account is locked after too many failed attempts',
+  pending_approval: 'Account is still awaiting approval',
+  registration_rejected: 'Registration was rejected',
+  suspended: 'Account is suspended',
+  deactivated: 'Account is deactivated',
+  invalid_mfa_code: 'Wrong authenticator code',
+  weak_new_password: 'New password did not meet the requirements',
+  unsupported_password_format: 'Stored password is in an unsupported format',
+  config_error: 'Sign-in configuration error',
+  server_error: 'Server error during sign-in',
+};
+
+const REPORT_FILTER_LABELS: Record<string, string> = {
+  dateFrom: 'from',
+  dateTo: 'to',
+  applicationType: 'type',
+  status: 'status',
+  isRenewal: 'new/renewal',
+  search: 'search',
+};
+
+// Filter names as recorded in AUDIT_LOG_EXPORTED details.
+const AUDIT_FILTER_LABELS: Record<string, string> = {
+  q: 'search',
+  actor: 'username contains',
+  user: 'user',
+  action: 'action',
+  category: 'category',
+  ip: 'IP',
+  entityType: 'record type',
+  entityId: 'record id',
+  session: 'session',
+  from: 'from',
+  to: 'to',
+};
+
+function describeLoginFailure(d: Record<string, unknown>): string {
+  const reason = typeof d.reason === 'string' ? d.reason : null;
+  // Rows from before reasons were recorded: fall back to the message the user saw.
+  if (!reason || !LOGIN_FAILURE_REASONS[reason]) {
+    const message = typeof d.message === 'string' && d.message ? d.message : 'Sign-in attempt failed';
+    return d.locked ? `${message} Account is now locked.` : message;
+  }
+  let text = LOGIN_FAILURE_REASONS[reason];
+  if (typeof d.attempt === 'number' && typeof d.maxAttempts === 'number') {
+    text += ` (attempt ${d.attempt} of ${d.maxAttempts})`;
+  }
+  if (reason === 'wrong_password' && d.locked) text += ' — account now locked';
+  if (typeof d.recentFailures === 'number' && d.recentFailures > 1) {
+    const minutes = typeof d.windowMinutes === 'number' ? d.windowMinutes : 15;
+    text += ` · ${d.recentFailures} failed attempts for this name in the last ${minutes} min`;
+  }
+  return text;
+}
+
+function describeFileAccess(row: AuditLogRow, d: Record<string, unknown>): string {
+  const verb = row.action.endsWith('_VIEWED') ? 'Viewed' : 'Downloaded';
+  if (row.action.startsWith('CERTIFICATE_')) {
+    const what =
+      d.certificate === 'permit'
+        ? `permit certificate${d.permit_no ? ` ${String(d.permit_no)}` : ''}`
+        : `contract certificate${d.contract_no ? ` ${String(d.contract_no)}` : ''}`;
+    return `${verb} ${what}`;
+  }
+  const file = d.file_name ? `"${String(d.file_name)}"` : 'a document';
+  return d.application_no ? `${verb} ${file} from application ${String(d.application_no)}` : `${verb} ${file}`;
+}
+
+function describeReportExport(d: Record<string, unknown>): string {
+  const format = typeof d.format === 'string' ? d.format.toUpperCase() : 'a file';
+  const rows = typeof d.rowCount === 'number' ? ` (${d.rowCount} ${d.rowCount === 1 ? 'row' : 'rows'})` : '';
+  const filters = d.filters && typeof d.filters === 'object' ? Object.entries(d.filters as Record<string, unknown>) : [];
+  const filterText = filters.length
+    ? ` — ${filters.map(([k, v]) => `${REPORT_FILTER_LABELS[k] || humanizeKey(k)}: ${String(v)}`).join(', ')}`
+    : ' — no filters';
+  return `Exported the applications report to ${format}${rows}${filterText}`;
+}
 
 const FIELD_LABELS: Record<string, string> = {
   username: 'username',
@@ -169,8 +299,79 @@ const FIELD_LABELS: Record<string, string> = {
   role_id: 'role',
   business_name: 'business name',
   address: 'address',
+  lease_address: 'lease address',
   contact_no: 'contact number',
+  role: 'role',
+  tin: 'TIN',
+  department_id: 'department',
+  proponent_id: 'locator',
+  account_officer_id: 'account officer',
+  assigned_inspector_id: 'inspector',
+  contact_persons: 'contact persons',
+  is_renewal: 'renewal',
 };
+
+function fieldLabel(field: string) {
+  return FIELD_LABELS[field] || humanizeKey(field.replace(/_id$/, ''));
+}
+
+function capitalize(s: string) {
+  return s ? s[0].toUpperCase() + s.slice(1) : s;
+}
+
+function readChanges(row: AuditLogRow): AuditChange[] | null {
+  const changes = (row.details as Record<string, unknown> | null)?.changes;
+  return Array.isArray(changes) ? (changes as AuditChange[]) : null;
+}
+
+/** "Email: a@x.com → b@x.com" — one line per changed field. */
+function describeChange(c: AuditChange): string {
+  const label = capitalize(fieldLabel(c.field));
+  if (c.masked) return `${label}: changed (value hidden)`;
+  if (typeof c.from_count === 'number' || typeof c.to_count === 'number') {
+    const from = c.from_count ?? 0;
+    const to = c.to_count ?? 0;
+    return from === to ? `${label}: edited (${to} ${to === 1 ? 'entry' : 'entries'})` : `${label}: ${from} → ${to} entries`;
+  }
+  if (!('from' in c) && !('to' in c)) return `${label}: changed`;
+  const show = (v: string | null | undefined) => (v == null || v === '' ? '(empty)' : `"${v}"`);
+  return `${label}: ${show(c.from)} → ${show(c.to)}`;
+}
+
+/** ::1 / 127.0.0.1 is this machine itself; ::ffff:1.2.3.4 is just Node's
+ * spelling of an IPv4 client (older rows were stored that way). */
+function formatIp(ip: string | null): string {
+  if (!ip) return '—';
+  const plain = ip.replace(/^::ffff:(?=\d+\.\d+\.\d+\.\d+$)/i, '');
+  return plain === '::1' || plain === '127.0.0.1' ? 'localhost' : plain;
+}
+
+/** "Chrome 128 · Windows" from a raw user-agent string — enough to tell a
+ * familiar device from an unfamiliar one; the full string is in the tooltip. */
+function describeDevice(ua: string | null): string | null {
+  if (!ua) return null;
+  const match = (re: RegExp) => ua.match(re);
+  let r: RegExpMatchArray | null;
+  let browser: string | null = null;
+  if ((r = match(/Edg(?:e|A|iOS)?\/(\d+)/))) browser = `Edge ${r[1]}`;
+  else if ((r = match(/OPR\/(\d+)/))) browser = `Opera ${r[1]}`;
+  else if ((r = match(/SamsungBrowser\/(\d+)/))) browser = `Samsung Internet ${r[1]}`;
+  else if ((r = match(/(?:Chrome|CriOS)\/(\d+)/))) browser = `Chrome ${r[1]}`;
+  else if ((r = match(/(?:Firefox|FxiOS)\/(\d+)/))) browser = `Firefox ${r[1]}`;
+  else if ((r = match(/Version\/(\d+)[\d.]*.*Safari\//))) browser = `Safari ${r[1]}`;
+  else if ((r = match(/^(PostmanRuntime|curl|axios|node-fetch|python-requests)\b/i))) browser = r[1];
+
+  let os: string | null = null;
+  if (/iPhone|iPad|iPod/.test(ua)) os = 'iOS';
+  else if (/Android/.test(ua)) os = 'Android';
+  else if (/Windows NT/.test(ua)) os = 'Windows';
+  else if (/CrOS/.test(ua)) os = 'ChromeOS';
+  else if (/Mac OS X|Macintosh/.test(ua)) os = 'macOS';
+  else if (/Linux/.test(ua)) os = 'Linux';
+
+  const label = [browser, os].filter(Boolean).join(' · ');
+  return label || (ua.length > 40 ? `${ua.slice(0, 39)}…` : ua);
+}
 
 const PERMISSION_SCOPES: Record<string, string> = {
   role_sidebar_menu: 'sidebar menu access',
@@ -188,33 +389,34 @@ function joinList(items: string[]) {
 }
 
 // Human word for each entity_type, shown in the Entity column ahead of the
-// real name — e.g. "locator" rather than the raw "proponent" table name.
+// real name — e.g. "Locator" rather than the raw "proponent" table name.
 const ENTITY_TYPE_LABELS: Record<string, string> = {
-  user: 'user',
-  role: 'role',
-  role_sidebar_menu: 'role',
-  role_menu_crud: 'role',
-  role_dashboard_widgets: 'role',
-  proponent: 'locator',
-  application: 'application',
-  application_requirement: 'requirement',
-  assessment_finding: 'finding',
-  assessment_charge: 'charge',
-  inspection: 'inspection',
-  inspection_finding: 'finding',
-  inspection_action: 'corrective action',
-  permit: 'permit',
-  contract: 'contract',
-  approval_level: 'approval level',
-  requirement: 'requirement',
-  requirement_category: 'requirement category',
-  compliance_type: 'compliance type',
-  inspection_type: 'inspection type',
-  application_type: 'application type',
-  department: 'department',
-  building: 'building',
-  land_use: 'land use',
-  type_of_contract: 'type of contract',
+  user: 'User',
+  role: 'Role',
+  role_sidebar_menu: 'Role',
+  role_menu_crud: 'Role',
+  role_dashboard_widgets: 'Role',
+  proponent: 'Locator',
+  application: 'Application',
+  application_requirement: 'Requirement',
+  assessment_finding: 'Finding',
+  assessment_charge: 'Charge',
+  inspection: 'Inspection',
+  inspection_finding: 'Finding',
+  inspection_action: 'Corrective action',
+  permit: 'Permit',
+  contract: 'Contract',
+  approval_level: 'Approval level',
+  requirement: 'Requirement',
+  requirement_category: 'Requirement category',
+  compliance_type: 'Compliance type',
+  inspection_type: 'Inspection type',
+  application_type: 'Application type',
+  department: 'Department',
+  building: 'Building',
+  land_use: 'Land use',
+  type_of_contract: 'Type of contract',
+  report: 'Report',
 };
 
 // Which `details` field holds the real, human-readable name for each
@@ -263,7 +465,7 @@ function entityLabel(row: AuditLogRow): string {
   for (const field of fields) {
     const value = d[field];
     if (typeof value === 'string' && value.trim()) {
-      return `${typeLabel} "${value.trim()}"`;
+      return `${typeLabel}: "${value.trim()}"`;
     }
   }
 
@@ -286,12 +488,25 @@ function describeActivity(row: AuditLogRow): string {
   switch (row.action) {
     case 'LOGIN_SUCCESS':
       return 'Signed in to the system';
-    case 'LOGIN_FAILED': {
-      const reason = typeof d.message === 'string' && d.message ? d.message : 'Sign-in attempt failed';
-      return d.locked ? `${reason} Account is now locked.` : reason;
+    case 'LOGIN_FAILED':
+      return describeLoginFailure(d);
+    case 'LOGOUT': {
+      const duration = formatDuration(d.duration_seconds);
+      return duration ? `Signed out after ${duration}` : 'Signed out of the system';
     }
-    case 'LOGOUT':
-      return 'Signed out of the system';
+    case 'SESSION_EXPIRED': {
+      const active = formatDuration(d.active_seconds);
+      return active
+        ? `Session reached its 24h limit without a sign-out — last activity ${active} after sign-in`
+        : 'Session reached its 24h limit without a sign-out';
+    }
+    case 'SESSION_REVOKED': {
+      const duration = formatDuration(d.duration_seconds);
+      const cause = d.account_inactive
+        ? 'the account was deactivated or suspended'
+        : 'of a password reset or "sign out of all devices"';
+      return `Session ended because ${cause}${duration ? ` (after ${duration})` : ''}`;
+    }
     case 'USER_CREATED': {
       const parts = [`Created account "${d.username ?? user}"`];
       if (d.autoGeneratedPassword) parts.push('with an auto-generated password');
@@ -301,9 +516,12 @@ function describeActivity(row: AuditLogRow): string {
       return parts.join(' ');
     }
     case 'USER_UPDATED': {
+      // Newer rows carry `changes`, listed under this line by ChangeList.
+      if (readChanges(row)) return `Updated ${user}`;
+      // Older rows only have `fields` — every field the form sent, changed or not.
       const fields = Array.isArray(d.fields) ? (d.fields as string[]) : [];
-      const labels = fields.map((f) => FIELD_LABELS[f] || humanizeKey(f));
-      return labels.length ? `Updated ${user}: changed ${joinList(labels)}` : `Updated ${user}`;
+      const labels = fields.map(fieldLabel);
+      return labels.length ? `Updated ${user}: saved ${joinList(labels)}` : `Updated ${user}`;
     }
     case 'USER_PASSWORD_RESET': {
       if (d.emailSent === true) return `Reset password for ${user} and emailed the new one`;
@@ -366,8 +584,9 @@ function describeActivity(row: AuditLogRow): string {
     case 'PROPONENT_SELF_SETUP':
       return d.business_name ? `Set up business profile "${String(d.business_name)}"` : 'Set up their business profile';
     case 'PROPONENT_CHANGE_REQUESTED': {
+      if (readChanges(row)) return `Requested changes to "${String(d.business_name ?? '')}"`;
       const fields = Array.isArray(d.fields) ? (d.fields as string[]) : [];
-      const labels = fields.map((f) => FIELD_LABELS[f] || humanizeKey(f));
+      const labels = fields.map(fieldLabel);
       return labels.length
         ? `Requested changes to "${String(d.business_name ?? '')}": ${joinList(labels)}`
         : `Requested profile changes for "${String(d.business_name ?? '')}"`;
@@ -505,6 +724,24 @@ function describeActivity(row: AuditLogRow): string {
     case 'INSPECTION_DOCUMENT_DELETED':
       return `Removed "${String(d.file_name ?? 'a document')}" from an inspection`;
 
+    // --- File access / exports ---
+    case 'DOCUMENT_VIEWED':
+    case 'DOCUMENT_DOWNLOADED':
+    case 'CERTIFICATE_VIEWED':
+    case 'CERTIFICATE_DOWNLOADED':
+      return describeFileAccess(row, d);
+    case 'REPORT_EXPORTED':
+      return describeReportExport(d);
+    case 'AUDIT_LOG_EXPORTED': {
+      const count = typeof d.rowCount === 'number' ? d.rowCount : null;
+      const filters = d.filters && typeof d.filters === 'object' ? Object.entries(d.filters as Record<string, unknown>) : [];
+      const filterText = filters.length
+        ? ` — ${filters.map(([k, v]) => `${AUDIT_FILTER_LABELS[k] || humanizeKey(k)}: ${String(v)}`).join(', ')}`
+        : ' — no filters';
+      const format = typeof d.format === 'string' ? d.format.toUpperCase() : 'CSV';
+      return `Exported the audit log to ${format === 'XLSX' ? 'Excel' : format}${count != null ? ` (${count} ${count === 1 ? 'row' : 'rows'})` : ''}${filterText}`;
+    }
+
     default: {
       // Safety net for any action without a dedicated case above: never
       // surface a raw foreign-key column (…_id / id) here — those belong in
@@ -562,6 +799,206 @@ function formatDate(value: string) {
   return d.toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
+/** Details cell: the one-line summary, then one line per field that
+ * actually changed (for update actions that record `changes`). */
+function ActivityDetails({ row }: { row: AuditLogRow }) {
+  const changes = readChanges(row);
+  return (
+    <>
+      <div>
+        {describeActivity(row)}
+        {changes && changes.length === 0 ? ' — no fields changed' : ''}
+      </div>
+      {changes && changes.length > 0 && (
+        <ul className="mt-1 space-y-0.5">
+          {changes.map((c, i) => (
+            <li key={`${c.field}-${i}`} className="text-[10px] break-words" style={{ color: 'var(--text-muted)' }}>
+              • {describeChange(c)}
+            </li>
+          ))}
+        </ul>
+      )}
+    </>
+  );
+}
+
+// Keys already shown elsewhere in the expanded panel (or meaningless there).
+const PANEL_HIDDEN_KEYS = new Set(['changes']);
+
+function formatDetailValue(value: unknown): string {
+  if (value == null || value === '') return '—';
+  if (typeof value === 'boolean') return value ? 'Yes' : 'No';
+  if (typeof value === 'object') {
+    const entries = Object.entries(value as Record<string, unknown>);
+    return entries.length ? entries.map(([k, v]) => `${humanizeKey(k)}: ${String(v)}`).join(', ') : '—';
+  }
+  if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(value)) {
+    const d = new Date(value);
+    if (!Number.isNaN(d.getTime())) return formatFullDate(value);
+  }
+  return String(value);
+}
+
+function formatFullDate(value: string) {
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return value;
+  return d.toLocaleString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  });
+}
+
+function PanelField({
+  label,
+  title,
+  wide,
+  children,
+}: {
+  label: string;
+  title?: string;
+  wide?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className={`min-w-0 ${wide ? 'col-span-2' : ''}`}>
+      <div className="text-[11px] font-semibold uppercase tracking-wider text-secondary">{label}</div>
+      <div className="mt-0.5 text-[13px] leading-snug break-words" style={{ color: 'var(--text)' }} title={title}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function PanelButton({ onClick, children }: { onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick();
+      }}
+      // Tinted from the text colour rather than --border/--control-bg, which
+      // sit too close to the panel background in dark mode.
+      className="inline-flex items-center rounded-md px-2 h-6 text-[11px] font-semibold border cursor-pointer whitespace-nowrap bg-[color-mix(in_oklab,var(--text)_10%,transparent)] hover:bg-[color-mix(in_oklab,var(--text)_20%,transparent)] border-[color-mix(in_oklab,var(--text)_28%,transparent)]"
+      style={{ color: 'var(--text)' }}
+    >
+      {children}
+    </button>
+  );
+}
+
+/** Value with an optional shortcut button beside it (wrapping under it only
+ * when the column is too narrow). */
+function ValueWithAction({ children, action }: { children: React.ReactNode; action?: React.ReactNode }) {
+  return (
+    <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+      <span className="min-w-0">{children}</span>
+      {action}
+    </div>
+  );
+}
+
+/** Everything recorded for one entry, plus shortcuts to follow the trail:
+ * the actor's other activity, the record's full history, and every action
+ * taken in the same sign-in session. */
+function RowDetailsPanel({
+  row,
+  onFilterActor,
+  onFilterRecord,
+  onFilterSession,
+}: {
+  row: AuditLogRow;
+  onFilterActor: (username: string) => void;
+  onFilterRecord: (row: AuditLogRow) => void;
+  onFilterSession: (row: AuditLogRow) => void;
+}) {
+  const changes = readChanges(row);
+  const extra = Object.entries(row.details || {}).filter(([k]) => !PANEL_HIDDEN_KEYS.has(k));
+  const gridClass = 'grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-x-6 gap-y-3';
+  const sectionStyle = { borderColor: 'var(--border-subtle)' };
+
+  return (
+    <div
+      className="rounded-lg px-4 py-3 space-y-3"
+      style={{ backgroundColor: 'color-mix(in oklab, var(--control-bg) 60%, transparent)' }}
+      onClick={(e) => e.stopPropagation()}
+    >
+      <div className={gridClass}>
+        <PanelField label="When">{formatFullDate(row.created_at)}</PanelField>
+        <PanelField label="Action" title={row.action}>
+          {ACTION_LABELS[row.action] || humanizeKey(row.action)}
+        </PanelField>
+        <PanelField label="Actor">
+          <ValueWithAction
+            action={
+              row.actor_username && (
+                <PanelButton onClick={() => onFilterActor(row.actor_username as string)}>All activity</PanelButton>
+              )
+            }
+          >
+            {row.actor_username || '—'}
+            {row.actor_id != null && <span className="text-secondary"> #{row.actor_id}</span>}
+          </ValueWithAction>
+        </PanelField>
+        <PanelField label="Record">
+          <ValueWithAction
+            action={
+              row.entity_type &&
+              row.entity_id != null && <PanelButton onClick={() => onFilterRecord(row)}>History</PanelButton>
+            }
+          >
+            {row.entity_type ? entityLabel(row) : '—'}
+          </ValueWithAction>
+        </PanelField>
+        <PanelField label="IP address">{formatIp(row.ip_address)}</PanelField>
+        <PanelField label="Device">{describeDevice(row.user_agent) || '—'}</PanelField>
+        <PanelField label="Session">
+          {row.session_id ? (
+            <ValueWithAction action={<PanelButton onClick={() => onFilterSession(row)}>Session activity</PanelButton>}>
+              <span className="font-mono">{row.session_id.slice(0, 8)}</span>
+            </ValueWithAction>
+          ) : (
+            <span className="text-secondary">Not recorded</span>
+          )}
+        </PanelField>
+        <PanelField label="Category">{CATEGORY_LABELS[row.category] || row.category}</PanelField>
+      </div>
+
+      {changes && changes.length > 0 && (
+        <div className="pt-3 border-t" style={sectionStyle}>
+          <PanelField label="Changes">
+            <ul className="space-y-0.5">
+              {changes.map((c, i) => (
+                <li key={`${c.field}-${i}`}>{describeChange(c)}</li>
+              ))}
+            </ul>
+          </PanelField>
+        </div>
+      )}
+
+      {extra.length > 0 && (
+        <div className={`pt-3 border-t ${gridClass}`} style={sectionStyle}>
+          {extra.map(([k, v]) => {
+            const text = formatDetailValue(v);
+            return (
+              <PanelField key={k} label={humanizeKey(k)} wide={text.length > 40}>
+                {text}
+              </PanelField>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** A record or session the log is narrowed to — shown as a removable chip. */
+type ScopeFilter = { label: string; params: Record<string, string> };
+
 /** TOR items 10-12: a compliance-facing view over dbo.audit_logs — login
  * attempts, account changes, and permission changes, filterable and paged
  * server-side. Admin-only. */
@@ -570,28 +1007,63 @@ export function AuditLog() {
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [actions, setActions] = useState<string[]>([]);
-  const [actorFilter, setActorFilter] = useState('');
+  const [actionCategories, setActionCategories] = useState<Record<string, string>>({});
+  // What's typed in the search box, and the same text once typing pauses —
+  // only the latter triggers a reload.
+  const [searchInput, setSearchInput] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
   const [actionFilter, setActionFilter] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState('');
+  const [recordFilter, setRecordFilter] = useState<ScopeFilter | null>(null);
+  const [sessionFilter, setSessionFilter] = useState<ScopeFilter | null>(null);
+  const [userFilter, setUserFilter] = useState<ScopeFilter | null>(null);
+  const cardRef = useRef<HTMLDivElement>(null);
   const [fromDate, setFromDate] = useState<Date | null>(null);
   const [toDate, setToDate] = useState<Date | null>(null);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
+  const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [exporting, setExporting] = useState(false);
 
   useEffect(() => {
     fetch(api('/api/audit-logs/actions'), { credentials: 'include' })
       .then((res) => res.json())
-      .then((json) => setActions(Array.isArray(json?.data) ? json.data : []))
+      .then((json) => {
+        setActions(Array.isArray(json?.data) ? json.data : []);
+        setActionCategories(json?.categories && typeof json.categories === 'object' ? json.categories : {});
+      })
       .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setSearchQuery(searchInput.trim()), 300);
+    return () => window.clearTimeout(timer);
+  }, [searchInput]);
+
+  function filterParams() {
+    const params = new URLSearchParams();
+    if (searchQuery) {
+      params.set('q', searchQuery);
+      // The server knows action codes, not the labels shown here, so also
+      // send the actions whose label matches ("locator updated" → PROPONENT_UPDATED).
+      const term = searchQuery.toLowerCase();
+      const labelMatches = actions.filter((a) => (ACTION_LABELS[a] || '').toLowerCase().includes(term));
+      if (labelMatches.length) params.set('qActions', labelMatches.join(','));
+    }
+    if (actionFilter) params.set('action', actionFilter);
+    if (categoryFilter) params.set('category', categoryFilter);
+    for (const scope of [userFilter, recordFilter, sessionFilter]) {
+      if (scope) Object.entries(scope.params).forEach(([k, v]) => params.set(k, v));
+    }
+    if (fromDate) params.set('from', fromDate.toISOString());
+    if (toDate) params.set('to', toDate.toISOString());
+    return params;
+  }
 
   async function load() {
     setLoading(true);
     try {
-      const params = new URLSearchParams();
-      if (actorFilter.trim()) params.set('actor', actorFilter.trim());
-      if (actionFilter) params.set('action', actionFilter);
-      if (fromDate) params.set('from', fromDate.toISOString());
-      if (toDate) params.set('to', toDate.toISOString());
+      const params = filterParams();
       params.set('page', String(page));
       params.set('pageSize', String(pageSize));
 
@@ -607,14 +1079,35 @@ export function AuditLog() {
     }
   }
 
+  const filterKey = [
+    searchQuery,
+    // Re-run a search once the action list (for label matches) arrives.
+    searchQuery ? actions.length : 0,
+    actionFilter,
+    categoryFilter,
+    JSON.stringify(recordFilter?.params),
+    JSON.stringify(sessionFilter?.params),
+    JSON.stringify(userFilter?.params),
+    fromDate?.getTime(),
+    toDate?.getTime(),
+  ].join('|');
+
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, pageSize, actorFilter, actionFilter, fromDate, toDate]);
+  }, [page, pageSize, filterKey]);
 
   useEffect(() => {
     setPage(1);
-  }, [actorFilter, actionFilter, fromDate, toDate]);
+    setExpandedId(null);
+  }, [filterKey]);
+
+  // A category narrows the action list; drop an action that's no longer in it.
+  useEffect(() => {
+    if (categoryFilter && actionFilter && actionCategories[actionFilter] && actionCategories[actionFilter] !== categoryFilter) {
+      setActionFilter('');
+    }
+  }, [categoryFilter, actionFilter, actionCategories]);
 
   const totalPages = useMemo(() => Math.max(1, Math.ceil(total / Math.max(1, pageSize))), [total, pageSize]);
   const showingRange = useMemo(() => {
@@ -629,11 +1122,239 @@ export function AuditLog() {
     return [page - 2, page - 1, page, page + 1, page + 2];
   }, [page, totalPages]);
 
-  const actionOptions = useMemo(() => actions.map((a) => ({ value: a, label: ACTION_LABELS[a] || a })), [actions]);
+  const actionOptions = useMemo(
+    () =>
+      actions
+        .filter((a) => !categoryFilter || actionCategories[a] === categoryFilter)
+        .map((a) => ({ value: a, label: ACTION_LABELS[a] || a })),
+    [actions, actionCategories, categoryFilter]
+  );
+
+  function toggleExpanded(id: number) {
+    setExpandedId((current) => (current === id ? null : id));
+  }
+
+  // The three drill-downs from an expanded entry. Each narrows the list and
+  // scrolls back up to the filter bar, where "Back to list" undoes them.
+  function scrollToFilters() {
+    cardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  function filterByActor(username: string) {
+    setUserFilter({ label: username, params: { user: username } });
+    scrollToFilters();
+  }
+
+  function filterByRecord(row: AuditLogRow) {
+    if (!row.entity_type || row.entity_id == null) return;
+    // Role permission changes are stored under several role_* types that all
+    // point at the same role; the server widens "role" to all of them.
+    const entityType = row.entity_type.startsWith('role') ? 'role' : row.entity_type;
+    setRecordFilter({
+      label: entityLabel(row),
+      params: { entityType, entityId: String(row.entity_id) },
+    });
+    scrollToFilters();
+  }
+
+  function filterBySession(row: AuditLogRow) {
+    if (!row.session_id) return;
+    setSessionFilter({
+      label: `${row.actor_username || 'Unknown'} · ${row.session_id.slice(0, 8)}`,
+      params: { session: row.session_id },
+    });
+    scrollToFilters();
+  }
+
+  const hasDrillDown = Boolean(userFilter || recordFilter || sessionFilter);
+
+  function clearDrillDowns() {
+    setUserFilter(null);
+    setRecordFilter(null);
+    setSessionFilter(null);
+  }
+
+  function clearAllFilters() {
+    setSearchInput('');
+    setSearchQuery('');
+    setActionFilter('');
+    setCategoryFilter('');
+    clearDrillDowns();
+    setFromDate(null);
+    setToDate(null);
+  }
+
+  const hasFilters = Boolean(
+    searchInput || actionFilter || categoryFilter || hasDrillDown || fromDate || toDate
+  );
+
+  /** Plain-language summary of the active filters, for the export's title block. */
+  function describeActiveFilters(): string {
+    const day = (d: Date) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    const parts: string[] = [];
+    if (searchQuery) parts.push(`Search: "${searchQuery}"`);
+    if (categoryFilter) parts.push(`Category: ${CATEGORY_LABELS[categoryFilter] || categoryFilter}`);
+    if (actionFilter) parts.push(`Action: ${ACTION_LABELS[actionFilter] || actionFilter}`);
+    if (userFilter) parts.push(`Activity by: ${userFilter.label}`);
+    if (recordFilter) parts.push(`Record: ${recordFilter.label}`);
+    if (sessionFilter) parts.push(`Session: ${sessionFilter.label}`);
+    if (fromDate || toDate) parts.push(`Dates: ${fromDate ? day(fromDate) : 'start'} to ${toDate ? day(toDate) : 'today'}`);
+    return parts.length ? parts.join('    ·    ') : 'None (all entries)';
+  }
+
+  /** Downloads every matching row (the server caps it and logs the export)
+   * as a formatted Excel file: title block, styled header, sized columns,
+   * wrapped details, frozen header and filter buttons. Same wording as the
+   * table. exceljs is loaded only when someone exports. */
+  async function exportExcel() {
+    setExporting(true);
+    try {
+      const res = await fetch(api(`/api/audit-logs/export?${filterParams().toString()}`), { credentials: 'include' });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.message || 'Failed to export audit log');
+      const data: AuditLogRow[] = Array.isArray(json.data) ? json.data : [];
+      if (data.length === 0) {
+        toast.info('Nothing to export for these filters');
+        return;
+      }
+      const matching = Number(json.total || data.length);
+
+      const { default: ExcelJS } = await import('exceljs');
+      const workbook = new ExcelJS.Workbook();
+      workbook.creator = '3CORE';
+      workbook.created = new Date();
+
+      const HEADER_ROW = 5;
+      const columns = [
+        { key: 'when', header: 'When', width: 22 },
+        { key: 'actor', header: 'Actor', width: 16 },
+        { key: 'action', header: 'Action', width: 26 },
+        { key: 'category', header: 'Category', width: 24 },
+        { key: 'record', header: 'Record', width: 30 },
+        { key: 'details', header: 'Details', width: 72 },
+        { key: 'ip', header: 'IP address', width: 17 },
+        { key: 'device', header: 'Device', width: 22 },
+        { key: 'session', header: 'Session', width: 11 },
+      ];
+      const sheet = workbook.addWorksheet('Audit Log', {
+        views: [{ state: 'frozen', ySplit: HEADER_ROW }],
+        pageSetup: { orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0 },
+      });
+      sheet.columns = columns.map(({ key, width }) => ({ key, width }));
+      const lastCol = columns.length;
+      const border = { style: 'thin' as const, color: { argb: 'FFE4E4E7' } };
+
+      // Title block: name, when/how much, and which filters produced it.
+      const titleLines = [
+        { text: '3CORE — Audit Log', font: { bold: true, size: 16, color: { argb: 'FF18181B' } }, height: 26 },
+        {
+          text: `Exported ${formatFullDate(new Date().toISOString())}  ·  ${data.length.toLocaleString()} ${
+            data.length === 1 ? 'entry' : 'entries'
+          }${matching > data.length ? ` (newest ${data.length.toLocaleString()} of ${matching.toLocaleString()} matching)` : ''}`,
+          font: { size: 10, color: { argb: 'FF52525B' } },
+          height: 16,
+        },
+        { text: `Filters: ${describeActiveFilters()}`, font: { size: 10, color: { argb: 'FF52525B' } }, height: 16 },
+      ];
+      titleLines.forEach((line, i) => {
+        const r = i + 1;
+        sheet.mergeCells(r, 1, r, lastCol);
+        const cell = sheet.getCell(r, 1);
+        cell.value = line.text;
+        cell.font = line.font;
+        cell.alignment = { vertical: 'middle' };
+        sheet.getRow(r).height = line.height;
+      });
+      sheet.getRow(4).height = 8; // spacer between the title block and the table
+
+      const header = sheet.getRow(HEADER_ROW);
+      header.values = columns.map((c) => c.header);
+      header.height = 24;
+      header.eachCell((cell) => {
+        cell.font = { bold: true, size: 10, color: { argb: 'FFFFFFFF' } };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF18181B' } };
+        cell.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
+        cell.border = { bottom: border };
+      });
+      sheet.autoFilter = { from: { row: HEADER_ROW, column: 1 }, to: { row: HEADER_ROW, column: lastCol } };
+
+      // Excel doesn't reliably auto-fit wrapped rows in generated files, so
+      // estimate each row's height from its longest wrapped cell.
+      const linesFor = (text: string, width: number) =>
+        text.split('\n').reduce((sum, part) => sum + Math.max(1, Math.ceil(part.length / Math.max(1, width - 2))), 0);
+
+      data.forEach((row, index) => {
+        const changes = readChanges(row);
+        const created = new Date(row.created_at);
+        const values: Record<string, string | Date> = {
+          // Excel has no time zones: shift so the cell shows local time.
+          when: Number.isNaN(created.getTime())
+            ? row.created_at
+            : new Date(created.getTime() - created.getTimezoneOffset() * 60000),
+          actor: row.actor_username || '',
+          action: ACTION_LABELS[row.action] || humanizeKey(row.action),
+          category: CATEGORY_LABELS[row.category] || row.category || '',
+          record: row.entity_type ? entityLabel(row) : '',
+          details: [describeActivity(row), ...(changes || []).map((c) => `• ${describeChange(c)}`)].join('\n'),
+          ip: formatIp(row.ip_address),
+          device: describeDevice(row.user_agent) || '',
+          session: row.session_id ? row.session_id.slice(0, 8) : '',
+        };
+        const added = sheet.addRow(values);
+        const lines = Math.max(
+          ...columns.map((c) => (typeof values[c.key] === 'string' ? linesFor(values[c.key] as string, c.width) : 1))
+        );
+        added.height = Math.max(18, lines * 14 + 4);
+        added.eachCell({ includeEmpty: true }, (cell) => {
+          cell.font = { size: 10, color: { argb: 'FF27272A' } };
+          cell.alignment = { vertical: 'top', horizontal: 'left', wrapText: true, indent: 1 };
+          cell.border = { bottom: border };
+          if (index % 2 === 1) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF7F7F8' } };
+        });
+        added.getCell('when').numFmt = 'mmm d, yyyy  h:mm AM/PM';
+      });
+
+      const buffer = await workbook.xlsx.writeBuffer();
+      const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `3core-audit-log-${new Date().toISOString().slice(0, 10)}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+
+      if (matching > data.length) {
+        toast.warning(`Exported the newest ${data.length.toLocaleString()} of ${matching.toLocaleString()} entries — narrow the filters to get the rest`);
+      } else {
+        toast.success(`Exported ${data.length.toLocaleString()} ${data.length === 1 ? 'entry' : 'entries'}`);
+      }
+      // The export itself is now an audit entry; show it if we're on page 1.
+      if (page === 1) load();
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to export audit log');
+    } finally {
+      setExporting(false);
+    }
+  }
+
+  const panelFor = (row: AuditLogRow) => (
+    <RowDetailsPanel
+      row={row}
+      onFilterActor={filterByActor}
+      onFilterRecord={filterByRecord}
+      onFilterSession={filterBySession}
+    />
+  );
+
+  const inputClass =
+    'h-9 rounded-full pl-9 pr-3 text-xs w-full focus:outline-none focus:ring-1 focus:ring-[var(--border)] text-[var(--text)] placeholder:text-[var(--text-muted)] transition-all';
+  const inputStyle = { backgroundColor: 'color-mix(in oklab, var(--control-bg) 70%, transparent)' };
 
   return (
     <div className="space-y-4 sm:space-y-5">
-      <div className="glass-card p-3 sm:p-5 !border-transparent" style={{ backgroundColor: 'var(--surface)' }}>
+      <div ref={cardRef} className="glass-card p-3 sm:p-5 !border-transparent scroll-mt-4" style={{ backgroundColor: 'var(--surface)' }}>
         {/* Phones: the page header right above already says this, so skip the repeat. */}
         <div className="hidden sm:flex items-center gap-2 mb-1">
           <ShieldAlert size={16} style={{ color: 'var(--text)' }} />
@@ -642,25 +1363,37 @@ export function AuditLog() {
           </h3>
         </div>
         <p className="hidden sm:block text-[11px] text-secondary mb-4">
-          Logins, account changes, and permission changes — for monitoring and compliance review.
+          Sign-ins, account and permission changes, record updates, and file access — for monitoring and compliance review.
+          Click an entry for full details.
         </p>
 
-        <div className="grid grid-cols-2 gap-2 mb-4 lg:flex lg:items-center">
-          <div className="relative group col-span-2 lg:w-56">
+        <div className="grid grid-cols-2 gap-2 mb-2 lg:flex lg:flex-wrap lg:items-center">
+          <div className="relative group col-span-2 lg:w-72">
             <Search
               className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)] group-focus-within:text-[var(--text)] transition-colors pointer-events-none"
               size={14}
             />
             <input
               type="text"
-              placeholder="Search by username..."
-              value={actorFilter}
-              onChange={(e) => setActorFilter(e.target.value)}
-              className="h-9 rounded-full pl-9 pr-3 text-xs w-full focus:outline-none focus:ring-1 focus:ring-[var(--border)] text-[var(--text)] placeholder:text-[var(--text-muted)] transition-all"
-              style={{ backgroundColor: 'color-mix(in oklab, var(--control-bg) 70%, transparent)' }}
+              placeholder="Search user, action, record, IP, details..."
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              aria-label="Search the audit log"
+              className={inputClass}
+              style={inputStyle}
             />
           </div>
-          <div className="col-span-2 lg:w-56">
+          <div className="col-span-2 sm:col-span-1 lg:w-52">
+            <AppSelect
+              options={CATEGORY_OPTIONS}
+              value={categoryFilter}
+              onChange={setCategoryFilter}
+              placeholder="All categories"
+              isClearable
+              compact
+            />
+          </div>
+          <div className="col-span-2 sm:col-span-1 lg:w-52">
             <AppSelect
               options={actionOptions}
               value={actionFilter}
@@ -670,13 +1403,90 @@ export function AuditLog() {
               compact
             />
           </div>
-          <div className="min-w-0 lg:w-44">
+          <div className="min-w-0 lg:w-40">
             <DatePicker mode="single" bordered fullWidth value={fromDate} onChange={setFromDate} placeholder="From date" />
           </div>
-          <div className="min-w-0 lg:w-44">
+          <div className="min-w-0 lg:w-40">
             <DatePicker mode="single" bordered fullWidth value={toDate} onChange={setToDate} placeholder="To date" />
           </div>
+          <button
+            type="button"
+            onClick={exportExcel}
+            disabled={exporting || loading || total === 0}
+            className={`col-span-2 lg:ml-auto inline-flex items-center justify-center gap-1.5 rounded-lg px-3 h-9 text-[11px] font-semibold border cursor-pointer ${
+              exporting || loading || total === 0 ? 'opacity-50 cursor-not-allowed' : ''
+            }`}
+            style={{ borderColor: 'var(--border)', color: 'var(--text)' }}
+            title="Download every entry matching these filters as an Excel file"
+          >
+            <Download size={13} />
+            {exporting ? 'Exporting…' : 'Export Excel'}
+          </button>
         </div>
+
+        {hasFilters && (
+          <div
+            className={`mb-4 flex flex-wrap items-center gap-2 sm:gap-3 ${hasDrillDown ? 'rounded-xl px-3 py-2.5' : ''}`}
+            style={
+              hasDrillDown
+                ? {
+                    border: '1px solid var(--border)',
+                    backgroundColor: 'color-mix(in oklab, var(--control-bg) 55%, transparent)',
+                  }
+                : undefined
+            }
+          >
+            {hasDrillDown && (
+              <button
+                type="button"
+                onClick={clearDrillDowns}
+                className="inline-flex items-center gap-1.5 rounded-lg px-3.5 h-9 text-xs font-semibold shadow-sm cursor-pointer"
+                style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
+              >
+                <ArrowLeft size={14} />
+                Back to list
+              </button>
+            )}
+            {[
+              userFilter && { key: 'user', label: 'Activity by', value: userFilter.label, clear: () => setUserFilter(null) },
+              recordFilter && { key: 'record', label: 'Record', value: recordFilter.label, clear: () => setRecordFilter(null) },
+              sessionFilter && { key: 'session', label: 'Session', value: sessionFilter.label, clear: () => setSessionFilter(null) },
+            ]
+              .filter((chip): chip is { key: string; label: string; value: string; clear: () => void } => Boolean(chip))
+              .map((chip) => (
+                <span
+                  key={chip.key}
+                  className="inline-flex items-center gap-1.5 rounded-full pl-3 pr-1.5 h-8 text-xs"
+                  style={{ border: '1px solid var(--border)', backgroundColor: 'var(--surface)', color: 'var(--text)' }}
+                >
+                  <span className="text-secondary">{chip.label}:</span>
+                  <span className="font-bold">{chip.value}</span>
+                  <button
+                    type="button"
+                    onClick={chip.clear}
+                    className="ml-0.5 rounded-full p-1 cursor-pointer hover:bg-[var(--control-bg)]"
+                    aria-label={`Remove filter ${chip.label} ${chip.value}`}
+                  >
+                    <X size={13} />
+                  </button>
+                </span>
+              ))}
+            {hasDrillDown && !loading && (
+              <span className="text-xs text-secondary">
+                {total.toLocaleString()} {total === 1 ? 'entry' : 'entries'}
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={clearAllFilters}
+              className="sm:ml-auto inline-flex items-center gap-1.5 rounded-lg px-3 h-8 text-xs font-semibold border cursor-pointer"
+              style={{ borderColor: 'var(--border)', color: 'var(--text)' }}
+            >
+              <X size={13} />
+              Clear all filters
+            </button>
+          </div>
+        )}
 
         {loading ? (
           <div className="py-2">
@@ -688,46 +1498,65 @@ export function AuditLog() {
           <>
           {/* Phones: one card per event instead of a 6-column table */}
           <div className="sm:hidden space-y-2">
-            {rows.map((row) => (
-              <div
-                key={row.id}
-                className="rounded-xl p-3"
-                style={{
-                  border: '1px solid var(--border-subtle)',
-                  backgroundColor: 'color-mix(in oklab, var(--control-bg) 35%, transparent)',
-                }}
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <span
-                    className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold"
-                    style={actionBadgeStyle(row.action)}
-                  >
-                    {ACTION_LABELS[row.action] || row.action}
-                  </span>
-                  <span className="shrink-0 text-[10px] text-secondary text-right">{formatDate(row.created_at)}</span>
-                </div>
-                <div className="mt-2 text-[13px] font-semibold" style={{ color: 'var(--text)' }}>
-                  {row.actor_username || '—'}
-                </div>
-                <div className="mt-0.5 text-[11px] text-secondary break-all">
-                  {row.entity_type ? entityLabel(row) : 'No entity'}
-                  {row.ip_address ? ` · ${row.ip_address}` : ''}
-                </div>
+            {rows.map((row) => {
+              const expanded = expandedId === row.id;
+              return (
                 <div
-                  className="mt-2 rounded-lg px-2 py-1.5 text-[11px] text-secondary"
-                  style={{ backgroundColor: 'var(--control-bg)' }}
+                  key={row.id}
+                  className="rounded-xl p-3 cursor-pointer"
+                  style={{
+                    border: '1px solid var(--border-subtle)',
+                    backgroundColor: 'color-mix(in oklab, var(--control-bg) 35%, transparent)',
+                  }}
+                  role="button"
+                  tabIndex={0}
+                  aria-expanded={expanded}
+                  onClick={() => toggleExpanded(row.id)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      toggleExpanded(row.id);
+                    }
+                  }}
                 >
-                  {describeActivity(row)}
+                  <div className="flex items-start justify-between gap-2">
+                    <span
+                      className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold"
+                      style={actionBadgeStyle(row.action)}
+                    >
+                      {ACTION_LABELS[row.action] || row.action}
+                    </span>
+                    <span className="shrink-0 text-[10px] text-secondary text-right">{formatDate(row.created_at)}</span>
+                  </div>
+                  <div className="mt-2 text-[13px] font-semibold" style={{ color: 'var(--text)' }}>
+                    {row.actor_username || '—'}
+                  </div>
+                  <div className="mt-0.5 text-[11px] text-secondary break-all">
+                    {row.entity_type ? entityLabel(row) : 'No entity'}
+                    {row.ip_address ? ` · ${formatIp(row.ip_address)}` : ''}
+                  </div>
+                  {row.user_agent && (
+                    <div className="mt-0.5 text-[10px] break-all" style={{ color: 'var(--text-muted)' }} title={row.user_agent}>
+                      {describeDevice(row.user_agent)}
+                    </div>
+                  )}
+                  <div
+                    className="mt-2 rounded-lg px-2 py-1.5 text-[11px] text-secondary"
+                    style={{ backgroundColor: 'var(--control-bg)' }}
+                  >
+                    <ActivityDetails row={row} />
+                  </div>
+                  {expanded && <div className="mt-2">{panelFor(row)}</div>}
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
 
           <div className="hidden sm:block overflow-x-auto">
             <table className="min-w-full text-left text-xs">
               <thead>
                 <tr>
-                  {['When', 'Actor', 'Action', 'Entity', 'IP Address', 'Details'].map((col) => (
+                  {['When', 'Actor', 'Action', 'Entity', 'IP / Device', 'Details'].map((col) => (
                     <th
                       key={col}
                       className="px-3 py-2 font-semibold text-[10px] uppercase tracking-widest text-secondary border-b"
@@ -741,28 +1570,67 @@ export function AuditLog() {
               <tbody>
                 {rows.map((row) => {
                   const badgeStyle = actionBadgeStyle(row.action);
+                  const expanded = expandedId === row.id;
                   return (
-                    <tr key={row.id} className="border-b last:border-b-0" style={{ borderColor: 'var(--border-subtle)' }}>
-                      <td className="px-3 py-2 text-[11px] text-secondary whitespace-nowrap">{formatDate(row.created_at)}</td>
-                      <td className="px-3 py-2 text-[11px] font-semibold" style={{ color: 'var(--text)' }}>
-                        {row.actor_username || '—'}
-                      </td>
-                      <td className="px-3 py-2 text-[11px]">
-                        <span
-                          className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold"
-                          style={badgeStyle}
-                        >
-                          {ACTION_LABELS[row.action] || row.action}
-                        </span>
-                      </td>
-                      <td className="px-3 py-2 text-[11px] text-secondary">
-                        {row.entity_type ? entityLabel(row) : '—'}
-                      </td>
-                      <td className="px-3 py-2 text-[11px] text-secondary">{row.ip_address || '—'}</td>
-                      <td className="px-3 py-2 text-[11px] text-secondary min-w-[220px] max-w-[360px]">
-                        {describeActivity(row)}
-                      </td>
-                    </tr>
+                    <React.Fragment key={row.id}>
+                      <tr
+                        className={`cursor-pointer hover:bg-[color-mix(in_oklab,var(--control-bg)_40%,transparent)] ${expanded ? '' : 'border-b last:border-b-0'}`}
+                        style={{ borderColor: 'var(--border-subtle)' }}
+                        tabIndex={0}
+                        aria-expanded={expanded}
+                        onClick={() => toggleExpanded(row.id)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            toggleExpanded(row.id);
+                          }
+                        }}
+                      >
+                        <td className="px-3 py-2 text-[11px] text-secondary whitespace-nowrap">
+                          <span className="inline-flex items-center gap-1">
+                            <ChevronRight
+                              size={12}
+                              className={`shrink-0 transition-transform ${expanded ? 'rotate-90' : ''}`}
+                              aria-hidden
+                            />
+                            {formatDate(row.created_at)}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2 text-[11px] font-semibold" style={{ color: 'var(--text)' }}>
+                          {row.actor_username || '—'}
+                        </td>
+                        <td className="px-3 py-2 text-[11px]">
+                          <span
+                            className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold"
+                            style={badgeStyle}
+                          >
+                            {ACTION_LABELS[row.action] || row.action}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2 text-[11px] text-secondary">
+                          {row.entity_type ? entityLabel(row) : '—'}
+                        </td>
+                        <td className="px-3 py-2 text-[11px] text-secondary">
+                          <div className="whitespace-nowrap">{formatIp(row.ip_address)}</div>
+                          {row.user_agent && (
+                            <div className="text-[10px] whitespace-nowrap" style={{ color: 'var(--text-muted)' }} title={row.user_agent}>
+                              {describeDevice(row.user_agent)}
+                            </div>
+                          )}
+                        </td>
+                        <td className="px-3 py-2 text-[11px] text-secondary min-w-[220px] max-w-[360px]">
+                          <ActivityDetails row={row} />
+                        </td>
+                      </tr>
+                      {expanded && (
+                        <tr className="border-b last:border-b-0" style={{ borderColor: 'var(--border-subtle)' }}>
+                          {/* No side padding: the panel spans the full row width. */}
+                          <td colSpan={6} className="px-0 pb-3">
+                            {panelFor(row)}
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
                   );
                 })}
               </tbody>

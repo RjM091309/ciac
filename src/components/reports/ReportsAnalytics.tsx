@@ -436,6 +436,33 @@ export function ReportsAnalytics({ navigate }: { navigate?: (to: string, opts?: 
     setSortKey(null);
   }
 
+  /** Tells the server an export happened, for the audit log — the file is
+   * built here in the browser, so the server wouldn't know otherwise.
+   * Fire-and-forget: a failed log call never blocks the user's export. */
+  function logExport(format: 'csv' | 'pdf') {
+    // Local calendar date — toISOString() would shift a picked date to the
+    // previous day for users east of UTC.
+    const ymd = (d: Date | null) =>
+      d ? `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` : undefined;
+    fetch('/api/reports/export-log', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        format,
+        rowCount: sortedRows.length,
+        filters: {
+          dateFrom: ymd(dateFrom),
+          dateTo: ymd(dateTo),
+          applicationType: typeFilter || undefined,
+          status: statusFilter || undefined,
+          isRenewal: renewalFilter || undefined,
+          search: search.trim() || undefined,
+        },
+      }),
+    }).catch(() => {});
+  }
+
   function exportCsv() {
     if (sortedRows.length === 0) return;
     setExporting('csv');
@@ -459,6 +486,7 @@ export function ReportsAnalytics({ navigate }: { navigate?: (to: string, opts?: 
       });
       // UTF-8 BOM so Excel doesn't mangle special characters on open.
       downloadBlob(`3core-applications-report-${Date.now()}.csv`, `﻿${lines.join('\n')}`, 'text/csv;charset=utf-8;');
+      logExport('csv');
       toast.success('Report exported for Excel');
     } finally {
       setExporting(null);
@@ -511,6 +539,7 @@ export function ReportsAnalytics({ navigate }: { navigate?: (to: string, opts?: 
       });
 
       doc.save(`3core-applications-report-${Date.now()}.pdf`);
+      logExport('pdf');
       toast.success('Report exported to PDF');
     } catch (e: any) {
       toast.error(e?.message || 'Failed to export PDF');

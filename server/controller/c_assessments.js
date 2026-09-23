@@ -85,7 +85,7 @@ exports.assign = async (req, res) => {
         proponent_name: data?.assessment?.proponent_name,
         evaluator_name: data?.assessment?.evaluator_name || data?.assessment?.evaluator_username,
       },
-      ipAddress: req.ip,
+      req,
     });
     return res.json({ success: true, data });
   } catch (error) {
@@ -107,7 +107,7 @@ exports.setStage = async (req, res) => {
       entityType: "application",
       entityId: id,
       details: { application_no: data?.assessment?.application_no, proponent_name: data?.assessment?.proponent_name, stage },
-      ipAddress: req.ip,
+      req,
     });
     return res.json({ success: true, data });
   } catch (error) {
@@ -129,7 +129,7 @@ exports.reopen = async (req, res) => {
       entityType: "application",
       entityId: id,
       details: { application_no: data?.assessment?.application_no, proponent_name: data?.assessment?.proponent_name },
-      ipAddress: req.ip,
+      req,
     });
     return res.json({ success: true, data });
   } catch (error) {
@@ -160,7 +160,7 @@ exports.recommendation = async (req, res) => {
         recommendation,
         summary: summary || undefined,
       },
-      ipAddress: req.ip,
+      req,
     });
     return res.json({ success: true, data });
   } catch (error) {
@@ -247,7 +247,7 @@ exports.addCustomRequirement = async (req, res) => {
       entityType: "application",
       entityId: id,
       details: { requirement_name: name, is_mandatory: Boolean(is_mandatory) },
-      ipAddress: req.ip,
+      req,
     });
     return res.status(201).json({ success: true, data: row });
   } catch (error) {
@@ -271,7 +271,7 @@ exports.addFinding = async (req, res) => {
       entityType: "application",
       entityId: id,
       details: { description: String(req.body?.description ?? "").trim().slice(0, 200), finding_type: req.body?.finding_type },
-      ipAddress: req.ip,
+      req,
     });
     return res.status(201).json({ success: true, data });
   } catch (error) {
@@ -292,7 +292,7 @@ exports.updateFinding = async (req, res) => {
       entityType: "assessment_finding",
       entityId: id,
       details: { description: String(data?.description ?? "").trim().slice(0, 200) },
-      ipAddress: req.ip,
+      req,
     });
     return res.json({ success: true, data });
   } catch (error) {
@@ -314,7 +314,7 @@ exports.deleteFinding = async (req, res) => {
       entityType: "assessment_finding",
       entityId: id,
       details: { description: String(before?.description ?? "").trim().slice(0, 200) },
-      ipAddress: req.ip,
+      req,
     });
     return res.json({ success: true });
   } catch (error) {
@@ -338,7 +338,7 @@ exports.addCharge = async (req, res) => {
       entityType: "application",
       entityId: id,
       details: { description: String(req.body?.description ?? "").trim().slice(0, 200), amount: req.body?.amount },
-      ipAddress: req.ip,
+      req,
     });
     return res.status(201).json({ success: true, data });
   } catch (error) {
@@ -359,7 +359,7 @@ exports.updateCharge = async (req, res) => {
       entityType: "assessment_charge",
       entityId: id,
       details: { description: String(data?.description ?? "").trim().slice(0, 200), amount: data?.amount },
-      ipAddress: req.ip,
+      req,
     });
     return res.json({ success: true, data });
   } catch (error) {
@@ -381,7 +381,7 @@ exports.deleteCharge = async (req, res) => {
       entityType: "assessment_charge",
       entityId: id,
       details: { description: String(before?.description ?? "").trim().slice(0, 200) },
-      ipAddress: req.ip,
+      req,
     });
     return res.json({ success: true });
   } catch (error) {

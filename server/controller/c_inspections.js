@@ -1,5 +1,6 @@
 const Inspection = require("../models/ComplianceInspection");
 const AuditLog = require("../models/AuditLog");
+const { diffChanges } = require("../lib/auditDiff");
 
 function fail(res, error, label) {
   console.error(`${label} error:`, error);
@@ -81,7 +82,7 @@ exports.create = async (req, res) => {
       entityType: "inspection",
       entityId: data?.inspection?.id,
       details: { title: data?.inspection?.title, proponent_name: data?.inspection?.proponent_name },
-      ipAddress: req.ip,
+      req,
     });
     return res.status(201).json({ success: true, data });
   } catch (error) {
@@ -93,16 +94,24 @@ exports.update = async (req, res) => {
   try {
     const id = idParam(req, res);
     if (id === null) return undefined;
+    const before = await Inspection.getInspectionById(id);
     const data = await Inspection.updateInspection(id, req.body || {}, req.user?.id ?? null);
     if (!data) return res.status(404).json({ success: false, message: "Inspection not found" });
+    // The inspector's readable name comes back as inspector_name; alias it
+    // so the diff shows the name instead of the assigned_inspector_id.
+    const withInspectorName = (i) => i && { ...i, assigned_inspector_name: i.inspector_name };
     await AuditLog.record({
       actorId: req.user?.id,
       actorUsername: req.user?.username,
       action: "INSPECTION_UPDATED",
       entityType: "inspection",
       entityId: id,
-      details: { title: data?.inspection?.title, proponent_name: data?.inspection?.proponent_name, fields: Object.keys(req.body || {}) },
-      ipAddress: req.ip,
+      details: {
+        title: data?.inspection?.title,
+        proponent_name: data?.inspection?.proponent_name,
+        changes: diffChanges(withInspectorName(before), withInspectorName(data?.inspection), Object.keys(req.body || {})),
+      },
+      req,
     });
     return res.json({ success: true, data });
   } catch (error) {
@@ -133,7 +142,7 @@ exports.assign = async (req, res) => {
         proponent_name: data?.inspection?.proponent_name,
         inspector_name: data?.inspection?.inspector_name || data?.inspection?.inspector_username,
       },
-      ipAddress: req.ip,
+      req,
     });
     return res.json({ success: true, data });
   } catch (error) {
@@ -154,7 +163,7 @@ exports.setStatus = async (req, res) => {
       entityType: "inspection",
       entityId: id,
       details: { title: data?.inspection?.title, proponent_name: data?.inspection?.proponent_name, status: data?.inspection?.status },
-      ipAddress: req.ip,
+      req,
     });
     return res.json({ success: true, data });
   } catch (error) {
@@ -184,7 +193,7 @@ exports.setResult = async (req, res) => {
         result: data?.inspection?.result,
         summary: req.body?.summary || undefined,
       },
-      ipAddress: req.ip,
+      req,
     });
     return res.json({ success: true, data });
   } catch (error) {
@@ -209,7 +218,7 @@ exports.addFinding = async (req, res) => {
       entityType: "inspection",
       entityId: id,
       details: { description: String(req.body?.description ?? "").trim().slice(0, 200) },
-      ipAddress: req.ip,
+      req,
     });
     return res.status(201).json({ success: true, data });
   } catch (error) {
@@ -230,7 +239,7 @@ exports.updateFinding = async (req, res) => {
       entityType: "inspection_finding",
       entityId: id,
       details: { description: String(data?.description ?? "").trim().slice(0, 200) },
-      ipAddress: req.ip,
+      req,
     });
     return res.json({ success: true, data });
   } catch (error) {
@@ -252,7 +261,7 @@ exports.deleteFinding = async (req, res) => {
       entityType: "inspection_finding",
       entityId: id,
       details: { description: String(before?.description ?? "").trim().slice(0, 200) },
-      ipAddress: req.ip,
+      req,
     });
     return res.json({ success: true });
   } catch (error) {
@@ -277,7 +286,7 @@ exports.addAction = async (req, res) => {
       entityType: "inspection",
       entityId: id,
       details: { action_required: String(data?.action_required ?? "").trim().slice(0, 200) },
-      ipAddress: req.ip,
+      req,
     });
     return res.status(201).json({ success: true, data });
   } catch (error) {
@@ -298,7 +307,7 @@ exports.updateAction = async (req, res) => {
       entityType: "inspection_action",
       entityId: id,
       details: { action_required: String(data?.action_required ?? "").trim().slice(0, 200), status: data?.status },
-      ipAddress: req.ip,
+      req,
     });
     return res.json({ success: true, data });
   } catch (error) {
@@ -320,7 +329,7 @@ exports.deleteAction = async (req, res) => {
       entityType: "inspection_action",
       entityId: id,
       details: { action_required: String(before?.action_required ?? "").trim().slice(0, 200) },
-      ipAddress: req.ip,
+      req,
     });
     return res.json({ success: true });
   } catch (error) {
@@ -342,7 +351,7 @@ exports.addDocument = async (req, res) => {
       entityType: "inspection",
       entityId: id,
       details: { file_name: data?.original_file_name || data?.file_name },
-      ipAddress: req.ip,
+      req,
     });
     return res.status(201).json({ success: true, data });
   } catch (error) {
@@ -364,7 +373,7 @@ exports.deleteDocument = async (req, res) => {
       entityType: "inspection",
       entityId: before?.inspection_id,
       details: { file_name: before?.original_file_name || before?.file_name },
-      ipAddress: req.ip,
+      req,
     });
     return res.json({ success: true });
   } catch (error) {

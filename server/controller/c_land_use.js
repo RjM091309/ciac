@@ -9,7 +9,7 @@ function audit(req, action, entityId, details) {
     entityType: "land_use",
     entityId,
     details,
-    ipAddress: req.ip,
+    req,
   });
 }
 
