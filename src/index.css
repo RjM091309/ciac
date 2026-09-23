@@ -628,6 +628,17 @@ select.input-field:-webkit-autofill:focus {
   z-index: 50 !important;
 }
 
+/* Now that this toaster's theme matches the page's own light/dark mode
+   instead of deliberately inverting, it no longer pops on contrast alone —
+   this accent stripe + stronger shadow keeps it recognizable as a
+   notification (vs. blending into the surrounding surface) in either
+   theme. !important needed for the same reason as above: sonner's own
+   runtime stylesheet may load after this one. */
+.locator-events-toaster[data-sonner-toaster] [data-sonner-toast] {
+  border-left: 3px solid #2563eb !important;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28), 0 0 0 1px rgba(37, 99, 235, 0.12) !important;
+}
+
 /* Native date/time fields: Chromium paints the calendar glyph as
    ::-webkit-calendar-picker-indicator with its own UA cursor (default).
    The OS/browser calendar popup is not in the page DOM, so it cannot

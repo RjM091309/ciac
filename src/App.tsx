@@ -443,21 +443,35 @@ export default function App() {
           call in the app renders into, and those are direct feedback for
           whatever the user just did (e.g. Save inside an open modal), so
           they must stay visible even with a modal open. */}
-      <Toaster richColors position="top-right" expand theme={isDarkMode ? 'light' : 'dark'} />
+      <Toaster
+        richColors
+        position="top-right"
+        expand
+        theme={isDarkMode ? 'light' : 'dark'}
+        duration={6000}
+        toastOptions={{
+          style: { fontSize: '14px', padding: '14px 16px', lineHeight: 1.45 },
+          classNames: { title: 'font-semibold' },
+        }}
+      />
       {/* Second, separate instance — only locator-triggered event toasts
           (tagged with toasterId: 'locator-events' in AppHeader.tsx) render
           here, never the app's regular success/error toasts. Its lower
           z-index (index.css, scoped to .locator-events-toaster) is what
           lets an open modal's own backdrop cover it — a background
           "a locator did something" ping shouldn't float on top of a modal
-          the officer has open, unlike the Toaster above. */}
+          the officer has open, unlike the Toaster above. theme: matches the
+          page's own light/dark mode (unlike the Toaster above, which
+          deliberately inverts) — this one is a passive background ping, not
+          direct action feedback, so it should blend into the UI rather than
+          pop. */}
       <Toaster
         id="locator-events"
         className="locator-events-toaster"
         richColors
         position="bottom-right"
         expand
-        theme={isDarkMode ? 'light' : 'dark'}
+        theme={isDarkMode ? 'dark' : 'light'}
       />
       <AppLayout
         view={
@@ -600,7 +614,7 @@ export default function App() {
               ) : view === 'reports:analytics' ? (
                 <ReportsAnalytics navigate={navigate} />
               ) : view === 'settings:proponents' ? (
-                <ProponentsManagement />
+                <ProponentsManagement locationSearch={locationSearch} navigate={navigate} />
               ) : view === 'settings:requirement-categories' ? (
                 <RequirementCategoriesManagement />
               ) : view === 'settings:inspection-types' ? (

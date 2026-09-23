@@ -44,6 +44,7 @@ type SearchResult = {
   application_type: string;
   is_renewal: boolean;
   status: string;
+  proponent_id: number | null;
   proponent_name: string | null;
   target_path: string;
 };
@@ -473,7 +474,11 @@ export function AppHeader({
   }, [mobileSearchOpen]);
 
   function goToSearchResult(result: SearchResult) {
-    navigate(`${result.target_path}?applicationId=${result.id}`);
+    const query =
+      result.target_path === '/applications/proponents' && result.proponent_id
+        ? `proponentId=${result.proponent_id}`
+        : `applicationId=${result.id}`;
+    navigate(`${result.target_path}?${query}`);
     setMobileSearchOpen(false);
     setSearchOpen(false);
     setSearchQuery('');

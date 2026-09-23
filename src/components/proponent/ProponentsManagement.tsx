@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Plus, Save, Search } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { toast } from 'sonner';
@@ -300,6 +300,18 @@ function dateToDateInputValue(value: Date | null): string {
 
 const CURRENCY_OPTIONS = ['PHP', 'USD'];
 
+const HIGHLIGHT_DURATION_MS = 5000;
+
+function stripProponentQueryParam(search: string) {
+  const raw = String(search || '').trim();
+  if (!raw) return '';
+  const normalized = raw.startsWith('?') ? raw.slice(1) : raw;
+  const params = new URLSearchParams(normalized);
+  params.delete('proponentId');
+  const next = params.toString();
+  return next ? `?${next}` : '';
+}
+
 // "Profile" fields mirroring the legacy BRIDGE system's Locator's
 // Information form — see openEdit() for how these are fetched on demand.
 const BLANK_PROFILE_FORM = {
@@ -344,7 +356,13 @@ const BLANK_PROFILE_FORM = {
   signatories: [blankSignatoryRow()],
 };
 
-export function ProponentsManagement() {
+export function ProponentsManagement({
+  locationSearch = '',
+  navigate,
+}: {
+  locationSearch?: string;
+  navigate?: (to: string, opts?: { replace?: boolean }) => void;
+} = {}) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<ProponentRow | null>(null);
@@ -359,6 +377,11 @@ export function ProponentsManagement() {
   const [searchQuery, setSearchQuery] = useState('');
   const [pageSize, setPageSize] = useState(50);
   const [page, setPage] = useState(1);
+  const [highlightedProponentId, setHighlightedProponentId] = useState<number | null>(null);
+  const [highlightedProponentTick, setHighlightedProponentTick] = useState(0);
+  const consumedProponentQueryRef = useRef<string>('');
+  const rowRefs = useRef<Record<number, HTMLTableRowElement | null>>({});
+  const cardRefs = useRef<Record<number, HTMLButtonElement | null>>({});
 
   const { data: locatorsData, isLoading, isRevalidating, refresh } = useSessionStorageCachedResource<LocatorsData>({
     cacheKey: 'ciac.locators.v8',
@@ -639,6 +662,62 @@ export function ProponentsManagement() {
   useEffect(() => {
     if (page > totalPages) setPage(totalPages);
   }, [page, totalPages]);
+
+  const highlightProponentRow = useCallback((proponentId: number) => {
+    setHighlightedProponentId(proponentId);
+    setHighlightedProponentTick((current) => current + 1);
+  }, []);
+
+  const [shouldCleanProponentQuery, setShouldCleanProponentQuery] = useState(false);
+
+  // Arriving from global search (?proponentId=…): jump to the right page,
+  // clear any search filter that would hide the row, and flash-highlight it —
+  // same pattern as ApplicationsWorkflow's notification deep-link.
+  useEffect(() => {
+    const search = String(locationSearch || '').trim();
+    if (!search || consumedProponentQueryRef.current === search) return;
+    const params = new URLSearchParams(search.startsWith('?') ? search : `?${search}`);
+    const rawId = Number(params.get('proponentId') || '');
+    if (!Number.isFinite(rawId) || rawId <= 0) return;
+    if (!rows.some((row) => row.id === rawId)) return;
+
+    consumedProponentQueryRef.current = search;
+    if (searchQuery.trim()) setSearchQuery('');
+
+    const targetIndex = rows.findIndex((row) => row.id === rawId);
+    if (targetIndex !== -1) setPage(Math.floor(targetIndex / Math.max(1, pageSize)) + 1);
+
+    setShouldCleanProponentQuery(true);
+    highlightProponentRow(rawId);
+  }, [rows, pageSize, searchQuery, locationSearch, highlightProponentRow]);
+
+  useEffect(() => {
+    if (!highlightedProponentId) return;
+    const target = [rowRefs.current[highlightedProponentId], cardRefs.current[highlightedProponentId]].find(
+      (node) => node && node.offsetParent !== null,
+    );
+    if (!target) return;
+    target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, [highlightedProponentId, pagedRows]);
+
+  useEffect(() => {
+    if (!highlightedProponentId) return;
+    const timerId = window.setTimeout(() => {
+      setHighlightedProponentId((current) => (current === highlightedProponentId ? null : current));
+    }, HIGHLIGHT_DURATION_MS);
+    return () => window.clearTimeout(timerId);
+  }, [highlightedProponentId, highlightedProponentTick]);
+
+  useEffect(() => {
+    if (!shouldCleanProponentQuery || highlightedProponentId !== null || !navigate) return;
+    const normalizedSearch = String(locationSearch || '').trim();
+    const cleanedSearch = stripProponentQueryParam(normalizedSearch);
+    setShouldCleanProponentQuery(false);
+    consumedProponentQueryRef.current = '';
+    if (cleanedSearch === normalizedSearch) return;
+    const nextPathname = typeof window !== 'undefined' ? window.location.pathname || '/applications/proponents' : '/applications/proponents';
+    navigate(`${nextPathname}${cleanedSearch}`, { replace: true });
+  }, [highlightedProponentId, locationSearch, navigate, shouldCleanProponentQuery]);
 
   function openCreate() {
     setEditing(null);
@@ -1017,11 +1096,16 @@ export function ProponentsManagement() {
             {pagedRows.map((p) => (
               <button
                 key={p.id}
+                ref={(node) => { cardRefs.current[p.id] = node; }}
                 type="button"
                 className="w-full text-left rounded-xl p-3 cursor-pointer active:bg-[var(--selected-bg)] transition-colors"
                 style={{
-                  border: '1px solid var(--border-subtle)',
-                  backgroundColor: 'color-mix(in oklab, var(--control-bg) 35%, transparent)',
+                  border: p.id === highlightedProponentId ? '1px solid #2563eb' : '1px solid var(--border-subtle)',
+                  backgroundColor:
+                    p.id === highlightedProponentId
+                      ? 'rgba(59,130,246,0.12)'
+                      : 'color-mix(in oklab, var(--control-bg) 35%, transparent)',
+                  boxShadow: p.id === highlightedProponentId ? 'inset 0 0 0 1px rgba(59,130,246,0.22)' : undefined,
                 }}
                 onClick={() => openEdit(p)}
               >
@@ -1077,7 +1161,17 @@ export function ProponentsManagement() {
                 {pagedRows.map((p) => (
                   <tr
                     key={p.id}
-                    style={{ borderTop: '1px solid var(--border-subtle)' }}
+                    ref={(node) => { rowRefs.current[p.id] = node; }}
+                    style={
+                      p.id === highlightedProponentId
+                        ? {
+                            borderTop: '1px solid var(--border-subtle)',
+                            background:
+                              'linear-gradient(90deg, rgba(59,130,246,0.14) 0%, rgba(59,130,246,0.07) 34%, rgba(59,130,246,0.02) 100%)',
+                            boxShadow: 'inset 3px 0 0 #2563eb, inset 0 0 0 1px rgba(59,130,246,0.22)',
+                          }
+                        : { borderTop: '1px solid var(--border-subtle)' }
+                    }
                     className="cursor-pointer hover:bg-[var(--control-bg)]/40"
                     onClick={() => openEdit(p)}
                   >

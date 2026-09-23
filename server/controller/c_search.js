@@ -40,6 +40,7 @@ function targetPathFor(row, allowedBuckets) {
   if (row.in_approval && allowedBuckets.has("in_approval")) return "/approval";
   if (row.in_assessment && allowedBuckets.has("in_assessment")) return "/assessment";
   if (row.in_renewals && allowedBuckets.has("in_renewals")) return "/applications/renewals";
+  if (row.in_completed && allowedBuckets.has("in_completed")) return "/applications/proponents";
   return "/applications/new";
 }
 
@@ -66,6 +67,7 @@ exports.search = async (req, res) => {
       application_type: row.application_type,
       is_renewal: Boolean(row.is_renewal),
       status: row.status,
+      proponent_id: row.proponent_id,
       proponent_name: row.proponent_name,
       target_path: targetPathFor(row, allowedBuckets),
     }));

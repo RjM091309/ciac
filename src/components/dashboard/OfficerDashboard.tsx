@@ -1,9 +1,10 @@
-import React from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, ClipboardList, FileCheck, FileText, Inbox, RotateCcw, XCircle } from 'lucide-react';
 import { EmptyState } from '../ui/EmptyState';
 import { getStatusBadgeStyles } from './statusBadge';
 import { useControlPanelAccess } from '../../context/ControlPanelAccessContext';
 import { cn } from '../../lib/utils';
+import { DataTableControls } from '../ui/DataTableControls';
 
 type DashboardApplicationRow = {
   id: number;
@@ -96,6 +97,29 @@ export function OfficerDashboard({
   const attention = data?.attention ?? [];
   const { canShowWidget: canShowWidgetForMe } = useControlPanelAccess();
   const canShowWidget = (key: string) => (widgetOverrides ? widgetOverrides[key] ?? true : canShowWidgetForMe(key));
+
+  const [tablePage, setTablePage] = useState(1);
+  const [tablePageSize, setTablePageSize] = useState(10);
+  const tableTotalPages = useMemo(
+    () => Math.max(1, Math.ceil(applications.length / Math.max(1, tablePageSize))),
+    [applications.length, tablePageSize],
+  );
+  const tableSafePage = Math.min(Math.max(1, tablePage), tableTotalPages);
+  const pagedApplications = useMemo(() => {
+    const start = (tableSafePage - 1) * tablePageSize;
+    return applications.slice(start, start + tablePageSize);
+  }, [applications, tableSafePage, tablePageSize]);
+  const tableShowingFrom = applications.length === 0 ? 0 : (tableSafePage - 1) * tablePageSize + 1;
+  const tableShowingTo = Math.min(applications.length, tableSafePage * tablePageSize);
+  const tableVisiblePageNumbers = useMemo(() => {
+    const start = Math.max(1, tableSafePage - 1);
+    const end = Math.min(tableTotalPages, start + 2);
+    const adjustedStart = Math.max(1, end - 2);
+    return Array.from({ length: end - adjustedStart + 1 }, (_, i) => adjustedStart + i);
+  }, [tableSafePage, tableTotalPages]);
+  useEffect(() => {
+    setTablePage(1);
+  }, [applications.length, tablePageSize]);
 
   return (
     <div className="space-y-4 sm:space-y-5">
@@ -214,7 +238,7 @@ export function OfficerDashboard({
           <>
             {/* Mobile: card list — a <table> forces horizontal scrolling on narrow screens. */}
             <div className="sm:hidden space-y-2.5">
-              {applications.map((app) => {
+              {pagedApplications.map((app) => {
                 const badge = getStatusBadgeStyles(app.status);
                 const total = Number(app.requirements_total || 0);
                 const verified = Number(app.requirements_verified || 0);
@@ -288,7 +312,7 @@ export function OfficerDashboard({
                 </tr>
               </thead>
               <tbody>
-                {applications.map((app) => {
+                {pagedApplications.map((app) => {
                   const badge = getStatusBadgeStyles(app.status);
                   const total = Number(app.requirements_total || 0);
                   const verified = Number(app.requirements_verified || 0);
@@ -343,6 +367,19 @@ export function OfficerDashboard({
               </tbody>
             </table>
             </div>
+
+            <DataTableControls
+              page={tableSafePage}
+              totalPages={tableTotalPages}
+              totalItems={applications.length}
+              showingFrom={tableShowingFrom}
+              showingTo={tableShowingTo}
+              visiblePageNumbers={tableVisiblePageNumbers}
+              pageSize={tablePageSize}
+              pageSizeOptions={[10, 20, 50, 100]}
+              onPageSizeChange={(value) => setTablePageSize(value)}
+              onPageChange={(p) => setTablePage(p)}
+            />
           </>
         )}
       </div>

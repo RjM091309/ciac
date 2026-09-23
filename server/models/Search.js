@@ -3,12 +3,16 @@ const { selectData } = require("../config/database");
 /** Which application-list "bucket" a role's sidebar menu maps to — mirrors
  * how each queue (New Applications, Renewals, Evaluation Queue, Approval
  * Queue) actually filters its own list, so global search only ever surfaces
- * an application through the same door that module's own screen would. */
+ * an application through the same door that module's own screen would.
+ * A non-renewal application that has reached APPROVED drops off the New
+ * Applications list entirely (it's done), so it gets its own bucket
+ * pointing at the Locators/Proponent directory instead. */
 const BUCKET_MENU_KEYS = {
   in_new: "applications:new",
   in_renewals: "applications:renewals",
   in_assessment: "assessment:queue",
   in_approval: "approval:queue",
+  in_completed: "settings:proponents",
 };
 
 /** Finds applications by application number or locator business name,
@@ -28,9 +32,11 @@ async function searchApplications(term) {
       a.application_type,
       a.is_renewal,
       a.status,
+      p.id AS proponent_id,
       p.business_name AS proponent_name,
-      CASE WHEN a.is_renewal = 0 THEN 1 ELSE 0 END AS in_new,
+      CASE WHEN a.is_renewal = 0 AND a.status <> 'APPROVED' THEN 1 ELSE 0 END AS in_new,
       CASE WHEN a.is_renewal = 1 THEN 1 ELSE 0 END AS in_renewals,
+      CASE WHEN a.is_renewal = 0 AND a.status = 'APPROVED' THEN 1 ELSE 0 END AS in_completed,
       CASE
         WHEN asm.id IS NOT NULL AND asm.stage <> 'COMPLETED' THEN 1
         WHEN asm.id IS NULL AND a.status IN ('SUBMITTED', 'RESUBMITTED', 'UNDER_REVIEW', 'RETURNED') THEN 1
