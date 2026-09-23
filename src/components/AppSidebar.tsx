@@ -4,7 +4,6 @@ import {
   ChevronRight,
   ClipboardCheck,
   FileCheck,
-  FilePlus2,
   KeyRound,
   LayoutDashboard,
   LogOut,
@@ -318,7 +317,6 @@ export function AppSidebar({
   // empty "Management"/"Assessment"/etc. shell with no way to know it's empty.
   const showDashboard = canView('dashboard');
   const showApplicationsMgmt =
-    canView('applications:new') ||
     canView('applications:renewals') ||
     canView('settings:proponents') ||
     canView('settings:locator-users') ||
@@ -351,9 +349,10 @@ export function AppSidebar({
   // Ordered to match the real workflow sequence: create the account, file
   // the application, evaluate it, approve it, then it shows up as a
   // registered locator — renewals are a separate, later-in-time track.
+  // New Application has no page of its own anymore — a locator account and
+  // its one application are created together on Locator Accounts.
   const applicationsItems: SidebarLeaf[] = [
     canView('settings:locator-users') && { key: 'settings:locator-users', label: 'Locator Accounts', active: view === 'settings:locator-users', onClick: () => onViewChange('settings:locator-users'), icon: KeyRound },
-    canView('applications:new') && { key: 'applications:new', label: 'New Application', active: view === 'applications:new', onClick: () => onViewChange('applications:new'), icon: FilePlus2 },
     canView('assessment:queue') && { key: 'assessment:queue', label: 'Evaluation Queue', active: view === 'assessment:queue', onClick: () => onViewChange('assessment:queue'), icon: ClipboardCheck },
     canView('approval:queue') && { key: 'approval:queue', label: 'Approval Queue', active: view === 'approval:queue', onClick: () => onViewChange('approval:queue'), icon: Stamp },
     canView('settings:proponents') && { key: 'settings:proponents', label: 'Registered Locator', active: view === 'settings:proponents', onClick: () => onViewChange('settings:proponents'), icon: Users },
@@ -391,7 +390,6 @@ export function AppSidebar({
     // Same full labels as the desktop sidebar, so the two menus read the same.
     const SHEET_TILES: Record<string, { label: string; icon: any }> = {
       dashboard: { label: 'Dashboard', icon: LayoutDashboard },
-      'applications:new': { label: 'Applications', icon: FilePlus2 },
       'applications:renewals': { label: 'Renewal Tracking', icon: RefreshCw },
       'settings:proponents': { label: 'Registered Locator', icon: Users },
       'assessment:queue': { label: 'Evaluation Queue', icon: ClipboardCheck },

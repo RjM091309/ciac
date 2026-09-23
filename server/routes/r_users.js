@@ -17,8 +17,16 @@ const USER_MENU_KEYS = ["settings:users", "settings:locator-users"];
 router.patch("/me/password", isAuthenticated, usersController.changeMyPassword);
 
 router.get("/", requireAnyMenuAccess(USER_MENU_KEYS, "view"), usersController.list);
+// Live "already taken" check while a create/edit form is filled in —
+// declared before "/:id" so "check-availability" isn't swallowed as an id.
+router.get("/check-availability", requireAnyMenuAccess(USER_MENU_KEYS, "view"), usersController.checkAvailability);
 router.get("/:id", requireUserMenuAccess("view"), usersController.getById);
 router.post("/", requireUserMenuAccess("add"), usersController.create);
+// Locator Accounts' merged create flow (account + business profile +
+// application in one step) — gated the same as a plain locator create
+// (requireUserMenuAccess detects a locator target via body.role_id, which
+// this form's payload always includes).
+router.post("/locator-with-application", requireUserMenuAccess("add"), usersController.createLocatorWithApplication);
 router.put("/:id", requireUserMenuAccess("edit"), usersController.update);
 router.patch("/:id/deactivate", requireUserMenuAccess("delete"), usersController.deactivate);
 router.patch("/:id/reactivate", requireUserMenuAccess("edit"), usersController.reactivate);

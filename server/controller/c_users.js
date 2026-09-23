@@ -5,9 +5,27 @@ const Proponent = require("../models/Proponent");
 const Role = require("../models/Role");
 const Notification = require("../models/Notification");
 const ActivityLog = require("../models/ActivityLog");
+const Workflow = require("../models/ApplicationWorkflow");
+const ApplicationType = require("../models/ApplicationType");
+const { updateData } = require("../config/database");
 const { validatePasswordStrength, generateTempPassword } = require("../lib/password");
 const { sendMail } = require("../lib/mailer");
 const { diffChanges } = require("../lib/auditDiff");
+
+/** Translates a raw MSSQL unique-constraint violation (error 2627/2601) on
+ * dbo.users into a friendly message plus which field it belongs to, so the
+ * frontend can show it inline under that field instead of a toast leaking
+ * the raw SQL error ("Violation of UNIQUE KEY constraint 'UX_users_username'
+ * ..."). Returns null for anything else — the caller falls through to its
+ * normal 500 handling. */
+function friendlyDuplicateUserError(error) {
+  if (error?.number !== 2627 && error?.number !== 2601) return null;
+  const msg = String(error?.message || "");
+  if (msg.includes("UX_users_username")) return { field: "username", message: "That username is already taken." };
+  if (msg.includes("UX_users_email")) return { field: "email", message: "That email is already in use." };
+  if (msg.includes("UX_users_phone")) return { field: "phone", message: "That phone number is already in use." };
+  return { field: null, message: "That value is already in use." };
+}
 
 /** The fields an admin can edit on a user, in the shape the audit diff
  * compares — role by name rather than id, plus the linked locator profile
@@ -72,6 +90,26 @@ exports.list = async (req, res) => {
     return res.json({ success: true, data: rows });
   } catch (error) {
     console.error("List users error:", error);
+    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+  }
+};
+
+// Live check while a create/edit form is still being filled in — lets the
+// UI say "already taken" immediately instead of only finding out from a raw
+// DB constraint error after Save. field/value come from the query string;
+// excludeUserId lets an edit form check without colliding with its own row.
+exports.checkAvailability = async (req, res) => {
+  try {
+    const field = String(req.query?.field || "");
+    const value = String(req.query?.value || "");
+    if (!["username", "email", "phone"].includes(field)) {
+      return res.status(400).json({ success: false, message: "Unsupported field" });
+    }
+    const excludeUserId = req.query?.excludeUserId ? Number(req.query.excludeUserId) : undefined;
+    const available = await User.isFieldAvailable(field, value, excludeUserId);
+    return res.json({ success: true, available });
+  } catch (error) {
+    console.error("Check availability error:", error);
     return res.status(500).json({ success: false, message: error.message || "Internal server error" });
   }
 };
@@ -220,7 +258,175 @@ exports.create = async (req, res) => {
     });
   } catch (error) {
     console.error("Create user error:", error);
+    const duplicate = friendlyDuplicateUserError(error);
+    if (duplicate) {
+      return res.status(409).json({ success: false, message: duplicate.message, field: duplicate.field });
+    }
     return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+  }
+};
+
+/** Locator Accounts + New Application, merged into one step — the business
+ * confirmed a locator account is always exactly one application (1:1), so
+ * creating an account with nothing to act on yet is no longer a real state
+ * worth supporting. This always creates the user, their business profile,
+ * and their application together; a failure partway through rolls back
+ * whatever was already created (raw DELETEs, not the model layer's own
+ * soft-deactivate helpers — this undoes a creation from the same request,
+ * not a real delete of existing data) so a half-created account can never be
+ * left behind, since one existing without the other would break the 1:1
+ * invariant this endpoint exists to guarantee. */
+exports.createLocatorWithApplication = async (req, res) => {
+  let createdUserId = null;
+  let createdProponentId = null;
+  try {
+    const {
+      username,
+      email,
+      phone,
+      full_name,
+      business_name,
+      address,
+      lease_address,
+      contact_no,
+      application_type,
+      is_renewal,
+      save_as_draft,
+    } = req.body || {};
+
+    if (!username) return res.status(400).json({ success: false, message: "username is required" });
+    if (!String(email || "").trim()) return res.status(400).json({ success: false, message: "email is required" });
+    if (!String(business_name || "").trim()) {
+      return res.status(400).json({ success: false, message: "business_name is required" });
+    }
+    if (!String(contact_no || "").trim()) {
+      return res.status(400).json({ success: false, message: "contact_no is required" });
+    }
+    if (!String(address || "").trim()) {
+      return res.status(400).json({ success: false, message: "address is required" });
+    }
+
+    const normalizedType = String(application_type || "").trim().toUpperCase();
+    if (!normalizedType) {
+      return res.status(400).json({ success: false, message: "application_type is required" });
+    }
+    if (!(await Workflow.isValidApplicationType(normalizedType))) {
+      const activeCodes = await ApplicationType.listActiveCodes();
+      return res.status(400).json({
+        success: false,
+        message: `Invalid application type. Expected one of: ${activeCodes.join(", ")}.`,
+      });
+    }
+
+    const locatorRoleId = await Role.getActiveRoleIdByName("proponent");
+    if (!locatorRoleId) {
+      return res.status(500).json({ success: false, message: "The Locator role isn't configured — set it up in Control Panel first." });
+    }
+
+    // Same deferred-activation semantics as the two separate flows this
+    // replaces: a draft isn't a real commitment yet, so no login access/email
+    // until it's actually submitted (existing submit-a-draft path already
+    // calls activateLocatorIfPending for that case).
+    const isDraft = Boolean(save_as_draft);
+    const tempPassword = generateTempPassword();
+
+    const user = await User.createUser({
+      username,
+      email,
+      phone,
+      full_name,
+      password: tempPassword,
+      is_active: isDraft ? 0 : 1,
+      role_id: locatorRoleId,
+      status: isDraft ? "PENDING" : "ACTIVE",
+    });
+    createdUserId = user?.id;
+
+    let proponent;
+    try {
+      proponent = await Proponent.createProponent({
+        user_id: user.id,
+        business_name: String(business_name).trim(),
+        address: String(address).trim(),
+        lease_address: lease_address ? String(lease_address).trim() : null,
+        contact_no: String(contact_no).trim(),
+        created_by: req.user?.id ?? null,
+      });
+      createdProponentId = proponent?.id;
+    } catch (error) {
+      console.error("Create locator with application: proponent step failed:", error);
+      throw Object.assign(new Error("Failed to create the locator's business profile."), { status: 500 });
+    }
+
+    let application;
+    try {
+      application = await Workflow.createApplication({
+        proponent_id: proponent.id,
+        application_type: normalizedType,
+        is_renewal: Number(is_renewal) ? 1 : 0,
+        status: isDraft ? "DRAFT" : "SUBMITTED",
+        created_by: req.user?.id ?? null,
+      });
+    } catch (error) {
+      console.error("Create locator with application: application step failed:", error);
+      throw Object.assign(new Error("Failed to create the application."), { status: 500 });
+    }
+
+    let mailResult = { sent: false };
+    if (!isDraft) {
+      await User.setMustChangePassword(user.id, true);
+      mailResult = await sendTempPasswordEmail({
+        to: user.email,
+        name: user.full_name || user.username,
+        username: user.username,
+        tempPassword,
+        isNewAccount: true,
+      });
+    }
+
+    await AuditLog.record({
+      actorId: req.user?.id,
+      actorUsername: req.user?.username,
+      action: "LOCATOR_AND_APPLICATION_CREATED",
+      entityType: "user",
+      entityId: user.id,
+      details: {
+        username: user.username,
+        business_name: proponent?.business_name,
+        application_no: application?.application_no,
+        application_type: normalizedType,
+        save_as_draft: isDraft,
+        emailSent: mailResult.sent,
+      },
+      req,
+    });
+
+    return res.status(201).json({
+      success: true,
+      data: { user, proponent, application },
+      emailSent: isDraft ? undefined : mailResult.sent,
+      message: isDraft
+        ? "Saved as draft — the locator's login and temporary password will be emailed automatically once the application is submitted."
+        : mailResult.sent
+          ? `Application filed. A temporary password was emailed to ${user.email}.`
+          : `Application filed, but the credentials email could not be sent (SMTP isn't configured on this server) — check the server console for the temporary password.`,
+    });
+  } catch (error) {
+    console.error("Create locator with application error:", error);
+    // Undo whatever this request already created, in reverse order, so a
+    // partial failure never leaves an account without its application.
+    if (createdProponentId) {
+      await updateData(`DELETE FROM dbo.proponents WHERE id = @param0`, [createdProponentId]).catch(() => {});
+    }
+    if (createdUserId) {
+      await updateData(`DELETE FROM dbo.user_roles WHERE user_id = @param0`, [createdUserId]).catch(() => {});
+      await updateData(`DELETE FROM dbo.users WHERE id = @param0`, [createdUserId]).catch(() => {});
+    }
+    const duplicate = friendlyDuplicateUserError(error);
+    if (duplicate) {
+      return res.status(409).json({ success: false, message: duplicate.message, field: duplicate.field });
+    }
+    return res.status(error.status || 500).json({ success: false, message: error.message || "Internal server error" });
   }
 };
 
@@ -311,6 +517,10 @@ exports.update = async (req, res) => {
     return res.json({ success: true, data: row });
   } catch (error) {
     console.error("Update user error:", error);
+    const duplicate = friendlyDuplicateUserError(error);
+    if (duplicate) {
+      return res.status(409).json({ success: false, message: duplicate.message, field: duplicate.field });
+    }
     return res.status(500).json({ success: false, message: error.message || "Internal server error" });
   }
 };

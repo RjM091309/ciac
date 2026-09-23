@@ -18,6 +18,7 @@ import { TableSkeleton } from '../ui/Skeleton';
 import { EmptyState } from '../ui/EmptyState';
 import { useSessionStorageCachedResource } from '../../hooks/useSessionStorageCachedResource';
 import { requestNotificationsRefresh } from '../../lib/notificationRefresh';
+import { loadProgressForApplications as loadProgressForApplicationsShared, type ProgressSummary } from '../../lib/applicationProgress';
 
 const NOTIFICATION_HIGHLIGHT_DURATION_MS = 5000;
 
@@ -91,15 +92,6 @@ function api(path: string) {
 }
 
 
-type ProgressSummary = {
-  total: number;
-  verified: number;
-  pending: number;
-  rejected: number;
-  missing: number;
-  percent: number;
-};
-
 function toUpper(v: string | null | undefined) {
   return String(v || '').trim().toUpperCase();
 }
@@ -122,32 +114,6 @@ function getBadgeStyles(status: string) {
     return { bg: 'rgba(220,38,38,.14)', color: '#dc2626', border: 'rgba(220,38,38,.38)' };
   }
   return { bg: 'rgba(148,163,184,.14)', color: '#94a3b8', border: 'rgba(148,163,184,.28)' };
-}
-
-function computeProgress(reqRows: AppRequirementRow[], docRows: DocumentRow[]): ProgressSummary {
-  const total = reqRows.length;
-  if (!total) return { total: 0, verified: 0, pending: 0, rejected: 0, missing: 0, percent: 0 };
-
-  const hasDocumentByRequirement = new Set<number>(
-    docRows.map((d) => Number(d.requirement_id)).filter((n) => Number.isFinite(n))
-  );
-
-  let verified = 0;
-  let pending = 0;
-  let rejected = 0;
-  let missing = 0;
-
-  for (const r of reqRows) {
-    const status = toUpper(r.status);
-    const hasDoc = hasDocumentByRequirement.has(Number(r.requirement_id));
-    if (status === 'VERIFIED') verified += 1;
-    else if (status === 'REJECTED') rejected += 1;
-    else pending += 1;
-    if (!hasDoc && status !== 'VERIFIED') missing += 1;
-  }
-
-  const percent = Math.round((verified / total) * 100);
-  return { total, verified, pending, rejected, missing, percent };
 }
 
 function stripNotificationQueryParams(search: string) {
@@ -345,22 +311,7 @@ export function ApplicationsWorkflow({
       return;
     }
     try {
-      const chunks = await Promise.all(
-        appIds.map(async (id) => {
-          const [reqRes, docRes] = await Promise.all([
-            fetch(api(`/api/applications/${id}/requirements`), { credentials: 'include' }),
-            fetch(api(`/api/applications/${id}/documents`), { credentials: 'include' }),
-          ]);
-          const [reqJson, docJson] = await Promise.all([reqRes.json(), docRes.json()]);
-          const reqRows: AppRequirementRow[] = Array.isArray(reqJson?.data) ? reqJson.data : [];
-          const docRows: DocumentRow[] = Array.isArray(docJson?.data) ? docJson.data : [];
-          return [id, computeProgress(reqRows, docRows)] as const;
-        })
-      );
-
-      const next: Record<number, ProgressSummary> = {};
-      for (const [id, summary] of chunks) next[id] = summary;
-      setProgressByApp(next);
+      setProgressByApp(await loadProgressForApplicationsShared(appIds, api));
     } catch {
       // keep UI usable even if aggregate progress fetch fails
     }
@@ -711,16 +662,23 @@ export function ApplicationsWorkflow({
 
   return (
     <div className="space-y-4 sm:space-y-5">
-      <div className="flex items-center justify-end gap-2">
-        <button
-          className="rounded-lg px-3 py-2 text-sm font-semibold inline-flex items-center gap-1.5 shadow-sm cursor-pointer"
-          style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
-          onClick={() => setIsCreateOpen(true)}
-        >
-          <Plus size={15} />
-          New Application
-        </button>
-      </div>
+      {/* A brand-new application only ever exists for a brand-new locator
+          (1 account = 1 application), so that creation now happens on
+          Locator Accounts instead of here. Renewals are unaffected — they're
+          a second filing for an EXISTING locator/account, so that create
+          entry point stays. */}
+      {renewalMode ? (
+        <div className="flex items-center justify-end gap-2">
+          <button
+            className="rounded-lg px-3 py-2 text-sm font-semibold inline-flex items-center gap-1.5 shadow-sm cursor-pointer"
+            style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
+            onClick={() => setIsCreateOpen(true)}
+          >
+            <Plus size={15} />
+            New Renewal
+          </button>
+        </div>
+      ) : null}
 
       <div className="glass-card p-4 sm:p-5 !border-transparent overflow-hidden" style={{ backgroundColor: 'var(--surface)' }}>
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-3">
@@ -758,20 +716,22 @@ export function ApplicationsWorkflow({
           </div>
         ) : filteredApps.length === 0 ? (
           <EmptyState
-            title="No applications found"
+            title={renewalMode ? 'No renewals found' : 'No applications found'}
             description={
-              appsSearchQuery 
-                ? 'Try adjusting your search filters.' 
-                : 'There are no records here yet. Click "New Application" to get started.'
+              appsSearchQuery
+                ? 'Try adjusting your search filters.'
+                : renewalMode
+                  ? 'There are no records here yet. Click "New Renewal" to get started.'
+                  : 'New applications are created from Locator Accounts, along with the locator\'s account.'
             }
             action={
-              !appsSearchQuery ? (
+              !appsSearchQuery && renewalMode ? (
                 <button
                   className="rounded-lg px-4 py-2 text-sm font-semibold shadow-sm transition-colors"
                   style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
                   onClick={() => setIsCreateOpen(true)}
                 >
-                  Create Application
+                  Create Renewal
                 </button>
               ) : undefined
             }

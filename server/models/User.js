@@ -371,6 +371,28 @@ async function createUser({ username, email, phone, full_name, password, is_acti
   return await getUserById(newId);
 }
 
+/** Live availability check for a single field (username/email/phone) while
+ * a form is still being filled in — lets the UI say "already taken" before
+ * Save is even clicked, instead of only surfacing it as a raw DB constraint
+ * error after a round-trip. `excludeUserId` omits a row from the check (the
+ * account being edited, so it doesn't collide with its own value). */
+async function isFieldAvailable(field, value, excludeUserId) {
+  const column = { username: "username", email: "email", phone: "phone" }[field];
+  if (!column) throw new Error("Unsupported field");
+  const trimmed = String(value ?? "").trim();
+  if (!trimmed) return true;
+  const excludeId = excludeUserId != null ? Number(excludeUserId) : null;
+  const rows = await selectData(
+    `
+    SELECT TOP (1) id FROM users
+    WHERE ${column} = @param0
+      ${excludeId != null && Number.isFinite(excludeId) ? "AND id <> @param1" : ""}
+    `,
+    excludeId != null && Number.isFinite(excludeId) ? [trimmed, excludeId] : [trimmed]
+  );
+  return !rows?.[0];
+}
+
 /** Duplicate check for self-service registration. Returns a minimal row or null. */
 async function findByUsernameOrEmail(username, email) {
   const uname = String(username ?? "").trim();
@@ -784,6 +806,7 @@ module.exports = {
   suspendUser,
   unsuspendUser,
   findByUsernameOrEmail,
+  isFieldAvailable,
   setUserStatus,
   USER_STATUSES,
   getTotpRecord,

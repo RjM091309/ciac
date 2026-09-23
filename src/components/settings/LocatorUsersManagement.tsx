@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Ban, Clock3, KeyRound, LogOut, Pencil, RotateCcw, Search, ShieldCheck, ShieldOff, Smartphone, UserX, X } from 'lucide-react';
+import { ArrowRight, Ban, KeyRound, LogOut, Pencil, RotateCcw, Search, ShieldCheck, ShieldOff, Smartphone, UserX, X } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { toast } from 'sonner';
 import { SidePanel } from '../ui/SidePanel';
@@ -8,8 +8,11 @@ import { DataTableControls } from '../ui/DataTableControls';
 import { Skeleton, TableSkeleton } from '../ui/Skeleton';
 import { EmptyState } from '../ui/EmptyState';
 import { AddressAutocomplete } from '../ui/AddressAutocomplete';
+import { AppSelect } from '../ui/AppSelect';
+import { RowActionsMenu, type RowActionItem } from '../ui/RowActionsMenu';
 import { useSessionStorageCachedResource } from '../../hooks/useSessionStorageCachedResource';
 import { useControlPanelAccess } from '../../context/ControlPanelAccessContext';
+import { loadProgressForApplications, type ProgressSummary } from '../../lib/applicationProgress';
 
 const MENU_KEY = 'settings:locator-users';
 
@@ -53,6 +56,12 @@ type UsersRolesData = {
   // Plain array, not a Set — useSessionStorageCachedResource round-trips
   // this through JSON via sessionStorage, and JSON.stringify(Set) -> "{}".
   activeBusinessUserIds: number[];
+  applicationTypes: { code: string; name: string }[];
+  // Company/application info for the merged 1-account-1-application flow —
+  // keyed by user_id (via the linked proponent) so each row can show which
+  // business and application it created together.
+  companyByUserId: Record<number, string>;
+  applicationByUserId: Record<number, { id: number; application_no: string; application_type: string; status: string }>;
 };
 
 function api(path: string) {
@@ -66,7 +75,13 @@ function isLocatorRoleName(name: string) {
   return String(name || '').trim().toUpperCase() === 'PROPONENT';
 }
 
-export function LocatorUsersManagement({ locationSearch = '' }: { locationSearch?: string } = {}) {
+export function LocatorUsersManagement({
+  locationSearch = '',
+  navigate,
+}: {
+  locationSearch?: string;
+  navigate?: (to: string, opts?: { replace?: boolean }) => void;
+} = {}) {
   const { fullAccess, crudPermissions } = useControlPanelAccess();
   const perm = crudPermissions[MENU_KEY] || { can_add: false, can_edit: false, can_delete: false };
   const canAdd = fullAccess || perm.can_add;
@@ -77,6 +92,29 @@ export function LocatorUsersManagement({ locationSearch = '' }: { locationSearch
   const [editing, setEditing] = useState<UserRow | null>(null);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [confirmDeactivateId, setConfirmDeactivateId] = useState<number | null>(null);
+  // A DRAFT application has nowhere else to be finished now that New
+  // Application's own create/continue flow is gone — clicking a draft's
+  // Company/Locator cell (or its "Draft ->" button) opens this instead of
+  // navigating to Assessment (which excludes drafts entirely). Shows the
+  // same field set as New Locator Account (for context — the account and
+  // profile are already fixed at this point, read-only here); only
+  // Application Type is actually editable, mirroring
+  // ApplicationsWorkflow.tsx's openContinueDraft/submitApplication.
+  const [continuingDraft, setContinuingDraft] = useState<{
+    id: number;
+    application_no: string;
+    application_type: string;
+    username: string;
+    full_name: string;
+    email: string;
+    business_name: string;
+    address: string;
+    lease_address: string;
+    contact_no: string;
+  } | null>(null);
+  const [continuingDraftType, setContinuingDraftType] = useState('DIRECT_LEASE');
+  const [continuingDraftSaving, setContinuingDraftSaving] = useState(false);
+  const [continuingDraftLoadingProfile, setContinuingDraftLoadingProfile] = useState(false);
   // Pre-applied when landing here from the dashboard's "Registered
   // Businesses" card (?status=ACTIVE) so the list is already scoped instead
   // of showing every status (active/pending/suspended/deactivated) mixed
@@ -99,26 +137,69 @@ export function LocatorUsersManagement({ locationSearch = '' }: { locationSearch
     ttlMs: 5 * 60 * 1000, // 5 minutes — shares the cache key with UsersManagement since it's the same underlying data
     fetcher: async () => {
       setError(null);
-      const [uRes, rRes, pRes] = await Promise.all([
+      const [uRes, rRes, pRes, tRes, aRes] = await Promise.all([
         fetch(api('/api/users'), { credentials: 'include' }),
         fetch(api('/api/roles'), { credentials: 'include' }),
         fetch(api('/api/proponents'), { credentials: 'include' }),
+        fetch(api('/api/application-types'), { credentials: 'include' }),
+        fetch(api('/api/applications'), { credentials: 'include' }),
       ]);
 
       const uJson = await uRes.json();
       const rJson = await rRes.json();
       const pJson = await pRes.json().catch(() => ({}));
+      const tJson = await tRes.json().catch(() => ({}));
+      const aJson = await aRes.json().catch(() => ({}));
 
       if (!uRes.ok) throw new Error(uJson?.message || 'Failed to load users');
       if (!rRes.ok) throw new Error(rJson?.message || 'Failed to load roles');
 
+      const proponentRows: any[] = pRes.ok && Array.isArray(pJson?.data) ? pJson.data : [];
+
       const activeBusinessUserIds = Array.from(
         new Set<number>(
-          (pRes.ok && Array.isArray(pJson?.data) ? pJson.data : [])
-            .filter((p: any) => Number(p?.is_active) && p?.user_id != null)
-            .map((p: any) => Number(p.user_id))
+          proponentRows.filter((p) => Number(p?.is_active) && p?.user_id != null).map((p) => Number(p.user_id))
         )
       );
+
+      const applicationTypes = (tRes.ok && Array.isArray(tJson?.data) ? tJson.data : [])
+        .filter((t: any) => Number(t?.is_active) === 1)
+        .map((t: any) => ({ code: String(t.code), name: String(t.name) }));
+
+      // 1 account = 1 application — created together, so each user_id maps
+      // to at most one proponent and at most one application. Built here
+      // once (rather than searched per row) since this page can list
+      // hundreds of accounts.
+      const proponentIdByUserId = new Map<number, number>();
+      const companyByUserId: Record<number, string> = {};
+      for (const p of proponentRows) {
+        if (p?.user_id == null) continue;
+        proponentIdByUserId.set(Number(p.user_id), Number(p.id));
+        companyByUserId[Number(p.user_id)] = String(p.business_name || '');
+      }
+
+      const applicationRows: any[] = aRes.ok && Array.isArray(aJson?.data) ? aJson.data : [];
+      const applicationByProponentId = new Map<
+        number,
+        { id: number; application_no: string; application_type: string; status: string }
+      >();
+      for (const a of applicationRows) {
+        if (a?.proponent_id == null) continue;
+        applicationByProponentId.set(Number(a.proponent_id), {
+          id: Number(a.id),
+          application_no: String(a.application_no || ''),
+          application_type: String(a.application_type || ''),
+          status: String(a.status || ''),
+        });
+      }
+      const applicationByUserId: Record<
+        number,
+        { id: number; application_no: string; application_type: string; status: string }
+      > = {};
+      for (const [userId, proponentId] of proponentIdByUserId) {
+        const app = applicationByProponentId.get(proponentId);
+        if (app) applicationByUserId[userId] = app;
+      }
 
       return {
         users: (uJson.data || []).map((u: any) => ({
@@ -128,6 +209,9 @@ export function LocatorUsersManagement({ locationSearch = '' }: { locationSearch
         })),
         roles: rJson.data || [],
         activeBusinessUserIds,
+        applicationTypes,
+        companyByUserId,
+        applicationByUserId,
       };
     },
     onError: (e) => {
@@ -138,6 +222,13 @@ export function LocatorUsersManagement({ locationSearch = '' }: { locationSearch
   });
 
   const allRoles = usersRoles?.roles ?? [];
+  const applicationTypeOptions = usersRoles?.applicationTypes ?? [];
+  const companyByUserId = usersRoles?.companyByUserId ?? {};
+  const applicationByUserId = usersRoles?.applicationByUserId ?? {};
+  const applicationTypeNameByCode = useMemo(
+    () => Object.fromEntries(applicationTypeOptions.map((t) => [t.code, t.name])),
+    [applicationTypeOptions]
+  );
   const activeBusinessUserIds = useMemo(
     () => new Set<number>(usersRoles?.activeBusinessUserIds ?? []),
     [usersRoles?.activeBusinessUserIds]
@@ -161,9 +252,59 @@ export function LocatorUsersManagement({ locationSearch = '' }: { locationSearch
     address: '',
     lease_address: '',
     contact_no: '',
+    application_type: 'DIRECT_LEASE',
+    save_as_draft: false,
   });
   const [originalForm, setOriginalForm] = useState<typeof form | null>(null);
   const [loadingProfile, setLoadingProfile] = useState(false);
+  // Inline, field-level validation errors (e.g. "username already taken") —
+  // shown under the offending field itself instead of a toast leaking the
+  // raw SQL constraint message, matching ChangePasswordModal's pattern. Also
+  // populated live (debounced, while typing) via /api/users/check-availability
+  // instead of only surfacing on Save, which the whole point of this is to
+  // avoid — nobody should have to submit the form just to find out.
+  const [fieldErrors, setFieldErrors] = useState<{ username?: string; email?: string }>({});
+  const [checkingField, setCheckingField] = useState<'username' | 'email' | null>(null);
+
+  function useAvailabilityCheck(field: 'username' | 'email', value: string) {
+    useEffect(() => {
+      const trimmed = value.trim();
+      // Unchanged from the account being edited — it already "owns" this
+      // value, so there's nothing to check.
+      if (editing && trimmed === (originalForm?.[field] || '').trim()) return;
+      if (!trimmed) return;
+      if (field === 'email' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) return;
+
+      let cancelled = false;
+      const timer = window.setTimeout(async () => {
+        setCheckingField(field);
+        try {
+          const params = new URLSearchParams({ field, value: trimmed });
+          if (editing) params.set('excludeUserId', String(editing.id));
+          const res = await fetch(api(`/api/users/check-availability?${params.toString()}`), { credentials: 'include' });
+          const json = await res.json().catch(() => ({}));
+          if (cancelled) return;
+          if (res.ok && json?.available === false) {
+            setFieldErrors((p) => ({ ...p, [field]: `That ${field} is already taken.` }));
+          } else {
+            setFieldErrors((p) => ({ ...p, [field]: undefined }));
+          }
+        } catch {
+          // Non-fatal — Save still catches a genuine duplicate server-side.
+        } finally {
+          if (!cancelled) setCheckingField((p) => (p === field ? null : p));
+        }
+      }, 500);
+
+      return () => {
+        cancelled = true;
+        window.clearTimeout(timer);
+      };
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [field, value, editing]);
+  }
+  useAvailabilityCheck('username', form.username);
+  useAvailabilityCheck('email', form.email);
 
   const stats = useMemo(() => {
     const active = userRows.filter((u) => u.is_active === 1).length;
@@ -221,6 +362,30 @@ export function LocatorUsersManagement({ locationSearch = '' }: { locationSearch
     return filteredUsers.slice(start, start + pageSize);
   }, [filteredUsers, page, pageSize, totalPages]);
 
+  // Requirements-verification progress for the linked application of each
+  // VISIBLE row only (not the full filtered set) — same computation
+  // ApplicationsWorkflow.tsx uses, but this page can list hundreds of
+  // accounts, so it's scoped to the current page to avoid firing that many
+  // parallel requirement/document fetches at once.
+  const [progressByApp, setProgressByApp] = useState<Record<number, ProgressSummary>>({});
+  useEffect(() => {
+    const appIds = Array.from(
+      new Set(pagedUsers.map((u) => applicationByUserId[u.id]?.id).filter((id): id is number => Boolean(id)))
+    );
+    let cancelled = false;
+    loadProgressForApplications(appIds, api)
+      .then((next) => {
+        if (!cancelled) setProgressByApp(next);
+      })
+      .catch(() => {
+        // keep the table usable even if the progress fetch fails
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pagedUsers]);
+
   const showingRange = useMemo(() => {
     if (filteredUsers.length === 0) return { from: 0, to: 0 };
     const safePage = Math.min(Math.max(1, page), totalPages);
@@ -245,6 +410,8 @@ export function LocatorUsersManagement({ locationSearch = '' }: { locationSearch
     if (!username) return false;
     if (!email) return false;
     if (!locatorRole) return false;
+    if (fieldErrors.username || fieldErrors.email) return false;
+    if (checkingField) return false;
 
     // Business name is what actually triggers creating/updating the linked
     // proponent profile server-side — address/contact without it would
@@ -259,8 +426,15 @@ export function LocatorUsersManagement({ locationSearch = '' }: { locationSearch
       // A locator account created without a business profile lands the
       // locator on the first-login setup wizard instead of the dashboard —
       // requiring the profile up front here skips that extra step entirely.
+      // The 1:1 account-to-application rule means creating one always
+      // creates the other, so application_type is required too.
       return Boolean(
-        username && email && form.business_name.trim() && form.contact_no.trim() && form.address.trim()
+        username &&
+          email &&
+          form.business_name.trim() &&
+          form.contact_no.trim() &&
+          form.address.trim() &&
+          form.application_type.trim()
       );
     }
 
@@ -274,7 +448,7 @@ export function LocatorUsersManagement({ locationSearch = '' }: { locationSearch
       form.lease_address.trim() !== originalForm.lease_address.trim() ||
       form.contact_no.trim() !== originalForm.contact_no.trim()
     );
-  }, [editing, form, locatorRole, originalForm]);
+  }, [editing, form, locatorRole, originalForm, fieldErrors, checkingField]);
 
   useEffect(() => {
     setPage(1);
@@ -287,13 +461,25 @@ export function LocatorUsersManagement({ locationSearch = '' }: { locationSearch
   function openCreate() {
     setEditing(null);
     setOriginalForm(null);
-    setForm({ username: '', email: '', full_name: '', business_name: '', address: '', lease_address: '', contact_no: '' });
+    setFieldErrors({});
+    setForm({
+      username: '',
+      email: '',
+      full_name: '',
+      business_name: '',
+      address: '',
+      lease_address: '',
+      contact_no: '',
+      application_type: 'DIRECT_LEASE',
+      save_as_draft: false,
+    });
     setIsCreateOpen(true);
   }
 
   async function openEdit(u: UserRow) {
     setIsCreateOpen(true);
     setEditing(u);
+    setFieldErrors({});
     const baseline = {
       username: u.username || '',
       email: u.email || '',
@@ -302,6 +488,11 @@ export function LocatorUsersManagement({ locationSearch = '' }: { locationSearch
       address: '',
       lease_address: '',
       contact_no: '',
+      // Application-filing fields don't apply on edit (an account's linked
+      // application isn't created/changed here) — kept only so `form` has
+      // one consistent shape between create and edit.
+      application_type: 'DIRECT_LEASE',
+      save_as_draft: false,
     };
     setForm(baseline);
     setOriginalForm(baseline);
@@ -335,18 +526,63 @@ export function LocatorUsersManagement({ locationSearch = '' }: { locationSearch
     }
     setSaving(true);
     setError(null);
+    setFieldErrors({});
     try {
+      if (!editing) {
+        // Locator Accounts + New Application, merged into one step (the
+        // business confirmed 1 account = 1 application) — this single call
+        // creates the login account, its business profile, AND its first
+        // application together, instead of two separate flows.
+        const payload = {
+          username: form.username.trim(),
+          email: form.email.trim(),
+          full_name: form.full_name.trim() || null,
+          role_id: locatorRole.id,
+          business_name: form.business_name.trim(),
+          address: form.address.trim(),
+          lease_address: form.lease_address.trim() || undefined,
+          contact_no: form.contact_no.trim(),
+          application_type: form.application_type,
+          save_as_draft: form.save_as_draft,
+        };
+
+        if (!payload.username) throw new Error('Username is required');
+        if (!payload.email) throw new Error('Email is required');
+        if (!payload.business_name) throw new Error('Business name is required');
+        if (!payload.contact_no) throw new Error('Contact number is required');
+        if (!payload.address) throw new Error('Business address is required');
+        if (!payload.application_type) throw new Error('Application type is required');
+
+        const res = await fetch(api('/api/users/locator-with-application'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify(payload),
+        });
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          throw Object.assign(new Error(json?.message || 'Save failed'), { field: json?.field });
+        }
+
+        setIsCreateOpen(false);
+        await refresh({ showLoading: false });
+        if (form.save_as_draft) {
+          toast.success(json.message || 'Locator account and draft application created.');
+        } else if (json.emailSent) {
+          toast.success(json.message || 'Locator account and application created — a temporary password was emailed.');
+        } else {
+          toast.warning(json.message || 'Locator account and application created, but the email could not be sent.');
+        }
+        return;
+      }
+
+      // Edit stays a plain account/profile update — no application involved.
       const payload: any = {
         username: form.username.trim(),
         email: form.email.trim(),
         full_name: form.full_name.trim() || null,
         role_id: locatorRole.id,
       };
-      // On create, a filled-in business profile makes the backend create the
-      // linked proponent record right away so this locator's first login
-      // skips the "one more step" wizard entirely. On edit, this is a direct
-      // admin edit of that same proponent record — separate from the
-      // proponent's own self-service change-request flow.
       payload.business_name = form.business_name.trim() || undefined;
       payload.address = form.address.trim() || undefined;
       payload.lease_address = form.lease_address.trim() || undefined;
@@ -356,41 +592,32 @@ export function LocatorUsersManagement({ locationSearch = '' }: { locationSearch
 
       if (!payload.username) throw new Error('Username is required');
       if (!payload.email) throw new Error('Email is required');
-      if (!editing) {
-        if (!payload.business_name) throw new Error('Business name is required');
-        if (!payload.contact_no) throw new Error('Contact number is required');
-        if (!payload.address) throw new Error('Business address is required');
-      }
 
-      const res = await fetch(api(editing ? `/api/users/${editing.id}` : '/api/users'), {
-        method: editing ? 'PUT' : 'POST',
+      const res = await fetch(api(`/api/users/${editing.id}`), {
+        method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
         body: JSON.stringify(payload),
       });
       const json = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(json?.message || 'Save failed');
+      if (!res.ok) {
+        throw Object.assign(new Error(json?.message || 'Save failed'), { field: json?.field });
+      }
 
       setIsCreateOpen(false);
       await refresh({ showLoading: false });
-      if (!editing) {
-        if (json.deferredActivation) {
-          toast.success(
-            json.message ||
-              'Locator account created — pending activation until their first application is submitted.'
-          );
-        } else if (json.emailSent) {
-          toast.success(json.message || 'Locator account created — a temporary password was emailed.');
-        } else {
-          toast.warning(json.message || 'Locator account created, but the email could not be sent.');
-        }
-      } else {
-        toast.success('Locator account updated successfully');
-      }
+      toast.success('Locator account updated successfully');
     } catch (e: any) {
       const message = e?.message || 'Save failed';
-      setError(message);
-      toast.error(message);
+      if (e?.field === 'username' || e?.field === 'email') {
+        // Inline only, under the offending field — no toast, matching
+        // ChangePasswordModal's pattern, since a raw "duplicate key" toast
+        // just repeats what the field itself now shows more usefully.
+        setFieldErrors({ [e.field]: message });
+      } else {
+        setError(message);
+        toast.error(message);
+      }
     } finally {
       setSaving(false);
     }
@@ -556,125 +783,182 @@ export function LocatorUsersManagement({ locationSearch = '' }: { locationSearch
     );
   }
 
+  // Same destination ApplicationsWorkflow.tsx's own goToApplication() uses —
+  // a locator account's linked application is opened the same way whether
+  // you got there from the Applications queue or from Locator Accounts.
+  // DRAFT is the one exception: Assessment excludes drafts entirely, so
+  // that click opens the Continue Draft panel instead.
+  function goToApplication(u: UserRow, app: { id: number; application_no: string; application_type: string; status: string }) {
+    if (app.status === 'DRAFT') {
+      setContinuingDraft({
+        id: app.id,
+        application_no: app.application_no,
+        application_type: app.application_type,
+        username: u.username,
+        full_name: u.full_name || '',
+        email: u.email || '',
+        business_name: companyByUserId[u.id] || '',
+        address: '',
+        lease_address: '',
+        contact_no: '',
+      });
+      setContinuingDraftType(app.application_type || 'DIRECT_LEASE');
+      // Business profile fields aren't part of the bulk /api/users list —
+      // same on-demand fetch openEdit() uses, so the panel doesn't have to
+      // wait on them before opening.
+      setContinuingDraftLoadingProfile(true);
+      fetch(api(`/api/users/${u.id}`), { credentials: 'include' })
+        .then((res) => res.json())
+        .then((json) => {
+          if (!json?.data) return;
+          setContinuingDraft((prev) =>
+            prev && prev.id === app.id
+              ? {
+                  ...prev,
+                  address: json.data.address || '',
+                  lease_address: json.data.lease_address || '',
+                  contact_no: json.data.contact_no || '',
+                }
+              : prev
+          );
+        })
+        .catch(() => {})
+        .finally(() => setContinuingDraftLoadingProfile(false));
+      return;
+    }
+    navigate?.(`/assessment?applicationId=${app.id}&tab=Compliance`);
+  }
+
+  async function saveContinueDraft(submit: boolean) {
+    if (!continuingDraft) return;
+    setContinuingDraftSaving(true);
+    try {
+      const patchRes = await fetch(api(`/api/applications/${continuingDraft.id}`), {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ application_type: continuingDraftType }),
+      });
+      const patchJson = await patchRes.json().catch(() => ({}));
+      if (!patchRes.ok || !patchJson?.success) throw new Error(patchJson?.message || 'Failed to update draft');
+
+      if (submit) {
+        const submitRes = await fetch(api(`/api/applications/${continuingDraft.id}/submit`), {
+          method: 'PATCH',
+          credentials: 'include',
+        });
+        const submitJson = await submitRes.json().catch(() => ({}));
+        if (!submitRes.ok || !submitJson?.success) throw new Error(submitJson?.message || 'Failed to submit application');
+        toast.success(`Application ${submitJson?.data?.application_no || continuingDraft.application_no} submitted`);
+        if (submitJson?.locatorActivated) {
+          toast.success(
+            submitJson?.locatorEmailSent
+              ? 'Locator account activated — login was emailed to them.'
+              : 'Locator account activated, but the email could not be sent — check the server console for the temporary password.'
+          );
+        }
+      } else {
+        toast.success(`Draft ${patchJson?.data?.application_no || continuingDraft.application_no} updated`);
+      }
+
+      setContinuingDraft(null);
+      await refresh({ showLoading: false });
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to update draft');
+    } finally {
+      setContinuingDraftSaving(false);
+    }
+  }
+
   function renderUserActions(u: UserRow) {
+    const statusActions: (RowActionItem | null)[] =
+      u.is_active === 1
+        ? [
+            canDelete
+              ? { key: 'suspend', label: 'Suspend', icon: Ban, onClick: () => setConfirmSuspendId(u.id), disabled: saving }
+              : null,
+            canDelete
+              ? {
+                  key: 'deactivate',
+                  label: 'Deactivate',
+                  icon: UserX,
+                  onClick: () => setConfirmDeactivateId(u.id),
+                  disabled: saving,
+                  danger: true,
+                }
+              : null,
+            canEdit
+              ? {
+                  key: 'revoke',
+                  label: 'Revoke sessions',
+                  icon: LogOut,
+                  onClick: () => setConfirmRevokeId(u.id),
+                  disabled: saving,
+                }
+              : null,
+          ]
+        : u.status === 'SUSPENDED'
+          ? [
+              canEdit
+                ? { key: 'unsuspend', label: 'Lift suspension', icon: RotateCcw, onClick: () => void unsuspend(u.id), disabled: saving }
+                : null,
+            ]
+          : u.status === 'PENDING'
+            ? [] // Reactivating here would just flip is_active without ever
+              // generating/emailing a real password — this account's
+              // placeholder password was never sent to anyone. Only the
+              // New Application flow (which does both) may activate it.
+            : [
+                canEdit
+                  ? {
+                      key: 'reactivate',
+                      label: 'Reactivate',
+                      icon: RotateCcw,
+                      onClick: () => setConfirmReactivateId(u.id),
+                      disabled: saving,
+                    }
+                  : null,
+              ];
+
     return (
-      <>
-        {canEdit ? (
-          <button
-            className={cn(
-              'inline-flex items-center justify-center rounded-md p-1.5 text-secondary',
-              saving ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
-            )}
-            onClick={() => openEdit(u)}
-            disabled={saving}
-            aria-label={`Edit ${u.username}`}
-            title="Edit"
-          >
-            <Pencil size={14} />
-          </button>
-        ) : null}
-        {canEdit ? (
-          <button
-            className={cn(
-              'inline-flex items-center justify-center rounded-md p-1.5 text-secondary',
-              saving ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
-            )}
-            onClick={() => setConfirmResetPasswordId(u.id)}
-            disabled={saving}
-            aria-label={u.status === 'PENDING' ? `Resend account email for ${u.username}` : `Reset password for ${u.username}`}
-            title={
-              u.status === 'PENDING'
-                ? 'Resend account email (new temporary password)'
-                : 'Reset password (emails a new temporary password)'
-            }
-          >
-            <KeyRound size={14} />
-          </button>
-        ) : null}
-        {u.is_active === 1 ? (
-          <>
-            {canDelete ? (
-              <button
-                className={cn(
-                  'inline-flex items-center justify-center rounded-md p-1.5 text-secondary',
-                  saving ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
-                )}
-                onClick={() => setConfirmSuspendId(u.id)}
-                disabled={saving}
-                aria-label={`Suspend ${u.username}`}
-                title="Suspend (temporary hold)"
-              >
-                <Ban size={14} />
-              </button>
-            ) : null}
-            {canDelete ? (
-              <button
-                className={cn(
-                  'inline-flex items-center justify-center rounded-md p-1.5 text-secondary',
-                  saving ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
-                )}
-                onClick={() => setConfirmDeactivateId(u.id)}
-                disabled={saving}
-                aria-label={`Deactivate ${u.username}`}
-                title="Deactivate"
-              >
-                <UserX size={14} />
-              </button>
-            ) : null}
-            {canEdit ? (
-              <button
-                className={cn(
-                  'inline-flex items-center justify-center rounded-md p-1.5 text-secondary',
-                  saving ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
-                )}
-                onClick={() => setConfirmRevokeId(u.id)}
-                disabled={saving}
-                aria-label={`Revoke sessions for ${u.username}`}
-                title="Revoke active sessions"
-              >
-                <LogOut size={14} />
-              </button>
-            ) : null}
-          </>
-        ) : u.status === 'SUSPENDED' ? (
-          canEdit ? (
-            <button
-              className={cn(
-                'inline-flex items-center justify-center rounded-md p-1.5 text-secondary',
-                saving ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
-              )}
-              onClick={() => void unsuspend(u.id)}
-              disabled={saving}
-              aria-label={`Reinstate ${u.username}`}
-              title="Lift suspension"
-            >
-              <RotateCcw size={14} />
-            </button>
-          ) : null
-        ) : u.status === 'PENDING' ? (
-          // Reactivating here would just flip is_active without ever
-          // generating/emailing a real password — this account's
-          // placeholder password was never sent to anyone. Only the
-          // New Application flow (which does both) may activate it.
-          <span className="text-secondary" title="Activates automatically once their first application is submitted">
-            <Clock3 size={14} />
-          </span>
-        ) : canEdit ? (
-          <button
-            className={cn(
-              'inline-flex items-center justify-center rounded-md p-1.5 text-secondary',
-              saving ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
-            )}
-            onClick={() => setConfirmReactivateId(u.id)}
-            disabled={saving}
-            aria-label={`Reactivate ${u.username}`}
-            title="Reactivate"
-          >
-            <RotateCcw size={14} />
-          </button>
-        ) : null}
-      </>
+      <RowActionsMenu
+        ariaLabel={`Actions for ${u.username}`}
+        actions={[
+          canEdit ? { key: 'edit', label: 'Edit', icon: Pencil, onClick: () => openEdit(u), disabled: saving } : null,
+          canEdit
+            ? {
+                key: 'reset-password',
+                label: u.status === 'PENDING' ? 'Resend account email' : 'Reset password',
+                icon: KeyRound,
+                onClick: () => setConfirmResetPasswordId(u.id),
+                disabled: saving,
+              }
+            : null,
+          ...statusActions,
+        ]}
+      />
     );
+  }
+
+  // A DRAFT application is unfinished — the one thing worth doing is
+  // finishing it, so that's surfaced directly (matching
+  // ApplicationsWorkflow.tsx's own "Draft →" treatment) instead of being
+  // buried inside the "..." menu alongside unrelated account actions.
+  function renderRowActions(u: UserRow) {
+    const app = applicationByUserId[u.id];
+    if (app?.status === 'DRAFT') {
+      return (
+        <button
+          type="button"
+          className="inline-flex items-center justify-center gap-1 rounded-lg h-8 px-2.5 text-[10px] font-bold uppercase tracking-wide cursor-pointer"
+          style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
+          onClick={() => goToApplication(u, app)}
+        >
+          Draft <ArrowRight size={12} />
+        </button>
+      );
+    }
+    return renderUserActions(u);
   }
 
   return (
@@ -805,6 +1089,40 @@ export function LocatorUsersManagement({ locationSearch = '' }: { locationSearch
                   <div className="shrink-0 flex flex-wrap justify-end gap-1 max-w-[45%]">{renderStatusBadges(u)}</div>
                 </div>
 
+                {companyByUserId[u.id] ? (
+                  <div
+                    className="mt-2 pt-2 border-t"
+                    style={{ borderColor: 'var(--border-subtle)' }}
+                  >
+                    <div className="text-[9px] uppercase tracking-wider text-secondary mb-1">Company / Locator</div>
+                    {applicationByUserId[u.id] ? (
+                      <button
+                        type="button"
+                        className="w-full text-left cursor-pointer rounded-md -mx-1.5 -my-1 px-1.5 py-1 transition-colors hover:bg-[var(--control-bg)] active:bg-[var(--selected-bg)]"
+                        onClick={() => goToApplication(u, applicationByUserId[u.id])}
+                      >
+                        <div className="text-[12px] font-semibold break-words" style={{ color: 'var(--text)' }}>
+                          {companyByUserId[u.id]}
+                        </div>
+                        <div className="mt-0.5 flex items-center gap-1.5 flex-wrap">
+                          <span className="text-[11px] text-secondary">{applicationByUserId[u.id].application_no}</span>
+                          <span
+                            className="inline-flex items-center rounded-full border px-1.5 py-0.5 text-[9px] font-medium"
+                            style={{ borderColor: 'var(--border-subtle)', color: 'var(--text-muted)' }}
+                          >
+                            {applicationTypeNameByCode[applicationByUserId[u.id].application_type] ||
+                              applicationByUserId[u.id].application_type}
+                          </span>
+                        </div>
+                      </button>
+                    ) : (
+                      <div className="text-[12px] font-semibold break-words" style={{ color: 'var(--text)' }}>
+                        {companyByUserId[u.id]}
+                      </div>
+                    )}
+                  </div>
+                ) : null}
+
                 <div className="mt-2.5 flex items-center justify-between gap-2">
                   <div className="min-w-0">
                     {u.totp_enabled === 1 ? (
@@ -818,7 +1136,7 @@ export function LocatorUsersManagement({ locationSearch = '' }: { locationSearch
                       <span className="text-[10px] text-secondary">2FA off</span>
                     )}
                   </div>
-                  <div className="shrink-0 flex items-center gap-0.5 -mr-1.5">{renderUserActions(u)}</div>
+                  <div className="shrink-0 flex items-center gap-0.5 -mr-1.5">{renderRowActions(u)}</div>
                 </div>
               </div>
             ))}
@@ -828,7 +1146,7 @@ export function LocatorUsersManagement({ locationSearch = '' }: { locationSearch
             <table className="min-w-full text-left text-xs">
               <thead>
                 <tr>
-                  {['Username', 'Full Name', 'Email', '2FA', 'Status', 'Actions'].map((col) => (
+                  {['Company / Locator', 'Username', 'Full Name', 'Email', 'Application Type', '2FA', 'Status', 'Progress', 'Actions'].map((col) => (
                     <th
                       key={col}
                       className={cn(
@@ -845,11 +1163,35 @@ export function LocatorUsersManagement({ locationSearch = '' }: { locationSearch
               <tbody>
                 {pagedUsers.map((u) => (
                   <tr key={u.id} className="border-b last:border-b-0" style={{ borderColor: 'var(--border-subtle)' }}>
+                    <td className="px-3 py-2 text-[11px]">
+                      {companyByUserId[u.id] ? (
+                        applicationByUserId[u.id] ? (
+                          <button
+                            type="button"
+                            className="text-left cursor-pointer rounded-md -mx-1.5 -my-1 px-1.5 py-1 transition-colors hover:bg-[var(--control-bg)] active:bg-[var(--selected-bg)]"
+                            onClick={() => goToApplication(u, applicationByUserId[u.id])}
+                          >
+                            <div className="font-semibold" style={{ color: 'var(--text)' }}>{companyByUserId[u.id]}</div>
+                            <div className="mt-0.5 text-secondary">{applicationByUserId[u.id].application_no}</div>
+                          </button>
+                        ) : (
+                          <div style={{ color: 'var(--text)' }}>{companyByUserId[u.id]}</div>
+                        )
+                      ) : (
+                        <span className="text-secondary">-</span>
+                      )}
+                    </td>
                     <td className="px-3 py-2 text-[11px]" style={{ color: 'var(--text)' }}>
                       {u.username}
                     </td>
                     <td className="px-3 py-2 text-[11px] text-secondary">{u.full_name || '-'}</td>
                     <td className="px-3 py-2 text-[11px] text-secondary">{u.email || '-'}</td>
+                    <td className="px-3 py-2 text-[11px] text-secondary">
+                      {applicationByUserId[u.id]
+                        ? applicationTypeNameByCode[applicationByUserId[u.id].application_type] ||
+                          applicationByUserId[u.id].application_type
+                        : '-'}
+                    </td>
                     <td className="px-3 py-2 text-[11px]">
                       {u.totp_enabled === 1 ? (
                         <span
@@ -865,9 +1207,27 @@ export function LocatorUsersManagement({ locationSearch = '' }: { locationSearch
                     <td className="px-3 py-2 text-[11px]">
                       {renderStatusBadges(u)}
                     </td>
+                    <td className="px-3 py-2 text-[11px] min-w-[150px]">
+                      {applicationByUserId[u.id] ? (
+                        (() => {
+                          const percent = progressByApp[applicationByUserId[u.id].id]?.percent ?? 0;
+                          const barColor = percent >= 100 ? '#10b981' : percent >= 50 ? '#3b82f6' : '#f59e0b';
+                          return (
+                            <div className="flex items-center gap-2">
+                              <div className="h-2 rounded-full overflow-hidden w-[90px]" style={{ backgroundColor: 'var(--input-border)' }}>
+                                <div className="h-full rounded-full transition-all" style={{ width: `${percent}%`, backgroundColor: barColor }} />
+                              </div>
+                              <span className="font-semibold">{percent}%</span>
+                            </div>
+                          );
+                        })()
+                      ) : (
+                        <span className="text-secondary">-</span>
+                      )}
+                    </td>
                     <td className="px-3 py-2 pr-2">
                       <div className="flex items-center justify-end gap-1.5">
-                        {renderUserActions(u)}
+                        {renderRowActions(u)}
                       </div>
                     </td>
                   </tr>
@@ -903,11 +1263,15 @@ export function LocatorUsersManagement({ locationSearch = '' }: { locationSearch
         saveDisabled={!canSubmit}
       >
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <Field label="Username">
+          <Field label="Username" error={fieldErrors.username} hint={checkingField === 'username' ? 'Checking availability…' : null}>
             <input
               className="app-input"
               value={form.username}
-              onChange={(e) => setForm((p) => ({ ...p, username: e.target.value }))}
+              onChange={(e) => {
+                setForm((p) => ({ ...p, username: e.target.value }));
+                if (fieldErrors.username) setFieldErrors((p) => ({ ...p, username: undefined }));
+              }}
+              style={fieldErrors.username ? { borderColor: '#ef4444' } : undefined}
             />
           </Field>
           <Field label="Full name">
@@ -917,16 +1281,45 @@ export function LocatorUsersManagement({ locationSearch = '' }: { locationSearch
               onChange={(e) => setForm((p) => ({ ...p, full_name: e.target.value }))}
             />
           </Field>
-          <Field label="Email">
+          <Field label="Email" error={fieldErrors.email} hint={checkingField === 'email' ? 'Checking availability…' : null}>
             <input
               type="email"
               required
               className="app-input"
               value={form.email}
-              onChange={(e) => setForm((p) => ({ ...p, email: e.target.value }))}
+              onChange={(e) => {
+                setForm((p) => ({ ...p, email: e.target.value }));
+                if (fieldErrors.email) setFieldErrors((p) => ({ ...p, email: undefined }));
+              }}
+              style={fieldErrors.email ? { borderColor: '#ef4444' } : undefined}
             />
           </Field>
+          {!editing ? (
+            <Field label="Application type *">
+              <AppSelect
+                isClearable={false}
+                options={
+                  applicationTypeOptions.length > 0
+                    ? applicationTypeOptions.map((t) => ({ value: t.code, label: t.name }))
+                    : [{ value: 'DIRECT_LEASE', label: 'Direct Lease' }]
+                }
+                value={form.application_type}
+                onChange={(value) => setForm((p) => ({ ...p, application_type: value }))}
+              />
+            </Field>
+          ) : null}
         </div>
+
+        {!editing ? (
+          <label className="mt-2 flex items-center gap-2 text-[12px] cursor-pointer">
+            <input
+              type="checkbox"
+              checked={form.save_as_draft}
+              onChange={(e) => setForm((p) => ({ ...p, save_as_draft: e.target.checked }))}
+            />
+            Save as draft — finish and submit later
+          </label>
+        ) : null}
 
         <div className="mt-4 pt-4 border-t" style={{ borderColor: 'var(--border-subtle)' }}>
           {editing ? (
@@ -980,8 +1373,81 @@ export function LocatorUsersManagement({ locationSearch = '' }: { locationSearch
           </div>
         </div>
 
+
         {editing ? (
           <TotpSection user={editing} onChanged={() => refresh({ showLoading: false })} />
+        ) : null}
+      </SidePanel>
+
+      <SidePanel
+        open={continuingDraft !== null}
+        title="Continue Draft"
+        subtitle={continuingDraft ? continuingDraft.application_no : undefined}
+        onClose={() => setContinuingDraft(null)}
+        onSave={() => saveContinueDraft(true)}
+        saving={continuingDraftSaving}
+        saveLabel="Submit Application"
+      >
+        {continuingDraft ? (
+          <>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <Field label="Username">
+                <input className="app-input" value={continuingDraft.username} disabled />
+              </Field>
+              <Field label="Full name">
+                <input className="app-input" value={continuingDraft.full_name} disabled />
+              </Field>
+              <Field label="Email">
+                <input className="app-input" value={continuingDraft.email} disabled />
+              </Field>
+              <Field label="Application type *">
+                <AppSelect
+                  isClearable={false}
+                  options={
+                    applicationTypeOptions.length > 0
+                      ? applicationTypeOptions.map((t) => ({ value: t.code, label: t.name }))
+                      : [{ value: 'DIRECT_LEASE', label: 'Direct Lease' }]
+                  }
+                  value={continuingDraftType}
+                  onChange={setContinuingDraftType}
+                />
+              </Field>
+            </div>
+
+            <div className="mt-4 pt-4 border-t" style={{ borderColor: 'var(--border-subtle)' }}>
+              <p className="text-[11px] text-secondary mb-3">
+                {continuingDraftLoadingProfile ? 'Loading business profile…' : "The locator's account and business profile — fixed at this point, shown here for context."}
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <Field label="Business name">
+                  <input className="app-input" value={continuingDraft.business_name} disabled />
+                </Field>
+                <Field label="Contact number">
+                  <input className="app-input" value={continuingDraft.contact_no} disabled />
+                </Field>
+                <div className="sm:col-span-2">
+                  <Field label="Principal Address">
+                    <input className="app-input" value={continuingDraft.address} disabled />
+                  </Field>
+                </div>
+                <div className="sm:col-span-2">
+                  <Field label="Lease Address">
+                    <input className="app-input" value={continuingDraft.lease_address} disabled />
+                  </Field>
+                </div>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              className="mt-4 w-full rounded-lg border px-3 py-2 text-[12px] font-semibold disabled:opacity-50 cursor-pointer"
+              style={{ borderColor: 'var(--border-subtle)', color: 'var(--text)' }}
+              disabled={continuingDraftSaving}
+              onClick={() => saveContinueDraft(false)}
+            >
+              Save Draft (don't submit yet)
+            </button>
+          </>
         ) : null}
       </SidePanel>
 
@@ -1074,11 +1540,28 @@ function StatCard({ label, value }: { label: string; value: string }) {
   );
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({
+  label,
+  error,
+  hint,
+  children,
+}: {
+  label: string;
+  error?: string | null;
+  hint?: string | null;
+  children: React.ReactNode;
+}) {
   return (
     <div className="space-y-1">
       <div className="text-[11px] font-semibold text-secondary uppercase tracking-widest">{label}</div>
       {children}
+      {error ? (
+        <p className="text-[10px] font-medium" style={{ color: '#ef4444' }}>
+          {error}
+        </p>
+      ) : hint ? (
+        <p className="text-[10px] font-medium text-secondary">{hint}</p>
+      ) : null}
     </div>
   );
 }

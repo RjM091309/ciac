@@ -37,6 +37,18 @@ const LandUseManagement = lazy(() => import('./components/FileMaintenance/LandUs
 const AuditLog = lazy(() => import('./components/settings/AuditLog').then((m) => ({ default: m.AuditLog })));
 const ReportsAnalytics = lazy(() => import('./components/reports/ReportsAnalytics').then((m) => ({ default: m.ReportsAnalytics })));
 
+/** "New Application" no longer has its own page — a locator account and its
+ * one application are created together on Locator Accounts now — so any
+ * remaining link/bookmark/deep-link to it (Search's "in_new" bucket,
+ * Dashboard cards, old notification links) lands here and gets sent to the
+ * page that actually replaced it, instead of a dead/blank view. */
+function RedirectToLocatorAccounts({ navigate }: { navigate: (to: string, opts?: { replace?: boolean }) => void }) {
+  useEffect(() => {
+    navigate('/applications/locator-users', { replace: true });
+  }, [navigate]);
+  return null;
+}
+
 // --- Types ---
 type Role = 'admin' | 'officer' | 'proponent';
 
@@ -593,9 +605,9 @@ export default function App() {
               ) : view === 'settings:users' ? (
                 <UsersManagement navigate={navigate} />
               ) : view === 'settings:locator-users' ? (
-                <LocatorUsersManagement locationSearch={locationSearch} />
+                <LocatorUsersManagement locationSearch={locationSearch} navigate={navigate} />
               ) : view === 'applications:new' ? (
-                <ApplicationsWorkflow renewalMode={false} locationSearch={locationSearch} navigate={navigate} />
+                <RedirectToLocatorAccounts navigate={navigate} />
               ) : view === 'applications:renewals' ? (
                 <ApplicationsWorkflow renewalMode={true} locationSearch={locationSearch} navigate={navigate} />
               ) : view === 'applications:requirements' ? (
