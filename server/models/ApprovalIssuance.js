@@ -1096,14 +1096,35 @@ async function settleApproval(approvalId, applicationId, outcome, note, actorId,
   }
 
   await logActivity(approvalId, `APPROVAL_${headerStatus}`, note ? note.slice(0, 200) : null, actorId);
+
+  // RETURNED is the routine "an approver kicked it back" outcome, not a
+  // real decision — the Assessment Officer redoing their recommendation is
+  // the normal way to handle it (see reopen()'s own comment on this), so
+  // auto-reopen the assessment here instead of leaving it stuck COMPLETED
+  // with no way out short of an admin-only manual reopen. Best-effort: a
+  // failure here shouldn't fail the RETURNED settlement itself.
+  if (headerStatus === "RETURNED") {
+    try {
+      await Assessment.reopen(applicationId, actorId);
+    } catch (error) {
+      console.error("Auto-reopen assessment on RETURNED error:", error);
+    }
+  }
+
   const app = await getApplicationRow(applicationId);
+  // APPROVED has a real next step (recording the contract on the Contract
+  // tab) that nothing else prompts anyone to do — the settlement itself
+  // never touches dbo.contracts/permits, so without this the only trace is
+  // a passive status change nobody's specifically told to act on.
+  const nextStepNote =
+    headerStatus === "APPROVED" ? " Record the contract on the Contract tab to complete this application's file." : "";
   await notify({
     applicationId,
     actorId,
     subject: `Application ${headerStatus.toLowerCase()}: ${app?.application_no || ""}`.trim(),
     body: `Application ${app?.application_no || ""} was ${headerStatus.toLowerCase()} by the approving hierarchy${
       note ? `: ${note.slice(0, 300)}` : "."
-    }`,
+    }${nextStepNote}`,
   });
 }
 

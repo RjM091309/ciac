@@ -326,7 +326,15 @@ async function getProponentProperties(proponentId) {
   }));
 }
 
-async function listProponents() {
+/** `approvedOnly` scopes this down to locators with at least one APPROVED
+ * application — used ONLY by the "Registered Locator" master checklist page.
+ * This function is also the shared source for the New Application proponent
+ * picker (ApplicationsWorkflow.tsx) and Locator Users' "has business
+ * profile" filter, both of which need the FULL proponent universe (a
+ * brand-new locator filing their first-ever application has no approved
+ * application yet, by definition) — defaulting to unfiltered and only
+ * narrowing on explicit opt-in avoids locking new locators out of filing. */
+async function listProponents({ approvedOnly = false } = {}) {
   await ensureSchema();
   const rows = await selectData(
     `
@@ -349,13 +357,7 @@ async function listProponents() {
       u.status AS account_status
     FROM dbo.proponents p
     LEFT JOIN dbo.users u ON u.id = p.user_id
-    -- Master checklist: a locator only belongs here once their business is
-    -- actually registered (an application of theirs reached APPROVED) — an
-    -- account that merely exists (pending, mid-review, or never went further
-    -- than an in-progress application) isn't a registered proponent yet.
-    WHERE EXISTS (
-      SELECT 1 FROM dbo.applications a WHERE a.proponent_id = p.id AND a.status = 'APPROVED'
-    )
+    ${approvedOnly ? "WHERE EXISTS (SELECT 1 FROM dbo.applications a WHERE a.proponent_id = p.id AND a.status = 'APPROVED')" : ""}
     ORDER BY p.id DESC
     `
   );

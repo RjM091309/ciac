@@ -22,7 +22,13 @@ async function unknownLookup(id, list, label) {
 
 exports.list = async (req, res) => {
   try {
-    const rows = await Proponent.listProponents();
+    // approvedOnly is opt-in — the New Application proponent picker and
+    // Locator Users' "has business profile" filter both need the FULL
+    // proponent universe (a locator filing their first-ever application has
+    // no approved application yet), so only the Registered Locator master
+    // checklist page passes this.
+    const approvedOnly = String(req.query.approvedOnly || "") === "1";
+    const rows = await Proponent.listProponents({ approvedOnly });
     return res.json({ success: true, data: rows });
   } catch (error) {
     console.error("List proponents error:", error);

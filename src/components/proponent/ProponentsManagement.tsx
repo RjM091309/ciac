@@ -388,7 +388,7 @@ export function ProponentsManagement({
     ttlMs: 5 * 60 * 1000,
     fetcher: async () => {
       const [pRes, dRes, uRes, atRes, luRes] = await Promise.all([
-        fetch(api('/api/proponents'), { credentials: 'include' }),
+        fetch(api('/api/proponents?approvedOnly=1'), { credentials: 'include' }),
         fetch(api('/api/proponents/locator-list'), { credentials: 'include' }),
         fetch(api('/api/proponents/account-officers'), { credentials: 'include' }),
         fetch(api('/api/proponents/type-of-contract'), { credentials: 'include' }),

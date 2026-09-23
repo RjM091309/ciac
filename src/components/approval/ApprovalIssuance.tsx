@@ -738,6 +738,23 @@ function ApprovalDetail({
           ))}
         </div>
 
+        {!loading && data && a?.approval_status === 'APPROVED' && !data.contract ? (
+          <div
+            className="mx-4 mt-3 rounded-lg border px-3 py-2 text-[12px] flex items-center justify-between gap-3"
+            style={{ borderColor: '#f59e0b55', backgroundColor: '#f59e0b1a', color: 'var(--text)' }}
+          >
+            <span>This application was approved but no contract has been recorded yet.</span>
+            <button
+              type="button"
+              className="rounded-md px-2.5 py-1 text-[11px] font-semibold whitespace-nowrap cursor-pointer"
+              style={{ backgroundColor: '#f59e0b', color: '#1a1200' }}
+              onClick={() => setTab('Contract')}
+            >
+              Record contract
+            </button>
+          </div>
+        ) : null}
+
         <div className="flex-1 overflow-y-auto p-4">
           {loading || !data ? (
             <div className="flex items-center justify-center py-16">
@@ -848,11 +865,44 @@ function ChainTab({
     null
   );
   if (data.steps.length === 0) {
+    // FOR_APPROVAL with zero steps means routing SHOULD have started
+    // (Assessment already endorsed it) but didn't — usually because no
+    // active Approval Levels are configured. The self-heal-on-view retry
+    // (c_approvals.js's detail endpoint) keeps failing silently in that
+    // case, so surface it as an actual problem with a manual retry instead
+    // of the same "starts automatically" message a genuinely-not-yet-
+    // endorsed application shows.
+    const stuck = data.approval.application_status === 'FOR_APPROVAL';
     return (
       <EmptyState
         icon={<Stamp size={40} className="opacity-40" />}
-        title="Not routed yet"
-        description="This application hasn't reached the approval workflow yet — the routing ladder starts automatically once Assessment endorses it."
+        title={stuck ? 'Routing failed to start' : 'Not routed yet'}
+        description={
+          stuck
+            ? "This application reached the approval stage, but the routing ladder failed to start — most likely no active Approval Levels are configured (Control Panel → Approval & Issuance). Fix the levels, then retry."
+            : "This application hasn't reached the approval workflow yet — the routing ladder starts automatically once Assessment endorses it."
+        }
+        action={
+          stuck && perms.canEdit ? (
+            <button
+              type="button"
+              className="rounded-lg px-3 py-1.5 text-[12px] font-semibold cursor-pointer disabled:opacity-50"
+              style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
+              disabled={busy}
+              onClick={() =>
+                run(
+                  () =>
+                    apiFetch(`/api/approvals/${data.approval.application_id}/start`, {
+                      method: 'POST',
+                    }),
+                  'Routing started'
+                )
+              }
+            >
+              Retry routing
+            </button>
+          ) : undefined
+        }
       />
     );
   }
