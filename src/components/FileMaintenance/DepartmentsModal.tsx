@@ -4,6 +4,7 @@ import { Pencil, RotateCcw, UserX, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '../../lib/utils';
 import { DataTableControls } from '../ui/DataTableControls';
+import { TableSkeleton } from '../ui/Skeleton';
 
 export type DepartmentRow = {
   id: number;
@@ -235,7 +236,7 @@ export function DepartmentsModal({ open, canAdd, canEdit, canDelete, onClose, on
 
             <div className="mt-2">
               {loading ? (
-                <div className="py-6 text-center text-xs text-secondary">Loading…</div>
+                <TableSkeleton columns={4} rows={4} />
               ) : filtered.length === 0 ? (
                 <div className="py-6 text-center text-xs text-secondary">
                   {search ? 'No departments match your search.' : 'No departments yet.'}

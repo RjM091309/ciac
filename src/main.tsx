@@ -6,6 +6,9 @@ import './index.css';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { GlobalDateProvider } from './state/GlobalDateContext';
+import { installFetchLoadingBar } from './lib/loadingBar';
+
+installFetchLoadingBar();
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

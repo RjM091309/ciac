@@ -7,6 +7,7 @@ import { LoginPage } from './components/auth/LoginPage';
 import { LocatorProfileSetup } from './components/proponent/LocatorProfileSetup';
 import { locatorSetupSkipKey } from './lib/locatorSetup';
 import { DataTableControls } from './components/ui/DataTableControls';
+import { PageSkeleton } from './components/ui/PageSkeleton';
 import { Toaster } from 'sonner';
 
 const RoleDashboard = lazy(() => import('./components/dashboard/RoleDashboard').then((m) => ({ default: m.RoleDashboard })));
@@ -562,11 +563,7 @@ export default function App() {
             transition={{ duration: 0.25, ease: [0.22, 0.8, 0.35, 1] }}
             className="h-full"
           >
-            <Suspense fallback={
-              <div className="flex h-full w-full items-center justify-center min-h-[400px]">
-                <Loader2 className="h-8 w-8 animate-spin text-secondary opacity-50" />
-              </div>
-            }>
+            <Suspense fallback={<PageSkeleton />}>
               {isProponent ? (
                 proponentView === 'me:profile' ? (
                   <ProponentProfile />

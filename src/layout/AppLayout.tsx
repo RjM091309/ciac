@@ -6,6 +6,7 @@ import { ProponentSidebar } from '../components/proponent/ProponentSidebar';
 import { ProponentBottomNav, BOTTOM_NAV_HEIGHT } from '../components/proponent/ProponentBottomNav';
 import { MobileMenuSheet } from '../components/MobileMenuSheet';
 import { ChangePasswordModal } from '../components/ChangePasswordModal';
+import { LoadingBar } from '../components/ui/LoadingBar';
 import { ControlPanelAccessProvider } from '../context/ControlPanelAccessContext';
 import { cn } from '../lib/utils';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
@@ -231,6 +232,7 @@ export function AppLayout({
         )}
         style={{ backgroundColor: 'var(--background)', color: 'var(--foreground)', transition: 'background-color 220ms ease-out, color 220ms ease-out' }}
       >
+        <LoadingBar />
         <AppHeader
           onToggleSidebar={toggleSidebar}
           theme={theme}
