@@ -7,5 +7,7 @@ router.get("/me", authenticateToken, controller.listMine);
 router.get("/stream", authenticateToken, controller.stream);
 router.patch("/:id/read", authenticateToken, controller.markRead);
 router.patch("/read-all", authenticateToken, controller.markAllRead);
+router.delete("/clear-all", authenticateToken, controller.clearAll);
+router.delete("/:id", authenticateToken, controller.remove);
 
 module.exports = router;

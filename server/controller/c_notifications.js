@@ -38,6 +38,31 @@ exports.markAllRead = async (req, res) => {
   }
 };
 
+exports.remove = async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) {
+      return res.status(400).json({ success: false, message: "Invalid notification id" });
+    }
+    const ok = await Notification.deleteOne(id, req.user?.id);
+    if (!ok) return res.status(404).json({ success: false, message: "Notification not found" });
+    return res.json({ success: true });
+  } catch (error) {
+    console.error("Delete notification error:", error);
+    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+  }
+};
+
+exports.clearAll = async (req, res) => {
+  try {
+    await Notification.deleteAllForUser(req.user?.id);
+    return res.json({ success: true });
+  } catch (error) {
+    console.error("Clear all notifications error:", error);
+    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+  }
+};
+
 exports.stream = async (req, res) => {
   const userId = Number(req.user?.id || 0);
   if (!Number.isFinite(userId) || userId <= 0) {

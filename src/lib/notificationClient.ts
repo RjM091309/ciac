@@ -125,6 +125,36 @@ export async function markAllNotificationsReadRequest(backendUrl: string) {
   return res.ok;
 }
 
+export async function deleteNotificationRequest(backendUrl: string, id: string) {
+  const baseUrl = String(backendUrl || '').replace(/\/+$/, '');
+  let res = await fetch(`${baseUrl}/api/notifications/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+    credentials: 'include',
+  });
+  if (!res.ok) {
+    res = await fetch(`/api/notifications/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+      credentials: 'include',
+    });
+  }
+  return res.ok;
+}
+
+export async function clearAllNotificationsRequest(backendUrl: string) {
+  const baseUrl = String(backendUrl || '').replace(/\/+$/, '');
+  let res = await fetch(`${baseUrl}/api/notifications/clear-all`, {
+    method: 'DELETE',
+    credentials: 'include',
+  });
+  if (!res.ok) {
+    res = await fetch('/api/notifications/clear-all', {
+      method: 'DELETE',
+      credentials: 'include',
+    });
+  }
+  return res.ok;
+}
+
 export function formatNotificationTime(value: string) {
   const diff = Date.now() - new Date(value).getTime();
   const minute = 60 * 1000;

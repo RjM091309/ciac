@@ -460,18 +460,16 @@ export default function App() {
           z-index (index.css, scoped to .locator-events-toaster) is what
           lets an open modal's own backdrop cover it — a background
           "a locator did something" ping shouldn't float on top of a modal
-          the officer has open, unlike the Toaster above. theme: matches the
-          page's own light/dark mode (unlike the Toaster above, which
-          deliberately inverts) — this one is a passive background ping, not
-          direct action feedback, so it should blend into the UI rather than
-          pop. */}
+          the officer has open, unlike the Toaster above. theme: inverted
+          relative to the page's own light/dark mode, same as the Toaster
+          above, so it always pops instead of blending in. */}
       <Toaster
         id="locator-events"
         className="locator-events-toaster"
         richColors
         position="bottom-right"
         expand
-        theme={isDarkMode ? 'dark' : 'light'}
+        theme={isDarkMode ? 'light' : 'dark'}
       />
       <AppLayout
         view={

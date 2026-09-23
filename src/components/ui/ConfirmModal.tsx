@@ -1,4 +1,5 @@
 import React from 'react';
+import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'motion/react';
 
 type ConfirmModalProps = {
@@ -28,10 +29,15 @@ export function ConfirmModal({
   onConfirm,
   onCancel,
 }: ConfirmModalProps) {
-  return (
+  // Portaled straight to <body>: a `fixed` element positions relative to any
+  // ancestor with a transform/filter/backdrop-filter instead of the
+  // viewport (e.g. AppHeader's backdrop-blur bar), which otherwise squashes
+  // this modal into that ancestor's own small box instead of centering it
+  // on screen.
+  return createPortal(
     <AnimatePresence>
       {open ? (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center px-3">
+        <div className="fixed inset-0 z-[140] flex items-center justify-center px-3">
           <motion.div
             className="absolute inset-0"
             style={{ backgroundColor: 'rgba(0,0,0,.45)' }}
@@ -84,6 +90,7 @@ export function ConfirmModal({
           </motion.div>
         </div>
       ) : null}
-    </AnimatePresence>
+    </AnimatePresence>,
+    document.body
   );
 }

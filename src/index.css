@@ -593,19 +593,28 @@ select.input-field:-webkit-autofill:focus {
   margin: 4px 6px 2px;
 }
 
-/* sonner's own close-button dismiss always animates out vertically
+/* sonner's own close-button/timeout dismiss always animates out vertically
    (translateY, baked into its --y custom property per data-front/
    data-expanded state) — only a manual swipe gesture respects direction.
    Right-positioned toasts (top-right default, bottom-right locator-event
-   toasts) should exit toward the right edge they're anchored to instead.
+   toasts) should exit toward the right edge they're anchored to instead,
+   in a straight line rather than sliding diagonally.
    Composed as `var(--y) translateX(...)` rather than replacing transform
    outright — --y also encodes this toast's current vertical offset in an
    expanded stack (sonner keeps it live via JS), so dropping it snapped
    every non-front toast back to y:0 as it left, reading as "falls to the
    bottom, then slides right" instead of sliding right in place.
-   !important is needed since sonner injects its own stylesheet at runtime
-   and may load after this one. */
+   sonner's own removed-state rule also redefines --y with an extra
+   `var(--lift) * -100%` term (its default "cascades upward" exit), which
+   on removal changes --y's value out from under this rule mid-transition —
+   the vertical component then animates *alongside* our translateX, so the
+   toast visibly slides right on a diagonal instead of straight across.
+   Redefining --y back to the plain mounted/expanded formula (no lift term)
+   keeps the vertical offset constant through the exit, so only translateX
+   animates. !important is needed since sonner injects its own stylesheet
+   at runtime and may load after this one. */
 [data-sonner-toast][data-x-position='right'][data-removed='true'] {
+  --y: translateY(calc(var(--lift) * var(--offset))) !important;
   transform: var(--y) translateX(150%) !important;
   opacity: 0 !important;
   transition: transform 0.3s ease, opacity 0.3s ease !important;
@@ -618,7 +627,9 @@ select.input-field:-webkit-autofill:focus {
    whatever the user just did, including inside an open modal.
    This one drops below every modal-layer z-index in the app (lowest in use
    is z-55 — ComplianceInspections' confirm dialog — then SidePanel z-60,
-   ConfirmModal z-70, AppHeader dropdowns z-120, ChangePasswordModal z-130)
+   AppHeader dropdowns z-120, ChangePasswordModal z-130, ConfirmModal z-140 —
+   topmost, since a confirmation must eclipse whatever modal/dropdown it's
+   confirming an action from)
    — a background "a locator did something" ping shouldn't float on top of
    a modal the officer has open. A modal's own backdrop then naturally
    covers it for as long as that modal is open, with no explicit "is a
@@ -626,17 +637,6 @@ select.input-field:-webkit-autofill:focus {
    (header is z-40) the rest of the time. */
 .locator-events-toaster[data-sonner-toaster] {
   z-index: 50 !important;
-}
-
-/* Now that this toaster's theme matches the page's own light/dark mode
-   instead of deliberately inverting, it no longer pops on contrast alone —
-   this accent stripe + stronger shadow keeps it recognizable as a
-   notification (vs. blending into the surrounding surface) in either
-   theme. !important needed for the same reason as above: sonner's own
-   runtime stylesheet may load after this one. */
-.locator-events-toaster[data-sonner-toaster] [data-sonner-toast] {
-  border-left: 3px solid #2563eb !important;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28), 0 0 0 1px rgba(37, 99, 235, 0.12) !important;
 }
 
 /* Native date/time fields: Chromium paints the calendar glyph as

@@ -404,6 +404,41 @@ async function markAllAsRead(userId) {
   });
 }
 
+async function deleteOne(id, userId) {
+  const notificationId = toInt(id);
+  const uid = toInt(userId);
+  if (!notificationId || !uid) return false;
+  await ensureSchema();
+
+  const result = await updateData(
+    `
+    DELETE FROM dbo.notifications
+    WHERE id = @param0
+      AND user_id = @param1
+    `,
+    [notificationId, uid]
+  );
+  return Boolean(result?.rowsAffected?.[0]);
+}
+
+async function deleteAllForUser(userId) {
+  const uid = toInt(userId);
+  if (!uid) return;
+  await ensureSchema();
+
+  await updateData(
+    `
+    DELETE FROM dbo.notifications
+    WHERE user_id = @param0
+    `,
+    [uid]
+  );
+
+  publishToUser(uid, {
+    type: "notifications_cleared",
+  });
+}
+
 module.exports = {
   ensureSchema,
   getApplicationContext,
@@ -412,4 +447,6 @@ module.exports = {
   listForUser,
   markAsRead,
   markAllAsRead,
+  deleteOne,
+  deleteAllForUser,
 };

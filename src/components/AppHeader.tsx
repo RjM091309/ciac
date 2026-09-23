@@ -16,6 +16,7 @@ import {
   Zap,
 } from 'lucide-react';
 import { ChangePasswordModal } from './ChangePasswordModal';
+import { ConfirmModal } from './ui/ConfirmModal';
 import { cn } from '../lib/utils';
 import {
   countUnread,
@@ -27,6 +28,8 @@ import {
   Role,
 } from '../lib/notifications';
 import {
+  clearAllNotificationsRequest,
+  deleteNotificationRequest,
   fetchNotificationsList,
   formatNotificationTime,
   getNotificationCategoryLabel,
@@ -516,6 +519,34 @@ export function AppHeader({
       });
   }
 
+  function deleteNotification(id: string) {
+    setNotifications((prev) => prev.filter((item) => item.id !== id));
+    deleteNotificationRequest(backendUrl, id).catch(() => {
+      // no-op (optimistic UI) — a stale row just reappears on the next refresh
+    });
+  }
+
+  const [confirmClearAllOpen, setConfirmClearAllOpen] = useState(false);
+  const [clearingAll, setClearingAll] = useState(false);
+
+  async function clearAllNotifications() {
+    setClearingAll(true);
+    try {
+      const ok = await clearAllNotificationsRequest(backendUrl);
+      if (ok) {
+        setNotifications((prev) =>
+          prev.filter(
+            (item) =>
+              filterNotificationsForUser([item], { role: userRole, userId }).length === 0
+          )
+        );
+      }
+    } finally {
+      setClearingAll(false);
+      setConfirmClearAllOpen(false);
+    }
+  }
+
   function handleNotificationClick(item: NotificationItem) {
     if (!item.targetPath || !item.applicationId) return;
     if (!item.isRead) markOneAsRead(item.id);
@@ -824,18 +855,31 @@ export function AppHeader({
                                     </div>
                                   </div>
 
-                                  {!item.isRead && (
+                                  <div className="flex items-center gap-2 shrink-0">
+                                    {!item.isRead && (
+                                      <button
+                                        type="button"
+                                        onClick={(event) => {
+                                          event.stopPropagation();
+                                          markOneAsRead(item.id);
+                                        }}
+                                        className="text-[11px] font-semibold text-[var(--text-muted)] hover:text-[var(--text)] whitespace-nowrap cursor-pointer"
+                                      >
+                                        Mark read
+                                      </button>
+                                    )}
                                     <button
                                       type="button"
+                                      aria-label="Dismiss notification"
                                       onClick={(event) => {
                                         event.stopPropagation();
-                                        markOneAsRead(item.id);
+                                        deleteNotification(item.id);
                                       }}
-                                      className="text-[11px] font-semibold text-[var(--text-muted)] hover:text-[var(--text)] whitespace-nowrap cursor-pointer"
+                                      className="text-[var(--text-muted)] hover:text-[var(--text)] cursor-pointer"
                                     >
-                                      Mark read
+                                      <X size={14} />
                                     </button>
-                                  )}
+                                  </div>
                                 </div>
                               </div>
                             </div>
@@ -847,7 +891,7 @@ export function AppHeader({
                 </div>
 
                 <div
-                  className="flex items-center justify-center px-3 py-2.5 border-t"
+                  className="flex items-center justify-center gap-8 px-3 py-2.5 border-t"
                   style={{ borderColor: 'var(--border-subtle)' }}
                 >
                   <button
@@ -858,10 +902,29 @@ export function AppHeader({
                   >
                     Mark all as read
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => setConfirmClearAllOpen(true)}
+                    disabled={visibleNotifications.length === 0}
+                    className="text-xs font-semibold text-[#f87171] hover:text-[#fca5a5] disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                  >
+                    Clear all
+                  </button>
                 </div>
               </div>
             )}
           </div>
+
+          <ConfirmModal
+            open={confirmClearAllOpen}
+            title="Clear all notifications?"
+            description="This permanently removes every notification in this list. This can't be undone."
+            confirmText="Clear all"
+            danger
+            loading={clearingAll}
+            onConfirm={clearAllNotifications}
+            onCancel={() => setConfirmClearAllOpen(false)}
+          />
 
           <div
             className="h-9 w-px mx-1 shrink-0 hidden md:block"
