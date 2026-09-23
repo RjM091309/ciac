@@ -182,22 +182,6 @@ export default function App() {
     };
   }, []);
 
-  // Mirrors AppLayout's theme toggle (which sets the 'dark' class on <html>)
-  // so the Toaster below can render toasts in the OPPOSITE theme — a toast
-  // pops against the page instead of blending into it. AppLayout owns the
-  // actual theme state/toggle; this just observes the DOM class it writes,
-  // since Toaster is a sibling rendered outside AppLayout.
-  const [isDarkMode, setIsDarkMode] = useState(
-    () => typeof document !== 'undefined' && document.documentElement.classList.contains('dark')
-  );
-  useEffect(() => {
-    if (typeof document === 'undefined') return;
-    const root = document.documentElement;
-    const observer = new MutationObserver(() => setIsDarkMode(root.classList.contains('dark')));
-    observer.observe(root, { attributes: true, attributeFilter: ['class'] });
-    return () => observer.disconnect();
-  }, []);
-
   const [user, setUser] = useState<UserData | null>(null);
   const [authState, setAuthState] = useState<'authed' | 'guest'>('guest');
   const [view, setView] = useState<AppView>('dashboard');
@@ -448,10 +432,8 @@ export default function App() {
     <>
       {/* expand: sonner collapses multiple simultaneous toasts into a stack
           with only the front one fully visible (rest peek behind until
-          hovered). theme: inverted relative to the page's own light/dark
-          mode (see isDarkMode above) — a black toast on a light page, a
-          white toast on a dark page, so it always pops instead of blending
-          in. Default z-index (sonner's own, way above every modal) — this
+          hovered). theme: always light (light green/red richColors toasts),
+          regardless of the page's light/dark mode. Default z-index (sonner's own, way above every modal) — this
           is the shared instance every plain toast.success()/toast.error()
           call in the app renders into, and those are direct feedback for
           whatever the user just did (e.g. Save inside an open modal), so
@@ -460,7 +442,7 @@ export default function App() {
         richColors
         position="top-right"
         expand
-        theme={isDarkMode ? 'light' : 'dark'}
+        theme="light"
         duration={6000}
         toastOptions={{
           style: { fontSize: '14px', padding: '14px 16px', lineHeight: 1.45 },
@@ -473,16 +455,15 @@ export default function App() {
           z-index (index.css, scoped to .locator-events-toaster) is what
           lets an open modal's own backdrop cover it — a background
           "a locator did something" ping shouldn't float on top of a modal
-          the officer has open, unlike the Toaster above. theme: inverted
-          relative to the page's own light/dark mode, same as the Toaster
-          above, so it always pops instead of blending in. */}
+          the officer has open, unlike the Toaster above. theme: always
+          light, same as the Toaster above. */}
       <Toaster
         id="locator-events"
         className="locator-events-toaster"
         richColors
         position="bottom-right"
         expand
-        theme={isDarkMode ? 'light' : 'dark'}
+        theme="light"
       />
       <AppLayout
         view={
