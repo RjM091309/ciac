@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowDown, ArrowUp, ArrowUpDown, Download, FileSpreadsheet, FileText, RotateCcw, Search, X } from 'lucide-react';
+import { motion } from 'motion/react';
 import { toast } from 'sonner';
 import {
   Area,
@@ -20,7 +21,7 @@ import { AppSelect } from '../ui/AppSelect';
 import { DataTableControls } from '../ui/DataTableControls';
 import { DatePicker } from '../ui/DatePicker';
 import { EmptyState } from '../ui/EmptyState';
-import { TableSkeleton } from '../ui/Skeleton';
+import { Skeleton, TableSkeleton } from '../ui/Skeleton';
 
 const STATUS_LABELS: Record<string, string> = {
   SUBMITTED: 'Submitted',
@@ -52,6 +53,8 @@ const OTHER_TILE_COLOR = '#94a3b8';
 // Every chart body in the Applications row shares this height so the three
 // cards stay equal no matter how many statuses/types/months there are.
 const CHART_BODY_HEIGHT = 240;
+// Recharts' default Area draw time, stated so the dots can wait it out.
+const AREA_DRAW_MS = 1500;
 
 type TrendRange = '12M' | '24M' | 'ALL';
 const TREND_RANGES: { value: TrendRange; label: string }[] = [
@@ -257,6 +260,20 @@ function readFiltersFromUrl() {
 
 // Phones get chart layouts that fit a ~350px card (horizontal status bars,
 // thinned month ticks) — recharts needs this in JS, not CSS.
+/** False on the first render, true right after mount. Chart entry animations
+ * key off this instead of motion's `initial`: App.tsx wraps every page in
+ * <AnimatePresence initial={false}>, which makes nested motion elements skip
+ * their `initial` state on a direct page load. Animating from a first-render
+ * value to the real one is a plain change, so it plays either way. */
+function useHasMounted() {
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    const id = requestAnimationFrame(() => setMounted(true));
+    return () => cancelAnimationFrame(id);
+  }, []);
+  return mounted;
+}
+
 // Callback ref (not useRef) so measuring starts whenever the element mounts —
 // the treemap box only exists once data has loaded.
 function useElementWidth<T extends HTMLElement>() {
@@ -783,44 +800,46 @@ export function ReportsAnalytics({ navigate }: { navigate?: (to: string, opts?: 
       </div>
 
       <div className="grid grid-cols-3 lg:grid-cols-6 gap-2 sm:gap-4">
-        <StatTile
+        <StatTile loading={loading}
           label="Total Applications"
           value={overview?.total_applications ?? '—'}
           onClick={() => drillToStatus('')}
           title="Show all statuses in the table below"
         />
-        <StatTile
+        <StatTile loading={loading}
           label="Approved"
           value={overview?.applications_by_status?.APPROVED ?? 0}
           tone="#10b981"
           onClick={() => drillToStatus('APPROVED')}
           title="Filter the table to Approved applications"
         />
-        <StatTile
+        <StatTile loading={loading}
           label="For Approval"
           value={overview?.applications_by_status?.FOR_APPROVAL ?? 0}
           tone="#3b82f6"
           onClick={() => drillToStatus('FOR_APPROVAL')}
           title="Filter the table to applications For Approval"
         />
-        <StatTile
+        <StatTile loading={loading}
           label="Returned"
           value={overview?.applications_by_status?.RETURNED ?? 0}
           tone="#f59e0b"
           onClick={() => drillToStatus('RETURNED')}
           title="Filter the table to Returned applications"
         />
-        <StatTile
+        <StatTile loading={loading}
           label="Disapproved / Rejected"
           value={(overview?.applications_by_status?.DISAPPROVED ?? 0) + (overview?.applications_by_status?.REJECTED ?? 0)}
           tone="#ef4444"
         />
-        <StatTile label="Contracts Issued" value={overview?.contracts_issued ?? '—'} />
+        <StatTile loading={loading} label="Contracts Issued" value={overview?.contracts_issued ?? '—'} />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <ChartCard title="Applications by Status">
-          {hasStatusData ? (
+          {loading ? (
+            <StatusSkeleton />
+          ) : hasStatusData ? (
             <StatusSplit counts={statusCounts} onPick={drillToStatus} />
           ) : (
             <ChartEmpty />
@@ -828,7 +847,9 @@ export function ReportsAnalytics({ navigate }: { navigate?: (to: string, opts?: 
         </ChartCard>
 
         <ChartCard title="Applications by Type">
-          {typeTiles.tiles.length === 0 ? (
+          {loading ? (
+            <TypeSkeleton />
+          ) : typeTiles.tiles.length === 0 ? (
             <ChartEmpty />
           ) : (
             <div ref={typeCardRef} className="relative" style={{ height: CHART_BODY_HEIGHT }}>
@@ -891,10 +912,12 @@ export function ReportsAnalytics({ navigate }: { navigate?: (to: string, opts?: 
             </div>
           }
         >
-          {trendSeries.length === 0 ? (
+          {loading ? (
+            <TrendSkeleton />
+          ) : trendSeries.length === 0 ? (
             <ChartEmpty />
           ) : (
-            <TrendChart points={trendSeries} onPick={drillToTrendPoint} isPhone={isPhone} />
+            <TrendChart key={trendRange} points={trendSeries} onPick={drillToTrendPoint} isPhone={isPhone} />
           )}
         </ChartCard>
       </div>
@@ -905,25 +928,25 @@ export function ReportsAnalytics({ navigate }: { navigate?: (to: string, opts?: 
         </h3>
 
         <div className="grid grid-cols-3 lg:grid-cols-6 gap-2 sm:gap-4">
-          <StatTile label="Total Permits" value={overview ? totalPermits : '—'} />
-          <StatTile label="Valid Permits" value={overview?.permits_by_status?.VALID ?? 0} tone={PERMIT_STATUS_TONE.VALID.color} />
-          <StatTile label="Expiring Permits" value={overview?.permits_by_status?.EXPIRING ?? 0} tone={PERMIT_STATUS_TONE.EXPIRING.color} />
-          <StatTile label="Expired Permits" value={overview?.permits_by_status?.EXPIRED ?? 0} tone={PERMIT_STATUS_TONE.EXPIRED.color} />
-          <StatTile label="Total Inspections" value={overview ? totalInspections : '—'} />
-          <StatTile label="Failed Inspections" value={overview?.inspections_by_result?.FAILED ?? 0} tone={INSPECTION_RESULT_TONE.FAILED.color} />
+          <StatTile loading={loading} label="Total Permits" value={overview ? totalPermits : '—'} />
+          <StatTile loading={loading} label="Valid Permits" value={overview?.permits_by_status?.VALID ?? 0} tone={PERMIT_STATUS_TONE.VALID.color} />
+          <StatTile loading={loading} label="Expiring Permits" value={overview?.permits_by_status?.EXPIRING ?? 0} tone={PERMIT_STATUS_TONE.EXPIRING.color} />
+          <StatTile loading={loading} label="Expired Permits" value={overview?.permits_by_status?.EXPIRED ?? 0} tone={PERMIT_STATUS_TONE.EXPIRED.color} />
+          <StatTile loading={loading} label="Total Inspections" value={overview ? totalInspections : '—'} />
+          <StatTile loading={loading} label="Failed Inspections" value={overview?.inspections_by_result?.FAILED ?? 0} tone={INSPECTION_RESULT_TONE.FAILED.color} />
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           <ChartCard title="Permits by Status">
-            <ProportionRibbon items={permitStatusChartData} toneMap={PERMIT_STATUS_TONE} />
+            <ProportionRibbon loading={loading} items={permitStatusChartData} toneMap={PERMIT_STATUS_TONE} />
           </ChartCard>
 
           <ChartCard title="Inspections by Status">
-            <ProportionRibbon items={inspectionStatusChartData} toneMap={INSPECTION_STATUS_TONE} />
+            <ProportionRibbon loading={loading} items={inspectionStatusChartData} toneMap={INSPECTION_STATUS_TONE} />
           </ChartCard>
 
           <ChartCard title="Inspections by Result">
-            <ProportionRibbon items={inspectionResultChartData} toneMap={INSPECTION_RESULT_TONE} />
+            <ProportionRibbon loading={loading} items={inspectionResultChartData} toneMap={INSPECTION_RESULT_TONE} />
           </ChartCard>
         </div>
       </div>
@@ -1181,12 +1204,14 @@ function StatTile({
   tone,
   onClick,
   title,
+  loading,
 }: {
   label: string;
   value: React.ReactNode;
   tone?: string;
   onClick?: () => void;
   title?: string;
+  loading?: boolean;
 }) {
   const Tag: any = onClick ? 'button' : 'div';
   return (
@@ -1203,9 +1228,13 @@ function StatTile({
       <span className="text-[9px] sm:text-[10px] font-semibold text-secondary uppercase tracking-wide sm:tracking-widest leading-tight">
         {label}
       </span>
-      <span className="text-lg font-bold leading-tight" style={{ color: tone || 'var(--text)' }}>
-        {value}
-      </span>
+      {loading ? (
+        <Skeleton className="h-[22px] w-12 rounded" />
+      ) : (
+        <span className="text-lg font-bold leading-tight" style={{ color: tone || 'var(--text)' }}>
+          {value}
+        </span>
+      )}
     </Tag>
   );
 }
@@ -1227,6 +1256,65 @@ function ChartEmpty() {
   return (
     <div className="flex items-center justify-center text-[11px] text-secondary" style={{ height: CHART_BODY_HEIGHT }}>
       No data for the selected filters
+    </div>
+  );
+}
+
+// ---- Loading skeletons, shaped like the charts they stand in for -----------
+
+function StatusSkeleton() {
+  const group = (rows: number) => (
+    <div className="space-y-1">
+      <div className="flex items-center justify-between h-[14px]">
+        <Skeleton className="h-2.5 w-20 rounded" />
+        <Skeleton className="h-2.5 w-12 rounded" />
+      </div>
+      {Array.from({ length: rows }).map((_, i) => (
+        <div key={i} className="grid grid-cols-[84px_1fr_32px] items-center gap-2 h-[20px]">
+          <Skeleton className="h-2.5 w-16 rounded" />
+          <Skeleton className="h-2 rounded-full" />
+          <Skeleton className="h-2.5 w-5 rounded justify-self-end" />
+        </div>
+      ))}
+    </div>
+  );
+  return (
+    <div className="flex flex-col justify-between" style={{ height: CHART_BODY_HEIGHT }}>
+      {group(IN_PROGRESS_STATUSES.length)}
+      <div className="h-px" style={{ backgroundColor: 'var(--border-subtle)' }} />
+      {group(OUTCOME_STATUSES.length)}
+    </div>
+  );
+}
+
+function TypeSkeleton() {
+  return (
+    <div className="flex gap-[3px]" style={{ height: CHART_BODY_HEIGHT }}>
+      <Skeleton className="flex-[4] h-full rounded-md" />
+      <div className="flex-[3] flex flex-col gap-[3px]">
+        <Skeleton className="flex-[3] rounded-md" />
+        <Skeleton className="flex-[1] rounded-md" />
+      </div>
+      <div className="flex-[3] flex flex-col gap-[3px]">
+        <div className="flex-[1] flex gap-[3px]">
+          <Skeleton className="flex-1 rounded-md" />
+          <Skeleton className="flex-1 rounded-md" />
+        </div>
+        <Skeleton className="flex-[1] rounded-md" />
+        <Skeleton className="flex-[2] rounded-md" />
+      </div>
+    </div>
+  );
+}
+
+const TREND_SKELETON_HEIGHTS = [18, 30, 22, 40, 34, 55, 46, 62, 38, 50, 70, 44];
+
+function TrendSkeleton() {
+  return (
+    <div className="flex items-end gap-1.5 sm:gap-2 pl-6 pb-5 pt-4" style={{ height: CHART_BODY_HEIGHT }}>
+      {TREND_SKELETON_HEIGHTS.map((h, i) => (
+        <Skeleton key={i} className="flex-1 rounded-t" style={{ height: `${h}%` }} />
+      ))}
     </div>
   );
 }
@@ -1281,6 +1369,7 @@ function StatusGroup({
   counts: Record<string, number>;
   onPick: (status: string) => void;
 }) {
+  const mounted = useHasMounted();
   const max = Math.max(0, ...statuses.map((st) => counts[st] || 0));
   const groupTotal = statuses.reduce((sum, st) => sum + (counts[st] || 0), 0);
   return (
@@ -1289,7 +1378,7 @@ function StatusGroup({
         <span className="font-semibold uppercase tracking-wider">{title}</span>
         <span>{aside}</span>
       </div>
-      {statuses.map((st) => {
+      {statuses.map((st, i) => {
         const n = counts[st] || 0;
         const color = STATUS_TONE[st]?.color || CHART_COLORS[0];
         return (
@@ -1306,9 +1395,12 @@ function StatusGroup({
           >
             <span className="text-[10px] text-secondary truncate group-enabled:group-hover:underline">{STATUS_LABELS[st]}</span>
             <span className="h-2 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--border-subtle)' }}>
-              <span
+              <motion.span
                 className="block h-full rounded-full"
-                style={{ width: n ? `${Math.max(3, (n / max) * 100)}%` : 0, backgroundColor: color }}
+                style={{ backgroundColor: color }}
+                initial={false}
+                animate={{ width: mounted && n ? `${Math.max(3, (n / max) * 100)}%` : '0%' }}
+                transition={{ duration: 1, delay: i * 0.06, ease: 'easeOut' }}
               />
             </span>
             <span className="text-[11px] font-semibold text-right tabular-nums" style={{ color: 'var(--text)' }}>
@@ -1331,7 +1423,8 @@ type TypeTileDatum = { code: string; name: string; total: number; pct: number; c
  * into "Other" upstream (MIN_TYPE_TILE_AREA). recharts clones this element
  * with the node's geometry plus the datum's own fields. */
 function TypeTile(props: any) {
-  const { x, y, width, height, depth, name, total, pct, color, isOther, code, onPick } = props;
+  const { x, y, width, height, depth, index, name, total, pct, color, isOther, code, onPick } = props;
+  const mounted = useHasMounted();
   if (depth !== 1 || !(width > 0) || !(height > 0)) return null;
   const w = Math.max(0, width - 3);
   const h = Math.max(0, height - 3);
@@ -1348,9 +1441,15 @@ function TypeTile(props: any) {
   const showInline = !showName && h >= 12 && inlineRoom >= CHAR_W * 6;
   const showCount = w > 16 && h > 12;
   return (
-    <g
+    // Entry: tiles fade/scale in one after another, largest first (the same
+    // motion fade the Dashboard uses) — recharts' own treemap animation
+    // squeezes tiles mid-way, overlapping their labels.
+    <motion.g
       style={{ cursor: 'pointer' }}
       onClick={() => onPick?.({ code, name, total, pct, color, isOther })}
+      initial={false}
+      animate={mounted ? { opacity: 1, scale: 1 } : { opacity: 0, scale: 0.9 }}
+      transition={{ duration: 0.5, delay: (Number(index) || 0) * 0.06, ease: 'easeOut' }}
     >
       <rect x={x + 1.5} y={y + 1.5} width={w} height={h} rx={6} style={{ fill: color, fillOpacity: 0.2 }} />
       <rect x={x + 1.5} y={y + 1.5} width={Math.min(3, w)} height={h} rx={1.5} style={{ fill: color }} />
@@ -1379,7 +1478,7 @@ function TypeTile(props: any) {
           {total}
         </text>
       ) : null}
-    </g>
+    </motion.g>
   );
 }
 
@@ -1462,14 +1561,7 @@ function TrendChart({
   const peak = Math.max(...points.map((p) => p.total));
   const peakLabel = (p: any) =>
     Number(p.value) === peak && peak > 0 ? (
-      <text
-        x={Number(p.x) + (Number(p.width) || 0) / 2}
-        y={Number(p.y) - 6}
-        textAnchor="middle"
-        style={{ fill: 'var(--text)', fontSize: 10, fontWeight: 600 }}
-      >
-        {p.value}
-      </text>
+      <PeakLabel x={Number(p.x) + (Number(p.width) || 0) / 2} y={Number(p.y) - 6} value={p.value} />
     ) : null;
   const margin = { top: 16, right: isPhone ? 12 : 8, left: -20, bottom: 0 };
   const xAxis = (
@@ -1494,6 +1586,14 @@ function TrendChart({
     if (p) onPick(p);
   };
   const chartEvents = { onClick: pickHovered, style: { cursor: 'pointer' } };
+  // recharts draws the line in but shows every dot at once, leaving dots
+  // floating ahead of the line — so dots wait out the draw. (A timer, not
+  // onAnimationEnd: that also fires for recharts' zero-size first pass.)
+  const [lineDrawn, setLineDrawn] = useState(false);
+  useEffect(() => {
+    const id = window.setTimeout(() => setLineDrawn(true), AREA_DRAW_MS);
+    return () => window.clearTimeout(id);
+  }, []);
 
   return (
     <ResponsiveContainer width="100%" height={CHART_BODY_HEIGHT}>
@@ -1535,8 +1635,8 @@ function TrendChart({
             stroke={CHART_COLORS[0]}
             strokeWidth={2}
             fill="url(#volumeFill)"
-            isAnimationActive={false}
-            dot={{ r: points.length > 12 ? 2.5 : 3.5, fill: CHART_COLORS[0], stroke: 'none' }}
+            dot={<FadeDot r={points.length > 12 ? 2.5 : 3.5} visible={lineDrawn} />}
+            animationDuration={AREA_DRAW_MS}
             activeDot={{ r: 5 }}
           >
             <LabelList dataKey="total" content={peakLabel} />
@@ -1544,6 +1644,45 @@ function TrendChart({
         </AreaChart>
       )}
     </ResponsiveContainer>
+  );
+}
+
+/** Area dot kept hidden while the line draws, then faded in — rendering dots
+ * only after the draw made them pop in all at once. Also fades from 0 on
+ * mount, since recharts re-creates its dots when the draw ends. */
+function FadeDot({ cx, cy, r, visible }: any) {
+  const mounted = useHasMounted();
+  if (cx == null || cy == null) return null;
+  return (
+    <motion.circle
+      cx={cx}
+      cy={cy}
+      r={r}
+      fill={CHART_COLORS[0]}
+      stroke="none"
+      initial={false}
+      animate={{ opacity: visible && mounted ? 1 : 0 }}
+      transition={{ duration: 0.4, ease: 'easeOut' }}
+    />
+  );
+}
+
+/** Peak value label. recharts only mounts chart labels once its draw
+ * finishes, so this fades in from that point instead of popping in. */
+function PeakLabel({ x, y, value }: { x: number; y: number; value: React.ReactNode }) {
+  const mounted = useHasMounted();
+  return (
+    <motion.text
+      x={x}
+      y={y}
+      textAnchor="middle"
+      style={{ fill: 'var(--text)', fontSize: 10, fontWeight: 600 }}
+      initial={false}
+      animate={{ opacity: mounted ? 1 : 0 }}
+      transition={{ duration: 0.4, ease: 'easeOut' }}
+    >
+      {value}
+    </motion.text>
   );
 }
 
@@ -1556,11 +1695,38 @@ function TrendChart({
 function ProportionRibbon({
   items,
   toneMap,
+  loading,
+}: {
+  items: { key: string; label: string; total: number }[];
+  toneMap: Record<string, { color: string }>;
+  loading?: boolean;
+}) {
+  if (loading) {
+    return (
+      <div className="space-y-2">
+        <Skeleton className="h-6 rounded-md" />
+        <div className="flex justify-center gap-3">
+          {[0, 1, 2].map((i) => (
+            <Skeleton key={i} className="h-2.5 w-16 rounded" />
+          ))}
+        </div>
+      </div>
+    );
+  }
+  // Separate component so its entry animation starts when the data arrives,
+  // not when the skeleton first mounted.
+  return <RibbonBody items={items} toneMap={toneMap} />;
+}
+
+function RibbonBody({
+  items,
+  toneMap,
 }: {
   items: { key: string; label: string; total: number }[];
   toneMap: Record<string, { color: string }>;
 }) {
   const total = items.reduce((sum, it) => sum + it.total, 0);
+  const mounted = useHasMounted();
 
   if (total === 0) {
     return (
@@ -1577,14 +1743,17 @@ function ProportionRibbon({
         {items.map((it, i) => {
           const pct = (it.total / total) * 100;
           return (
-            <div
+            <motion.div
               key={it.key}
               className={cn(
                 'relative group h-full',
                 i === 0 && 'rounded-l-md',
                 i === items.length - 1 && 'rounded-r-md'
               )}
-              style={{ flexBasis: `${pct}%`, backgroundColor: toneMap[it.key]?.color || CHART_COLORS[i % CHART_COLORS.length] }}
+              style={{ backgroundColor: toneMap[it.key]?.color || CHART_COLORS[i % CHART_COLORS.length] }}
+              initial={false}
+              animate={{ flexBasis: mounted ? `${pct}%` : '0%' }}
+              transition={{ duration: 1, ease: 'easeOut' }}
             >
               <div
                 className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 hidden group-hover:block whitespace-nowrap z-10 pointer-events-none"
@@ -1596,7 +1765,7 @@ function ProportionRibbon({
                   : {it.total} ({Math.round(pct)}%)
                 </span>
               </div>
-            </div>
+            </motion.div>
           );
         })}
       </div>

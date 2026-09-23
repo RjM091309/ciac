@@ -7,7 +7,9 @@ import {
   ClipboardList,
   FileText,
   Loader2,
+  Pencil,
   Plus,
+  Search,
   ShieldCheck,
   Trash2,
   UserCheck,
@@ -169,6 +171,18 @@ function actionBadge(status: string) {
   return { bg: 'rgba(245,158,11,.14)', color: '#f59e0b', border: 'rgba(245,158,11,.38)' };
 }
 
+const typeBadgeStyle = {
+  background: 'rgba(99,102,241,0.18)',
+  color: '#818cf8',
+  borderColor: 'rgba(99,102,241,0.4)',
+};
+
+function statusProgress(status: string) {
+  const percent = status === 'COMPLETED' ? 100 : status === 'IN_PROGRESS' ? 50 : status === 'CANCELLED' ? 0 : 0;
+  const barColor = percent >= 100 ? '#10b981' : percent >= 50 ? '#3b82f6' : '#f59e0b';
+  return { percent, barColor };
+}
+
 function isOverdue(a: ActionRow) {
   if (a.status === 'DONE' || !a.due_date) return false;
   const d = new Date(a.due_date);
@@ -262,6 +276,7 @@ export function ComplianceInspections({
 
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [creating, setCreating] = useState(false);
+  const [selectedProponent, setSelectedProponent] = useState<{ id: number; name: string } | null>(null);
 
   const loadList = useCallback(async () => {
     const params = new URLSearchParams();
@@ -388,25 +403,27 @@ export function ComplianceInspections({
       </div>
 
       {tab === 'monitor' ? (
-        <MonitorTab summary={summary} loading={loading} onOpenProponent={(pid) => {
-          setTypeFilter('');
-          setStatusFilter('');
-          setSearch('');
-          setTab('inspections');
-          // proponent filter is applied server-side via a dedicated fetch
-          apiFetch(`/api/inspections?proponentId=${pid}`)
-            .then((j) => setRows(j.data || []))
-            .catch((e) => toast.error((e as Error).message));
-        }} />
+        <MonitorTab
+          summary={summary}
+          loading={loading}
+          onOpenProponent={(pid, name) => setSelectedProponent({ id: pid, name })}
+        />
       ) : (
         <>
           <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
-            <input
-              className={cn(inputCls, 'w-full sm:w-64')}
-              placeholder="Search inspection / locator…"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
+            <div className="relative group w-full sm:w-64">
+              <Search
+                size={14}
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)] group-focus-within:text-[var(--text)] transition-colors pointer-events-none"
+              />
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search inspection / locator…"
+                className="h-9 rounded-full pl-9 pr-3 text-xs w-full focus:outline-none focus:ring-1 focus:ring-[var(--border)] text-[var(--text)] placeholder:text-[var(--text-muted)] transition-all"
+                style={{ backgroundColor: 'color-mix(in oklab, var(--control-bg) 70%, transparent)' }}
+              />
+            </div>
             {/* Side by side on phones so the filters don't eat two full rows. */}
             <div className="grid grid-cols-2 gap-2 sm:flex">
               <div className="min-w-0 sm:w-44">
@@ -509,55 +526,94 @@ export function ComplianceInspections({
               </div>
 
               <div className="hidden sm:block overflow-x-auto">
-                <table className="w-full text-left text-[13px]">
+                <table className="min-w-full text-left text-xs">
                   <thead>
-                    <tr
-                      className="text-[11px] uppercase tracking-wide text-secondary"
-                      style={{ backgroundColor: 'var(--control-bg)' }}
-                    >
-                      <th className="px-3 py-2.5 font-semibold">Inspection</th>
-                      <th className="px-3 py-2.5 font-semibold">Locator</th>
-                      <th className="px-3 py-2.5 font-semibold">Type</th>
-                      <th className="px-3 py-2.5 font-semibold">Inspector</th>
-                      <th className="px-3 py-2.5 font-semibold">Scheduled</th>
-                      <th className="px-3 py-2.5 font-semibold">Status</th>
-                      <th className="px-3 py-2.5 font-semibold">Result</th>
-                      <th className="px-3 py-2.5 font-semibold">Findings</th>
+                    <tr style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+                      <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary">Locator</th>
+                      <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary">Inspection Type</th>
+                      <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary">Progress</th>
+                      <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary">Status</th>
+                      <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary text-right">Actions</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {pg.pageItems.map((r) => (
-                      <tr
-                        key={r.id}
-                        className="border-t cursor-pointer hover:bg-[var(--selected-bg)] transition-colors"
-                        style={{ borderColor: 'var(--border)' }}
-                        onClick={() => setSelectedId(r.id)}
-                      >
-                        <td className="px-3 py-2.5 font-semibold">{r.title}</td>
-                        <td className="px-3 py-2.5">{r.proponent_name || '—'}</td>
-                        <td className="px-3 py-2.5 text-[12px]">{r.inspection_type_name || r.inspection_type_code || '—'}</td>
-                        <td className="px-3 py-2.5 text-[12px]">{r.inspector_name || r.inspector_username || '—'}</td>
-                        <td className="px-3 py-2.5 text-[12px]">{fmtDate(r.scheduled_date)}</td>
-                        <td className="px-3 py-2.5">
-                          <Badge label={STATUS_LABELS[r.status] || r.status} styles={statusBadge(r.status)} />
-                        </td>
-                        <td className="px-3 py-2.5">
-                          {r.result ? <Badge label={RESULT_LABELS[r.result] || r.result} styles={resultBadge(r.result)} /> : '—'}
-                        </td>
-                        <td className="px-3 py-2.5 text-[12px]">
-                          {r.open_findings > 0 ? (
-                            <span style={{ color: '#ef4444' }}>{r.open_findings} open</span>
-                          ) : (
-                            <span className="text-secondary">{r.total_findings || 0}</span>
-                          )}
-                          {r.overdue_actions > 0 ? (
-                            <span className="ml-1" style={{ color: '#ef4444' }}>
-                              · {r.overdue_actions} overdue
+                    {pg.pageItems.map((r) => {
+                      const { percent, barColor } = statusProgress(r.status);
+                      const typeName = r.inspection_type_name || r.inspection_type_code || '';
+                      return (
+                        <tr
+                          key={r.id}
+                          className="transition-colors cursor-pointer hover:bg-[var(--selected-bg)]"
+                          style={{ borderTop: '1px solid var(--border-subtle)' }}
+                          onClick={() => setSelectedId(r.id)}
+                        >
+                          <td className="px-3 py-2.5">
+                            {r.proponent_name ? (
+                              <button
+                                type="button"
+                                className="font-semibold hover:underline cursor-pointer"
+                                style={{ color: 'var(--text)' }}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setSelectedProponent({ id: r.proponent_id, name: r.proponent_name as string });
+                                }}
+                                title="View all inspections for this locator"
+                              >
+                                {r.proponent_name}
+                              </button>
+                            ) : (
+                              <div className="font-semibold" style={{ color: 'var(--text)' }}>
+                                —
+                              </div>
+                            )}
+                            <div className="mt-0.5 text-[11px] text-secondary">{r.title}</div>
+                          </td>
+                          <td className="px-3 py-2.5">
+                            {typeName ? (
+                              <span
+                                className="inline-flex items-center rounded-full border px-2.5 py-0.5 text-[11px] font-medium"
+                                style={typeBadgeStyle}
+                              >
+                                {typeName}
+                              </span>
+                            ) : (
+                              <span className="text-secondary">—</span>
+                            )}
+                          </td>
+                          <td className="px-3 py-2.5 min-w-[180px]">
+                            <div className="flex items-center gap-2">
+                              <div className="h-2.5 rounded-full overflow-hidden w-[120px]" style={{ backgroundColor: 'var(--input-border)' }}>
+                                <div className="h-full rounded-full transition-all" style={{ width: `${percent}%`, backgroundColor: barColor }} />
+                              </div>
+                              <span className="text-[11px] font-semibold">{percent}%</span>
+                            </div>
+                          </td>
+                          <td className="px-3 py-2.5">
+                            <span
+                              className="inline-flex items-center rounded-full border px-2.5 py-0.5 text-[11px] font-semibold"
+                              style={{
+                                backgroundColor: statusBadge(r.status).bg,
+                                color: statusBadge(r.status).color,
+                                borderColor: statusBadge(r.status).border,
+                              }}
+                            >
+                              {STATUS_LABELS[r.status] || r.status}
                             </span>
-                          ) : null}
-                        </td>
-                      </tr>
-                    ))}
+                          </td>
+                          <td className="px-3 py-2.5 text-right" onClick={(e) => e.stopPropagation()}>
+                            <button
+                              className="inline-flex items-center justify-center rounded-lg border h-8 w-8 text-xs font-semibold"
+                              style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'var(--control-bg)' }}
+                              onClick={() => setSelectedId(r.id)}
+                              title="Open Inspection"
+                              aria-label="Open Inspection"
+                            >
+                              <Pencil size={14} />
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -583,6 +639,17 @@ export function ComplianceInspections({
       )}
 
       <AnimatePresence>
+        {selectedProponent != null ? (
+          <LocatorInspectionsDrawer
+            proponentId={selectedProponent.id}
+            proponentName={selectedProponent.name}
+            onClose={() => setSelectedProponent(null)}
+            onOpenInspection={(id) => {
+              setSelectedProponent(null);
+              setSelectedId(id);
+            }}
+          />
+        ) : null}
         {selectedId != null ? (
           <InspectionDetail
             inspectionId={selectedId}
@@ -632,7 +699,7 @@ function MonitorTab({
 }: {
   summary: Summary | null;
   loading: boolean;
-  onOpenProponent: (proponentId: number) => void;
+  onOpenProponent: (proponentId: number, proponentName: string) => void;
 }) {
   if (loading) return <TableSkeleton rows={6} />;
   const rows = summary?.by_proponent || [];
@@ -671,7 +738,7 @@ function MonitorTab({
             type="button"
             className="w-full text-left rounded-xl border p-3 cursor-pointer active:bg-[var(--selected-bg)] transition-colors"
             style={{ borderColor: 'var(--border)', backgroundColor: 'var(--surface)' }}
-            onClick={() => onOpenProponent(r.proponent_id)}
+            onClick={() => onOpenProponent(r.proponent_id, r.proponent_name)}
           >
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0 flex-1">
@@ -731,7 +798,7 @@ function MonitorTab({
                 key={r.proponent_id}
                 className="border-t cursor-pointer hover:bg-[var(--selected-bg)]"
                 style={{ borderColor: 'var(--border)' }}
-                onClick={() => onOpenProponent(r.proponent_id)}
+                onClick={() => onOpenProponent(r.proponent_id, r.proponent_name)}
               >
                 <td className="px-3 py-2.5 font-semibold">{r.proponent_name}</td>
                 <td className="px-3 py-2.5 text-right tabular-nums">{r.total_inspections}</td>
@@ -755,6 +822,148 @@ function MonitorTab({
       </table>
     </div>
     </>
+  );
+}
+
+function LocatorInspectionsDrawer({
+  proponentId,
+  proponentName,
+  onClose,
+  onOpenInspection,
+}: {
+  proponentId: number;
+  proponentName: string;
+  onClose: () => void;
+  onOpenInspection: (id: number) => void;
+}) {
+  const [rows, setRows] = useState<InspectionRow[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    apiFetch(`/api/inspections?proponentId=${proponentId}`)
+      .then((j) => {
+        if (!cancelled) setRows(j.data || []);
+      })
+      .catch((err) => {
+        if (!cancelled) toast.error((err as Error).message);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [proponentId]);
+
+  const stats = useMemo(() => {
+    const total = rows.length;
+    const completed = rows.filter((r) => r.status === 'COMPLETED').length;
+    const failed = rows.filter((r) => r.result === 'FAILED').length;
+    const openFindings = rows.reduce((sum, r) => sum + (r.open_findings || 0), 0);
+    const overdueActions = rows.reduce((sum, r) => sum + (r.overdue_actions || 0), 0);
+    return { total, completed, failed, openFindings, overdueActions };
+  }, [rows]);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-stretch justify-end">
+      <motion.div
+        className="absolute inset-0"
+        style={{ backgroundColor: 'rgba(0,0,0,.45)' }}
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        transition={{ duration: 0.2 }}
+        onClick={onClose}
+      />
+      <motion.div
+        className="relative z-10 h-full w-full max-w-2xl border-l shadow-2xl flex flex-col"
+        style={{ backgroundColor: 'var(--surface)', borderColor: 'var(--border)' }}
+        initial={{ x: '100%' }}
+        animate={{ x: 0 }}
+        exit={{ x: '100%' }}
+        transition={{ duration: 0.28, ease: [0.16, 1, 0.3, 1] }}
+      >
+        <div className="px-4 py-3 border-b flex items-start justify-between gap-3" style={{ borderColor: 'var(--border)' }}>
+          <div className="min-w-0">
+            <div className="text-sm font-bold truncate" style={{ color: 'var(--text)' }}>
+              {proponentName}
+            </div>
+            <div className="text-[11px] text-secondary">All inspections for this locator</div>
+          </div>
+          <button
+            className="rounded-lg p-1 border shrink-0"
+            style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}
+            onClick={onClose}
+          >
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className="px-4 py-3 grid grid-cols-3 sm:grid-cols-5 gap-2 border-b" style={{ borderColor: 'var(--border)' }}>
+          <InfoCell label="Total" value={stats.total} />
+          <InfoCell label="Completed" value={stats.completed} />
+          <InfoCell label="Failed" value={stats.failed} />
+          <InfoCell label="Open Findings" value={stats.openFindings} />
+          <InfoCell label="Overdue Actions" value={stats.overdueActions} />
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-4">
+          {loading ? (
+            <TableSkeleton rows={5} />
+          ) : rows.length === 0 ? (
+            <EmptyState
+              icon={<ClipboardCheck size={40} className="opacity-40" />}
+              title="No inspections"
+              description="This locator has no recorded inspections yet."
+            />
+          ) : (
+            <div className="flex flex-col gap-2">
+              {rows.map((r) => (
+                <button
+                  key={r.id}
+                  type="button"
+                  onClick={() => onOpenInspection(r.id)}
+                  className="w-full text-left rounded-xl border p-3 hover:bg-[var(--selected-bg)] transition-colors"
+                  style={{ borderColor: 'var(--border)' }}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0 flex-1">
+                      <div className="text-[13px] font-semibold" style={{ color: 'var(--text)' }}>
+                        {r.title}
+                      </div>
+                      <div className="text-[11px] text-secondary mt-0.5">
+                        {r.inspection_type_name || r.inspection_type_code || 'Inspection'} · Scheduled{' '}
+                        {fmtDate(r.scheduled_date)}
+                      </div>
+                    </div>
+                    <div className="shrink-0 flex flex-col items-end gap-1">
+                      <Badge label={STATUS_LABELS[r.status] || r.status} styles={statusBadge(r.status)} />
+                      {r.result ? <Badge label={RESULT_LABELS[r.result] || r.result} styles={resultBadge(r.result)} /> : null}
+                    </div>
+                  </div>
+                  {r.open_findings > 0 || r.overdue_actions > 0 ? (
+                    <div className="mt-2 flex items-center gap-3 text-[11px]">
+                      {r.open_findings > 0 ? (
+                        <span style={{ color: '#ef4444' }}>
+                          {r.open_findings} open finding{r.open_findings === 1 ? '' : 's'}
+                        </span>
+                      ) : null}
+                      {r.overdue_actions > 0 ? (
+                        <span style={{ color: '#ef4444' }}>
+                          {r.overdue_actions} overdue action{r.overdue_actions === 1 ? '' : 's'}
+                        </span>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      </motion.div>
+    </div>
   );
 }
 
