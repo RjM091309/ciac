@@ -1,10 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
-import { Check, Loader2, Plus, Save } from 'lucide-react';
+import { Check, ChevronRight, Loader2, Plus, Save, Settings2 } from 'lucide-react';
 import Select, { components, type OptionProps, type StylesConfig } from 'react-select';
 import { toast } from 'sonner';
 import { Skeleton, TableSkeleton } from '../ui/Skeleton';
 import { EmptyState } from '../ui/EmptyState';
+import { SidePanel } from '../ui/SidePanel';
 import { AppSelect } from '../ui/AppSelect';
 import { LANDING_CONFIG } from '../../config/landingConfig';
 import { roleDisplayName } from '../../lib/roleDisplay';
@@ -51,10 +52,12 @@ const PROPONENT_MENU_ITEMS: MenuItem[] = [
 ];
 const PROPONENT_MENU_KEYS = new Set(PROPONENT_MENU_ITEMS.map((item) => item.key));
 
-/** Fixed widths so CRUD header labels line up with toggle columns. Grid only
- * from `sm` up — on phones each module stacks its switches under the name. */
-const CRUD_TOGGLE_COLS_CLASS =
-  'sm:grid-cols-[minmax(0,1fr)_3.25rem_3.25rem_3.25rem] sm:items-center gap-x-3';
+type CrudFlag = 'can_add' | 'can_edit' | 'can_delete';
+const CRUD_FLAGS: readonly (readonly [CrudFlag, string, 'add' | 'edit' | 'delete'])[] = [
+  ['can_add', 'Add', 'add'],
+  ['can_edit', 'Edit', 'edit'],
+  ['can_delete', 'Delete', 'delete'],
+];
 
 /** Pill switch: thumb stays inside track (flex + translateX only — avoids absolute + conflicting translate bugs). */
 function PermissionToggle({
@@ -121,7 +124,7 @@ const approverSelectStyles: StylesConfig<ApproverOption, true> = {
     backgroundColor: 'var(--input-bg)',
     borderStyle: 'solid',
     borderWidth: '1px',
-    borderColor: state.isFocused ? 'var(--nav-active-bg)' : 'var(--input-border)',
+    borderColor: state.isFocused ? 'var(--text-muted)' : 'var(--input-border)',
     borderRadius: '0.5rem',
     boxShadow: 'none',
     cursor: 'pointer',
@@ -129,17 +132,20 @@ const approverSelectStyles: StylesConfig<ApproverOption, true> = {
   valueContainer: (base) => ({ ...base, padding: '2px 8px', gap: 4 }),
   input: (base) => ({ ...base, color: 'var(--text)', margin: 0 }),
   placeholder: (base) => ({ ...base, color: 'var(--text-muted)', fontSize: 12 }),
+  // Theme text/surface tokens rather than --nav-active-bg: in dark mode that
+  // token is a near-background gray, which left the chip labels unreadable.
   multiValue: (base) => ({
     ...base,
-    backgroundColor: 'color-mix(in oklab, var(--nav-active-bg) 14%, transparent)',
+    backgroundColor: 'var(--control-bg)',
+    border: '1px solid var(--border-subtle)',
     borderRadius: 6,
   }),
-  multiValueLabel: (base) => ({ ...base, color: 'var(--nav-active-bg)', fontSize: 11, padding: '2px 4px' }),
+  multiValueLabel: (base) => ({ ...base, color: 'var(--text)', fontSize: 11, padding: '2px 4px' }),
   multiValueRemove: (base) => ({
     ...base,
-    color: 'var(--nav-active-bg)',
+    color: 'var(--text-muted)',
     cursor: 'pointer',
-    ':hover': { backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' },
+    ':hover': { backgroundColor: 'color-mix(in oklab, var(--text-muted) 25%, transparent)', color: 'var(--text)' },
   }),
   menuPortal: (base) => ({ ...base, zIndex: 9999 }),
   menu: (base) => ({
@@ -150,7 +156,12 @@ const approverSelectStyles: StylesConfig<ApproverOption, true> = {
     overflow: 'hidden',
   }),
   menuList: (base) => ({ ...base, scrollbarWidth: 'thin', scrollbarColor: 'var(--border) transparent' }),
-  option: (base) => ({ ...base, fontSize: 12, backgroundColor: 'transparent', cursor: 'pointer' }),
+  option: (base, state) => ({
+    ...base,
+    fontSize: 12,
+    backgroundColor: state.isFocused ? 'var(--control-bg)' : 'transparent',
+    cursor: 'pointer',
+  }),
   indicatorSeparator: () => ({ display: 'none' }),
   dropdownIndicator: (base) => ({ ...base, padding: 4, color: 'var(--text-muted)' }),
   clearIndicator: (base) => ({ ...base, padding: 4, color: 'var(--text-muted)' }),
@@ -166,11 +177,11 @@ function ApproverOptionRow(props: OptionProps<ApproverOption, true>) {
         <span
           className="flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded border"
           style={{
-            borderColor: props.isSelected ? 'var(--nav-active-bg)' : 'var(--input-border)',
-            backgroundColor: props.isSelected ? 'var(--nav-active-bg)' : 'transparent',
+            borderColor: props.isSelected ? 'var(--text)' : 'var(--input-border)',
+            backgroundColor: props.isSelected ? 'var(--text)' : 'transparent',
           }}
         >
-          {props.isSelected ? <Check size={10} color="var(--nav-active-text)" /> : null}
+          {props.isSelected ? <Check size={10} color="var(--surface)" /> : null}
         </span>
         <span style={{ color: 'var(--text)' }}>{props.label}</span>
       </div>
@@ -228,7 +239,7 @@ function ApproverMultiSelectField({
  * varies per role the way Add/Edit/Delete switches do, so it belongs here as
  * live content rather than as one more per-role permission row. Reachable
  * only by whoever can already open Control Panel itself. */
-function ApprovalWorkflowLevelsSection() {
+function ApprovalWorkflowLevelsSection({ showTitle = true }: { showTitle?: boolean } = {}) {
   const [levels, setLevels] = useState<ApprovalLevel[]>([]);
   // Candidate pool for the per-level "Approvers" multi-select — the same
   // set listApprovers() already computes server-side (admins + anyone whose
@@ -285,7 +296,9 @@ function ApprovalWorkflowLevelsSection() {
   return (
     <div className="flex flex-col gap-3">
       <div>
-        <div className="text-[11px] font-bold uppercase tracking-wide text-secondary">Approval Workflow Setup</div>
+        {showTitle ? (
+          <div className="text-[11px] font-bold uppercase tracking-wide text-secondary">Approval Workflow Setup</div>
+        ) : null}
         <p className="text-[11px] text-secondary mt-0.5">
           Ordered levels every new approval routes through — a global setting, not per-role. Existing approvals keep the
           ladder they started with.
@@ -319,7 +332,7 @@ function ApprovalWorkflowLevelsSection() {
                       className="min-w-0 flex-1 rounded px-1.5 py-0.5 text-[13px] font-semibold bg-transparent border border-transparent hover:border-[var(--border-subtle)] focus:outline-none transition-colors"
                       style={{ color: 'var(--text)', borderColor: 'transparent' }}
                       onFocus={(e) => {
-                        e.currentTarget.style.borderColor = 'var(--nav-active-bg)';
+                        e.currentTarget.style.borderColor = 'var(--text-muted)';
                       }}
                       onBlur={(e) => {
                         e.currentTarget.style.borderColor = 'transparent';
@@ -494,8 +507,132 @@ function ApprovalWorkflowLevelsSection() {
   );
 }
 
+/** Connector-line color — derived from the muted text color since --border is
+ * nearly the same shade as --surface in dark mode and would vanish. */
+const TREE_LINE = 'color-mix(in oklab, var(--text-muted) 40%, transparent)';
+
+/** Dark rounded node like a flow/graph view: status dot, bold title, muted
+ * subtitle, optional trailing control and body. */
+function TreeNodeCard({
+  title,
+  subtitle,
+  active,
+  trailing,
+  children,
+  emphasis,
+}: {
+  title: React.ReactNode;
+  subtitle?: React.ReactNode;
+  active?: boolean;
+  trailing?: React.ReactNode;
+  children?: React.ReactNode;
+  emphasis?: boolean;
+}) {
+  return (
+    <div
+      className="rounded-lg border transition-colors"
+      style={{
+        borderColor: active ? 'color-mix(in oklab, var(--text-muted) 45%, transparent)' : 'var(--border-subtle)',
+        backgroundColor: emphasis || active ? 'var(--control-bg)' : 'var(--surface)',
+      }}
+    >
+      <div className="flex items-center gap-3 px-3 py-2.5">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2 min-w-0">
+            <span
+              className="h-2 w-2 shrink-0 rounded-full transition-colors"
+              style={{ backgroundColor: active ? '#22c55e' : 'color-mix(in oklab, var(--text-muted) 70%, transparent)' }}
+            />
+            <span
+              className={`truncate font-semibold ${emphasis ? 'text-[13px]' : 'text-[12px]'}`}
+              style={{ color: 'var(--text)' }}
+            >
+              {title}
+            </span>
+          </div>
+          {subtitle ? <div className="mt-0.5 pl-4 text-[11px] leading-snug text-secondary">{subtitle}</div> : null}
+        </div>
+        {trailing ? <div className="shrink-0">{trailing}</div> : null}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+/** Parent node on the left branching into its children on the right (stacks
+ * vertically on narrow screens, with the spine running down the left). */
+function NodeTree({
+  root,
+  items,
+  nested,
+}: {
+  root: React.ReactNode;
+  items: { key: string; node: React.ReactNode }[];
+  /** Second-level branch: root pinned to the top (so a tall root card still
+   * lines up with its first child) and a narrower root column. */
+  nested?: boolean;
+}) {
+  return (
+    <div className={`flex flex-col lg:flex-row ${nested ? 'lg:items-start' : 'lg:items-center lg:justify-center'}`}>
+      <div className={`w-full shrink-0 ${nested ? 'lg:w-[250px]' : 'lg:w-[260px]'}`}>{root}</div>
+      {items.length > 0 ? (
+        <>
+          <div
+            aria-hidden
+            className={`ml-5 h-3 w-px lg:ml-0 lg:h-px lg:w-6 shrink-0 ${nested ? 'lg:mt-7' : ''}`}
+            style={{ backgroundColor: TREE_LINE }}
+          />
+          <ul className="ml-5 lg:ml-0 min-w-0 flex-1 lg:max-w-3xl">
+            {items.map((item, idx) => {
+              const first = idx === 0;
+              const last = idx === items.length - 1;
+              return (
+                <li key={item.key} className="relative pl-6 py-1">
+                  <span
+                    aria-hidden
+                    className={`absolute left-0 w-px ${
+                      first && last
+                        ? 'top-0 h-7 lg:hidden'
+                        : first
+                          ? 'top-0 bottom-0 lg:top-7'
+                          : last
+                            ? 'top-0 h-7'
+                            : 'top-0 bottom-0'
+                    }`}
+                    style={{ backgroundColor: TREE_LINE }}
+                  />
+                  <span aria-hidden className="absolute left-0 top-7 h-px w-6" style={{ backgroundColor: TREE_LINE }} />
+                  {item.node}
+                </li>
+              );
+            })}
+          </ul>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
 export function ControlPanelManagement({ locationSearch }: { locationSearch?: string } = {}) {
-  const [activeTab, setActiveTab] = useState<'sidebar' | 'crud' | 'widgets'>('sidebar');
+  const [activeTab, setActiveTab] = useState<'sidebar' | 'widgets'>('sidebar');
+  // Unlinked (turned-off) items stay collapsed so the tree only shows what's linked.
+  const [showUnlinked, setShowUnlinked] = useState(false);
+  // The approval ladder is a global setting edited in its own side panel; the
+  // tree only shows a one-line summary node for it under Approval & Issuance.
+  const [workflowOpen, setWorkflowOpen] = useState(false);
+  const [workflowLevels, setWorkflowLevels] = useState<ApprovalLevel[] | null>(null);
+  const loadWorkflowSummary = useCallback(async () => {
+    try {
+      const res = await fetch(api('/api/approvals/levels'), { credentials: 'include' });
+      const json = await res.json().catch(() => ({}));
+      if (res.ok) setWorkflowLevels(json.data || []);
+    } catch {
+      /* summary only — the panel itself reports load errors */
+    }
+  }, []);
+  useEffect(() => {
+    loadWorkflowSummary();
+  }, [loadWorkflowSummary]);
   const [roles, setRoles] = useState<Role[]>([]);
   // Pre-selects the role named in ?roleId=... (e.g. arriving here via
   // RolesPanel's "Configure in Control Panel" nudge right after creating a
@@ -547,20 +684,28 @@ export function ControlPanelManagement({ locationSearch }: { locationSearch?: st
   );
   const isLocatorRoleSelected = String(selectedRole?.name || '').trim().toUpperCase() === 'PROPONENT';
 
-  // The Locator role's own menu items ride along in the same "Sidebar Menu
-  // Permissions" card/columns as everything else — a separate box just for
-  // one role read as a stray, disconnected section. Split into 3 evenly-sized
-  // columns (instead of a fixed 10/rest split) so a short remainder column
-  // doesn't end up mostly empty next to a full one.
-  const sidebarMenuColumns = useMemo(() => {
-    const items = isLocatorRoleSelected ? [...sidebarMenuItems, ...PROPONENT_MENU_ITEMS] : sidebarMenuItems;
-    const perColumn = Math.ceil(items.length / 3) || 1;
-    return [
-      { offset: 0, items: items.slice(0, perColumn) },
-      { offset: perColumn, items: items.slice(perColumn, perColumn * 2) },
-      { offset: perColumn * 2, items: items.slice(perColumn * 2) },
-    ];
-  }, [sidebarMenuItems, isLocatorRoleSelected]);
+  // The Locator role's own menu items ride along as extra branches of the
+  // same tree as everything else — a separate box just for one role read as a
+  // stray, disconnected section.
+  const sidebarTreeItems = useMemo(
+    () => (isLocatorRoleSelected ? [...sidebarMenuItems, ...PROPONENT_MENU_ITEMS] : sidebarMenuItems),
+    [sidebarMenuItems, isLocatorRoleSelected]
+  );
+
+  const rootSummary = useMemo(() => {
+    if (activeTab === 'sidebar') {
+      const on = sidebarTreeItems.filter((item) =>
+        PROPONENT_MENU_KEYS.has(item.key) ? sidebarPermissions[item.key] ?? true : Boolean(sidebarPermissions[item.key])
+      ).length;
+      const editable = visibleCrudMenuItems.filter((item) => {
+        const r = crudPermissions[item.key];
+        return r && (r.can_add || r.can_edit || r.can_delete);
+      }).length;
+      return `${on} of ${sidebarTreeItems.length} menus visible · ${editable} with edit access`;
+    }
+    const on = DASHBOARD_WIDGETS.filter((item) => widgetPermissions[item.key] ?? true).length;
+    return `${on} of ${DASHBOARD_WIDGETS.length} cards visible`;
+  }, [activeTab, sidebarTreeItems, sidebarPermissions, visibleCrudMenuItems, crudPermissions, widgetPermissions]);
 
   async function loadRoles() {
     setLoading(true);
@@ -640,37 +785,60 @@ export function ControlPanelManagement({ locationSearch }: { locationSearch?: st
     run();
   }, [selectedRoleId]);
 
-  async function saveSidebarPermissions() {
+  async function putSidebarPermissions() {
+    const payload = [
+      ...sidebarMenuItems.map((item) => ({
+        menu_key: item.key,
+        is_enabled: Boolean(sidebarPermissions[item.key]),
+      })),
+      // Only part of this role's saved set when it's the Locator role being
+      // edited — otherwise saving another role's sidebar would silently
+      // wipe the Locator portal menu rows (this save replaces the full set
+      // for the role, not just the keys shown on screen).
+      ...(isLocatorRoleSelected
+        ? PROPONENT_MENU_ITEMS.map((item) => ({
+            menu_key: item.key,
+            is_enabled: sidebarPermissions[item.key] ?? true,
+          }))
+        : []),
+    ];
+    const res = await fetch(api(`/api/control-panel/sidebar-menu/${selectedRoleId}`), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ permissions: payload }),
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(json?.message || 'Failed to save sidebar permissions');
+  }
+
+  async function putCrudPermissions() {
+    const payload = crudMenuItems.map((item) => ({
+      menu_key: item.key,
+      can_add: Boolean(crudPermissions[item.key]?.can_add),
+      can_edit: Boolean(crudPermissions[item.key]?.can_edit),
+      can_delete: Boolean(crudPermissions[item.key]?.can_delete),
+    }));
+    const res = await fetch(api(`/api/control-panel/menu-crud/${selectedRoleId}`), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ permissions: payload }),
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(json?.message || 'Failed to save CRUD permissions');
+  }
+
+  /** Menu visibility and its Add/Edit/Delete access live in one tree, so
+   * they save together. */
+  async function saveMenuAccess() {
     if (!selectedRoleId) return;
     setSaving(true);
     try {
-      const payload = [
-        ...sidebarMenuItems.map((item) => ({
-          menu_key: item.key,
-          is_enabled: Boolean(sidebarPermissions[item.key]),
-        })),
-        // Only part of this role's saved set when it's the Locator role being
-        // edited — otherwise saving another role's sidebar would silently
-        // wipe the Locator portal menu rows (this save replaces the full set
-        // for the role, not just the keys shown on screen).
-        ...(isLocatorRoleSelected
-          ? PROPONENT_MENU_ITEMS.map((item) => ({
-              menu_key: item.key,
-              is_enabled: sidebarPermissions[item.key] ?? true,
-            }))
-          : []),
-      ];
-      const res = await fetch(api(`/api/control-panel/sidebar-menu/${selectedRoleId}`), {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ permissions: payload }),
-      });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(json?.message || 'Failed to save sidebar permissions');
-      toast.success('Sidebar menu permissions saved');
+      await Promise.all([putSidebarPermissions(), putCrudPermissions()]);
+      toast.success('Menu access saved');
     } catch (e: any) {
-      toast.error(e?.message || 'Failed to save sidebar permissions');
+      toast.error(e?.message || 'Failed to save menu access');
     } finally {
       setSaving(false);
     }
@@ -702,32 +870,6 @@ export function ControlPanelManagement({ locationSearch }: { locationSearch?: st
     }
   }
 
-  async function saveCrudPermissions() {
-    if (!selectedRoleId) return;
-    setSaving(true);
-    try {
-      const payload = crudMenuItems.map((item) => ({
-        menu_key: item.key,
-        can_add: Boolean(crudPermissions[item.key]?.can_add),
-        can_edit: Boolean(crudPermissions[item.key]?.can_edit),
-        can_delete: Boolean(crudPermissions[item.key]?.can_delete),
-      }));
-      const res = await fetch(api(`/api/control-panel/menu-crud/${selectedRoleId}`), {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ permissions: payload }),
-      });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(json?.message || 'Failed to save CRUD permissions');
-      toast.success('Menu CRUD permissions saved');
-    } catch (e: any) {
-      toast.error(e?.message || 'Failed to save CRUD permissions');
-    } finally {
-      setSaving(false);
-    }
-  }
-
   return (
     <div className="space-y-4 sm:space-y-5">
       <div className="mt-3">
@@ -739,8 +881,7 @@ export function ControlPanelManagement({ locationSearch }: { locationSearch?: st
         >
           {(
             [
-              ['sidebar', 'Sidebar', 'Menu Permissions', 'Sidebar'],
-              ['crud', 'CRUD', 'Permissions', 'CRUD'],
+              ['sidebar', 'Sidebar', 'Menus & Access', 'Menus'],
               ['widgets', 'Dashboard', 'Widgets', 'Widgets'],
             ] as const
           ).map(([key, caption, title, shortTitle]) => (
@@ -757,7 +898,7 @@ export function ControlPanelManagement({ locationSearch }: { locationSearch?: st
               onClick={() => setActiveTab(key)}
             >
               <span className="hidden sm:block text-[10px] font-semibold uppercase tracking-widest opacity-80">{caption}</span>
-              {/* Phones: one short word per tab so all three fit without wrapping. */}
+              {/* Phones: one short word per tab so they fit without wrapping. */}
               <span className="sm:hidden text-[12px] font-bold leading-tight tracking-tight">{shortTitle}</span>
               <span className="hidden sm:block text-sm font-bold leading-tight tracking-tight">{title}</span>
             </button>
@@ -776,88 +917,38 @@ export function ControlPanelManagement({ locationSearch }: { locationSearch?: st
             description="There are no roles available to manage permissions for."
           />
         ) : (
-          <div className="grid grid-cols-1 lg:grid-cols-[280px_1fr] gap-3 sm:gap-4">
-            {/* Phones/tablets: a role dropdown instead of the tall role list,
-                so the permission switches are visible without scrolling. */}
-            <div className="lg:hidden space-y-1">
-              <div className="text-[10px] font-semibold text-secondary uppercase tracking-widest">Role</div>
-              <AppSelect
-                value={selectedRoleId}
-                onChange={(v) => v && setSelectedRoleId(v)}
-                options={roles.map((role) => ({ value: String(role.id), label: roleDisplayName(role.name) }))}
-                isClearable={false}
-              />
-              {selectedRole?.description ? (
-                <div className="text-[10px] text-secondary">{selectedRole.description}</div>
-              ) : null}
-            </div>
-
-            <div
-              className="hidden lg:block rounded-xl border p-3 h-fit"
-              style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'var(--control-bg)' }}
-            >
-              <div className="mb-2 text-[10px] font-semibold text-secondary uppercase tracking-widest">Roles</div>
-              <div className="space-y-1.5">
-                {roles.map((role) => {
-                  const isActive = String(role.id) === selectedRoleId;
-                  return (
-                    <button
-                      key={role.id}
-                      onClick={() => setSelectedRoleId(String(role.id))}
-                      className="w-full rounded-lg px-2.5 py-2 text-left text-[11px] cursor-pointer"
-                      style={
-                        isActive
-                          ? { backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }
-                          : { backgroundColor: 'transparent', color: 'var(--text)' }
-                      }
-                    >
-                      <div className="font-semibold leading-tight">{roleDisplayName(role.name)}</div>
-                      <div
-                        className="text-[10px] opacity-70 leading-tight whitespace-nowrap overflow-hidden text-ellipsis"
-                        title={role.description || `ID ${role.id}`}
-                      >
-                        {role.description || `ID ${role.id}`}
-                      </div>
-                    </button>
-                  );
-                })}
+          <div className="min-w-0">
+            <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-3 mb-4">
+              <div className="min-w-0">
+                <div className="text-[10px] font-semibold text-secondary uppercase tracking-widest">
+                  {activeTab === 'sidebar' ? 'Menus & Access' : 'Dashboard Widget Visibility'}
+                </div>
+                <div className="text-[12px] text-secondary">
+                  {activeTab === 'sidebar'
+                    ? `Sidebar menus and Add / Edit / Delete access for ${selectedRole ? roleDisplayName(selectedRole.name) : 'selected role'}`
+                    : `Choose which dashboard cards ${selectedRole ? roleDisplayName(selectedRole.name) : 'this role'} sees`}
+                </div>
               </div>
-            </div>
-
-            <div className="min-w-0 sm:rounded-xl sm:border sm:p-3" style={{ borderColor: 'var(--border-subtle)' }}>
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
-                <div className="min-w-0">
-                  <div className="text-[10px] font-semibold text-secondary uppercase tracking-widest">
-                    {activeTab === 'sidebar'
-                      ? 'Sidebar Menu Permissions'
-                      : activeTab === 'crud'
-                        ? 'Menu CRUD Permissions'
-                        : 'Dashboard Widget Visibility'}
-                  </div>
-                  <div className="text-[12px] text-secondary">
-                    {activeTab === 'sidebar'
-                      ? `Showing sidebar menus for ${selectedRole ? roleDisplayName(selectedRole.name) : 'selected role'}`
-                      : activeTab === 'crud'
-                        ? `Configure CRUD modules for ${selectedRole ? roleDisplayName(selectedRole.name) : 'selected role'}`
-                        : `Choose which dashboard cards ${selectedRole ? roleDisplayName(selectedRole.name) : 'this role'} sees`}
-                  </div>
+              <div className="flex flex-col sm:flex-row sm:items-end gap-2">
+                <div className="space-y-1 sm:w-[240px]">
+                  <div className="text-[10px] font-semibold text-secondary uppercase tracking-widest">Role</div>
+                  <AppSelect
+                    value={selectedRoleId}
+                    onChange={(v) => v && setSelectedRoleId(v)}
+                    options={roles.map((role) => ({ value: String(role.id), label: roleDisplayName(role.name) }))}
+                    isClearable={false}
+                  />
                 </div>
                 <button
                   type="button"
-                  className="group relative inline-flex shrink-0 items-center justify-center gap-1.5 overflow-hidden rounded-lg px-3 py-1.5 text-[11px] font-semibold tracking-wide shadow-sm transition-[transform,box-shadow,filter,opacity] duration-200 ease-out hover:brightness-110 hover:shadow-md active:scale-[0.98] cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:brightness-100 disabled:active:scale-100"
+                  className="group relative inline-flex shrink-0 items-center justify-center gap-1.5 overflow-hidden rounded-lg px-3 py-2 text-[11px] font-semibold tracking-wide shadow-sm transition-[transform,box-shadow,filter,opacity] duration-200 ease-out hover:brightness-110 hover:shadow-md active:scale-[0.98] cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:brightness-100 disabled:active:scale-100"
                   style={{
                     backgroundColor: 'var(--nav-active-bg)',
                     color: 'var(--nav-active-text)',
                     boxShadow:
                       '0 1px 2px rgba(0,0,0,0.12), 0 4px 14px color-mix(in srgb, var(--nav-active-bg) 45%, transparent)',
                   }}
-                  onClick={
-                    activeTab === 'sidebar'
-                      ? saveSidebarPermissions
-                      : activeTab === 'crud'
-                        ? saveCrudPermissions
-                        : saveWidgetPermissions
-                  }
+                  onClick={activeTab === 'sidebar' ? saveMenuAccess : saveWidgetPermissions}
                   disabled={saving || loading}
                 >
                   <span
@@ -875,245 +966,268 @@ export function ControlPanelManagement({ locationSearch }: { locationSearch?: st
                   <span className="relative">{saving ? 'Saving…' : 'Save changes'}</span>
                 </button>
               </div>
+            </div>
 
-              <AnimatePresence mode="wait" initial={false}>
-                {activeTab === 'sidebar' ? (
-                  <motion.div
-                    key={`sidebar-${selectedRoleId}`}
-                    initial={{ opacity: 0, x: 16 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    exit={{ opacity: 0, x: -16 }}
-                    transition={{ duration: 0.22, ease: 'easeOut' }}
-                    className="space-y-2"
-                  >
-                    <div
-                      className="space-y-2 rounded-xl border p-2"
-                      style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'var(--control-bg)' }}
-                    >
-                      <div
-                        className="grid grid-cols-[minmax(0,1fr)_3.25rem] items-center gap-x-3 gap-y-1 px-3 py-2 border rounded-lg text-[10px] font-semibold uppercase tracking-widest text-secondary"
-                        style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'var(--surface)' }}
-                      >
-                        <span className="min-w-0">Menu Item</span>
-                        <span className="flex min-h-[1.75rem] items-center justify-center text-center leading-none">
-                          Visible
-                        </span>
-                      </div>
-                      <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
-                        {sidebarMenuColumns
-                          .filter((c) => c.items.length > 0)
-                          .map((column) => (
-                          <div key={`sidebar-column-${column.offset}`} className="space-y-2">
-                            {column.items.map((item) => {
-                              const enabled = PROPONENT_MENU_KEYS.has(item.key)
-                                ? sidebarPermissions[item.key] ?? true
-                                : Boolean(sidebarPermissions[item.key]);
-                              return (
-                              <div
-                                key={item.key}
-                                className="grid grid-cols-[minmax(0,1fr)_3.25rem] items-center gap-x-3 gap-y-1 px-3 py-2.5 border rounded-lg transition-colors"
-                                style={{
-                                  borderColor: 'var(--border-subtle)',
-                                  backgroundColor: enabled ? 'var(--surface)' : 'transparent',
-                                }}
-                              >
-                                <span className="min-w-0 text-[11px]" style={{ color: 'var(--text)' }}>
-                                  {item.label}
-                                </span>
-                                <div className="flex min-h-[1.75rem] items-center justify-center">
-                                  <PermissionToggle
-                                    aria-label={`${item.label} sidebar visible`}
-                                    checked={enabled}
-                                    onChange={(next) =>
-                                      setSidebarPermissions((prev) => ({
-                                        ...prev,
-                                        [item.key]: next,
-                                      }))
-                                    }
-                                  />
-                                </div>
+            <AnimatePresence mode="wait" initial={false}>
+              <motion.div
+                key={`${activeTab}-${selectedRoleId}`}
+                initial={{ opacity: 0, x: 16 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -16 }}
+                transition={{ duration: 0.22, ease: 'easeOut' }}
+                className="space-y-3"
+              >
+                {(() => {
+                  const allItems: { key: string; linked: boolean; node: React.ReactNode }[] =
+                    activeTab === 'sidebar'
+                      ? sidebarTreeItems.map((item) => {
+                          const enabled = PROPONENT_MENU_KEYS.has(item.key)
+                            ? sidebarPermissions[item.key] ?? true
+                            : Boolean(sidebarPermissions[item.key]);
+                          const menuCard = (
+                            <TreeNodeCard
+                              active={enabled}
+                              title={item.label}
+                              subtitle={enabled ? 'Visible in sidebar' : 'Hidden'}
+                              trailing={
+                                <PermissionToggle
+                                  aria-label={`${item.label} sidebar visible`}
+                                  checked={enabled}
+                                  onChange={(next) =>
+                                    setSidebarPermissions((prev) => ({ ...prev, [item.key]: next }))
+                                  }
+                                />
+                              }
+                            />
+                          );
+                          const isCrud = enabled && Boolean((LANDING_CONFIG as any)[item.key]?.isCrud);
+                          if (!isCrud) return { key: item.key, linked: enabled, node: menuCard };
+
+                          // CRUD access branches off its menu: only granted actions are
+                          // linked into the tree; the rest sit as "+" chips on the card.
+                          const row = crudPermissions[item.key] || { can_add: false, can_edit: false, can_delete: false };
+                          const hints = (LANDING_CONFIG as any)[item.key]?.crudHints as
+                            | { add?: string; edit?: string; delete?: string }
+                            | undefined;
+                          const setFlag = (flag: CrudFlag, next: boolean) =>
+                            setCrudPermissions((prev) => ({
+                              ...prev,
+                              [item.key]: {
+                                can_add: prev[item.key]?.can_add || false,
+                                can_edit: prev[item.key]?.can_edit || false,
+                                can_delete: prev[item.key]?.can_delete || false,
+                                [flag]: next,
+                              },
+                            }));
+                          const granted = CRUD_FLAGS.filter(([flag]) => row[flag]);
+                          const missing = CRUD_FLAGS.filter(([flag]) => !row[flag]);
+                          return {
+                            key: item.key,
+                            linked: true,
+                            node: (
+                              <div>
+                                <NodeTree
+                                  nested
+                                  root={
+                                    <TreeNodeCard
+                                      active
+                                      title={item.label}
+                                      subtitle={granted.length ? 'Visible in sidebar' : 'Visible · view only'}
+                                      trailing={
+                                        <PermissionToggle
+                                          aria-label={`${item.label} sidebar visible`}
+                                          checked
+                                          onChange={(next) =>
+                                            setSidebarPermissions((prev) => ({ ...prev, [item.key]: next }))
+                                          }
+                                        />
+                                      }
+                                    >
+                                      {missing.length > 0 ? (
+                                        <div
+                                          className="flex flex-wrap gap-1.5 border-t px-3 py-2"
+                                          style={{ borderColor: 'var(--border-subtle)' }}
+                                        >
+                                          {missing.map(([flag, label]) => (
+                                            <button
+                                              key={flag}
+                                              type="button"
+                                              onClick={() => setFlag(flag, true)}
+                                              className="inline-flex items-center gap-1 rounded-md border border-dashed px-2 py-0.5 text-[10px] font-semibold text-secondary cursor-pointer hover:opacity-80"
+                                              style={{ borderColor: 'var(--border-subtle)' }}
+                                              aria-label={`Grant ${label} on ${item.label}`}
+                                            >
+                                              <Plus size={10} /> {label}
+                                            </button>
+                                          ))}
+                                        </div>
+                                      ) : null}
+                                    </TreeNodeCard>
+                                  }
+                                  items={[
+                                    ...granted.map(([flag, label, hintKey]) => ({
+                                      key: flag,
+                                      node: (
+                                        <TreeNodeCard
+                                          active
+                                          title={label}
+                                          subtitle={hints?.[hintKey] || `Can ${label.toLowerCase()} records`}
+                                          trailing={
+                                            <PermissionToggle
+                                              aria-label={`${item.label} ${label.toLowerCase()} permission`}
+                                              checked
+                                              onChange={(next) => setFlag(flag, next)}
+                                            />
+                                          }
+                                        />
+                                      ),
+                                    })),
+                                    ...(item.key === 'approval:queue'
+                                      ? [
+                                          {
+                                            key: 'workflow',
+                                            node: (
+                                              <TreeNodeCard
+                                                active={(workflowLevels?.length || 0) > 0}
+                                                title="Approval Workflow"
+                                                subtitle={
+                                                  workflowLevels == null
+                                                    ? 'Global approval ladder'
+                                                    : workflowLevels.length
+                                                      ? `${workflowLevels.length} level${workflowLevels.length === 1 ? '' : 's'} · ${workflowLevels
+                                                          .map((l) => l.name)
+                                                          .join(' → ')}`
+                                                      : 'No levels configured yet'
+                                                }
+                                                trailing={
+                                                  <button
+                                                    type="button"
+                                                    onClick={() => setWorkflowOpen(true)}
+                                                    className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[11px] font-semibold cursor-pointer hover:opacity-80"
+                                                    style={{ borderColor: 'var(--border-subtle)', color: 'var(--text)' }}
+                                                  >
+                                                    <Settings2 size={12} /> Configure
+                                                  </button>
+                                                }
+                                              />
+                                            ),
+                                          },
+                                        ]
+                                      : []),
+                                  ]}
+                                />
                               </div>
-                              );
-                            })}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  </motion.div>
-                ) : activeTab === 'crud' ? (
-                  <motion.div
-                    key={`crud-${selectedRoleId}`}
-                    initial={{ opacity: 0, x: 16 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    exit={{ opacity: 0, x: -16 }}
-                    transition={{ duration: 0.22, ease: 'easeOut' }}
-                    className="space-y-2"
-                  >
-                    <div
-                      className={`hidden sm:grid ${CRUD_TOGGLE_COLS_CLASS} gap-y-1 px-3 py-2 border rounded-lg text-[10px] font-semibold uppercase tracking-widest text-secondary`}
-                      style={{ borderColor: 'var(--border-subtle)' }}
-                    >
-                      <span className="min-w-0">Module</span>
-                      <span className="flex min-h-[1.75rem] items-center justify-center text-center leading-none">
-                        Add
-                      </span>
-                      <span className="flex min-h-[1.75rem] items-center justify-center text-center leading-none">
-                        Edit
-                      </span>
-                      <span className="flex min-h-[1.75rem] items-center justify-center text-center leading-none">
-                        Delete
-                      </span>
-                    </div>
-                    {visibleCrudMenuItems.length === 0 ? (
-                      <p className="text-[11px] text-secondary px-3 py-4 text-center">
-                        No CRUD-capable modules are enabled for this role in Sidebar Menu Permissions yet.
-                      </p>
-                    ) : null}
-                    {visibleCrudMenuItems.map((item) => {
-                      const row = crudPermissions[item.key] || {
-                        can_add: false,
-                        can_edit: false,
-                        can_delete: false,
-                      };
-                      const hints = (LANDING_CONFIG as any)[item.key]?.crudHints as
-                        | { add?: string; edit?: string; delete?: string }
-                        | undefined;
-                      const isApprovalQueue = item.key === 'approval:queue';
-                      return (
-                        <React.Fragment key={item.key}>
-                        <div
-                          className="border rounded-lg overflow-hidden"
-                          style={{ borderColor: 'var(--border-subtle)' }}
-                        >
-                        <div
-                          className={`group block sm:grid ${CRUD_TOGGLE_COLS_CLASS} gap-y-1 px-3 py-2.5 transition-colors`}
-                        >
-                          <div className="min-w-0 flex flex-col gap-0.5">
-                            <span className="text-[11px] font-medium" style={{ color: 'var(--text)' }}>
-                              {item.label}
-                            </span>
-                            {hints ? (
-                              <span className="text-[10px] leading-snug text-secondary">
-                                {hints.add ? <>Add — {hints.add}. </> : null}
-                                {hints.edit ? <>Edit — {hints.edit}. </> : null}
-                                {hints.delete ? <>Delete — {hints.delete}.</> : null}
-                              </span>
-                            ) : null}
-                          </div>
-                          {/* Phones: switches sit under the name with their own labels; from sm the wrapper dissolves into the grid columns. */}
-                          <div className="mt-2 grid grid-cols-3 gap-2 sm:contents">
-                          <div className="flex flex-col sm:flex-row min-h-[1.75rem] items-center justify-center gap-1">
-                            <span className="sm:hidden text-[9px] font-semibold uppercase tracking-wider text-secondary">Add</span>
-                            <PermissionToggle
-                              aria-label={`${item.label} add permission`}
-                              checked={row.can_add}
-                              onChange={(next) =>
-                                setCrudPermissions((prev) => ({
-                                  ...prev,
-                                  [item.key]: {
-                                    can_add: next,
-                                    can_edit: prev[item.key]?.can_edit || false,
-                                    can_delete: prev[item.key]?.can_delete || false,
-                                  },
-                                }))
-                              }
-                            />
-                          </div>
-                          <div className="flex flex-col sm:flex-row min-h-[1.75rem] items-center justify-center gap-1">
-                            <span className="sm:hidden text-[9px] font-semibold uppercase tracking-wider text-secondary">Edit</span>
-                            <PermissionToggle
-                              aria-label={`${item.label} edit permission`}
-                              checked={row.can_edit}
-                              onChange={(next) =>
-                                setCrudPermissions((prev) => ({
-                                  ...prev,
-                                  [item.key]: {
-                                    can_add: prev[item.key]?.can_add || false,
-                                    can_edit: next,
-                                    can_delete: prev[item.key]?.can_delete || false,
-                                  },
-                                }))
-                              }
-                            />
-                          </div>
-                          <div className="flex flex-col sm:flex-row min-h-[1.75rem] items-center justify-center gap-1">
-                            <span className="sm:hidden text-[9px] font-semibold uppercase tracking-wider text-secondary">Delete</span>
-                            <PermissionToggle
-                              aria-label={`${item.label} delete permission`}
-                              checked={row.can_delete}
-                              onChange={(next) =>
-                                setCrudPermissions((prev) => ({
-                                  ...prev,
-                                  [item.key]: {
-                                    can_add: prev[item.key]?.can_add || false,
-                                    can_edit: prev[item.key]?.can_edit || false,
-                                    can_delete: next,
-                                  },
-                                }))
-                              }
-                            />
-                          </div>
-                          </div>
-                        </div>
-                        {isApprovalQueue ? (
-                          <div className="border-t px-3 py-3" style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'var(--control-bg)' }}>
-                            <ApprovalWorkflowLevelsSection />
-                          </div>
-                        ) : null}
-                        </div>
-                        </React.Fragment>
-                      );
-                    })}
-                    <p className="text-[11px] text-secondary pt-2 border-t mt-2" style={{ borderColor: 'var(--border-subtle)' }}>
-                      Turning off a switch hides the matching Add, Edit, or Delete controls for this role in that module.
-                    </p>
-                  </motion.div>
-                ) : (
-                  <motion.div
-                    key={`widgets-${selectedRoleId}`}
-                    initial={{ opacity: 0, x: 16 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    exit={{ opacity: 0, x: -16 }}
-                    transition={{ duration: 0.22, ease: 'easeOut' }}
-                    className="space-y-2"
-                  >
-                    <div
-                      className="grid grid-cols-[minmax(0,1fr)_3.25rem] items-center gap-x-3 gap-y-1 px-3 py-2 border rounded-lg text-[10px] font-semibold uppercase tracking-widest text-secondary"
-                      style={{ borderColor: 'var(--border-subtle)' }}
-                    >
-                      <span className="min-w-0">Dashboard Card</span>
-                      <span className="flex min-h-[1.75rem] items-center justify-center text-center leading-none">Visible</span>
-                    </div>
-                    {DASHBOARD_WIDGETS.map((item) => (
-                      <div
-                        key={item.key}
-                        className="grid grid-cols-[minmax(0,1fr)_3.25rem] items-center gap-x-3 gap-y-1 px-3 py-2.5 border rounded-lg transition-colors"
-                        style={{ borderColor: 'var(--border-subtle)' }}
-                      >
-                        <span className="min-w-0 text-[11px]" style={{ color: 'var(--text)' }}>
-                          {item.label}
-                        </span>
-                        <div className="flex min-h-[1.75rem] items-center justify-center">
-                          <PermissionToggle
-                            aria-label={`${item.label} visible`}
-                            checked={widgetPermissions[item.key] ?? true}
-                            onChange={(next) =>
-                              setWidgetPermissions((prev) => ({ ...prev, [item.key]: next }))
+                            ),
+                          };
+                        })
+                        : DASHBOARD_WIDGETS.map((item) => {
+                            const enabled = widgetPermissions[item.key] ?? true;
+                            return {
+                              key: item.key,
+                              linked: enabled,
+                              node: (
+                                <TreeNodeCard
+                                  active={enabled}
+                                  title={item.label}
+                                  subtitle={enabled ? 'Shown on dashboard' : 'Hidden'}
+                                  trailing={
+                                    <PermissionToggle
+                                      aria-label={`${item.label} visible`}
+                                      checked={enabled}
+                                      onChange={(next) => setWidgetPermissions((prev) => ({ ...prev, [item.key]: next }))}
+                                    />
+                                  }
+                                />
+                              ),
+                            };
+                          });
+                  const linkedItems = allItems.filter((i) => i.linked);
+                  const unlinkedItems = allItems.filter((i) => !i.linked);
+                  return (
+                    <>
+                      <NodeTree
+                        root={
+                          <TreeNodeCard
+                            emphasis
+                            active
+                            title={selectedRole ? roleDisplayName(selectedRole.name) : 'Role'}
+                            subtitle={
+                              <>
+                                {rootSummary}
+                                {selectedRole?.description ? <> · {selectedRole.description}</> : null}
+                              </>
                             }
                           />
+                        }
+                        items={linkedItems}
+                      />
+                      {unlinkedItems.length > 0 ? (
+                        <div className="pt-3 border-t" style={{ borderColor: 'var(--border-subtle)' }}>
+                          <button
+                            type="button"
+                            aria-expanded={showUnlinked}
+                            onClick={() => setShowUnlinked((v) => !v)}
+                            className="flex items-center gap-1.5 text-[10px] font-semibold text-secondary uppercase tracking-widest cursor-pointer hover:opacity-80"
+                          >
+                            <ChevronRight
+                              size={13}
+                              className="transition-transform duration-200"
+                              style={{ transform: showUnlinked ? 'rotate(90deg)' : 'none' }}
+                            />
+                            {showUnlinked ? 'Hide' : 'Show'} not linked ({unlinkedItems.length})
+                          </button>
+                          <AnimatePresence initial={false}>
+                            {showUnlinked ? (
+                              <motion.div
+                                key="unlinked"
+                                initial={{ height: 0, opacity: 0 }}
+                                animate={{ height: 'auto', opacity: 1 }}
+                                exit={{ height: 0, opacity: 0 }}
+                                transition={{ duration: 0.2, ease: 'easeOut' }}
+                                className="overflow-hidden"
+                              >
+                                <p className="mt-1 mb-2 text-[11px] text-secondary">Turn one on to add it to the tree.</p>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-2 pb-1">
+                                  {unlinkedItems.map((i) => (
+                                    <div key={i.key}>{i.node}</div>
+                                  ))}
+                                </div>
+                              </motion.div>
+                            ) : null}
+                          </AnimatePresence>
                         </div>
-                      </div>
-                    ))}
-                    <p className="text-[11px] text-secondary pt-2 border-t mt-2" style={{ borderColor: 'var(--border-subtle)' }}>
-                      New cards default to visible until turned off here — this never affects the Administrator role.
-                    </p>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
+                      ) : null}
+                    </>
+                  );
+                })()}
+                <p className="text-[11px] text-secondary pt-2 border-t" style={{ borderColor: 'var(--border-subtle)' }}>
+                  {activeTab === 'sidebar'
+                    ? 'Add, Edit, and Delete branch off each module the role can see — unlinking one hides that control for this role in that module.'
+                    : 'New cards default to visible until turned off here — this never affects the Administrator role.'}
+                </p>
+              </motion.div>
+            </AnimatePresence>
           </div>
         )}
       </div>
+
+      <SidePanel
+        open={workflowOpen}
+        title="Approval Workflow Setup"
+        subtitle="Global — applies to every role, not just the one selected"
+        saveLabel="Done"
+        widthClassName="max-w-[36rem]"
+        onClose={() => {
+          setWorkflowOpen(false);
+          loadWorkflowSummary();
+        }}
+        onSave={() => {
+          setWorkflowOpen(false);
+          loadWorkflowSummary();
+        }}
+      >
+        <ApprovalWorkflowLevelsSection showTitle={false} />
+      </SidePanel>
     </div>
   );
 }
