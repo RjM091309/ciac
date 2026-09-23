@@ -102,6 +102,7 @@ export function LocatorUsersManagement({
   // ApplicationsWorkflow.tsx's openContinueDraft/submitApplication.
   const [continuingDraft, setContinuingDraft] = useState<{
     id: number;
+    userId: number;
     application_no: string;
     application_type: string;
     username: string;
@@ -115,6 +116,7 @@ export function LocatorUsersManagement({
   const [continuingDraftType, setContinuingDraftType] = useState('DIRECT_LEASE');
   const [continuingDraftSaving, setContinuingDraftSaving] = useState(false);
   const [continuingDraftLoadingProfile, setContinuingDraftLoadingProfile] = useState(false);
+  const [continuingDraftFieldErrors, setContinuingDraftFieldErrors] = useState<{ username?: string; email?: string }>({});
   // Pre-applied when landing here from the dashboard's "Registered
   // Businesses" card (?status=ACTIVE) so the list is already scoped instead
   // of showing every status (active/pending/suspended/deactivated) mixed
@@ -792,6 +794,7 @@ export function LocatorUsersManagement({
     if (app.status === 'DRAFT') {
       setContinuingDraft({
         id: app.id,
+        userId: u.id,
         application_no: app.application_no,
         application_type: app.application_type,
         username: u.username,
@@ -803,6 +806,7 @@ export function LocatorUsersManagement({
         contact_no: '',
       });
       setContinuingDraftType(app.application_type || 'DIRECT_LEASE');
+      setContinuingDraftFieldErrors({});
       // Business profile fields aren't part of the bulk /api/users list —
       // same on-demand fetch openEdit() uses, so the panel doesn't have to
       // wait on them before opening.
@@ -832,7 +836,30 @@ export function LocatorUsersManagement({
   async function saveContinueDraft(submit: boolean) {
     if (!continuingDraft) return;
     setContinuingDraftSaving(true);
+    setContinuingDraftFieldErrors({});
     try {
+      // Still a draft, so unlike the account/business fields shown read-only
+      // everywhere else, these are genuinely fixable here — same PUT the
+      // Edit Locator Account form itself uses.
+      const userRes = await fetch(api(`/api/users/${continuingDraft.userId}`), {
+        method: 'PUT',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          username: continuingDraft.username.trim(),
+          email: continuingDraft.email.trim(),
+          full_name: continuingDraft.full_name.trim() || null,
+          business_name: continuingDraft.business_name.trim() || undefined,
+          address: continuingDraft.address.trim() || undefined,
+          lease_address: continuingDraft.lease_address.trim() || undefined,
+          contact_no: continuingDraft.contact_no.trim() || undefined,
+        }),
+      });
+      const userJson = await userRes.json().catch(() => ({}));
+      if (!userRes.ok) {
+        throw Object.assign(new Error(userJson?.message || 'Failed to update account'), { field: userJson?.field });
+      }
+
       const patchRes = await fetch(api(`/api/applications/${continuingDraft.id}`), {
         method: 'PATCH',
         credentials: 'include',
@@ -864,7 +891,12 @@ export function LocatorUsersManagement({
       setContinuingDraft(null);
       await refresh({ showLoading: false });
     } catch (e: any) {
-      toast.error(e?.message || 'Failed to update draft');
+      const message = e?.message || 'Failed to update draft';
+      if (e?.field === 'username' || e?.field === 'email') {
+        setContinuingDraftFieldErrors({ [e.field]: message });
+      } else {
+        toast.error(message);
+      }
     } finally {
       setContinuingDraftSaving(false);
     }
@@ -1391,14 +1423,40 @@ export function LocatorUsersManagement({
         {continuingDraft ? (
           <>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <Field label="Username">
-                <input className="app-input" value={continuingDraft.username} disabled />
+              <Field label="Username" error={continuingDraftFieldErrors.username}>
+                <input
+                  className="app-input"
+                  value={continuingDraft.username}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    setContinuingDraft((p) => (p ? { ...p, username: value } : p));
+                    if (continuingDraftFieldErrors.username) setContinuingDraftFieldErrors((p) => ({ ...p, username: undefined }));
+                  }}
+                  style={continuingDraftFieldErrors.username ? { borderColor: '#ef4444' } : undefined}
+                />
               </Field>
               <Field label="Full name">
-                <input className="app-input" value={continuingDraft.full_name} disabled />
+                <input
+                  className="app-input"
+                  value={continuingDraft.full_name}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    setContinuingDraft((p) => (p ? { ...p, full_name: value } : p));
+                  }}
+                />
               </Field>
-              <Field label="Email">
-                <input className="app-input" value={continuingDraft.email} disabled />
+              <Field label="Email" error={continuingDraftFieldErrors.email}>
+                <input
+                  type="email"
+                  className="app-input"
+                  value={continuingDraft.email}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    setContinuingDraft((p) => (p ? { ...p, email: value } : p));
+                    if (continuingDraftFieldErrors.email) setContinuingDraftFieldErrors((p) => ({ ...p, email: undefined }));
+                  }}
+                  style={continuingDraftFieldErrors.email ? { borderColor: '#ef4444' } : undefined}
+                />
               </Field>
               <Field label="Application type *">
                 <AppSelect
@@ -1416,23 +1474,50 @@ export function LocatorUsersManagement({
 
             <div className="mt-4 pt-4 border-t" style={{ borderColor: 'var(--border-subtle)' }}>
               <p className="text-[11px] text-secondary mb-3">
-                {continuingDraftLoadingProfile ? 'Loading business profile…' : "The locator's account and business profile — fixed at this point, shown here for context."}
+                {continuingDraftLoadingProfile ? 'Loading business profile…' : "Still a draft — the account and business profile can still be corrected here."}
               </p>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <Field label="Business name">
-                  <input className="app-input" value={continuingDraft.business_name} disabled />
+                  <input
+                    className="app-input"
+                    value={continuingDraft.business_name}
+                    disabled={continuingDraftLoadingProfile}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      setContinuingDraft((p) => (p ? { ...p, business_name: value } : p));
+                    }}
+                  />
                 </Field>
                 <Field label="Contact number">
-                  <input className="app-input" value={continuingDraft.contact_no} disabled />
+                  <input
+                    className="app-input"
+                    value={continuingDraft.contact_no}
+                    disabled={continuingDraftLoadingProfile}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      setContinuingDraft((p) => (p ? { ...p, contact_no: value } : p));
+                    }}
+                  />
                 </Field>
                 <div className="sm:col-span-2">
                   <Field label="Principal Address">
-                    <input className="app-input" value={continuingDraft.address} disabled />
+                    <AddressAutocomplete
+                      value={continuingDraft.address}
+                      onChange={(address) => setContinuingDraft((p) => (p ? { ...p, address } : p))}
+                      className="app-input"
+                      placeholder="Start typing to search, or type the full address"
+                    />
                   </Field>
                 </div>
                 <div className="sm:col-span-2">
                   <Field label="Lease Address">
-                    <input className="app-input" value={continuingDraft.lease_address} disabled />
+                    <AddressAutocomplete
+                      value={continuingDraft.lease_address}
+                      onChange={(lease_address) => setContinuingDraft((p) => (p ? { ...p, lease_address } : p))}
+                      className="app-input"
+                      placeholder="Start typing to search, or type the full address"
+                      disabled={continuingDraftLoadingProfile}
+                    />
                   </Field>
                 </div>
               </div>
