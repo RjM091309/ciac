@@ -3,7 +3,6 @@ import {
   BarChart3,
   ChevronRight,
   ClipboardCheck,
-  ClipboardList,
   FileCheck,
   FilePlus2,
   KeyRound,
@@ -321,7 +320,6 @@ export function AppSidebar({
   const showApplicationsMgmt =
     canView('applications:new') ||
     canView('applications:renewals') ||
-    canView('applications:requirements') ||
     canView('settings:proponents') ||
     canView('settings:locator-users') ||
     canView('assessment:queue') ||
@@ -335,6 +333,7 @@ export function AppSidebar({
     canView('settings:control-panel') ||
     canView('settings:audit-log');
   const showFileMaintenance =
+    canView('applications:requirements') ||
     canView('settings:inspection-types') ||
     canView('settings:compliance-types') ||
     canView('settings:application-types') ||
@@ -349,14 +348,16 @@ export function AppSidebar({
   // list instead of click-to-expand parents — see SidebarSection above.
   const flat = Boolean(permissionOverride) || !fullAccess;
 
+  // Ordered to match the real workflow sequence: create the account, file
+  // the application, evaluate it, approve it, then it shows up as a
+  // registered locator — renewals are a separate, later-in-time track.
   const applicationsItems: SidebarLeaf[] = [
     canView('settings:locator-users') && { key: 'settings:locator-users', label: 'Locator Accounts', active: view === 'settings:locator-users', onClick: () => onViewChange('settings:locator-users'), icon: KeyRound },
     canView('applications:new') && { key: 'applications:new', label: 'New Application', active: view === 'applications:new', onClick: () => onViewChange('applications:new'), icon: FilePlus2 },
-    canView('applications:renewals') && { key: 'applications:renewals', label: 'Renewal Tracking', active: view === 'applications:renewals', onClick: () => onViewChange('applications:renewals'), icon: RefreshCw },
-    canView('applications:requirements') && { key: 'applications:requirements', label: 'Requirements', active: view === 'applications:requirements', onClick: () => onViewChange('applications:requirements'), icon: ClipboardList },
-    canView('settings:proponents') && { key: 'settings:proponents', label: 'Locators / Proponent List', active: view === 'settings:proponents', onClick: () => onViewChange('settings:proponents'), icon: Users },
     canView('assessment:queue') && { key: 'assessment:queue', label: 'Evaluation Queue', active: view === 'assessment:queue', onClick: () => onViewChange('assessment:queue'), icon: ClipboardCheck },
     canView('approval:queue') && { key: 'approval:queue', label: 'Approval Queue', active: view === 'approval:queue', onClick: () => onViewChange('approval:queue'), icon: Stamp },
+    canView('settings:proponents') && { key: 'settings:proponents', label: 'Registered Locator', active: view === 'settings:proponents', onClick: () => onViewChange('settings:proponents'), icon: Users },
+    canView('applications:renewals') && { key: 'applications:renewals', label: 'Renewal Tracking', active: view === 'applications:renewals', onClick: () => onViewChange('applications:renewals'), icon: RefreshCw },
   ].filter(Boolean) as SidebarLeaf[];
 
   const complianceInspectionItems: SidebarLeaf[] = [
@@ -374,6 +375,7 @@ export function AppSidebar({
   ].filter(Boolean) as SidebarLeaf[];
 
   const fileMaintenanceItems: SidebarLeaf[] = [
+    canView('applications:requirements') && { key: 'applications:requirements', label: 'Requirements', active: view === 'applications:requirements', onClick: () => onViewChange('applications:requirements') },
     canView('settings:requirement-categories') && { key: 'settings:requirement-categories', label: 'Requirement Categories', active: view === 'settings:requirement-categories', onClick: () => onViewChange('settings:requirement-categories') },
     canView('settings:inspection-types') && { key: 'settings:inspection-types', label: 'Inspection Types', active: view === 'settings:inspection-types', onClick: () => onViewChange('settings:inspection-types') },
     canView('settings:compliance-types') && { key: 'settings:compliance-types', label: 'Compliance Types', active: view === 'settings:compliance-types', onClick: () => onViewChange('settings:compliance-types') },
@@ -391,8 +393,7 @@ export function AppSidebar({
       dashboard: { label: 'Dashboard', icon: LayoutDashboard },
       'applications:new': { label: 'Applications', icon: FilePlus2 },
       'applications:renewals': { label: 'Renewal Tracking', icon: RefreshCw },
-      'applications:requirements': { label: 'Requirements', icon: ClipboardList },
-      'settings:proponents': { label: 'Locators / Proponent List', icon: Users },
+      'settings:proponents': { label: 'Registered Locator', icon: Users },
       'assessment:queue': { label: 'Evaluation Queue', icon: ClipboardCheck },
       'approval:queue': { label: 'Approval Queue', icon: Stamp },
       'compliance:inspections': { label: 'Compliance & Inspection', icon: ClipboardCheck },

@@ -162,6 +162,7 @@ async function ensureSchemaImpl() {
       CREATE TABLE dbo.approval_steps (
         id INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
         approval_id INT NOT NULL,
+        level_id INT NULL,
         level_no INT NOT NULL,
         level_name NVARCHAR(150) NOT NULL,
         role_id INT NULL,
@@ -235,6 +236,18 @@ async function ensureSchemaImpl() {
   await updateSchema(`
     IF COL_LENGTH('dbo.approval_steps', 'role_id') IS NULL
       ALTER TABLE dbo.approval_steps ADD role_id INT NULL, role_name NVARCHAR(120) NULL;
+  `);
+  // level_id links a step back to the level it came from, so authorization
+  // can read that level's CURRENT role/Approvers config live instead of a
+  // frozen-at-start snapshot — an admin fixing a level's approver list (e.g.
+  // swapping in a replacement while someone's on leave) takes effect on
+  // already-in-progress applications immediately, not just new ones.
+  await updateSchema(`
+    IF COL_LENGTH('dbo.approval_steps', 'level_id') IS NULL
+    BEGIN
+      ALTER TABLE dbo.approval_steps ADD level_id INT NULL;
+      ALTER TABLE dbo.approval_steps ADD CONSTRAINT FK_approval_steps_level FOREIGN KEY (level_id) REFERENCES dbo.approval_levels(id);
+    END;
   `);
 
   // The queue LEFT JOINs application_assessments (assessment endorses into the
@@ -622,22 +635,49 @@ async function getApprovalDetail(applicationId) {
       )
     : [];
   if (steps.length > 0) {
-    const stepIds = steps.map((s) => Number(s.id));
-    const assigneeRows = await selectData(
-      `SELECT sa.step_id, u.id, u.full_name, u.username
-       FROM dbo.approval_step_assignees sa
-       INNER JOIN dbo.users u ON u.id = sa.user_id
-       WHERE sa.step_id IN (${stepIds.map((_, i) => `@param${i}`).join(", ")})
-       ORDER BY u.full_name`,
-      stepIds
-    );
-    const byStep = new Map();
-    for (const row of assigneeRows) {
-      const key = Number(row.step_id);
-      if (!byStep.has(key)) byStep.set(key, []);
-      byStep.get(key).push({ id: row.id, full_name: row.full_name, username: row.username });
+    // Steps linked to a level (level_id) show that level's LIVE current
+    // role/Approvers — same data actOnStep authorizes against — so the
+    // "Requires:" list an officer sees always matches what's actually
+    // enforced, including an admin's just-made edit. Legacy steps from
+    // before level_id existed fall back to their frozen
+    // approval_step_assignees snapshot.
+    const legacyStepIds = steps.filter((s) => !s.level_id).map((s) => Number(s.id));
+    const liveLevelIds = Array.from(new Set(steps.filter((s) => s.level_id).map((s) => Number(s.level_id))));
+
+    const legacyByStep = new Map();
+    if (legacyStepIds.length > 0) {
+      const assigneeRows = await selectData(
+        `SELECT sa.step_id, u.id, u.full_name, u.username
+         FROM dbo.approval_step_assignees sa
+         INNER JOIN dbo.users u ON u.id = sa.user_id
+         WHERE sa.step_id IN (${legacyStepIds.map((_, i) => `@param${i}`).join(", ")})
+         ORDER BY u.full_name`,
+        legacyStepIds
+      );
+      for (const row of assigneeRows) {
+        const key = Number(row.step_id);
+        if (!legacyByStep.has(key)) legacyByStep.set(key, []);
+        legacyByStep.get(key).push({ id: row.id, full_name: row.full_name, username: row.username });
+      }
     }
-    steps = steps.map((s) => ({ ...s, assignees: byStep.get(Number(s.id)) || [] }));
+
+    let liveLevelsById = new Map();
+    if (liveLevelIds.length > 0) {
+      const liveLevelRows = await selectData(
+        `${LEVEL_SELECT} WHERE l.id IN (${liveLevelIds.map((_, i) => `@param${i}`).join(", ")})`,
+        liveLevelIds
+      );
+      const withAssignees = await attachLevelAssignees(liveLevelRows);
+      liveLevelsById = new Map(withAssignees.map((l) => [Number(l.id), l]));
+    }
+
+    steps = steps.map((s) => {
+      const live = s.level_id ? liveLevelsById.get(Number(s.level_id)) : null;
+      if (live) {
+        return { ...s, role_id: live.role_id, role_name: live.role_name, assignees: live.assignees || [] };
+      }
+      return { ...s, assignees: legacyByStep.get(Number(s.id)) || [] };
+    });
   }
   const issuances = approvalId
     ? await selectData(
@@ -757,23 +797,26 @@ async function startApproval(applicationId, actorId) {
 
     await tx.query(`DELETE FROM dbo.approval_steps WHERE approval_id = @param0`, [approval.id]);
     for (const lvl of levels) {
-      // role_id/role_name (and the assignee list below) are snapshotted onto
-      // the step — not read live off approval_levels at act time — so
-      // re-configuring a level's role or approvers later never changes who's
-      // allowed to act on a ladder that's already in progress.
-      const stepResult = await tx.query(
-        `INSERT INTO dbo.approval_steps (approval_id, level_no, level_name, role_id, role_name, decision, created_at)
-         OUTPUT INSERTED.id
-         VALUES (@param0, @param1, @param2, @param3, @param4, 'PENDING', SYSUTCDATETIME())`,
-        [approval.id, lvl.level_no, String(lvl.name).slice(0, 150), lvl.role_id ?? null, lvl.role_name ? String(lvl.role_name).slice(0, 120) : null]
+      // level_id links back to dbo.approval_levels so who-can-act is read
+      // LIVE off the level's current role/Approvers config at act time (see
+      // actOnStep), not frozen at this moment — an admin fixing an approver
+      // list (e.g. swapping in a replacement while someone's on leave) takes
+      // effect on this already-in-progress step immediately. level_no/
+      // level_name/role_id/role_name are still stored as a point-in-time
+      // record (for history/audit display), just no longer authoritative
+      // for authorization.
+      await tx.query(
+        `INSERT INTO dbo.approval_steps (approval_id, level_id, level_no, level_name, role_id, role_name, decision, created_at)
+         VALUES (@param0, @param1, @param2, @param3, @param4, @param5, 'PENDING', SYSUTCDATETIME())`,
+        [
+          approval.id,
+          lvl.id,
+          lvl.level_no,
+          String(lvl.name).slice(0, 150),
+          lvl.role_id ?? null,
+          lvl.role_name ? String(lvl.role_name).slice(0, 120) : null,
+        ]
       );
-      const stepId = stepResult?.recordset?.[0]?.id;
-      for (const assignee of lvl.assignees || []) {
-        await tx.query(
-          `INSERT INTO dbo.approval_step_assignees (step_id, user_id) VALUES (@param0, @param1)`,
-          [stepId, assignee.id]
-        );
-      }
     }
   });
 
@@ -789,56 +832,16 @@ async function startApproval(applicationId, actorId) {
 }
 
 /** The level's hand-picked approvers, snapshotted onto this specific step at
- * startApproval — the pool assignStep/actOnStep narrow against, kept
- * separate from `listApprovers()` which reflects the CURRENT (possibly since
- * re-edited) level config, not what this in-progress ladder actually started
- * with. */
+ * startApproval — the pool actOnStep authorizes against (see its narrowest-
+ * first check below), kept separate from `listApprovers()` which reflects
+ * the CURRENT (possibly since re-edited) level config, not what this
+ * in-progress ladder actually started with. */
 async function getStepAssigneeIds(stepId) {
   const rows = await selectData(
     `SELECT user_id FROM dbo.approval_step_assignees WHERE step_id = @param0`,
     [toInt(stepId)]
   );
   return rows.map((r) => Number(r.user_id));
-}
-
-async function assignStep(stepId, userId, actorId) {
-  await ensureSchema();
-  const rows = await selectData(`SELECT * FROM dbo.approval_steps WHERE id = @param0`, [toInt(stepId)]);
-  const step = rows?.[0];
-  if (!step) return null;
-  if (step.decision !== "PENDING") {
-    throw businessError("This level has already been decided — it can't be reassigned.");
-  }
-  const targetUserId = toInt(userId);
-  // Two people can hold the same role (e.g. two Assessment Officers on
-  // different levels of the same ladder) — role_id alone can't tell them
-  // apart, so once a level is bound to a role, assigning it to a SPECIFIC
-  // person is what actually narrows "who" down to one individual.
-  // Un-assigning (userId null) always stays allowed regardless of role.
-  if (targetUserId !== null) {
-    const assigneeIds = await getStepAssigneeIds(step.id);
-    if (assigneeIds.length > 0) {
-      if (!assigneeIds.includes(targetUserId)) {
-        throw businessError("This level is restricted to a specific set of approvers — that user isn't one of them.");
-      }
-    } else if (step.role_id) {
-      const roleRow = await Role.getRoleById(step.role_id).catch(() => null);
-      const holds = roleRow ? await Role.userHasRoleName(targetUserId, roleRow.name) : false;
-      if (!holds) {
-        throw businessError(`This level requires ${step.role_name || roleRow?.name || "a specific role"} — that user doesn't hold it.`);
-      }
-    }
-  }
-  await updateData(
-    `UPDATE dbo.approval_steps SET assigned_to = @param1 WHERE id = @param0`,
-    [toInt(stepId), targetUserId]
-  );
-  await logActivity(step.approval_id, "STEP_ASSIGNED", `${step.level_name} → user #${toInt(userId) ?? "—"}`, actorId);
-  const appRows = await selectData(
-    `SELECT application_id FROM dbo.application_approvals WHERE id = @param0`,
-    [step.approval_id]
-  );
-  return getApprovalDetail(appRows?.[0]?.application_id);
 }
 
 async function endorseStep(stepId, { office, note, assignToUserId, actorId }) {
@@ -905,20 +908,24 @@ async function actOnStep(stepId, { action, remarks, actorId, override_unverified
     throw businessError("An earlier approval level is still pending.");
   }
 
-  // Three layers, checked narrowest-first:
-  //  1. assigned_to (a specific person) — set via assignStep, this narrows a
-  //     level down to ONE individual for this application's instance (e.g.
-  //     one of two Assessment Officers who share a level's approver list).
-  //     When set, ONLY that person (or admin) may act.
-  //  2. step assignees (dbo.approval_step_assignees, snapshotted from the
-  //     level's hand-picked approver list) — when the level was configured
-  //     with specific approvers, any ONE of them (or admin) may act, same as
-  //     role_id below but narrowed to named individuals instead of a role.
-  //  3. role_id (no assignees configured) — anyone holding that role (or
-  //     admin) may act, same as before assignment existed.
+  // Checked narrowest-first:
+  //  1. assigned_to — a legacy per-instance override some already-in-progress
+  //     approvals may still carry from before per-step reassignment was
+  //     removed; honored here so those don't change behavior mid-flight, but
+  //     nothing sets it anymore.
+  //  2. Approvers — read LIVE off the originating level's CURRENT config
+  //     (step.level_id -> approval_levels), not a frozen-at-start snapshot,
+  //     so an admin fixing a level's Approvers list (e.g. swapping in a
+  //     replacement while someone's on leave) takes effect on this
+  //     already-in-progress step immediately. When the level has specific
+  //     Approvers, ONLY one of them (or admin) may act using their own
+  //     account — this is the actual, current gate. Steps from before
+  //     level_id existed fall back to their frozen role_id/role_name and
+  //     approval_step_assignees snapshot.
+  //  3. role_id (no approvers configured) — anyone holding that role (or
+  //     admin) may act.
   //  A level with none of the above set stays open to anyone with
-  //  approval:queue edit access, unchanged from before any of this was
-  //  enforceable.
+  //  approval:queue edit access.
   const isAdmin = await Role.userHasRoleName(actorId, "admin");
   if (!isAdmin) {
     if (step.assigned_to) {
@@ -926,14 +933,17 @@ async function actOnStep(stepId, { action, remarks, actorId, override_unverified
         throw businessError("This level is assigned to someone else.");
       }
     } else {
-      const assigneeIds = await getStepAssigneeIds(step.id);
+      const liveLevel = step.level_id ? await getLevelById(step.level_id) : null;
+      const assigneeIds = liveLevel ? (liveLevel.assignees || []).map((a) => Number(a.id)) : await getStepAssigneeIds(step.id);
+      const effectiveRoleId = liveLevel ? liveLevel.role_id : step.role_id;
+      const effectiveRoleName = liveLevel ? liveLevel.role_name : step.role_name;
       if (assigneeIds.length > 0) {
         if (!assigneeIds.includes(Number(actorId))) {
           throw businessError("This level is restricted to a specific set of approvers, and you're not one of them.");
         }
-      } else if (step.role_id) {
-        if (!(await Role.userHasRoleName(actorId, step.role_name))) {
-          throw businessError(`Only ${step.role_name || "the assigned role"} can act on this level.`);
+      } else if (effectiveRoleId) {
+        if (!(await Role.userHasRoleName(actorId, effectiveRoleName))) {
+          throw businessError(`Only ${effectiveRoleName || "the assigned role"} can act on this level.`);
         }
       }
     }
@@ -1233,7 +1243,6 @@ module.exports = {
   getOrCreateApproval,
   getApprovalDetail,
   startApproval,
-  assignStep,
   endorseStep,
   actOnStep,
   reopenApproval,

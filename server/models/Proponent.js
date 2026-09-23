@@ -349,6 +349,13 @@ async function listProponents() {
       u.status AS account_status
     FROM dbo.proponents p
     LEFT JOIN dbo.users u ON u.id = p.user_id
+    -- Master checklist: a locator only belongs here once their business is
+    -- actually registered (an application of theirs reached APPROVED) — an
+    -- account that merely exists (pending, mid-review, or never went further
+    -- than an in-progress application) isn't a registered proponent yet.
+    WHERE EXISTS (
+      SELECT 1 FROM dbo.applications a WHERE a.proponent_id = p.id AND a.status = 'APPROVED'
+    )
     ORDER BY p.id DESC
     `
   );

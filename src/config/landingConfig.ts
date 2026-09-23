@@ -20,6 +20,12 @@ export type LandingConfig = {
   };
 };
 
+// Key order here drives the order Control Panel's Sidebar Menu Permissions
+// and Menu CRUD Permissions checklists render in — kept in sync with
+// AppSidebar's Applications-group order (Locator Accounts -> New Application
+// -> Evaluation Queue -> Approval Queue -> Registered Locator -> Renewal
+// Tracking) so admins configuring access see the same sequence the sidebar
+// itself uses, instead of two screens disagreeing about the workflow order.
 export const LANDING_CONFIG: Record<AppView, LandingConfig> = {
   dashboard: {
     title: 'Dashboard',
@@ -28,6 +34,25 @@ export const LANDING_CONFIG: Record<AppView, LandingConfig> = {
     icon: FolderTree,
     stats: [],
     table: { columns: [], rows: [] },
+  },
+  'settings:locator-users': {
+    title: 'Locator Accounts',
+    description: 'Manage login accounts for registered locators, kept separate from staff accounts.',
+    badge: 'System',
+    icon: Users,
+    isCrud: true,
+    stats: [
+      { label: 'Active Accounts', value: '—' },
+      { label: 'Total Accounts', value: '—' },
+      { label: 'Deactivated', value: '—' },
+    ],
+    table: {
+      columns: ['Username', 'Full Name', 'Email', '2FA', 'Status'],
+      rows: [
+        ['jdelacruz', 'Juan Dela Cruz', 'j.delacruz@skyport.com', 'On', 'Active'],
+        ['mreyes', 'Maria Reyes', 'm.reyes@greenfuel.com', 'On', 'Active'],
+      ],
+    },
   },
   'applications:new': {
     title: 'New Applications Directory',
@@ -45,45 +70,6 @@ export const LANDING_CONFIG: Record<AppView, LandingConfig> = {
         ['SkyPort Logistics Inc.', 'Cargo Hub Expansion', 'Mar 10, 2026', 'AFS, Bank Cert', 'Pending Verification'],
         ['GreenFuel Terminals Corp.', 'Fuel Depot Lease', 'Mar 09, 2026', 'Board Resolution', 'For Evaluation'],
         ['Atlas Aero Parts', 'Hangar Lease', 'Mar 05, 2026', 'None', 'Ready for Board'],
-      ],
-    },
-  },
-  'applications:renewals': {
-    title: 'Renewal Tracking',
-    description: 'Existing locators with lease agreements due for renewal.',
-    badge: 'Renewals',
-    icon: FileCheck,
-    stats: [
-      { label: 'Renewals This Year', value: '32' },
-      { label: 'Expiring in 90 Days', value: '6' },
-      { label: 'With Pending Requirements', value: '4' },
-    ],
-    table: {
-      columns: ['Locator', 'Lease No.', 'Expiry', 'Days Left', 'Renewal Status'],
-      rows: [
-        ['NorthGate Foods Corp.', 'DL-2020-018', 'Jun 15, 2026', '95', 'For LOI Submission'],
-        ['Delta AeroTech', 'DL-2019-004', 'May 30, 2026', '79', 'Docs Under Review'],
-        ['HarborFresh Cold Storage', 'DL-2021-022', 'Apr 21, 2026', '40', 'For Board Approval'],
-      ],
-    },
-  },
-  'applications:requirements': {
-    title: 'Requirements',
-    description: 'Manage requirement definitions for new and renewal applications.',
-    badge: 'Applications',
-    icon: FileCheck,
-    isCrud: true,
-    stats: [
-      { label: 'Total Requirements', value: '—' },
-      { label: 'For New', value: '—' },
-      { label: 'For Renewal', value: '—' },
-    ],
-    table: {
-      columns: ['Code', 'Name', 'Category', 'Flags', 'Status'],
-      rows: [
-        ['SEC-AOI', 'Articles of Incorporation', 'Legal', 'New, Mandatory', 'Active'],
-        ['BIR-CLR', 'BIR Tax Clearance', 'Financial', 'New, Renewal, Mandatory', 'Active'],
-        ['FSIC', 'Fire Safety Certificate', 'Technical', 'Renewal', 'Inactive'],
       ],
     },
   },
@@ -129,6 +115,45 @@ export const LANDING_CONFIG: Record<AppView, LandingConfig> = {
         ['APP-2026-00001', 'SkyPort Logistics Inc.', 'In Progress', 'Division Chief', '—'],
         ['REN-2026-00007', 'Delta AeroTech', 'Approved', '—', 'Approval Order'],
         ['APP-2026-00012', 'Metro Agro Trading', 'Awaiting Start', '—', '—'],
+      ],
+    },
+  },
+  'settings:proponents': {
+    title: 'Registered Locator',
+    description: 'Master list of registered locator businesses, with lease/contract status pulled in automatically.',
+    badge: 'Directory',
+    icon: Users,
+    isCrud: true,
+    stats: [
+      { label: 'Total Locators', value: '—' },
+      { label: 'Active', value: '—' },
+      { label: 'Deactivated', value: '—' },
+    ],
+    table: {
+      columns: ['Ref No', 'Tenant', 'Address', 'Industry', 'Start Term', 'End Term', 'Lease Term', 'Encoded By'],
+      rows: [
+        ['LOC-2026-00001', 'SkyPort Logistics Inc.', 'Clark Freeport Zone', 'Warehouse Lease', 'Mar 10, 2024', 'Mar 10, 2027', '3Y-0M-0D', 'J. Puyat'],
+        ['LOC-2026-00002', 'GreenFuel Terminals Corp.', 'Clark Civil Aviation Complex', 'Direct Lease', 'Mar 09, 2024', 'Mar 09, 2029', '5Y-0M-0D', 'G. Cruz'],
+        ['LOC-2026-00003', 'Metro Agro Trading', 'Building 7508, Clark', '—', '—', '—', '—', 'B. Cabangbang'],
+      ],
+    },
+  },
+  'applications:renewals': {
+    title: 'Renewal Tracking',
+    description: 'Existing locators with lease agreements due for renewal.',
+    badge: 'Renewals',
+    icon: FileCheck,
+    stats: [
+      { label: 'Renewals This Year', value: '32' },
+      { label: 'Expiring in 90 Days', value: '6' },
+      { label: 'With Pending Requirements', value: '4' },
+    ],
+    table: {
+      columns: ['Locator', 'Lease No.', 'Expiry', 'Days Left', 'Renewal Status'],
+      rows: [
+        ['NorthGate Foods Corp.', 'DL-2020-018', 'Jun 15, 2026', '95', 'For LOI Submission'],
+        ['Delta AeroTech', 'DL-2019-004', 'May 30, 2026', '79', 'Docs Under Review'],
+        ['HarborFresh Cold Storage', 'DL-2021-022', 'Apr 21, 2026', '40', 'For Board Approval'],
       ],
     },
   },
@@ -215,42 +240,23 @@ export const LANDING_CONFIG: Record<AppView, LandingConfig> = {
       ],
     },
   },
-  'settings:locator-users': {
-    title: 'Locator Accounts',
-    description: 'Manage login accounts for registered locators, kept separate from staff accounts.',
-    badge: 'System',
-    icon: Users,
+  'applications:requirements': {
+    title: 'Requirements',
+    description: 'Manage requirement definitions for new and renewal applications.',
+    badge: 'Applications',
+    icon: FileCheck,
     isCrud: true,
     stats: [
-      { label: 'Active Accounts', value: '—' },
-      { label: 'Total Accounts', value: '—' },
-      { label: 'Deactivated', value: '—' },
+      { label: 'Total Requirements', value: '—' },
+      { label: 'For New', value: '—' },
+      { label: 'For Renewal', value: '—' },
     ],
     table: {
-      columns: ['Username', 'Full Name', 'Email', '2FA', 'Status'],
+      columns: ['Code', 'Name', 'Category', 'Flags', 'Status'],
       rows: [
-        ['jdelacruz', 'Juan Dela Cruz', 'j.delacruz@skyport.com', 'On', 'Active'],
-        ['mreyes', 'Maria Reyes', 'm.reyes@greenfuel.com', 'On', 'Active'],
-      ],
-    },
-  },
-  'settings:proponents': {
-    title: 'Locators / Proponent List',
-    description: 'Master list of registered locator businesses, with lease/contract status pulled in automatically.',
-    badge: 'Directory',
-    icon: Users,
-    isCrud: true,
-    stats: [
-      { label: 'Total Locators', value: '—' },
-      { label: 'Active', value: '—' },
-      { label: 'Deactivated', value: '—' },
-    ],
-    table: {
-      columns: ['Ref No', 'Tenant', 'Address', 'Industry', 'Start Term', 'End Term', 'Lease Term', 'Encoded By'],
-      rows: [
-        ['LOC-2026-00001', 'SkyPort Logistics Inc.', 'Clark Freeport Zone', 'Warehouse Lease', 'Mar 10, 2024', 'Mar 10, 2027', '3Y-0M-0D', 'J. Puyat'],
-        ['LOC-2026-00002', 'GreenFuel Terminals Corp.', 'Clark Civil Aviation Complex', 'Direct Lease', 'Mar 09, 2024', 'Mar 09, 2029', '5Y-0M-0D', 'G. Cruz'],
-        ['LOC-2026-00003', 'Metro Agro Trading', 'Building 7508, Clark', '—', '—', '—', '—', 'B. Cabangbang'],
+        ['SEC-AOI', 'Articles of Incorporation', 'Legal', 'New, Mandatory', 'Active'],
+        ['BIR-CLR', 'BIR Tax Clearance', 'Financial', 'New, Renewal, Mandatory', 'Active'],
+        ['FSIC', 'Fire Safety Certificate', 'Technical', 'Renewal', 'Inactive'],
       ],
     },
   },
@@ -426,4 +432,3 @@ export const LANDING_CONFIG: Record<AppView, LandingConfig> = {
     },
   },
 };
-

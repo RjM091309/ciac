@@ -27,7 +27,6 @@ router.post("/:applicationId/start", requireMenuAccess(MENU_KEY, "edit"), contro
 router.patch("/:applicationId/reopen", requireRole("admin"), controller.reopen);
 router.patch("/steps/:id/act", requireMenuAccess(MENU_KEY, "edit"), controller.actOnStep);
 router.patch("/steps/:id/endorse", requireMenuAccess(MENU_KEY, "edit"), controller.endorseStep);
-router.patch("/steps/:id/assign", requireMenuAccess(MENU_KEY, "edit"), controller.assignStep);
 
 // Charges — assessed by the Account Officer at Level 1 review
 router.post("/:applicationId/charges", requireMenuAccess(MENU_KEY, "add"), controller.addCharge);

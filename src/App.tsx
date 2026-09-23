@@ -834,7 +834,7 @@ const LANDING_CONFIG: Record<AppView, LandingConfig> = {
     },
   },
   'settings:proponents': {
-    title: 'Locators / Proponent List',
+    title: 'Registered Locator',
     description: 'Master list of registered locator businesses, with lease/contract status pulled in automatically.',
     badge: 'Directory',
     icon: Users,

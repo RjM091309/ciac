@@ -191,28 +191,6 @@ exports.endorseStep = async (req, res) => {
   }
 };
 
-exports.assignStep = async (req, res) => {
-  try {
-    const id = idParam(req, res, "step id");
-    if (id === null) return undefined;
-    const { user_id } = req.body || {};
-    const data = await Approval.assignStep(id, user_id, req.user?.id ?? null);
-    if (!data) return res.status(404).json({ success: false, message: "Approval step not found" });
-    await AuditLog.record({
-      actorId: req.user?.id,
-      actorUsername: req.user?.username,
-      action: "APPROVAL_STEP_ASSIGNED",
-      entityType: "application",
-      entityId: data?.approval?.application_id,
-      details: { application_no: data?.approval?.application_no },
-      ipAddress: req.ip,
-    });
-    return res.json({ success: true, data });
-  } catch (error) {
-    return fail(res, error, "Assign approval step");
-  }
-};
-
 /* -------------------------------- Issuance ------------------------------- */
 
 exports.addIssuance = async (req, res) => {

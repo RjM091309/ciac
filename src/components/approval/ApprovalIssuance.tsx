@@ -35,7 +35,9 @@ const APPROVAL_STATUS_LABELS: Record<string, string> = {
   DISAPPROVED: 'Disapproved',
   RETURNED: 'Returned',
 };
-const APPROVAL_STATUS_ORDER = ['PENDING', 'IN_PROGRESS', 'APPROVED', 'DISAPPROVED', 'RETURNED'];
+// APPROVED excluded — approved applications are excluded from the queue
+// entirely (see the `rows` filter), so it's never a meaningful filter choice.
+const APPROVAL_STATUS_ORDER = ['PENDING', 'IN_PROGRESS', 'DISAPPROVED', 'RETURNED'];
 const CHARGE_TYPES = ['RENTAL', 'PROCESSING_FEE', 'TAX', 'PENALTY', 'OTHER'];
 
 type ApprovalRow = {
@@ -166,13 +168,6 @@ function peso(n: number | null | undefined) {
   return `₱${v.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
-function fmtDate(v: string | null | undefined) {
-  if (!v) return '—';
-  const d = new Date(v);
-  if (Number.isNaN(d.getTime())) return '—';
-  return d.toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' });
-}
-
 function fmtDateTime(v: string | null | undefined) {
   if (!v) return '—';
   const d = new Date(v);
@@ -291,26 +286,23 @@ export function ApprovalIssuance({
   const [pageSize, setPageSize] = useState(20);
   const [selectedId, setSelectedId] = useState<number | null>(null);
 
-  // One cached fetch of the whole queue + summary + approvers, then filter
-  // client-side. Revisits paint instantly from sessionStorage while revalidating,
-  // and typing in the search box no longer round-trips to the server.
+  // One cached fetch of the whole queue + summary, then filter client-side.
+  // Revisits paint instantly from sessionStorage while revalidating, and
+  // typing in the search box no longer round-trips to the server.
   const { data, isLoading, isRevalidating, refresh } = useSessionStorageCachedResource<{
     rows: ApprovalRow[];
     summary: Summary | null;
-    approvers: Approver[];
   }>({
     cacheKey: 'ciac.approvals_queue.v1',
     ttlMs: 5 * 60 * 1000,
     fetcher: async () => {
-      const [listJson, summaryJson, apJson] = await Promise.all([
+      const [listJson, summaryJson] = await Promise.all([
         apiFetch('/api/approvals'),
         apiFetch('/api/approvals/summary'),
-        apiFetch('/api/approvals/approvers'),
       ]);
       return {
         rows: listJson.data || [],
         summary: summaryJson.data || null,
-        approvers: apJson.data || [],
       };
     },
     onError: (err) => toast.error(err instanceof Error ? err.message : 'Failed to load approvals'),
@@ -318,12 +310,15 @@ export function ApprovalIssuance({
 
   const allRows = data?.rows ?? [];
   const summary = data?.summary ?? null;
-  const approvers = data?.approvers ?? [];
   const loading = isLoading;
 
   const rows = useMemo(() => {
     const term = search.trim().toLowerCase();
     return allRows.filter((r) => {
+      // Already-approved applications are done — they clutter the active
+      // queue and don't need any further action here, so they're excluded
+      // outright rather than just being one more filterable status.
+      if ((r.approval_status || 'PENDING') === 'APPROVED') return false;
       if (statusFilter && (r.approval_status || 'PENDING') !== statusFilter) return false;
       if (term) {
         const hay = `${r.application_no ?? ''} ${r.proponent_name ?? ''}`.toLowerCase();
@@ -582,7 +577,6 @@ export function ApprovalIssuance({
         {selectedId != null ? (
           <ApprovalDetail
             applicationId={selectedId}
-            approvers={approvers}
             perms={{ canAdd, canEdit, canDelete }}
             onClose={() => setSelectedId(null)}
             onMutated={refreshAfterMutation}
@@ -624,13 +618,11 @@ type RunFn = (fn: () => Promise<unknown>, successMsg?: string) => Promise<void>;
 
 function ApprovalDetail({
   applicationId,
-  approvers,
   perms,
   onClose,
   onMutated,
 }: {
   applicationId: number;
-  approvers: Approver[];
   perms: { canAdd: boolean; canEdit: boolean; canDelete: boolean };
   onClose: () => void;
   onMutated: () => void;
@@ -754,7 +746,7 @@ function ApprovalDetail({
           ) : tab === 'Overview' ? (
             <OverviewTab data={data} perms={perms} busy={busy} run={run} />
           ) : tab === 'Approval Chain' ? (
-            <ChainTab data={data} approvers={approvers} perms={perms} busy={busy} run={run} />
+            <ChainTab data={data} perms={perms} busy={busy} run={run} />
           ) : tab === 'Findings' ? (
             <FindingsReadOnlyTab data={data} />
           ) : tab === 'Charges' ? (
@@ -841,13 +833,11 @@ function OverviewTab({
 
 function ChainTab({
   data,
-  approvers,
   perms,
   busy,
   run,
 }: {
   data: DetailPayload;
-  approvers: Approver[];
   perms: { canAdd: boolean; canEdit: boolean; canDelete: boolean };
   busy: boolean;
   run: RunFn;
@@ -857,30 +847,6 @@ function ChainTab({
   const [overridePrompt, setOverridePrompt] = useState<{ message: string; resolve: (v: boolean) => void } | null>(
     null
   );
-  // Eligible-assignee lists, fetched per distinct role once a step needs
-  // one — a role-bound step's picker must only offer people who actually
-  // hold that role, not the whole approvers list. Cached by role_id so
-  // switching tabs or re-rendering doesn't refetch it every time.
-  const [approversByRole, setApproversByRole] = useState<Record<number, Approver[]>>({});
-  const [assigning, setAssigning] = useState<number | null>(null);
-  useEffect(() => {
-    const roleIds = Array.from(
-      new Set(data.steps.filter((s) => s.decision === 'PENDING' && s.role_id).map((s) => s.role_id as number))
-    ).filter((id) => !(id in approversByRole));
-    if (!roleIds.length) return;
-    (async () => {
-      for (const roleId of roleIds) {
-        try {
-          const json = await apiFetch(`/api/approvals/approvers?role_id=${roleId}`);
-          setApproversByRole((prev) => ({ ...prev, [roleId]: json.data || [] }));
-        } catch {
-          // Non-fatal — that step's picker just falls back to showing nothing extra.
-        }
-      }
-    })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data.steps]);
-
   if (data.steps.length === 0) {
     return (
       <EmptyState
@@ -968,50 +934,10 @@ function ChainTab({
                 ) : s.role_name ? (
                   <span>Requires: {s.role_name}</span>
                 ) : null}
-                {s.decision === 'PENDING' && perms.canEdit ? (
-                  <label className="flex items-center gap-1.5">
-                    Assignee
-                    <select
-                      className="rounded border px-1.5 py-0.5 text-[11px] cursor-pointer disabled:opacity-50"
-                      style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'var(--surface)', color: 'var(--text)' }}
-                      disabled={assigning === s.id}
-                      value={s.assigned_to ?? ''}
-                      onChange={(e) => {
-                        const value = e.target.value ? Number(e.target.value) : null;
-                        setAssigning(s.id);
-                        run(
-                          () =>
-                            apiFetch(`/api/approvals/steps/${s.id}/assign`, {
-                              method: 'PATCH',
-                              body: JSON.stringify({ user_id: value }),
-                            }),
-                          value ? 'Assigned' : 'Unassigned'
-                        ).finally(() => setAssigning(null));
-                      }}
-                    >
-                      <option value="">
-                        {(s.assignees || []).length > 0
-                          ? `Unassigned — any of ${(s.assignees || []).length} approvers`
-                          : s.role_name
-                            ? `Unassigned — any ${s.role_name}`
-                            : 'Unassigned — anyone with access'}
-                      </option>
-                      {((s.assignees || []).length > 0 ? s.assignees : s.role_id ? approversByRole[s.role_id] : approvers)?.map((a) => (
-                        <option key={a.id} value={a.id}>
-                          {a.full_name || a.username}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                ) : s.assignee_name || s.assignee_username ? (
+                {s.assignee_name || s.assignee_username ? (
                   <span>Assignee: {s.assignee_name || s.assignee_username}</span>
                 ) : null}
                 {s.endorsed_to_office ? <span>Endorsed to: {s.endorsed_to_office}</span> : null}
-                {s.acted_at ? (
-                  <span>
-                    {s.action} by {s.acted_by_name || s.acted_by_username || '—'} · {fmtDate(s.acted_at)}
-                  </span>
-                ) : null}
               </div>
               {s.remarks ? <div className="text-[12px] mt-1">{s.remarks}</div> : null}
             </div>
