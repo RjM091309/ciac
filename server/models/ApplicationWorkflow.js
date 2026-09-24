@@ -2,6 +2,7 @@ const { selectData, insertData, updateData, updateSchema, runInTransaction } = r
 const Notification = require("./Notification");
 const ApplicationType = require("./ApplicationType");
 const Requirement = require("./Requirement");
+const Permit = require("./Permit");
 const { sendMail } = require("../lib/mailer");
 
 function toInt(v) {
@@ -371,6 +372,16 @@ async function ensureSchema() {
       CREATE INDEX IX_applications_application_no ON dbo.applications(application_no);
     END;
 
+    -- Explicit link back to the specific permit/contract this application is
+    -- renewing (Renewal Tracking) — nullable, since a renewal can still be
+    -- filed free-form with no specific expiring permit selected, and a
+    -- first-time filing never has one.
+    IF COL_LENGTH('dbo.applications', 'renewed_from_permit_id') IS NULL
+    BEGIN
+      ALTER TABLE dbo.applications ADD renewed_from_permit_id INT NULL;
+      CREATE INDEX IX_applications_renewed_from_permit_id ON dbo.applications(renewed_from_permit_id);
+    END;
+
     IF OBJECT_ID('dbo.application_requirements', 'U') IS NULL
     BEGIN
       CREATE TABLE dbo.application_requirements (
@@ -530,6 +541,7 @@ async function listApplications() {
       a.application_no,
       a.application_type,
       a.is_renewal,
+      a.renewed_from_permit_id,
       a.status,
       a.submitted_at,
       a.current_officer_id,
@@ -690,6 +702,7 @@ async function getApplicationById(id) {
       a.application_no,
       a.application_type,
       a.is_renewal,
+      a.renewed_from_permit_id,
       a.status,
       a.submitted_at,
       a.current_officer_id,
@@ -714,6 +727,7 @@ async function createApplication({
   submitted_at,
   current_officer_id,
   created_by,
+  renewed_from_permit_id,
 }) {
   await ensureSchema();
   await Notification.ensureSchema();
@@ -728,6 +742,14 @@ async function createApplication({
   }
   const normalizedType = String(application_type).trim().toUpperCase();
 
+  const renewedFromPermitId = toInt(renewed_from_permit_id);
+  if (renewedFromPermitId) {
+    const permit = await Permit.getById(renewedFromPermitId);
+    if (!permit || Number(permit.proponent_id) !== proponentId) {
+      throw new Error("The selected permit/contract doesn't belong to this locator.");
+    }
+  }
+
   const id = await runInTransaction(async (tx) => {
     // Reference numbers are always minted here, never accepted from the
     // caller — this is what makes BRM-09 (unique, system-issued numbers)
@@ -737,10 +759,10 @@ async function createApplication({
     const result = await tx.query(
       `
       INSERT INTO dbo.applications
-        (proponent_id, application_no, application_type, is_renewal, status, submitted_at, current_officer_id, created_by, updated_by, created_at, updated_at)
+        (proponent_id, application_no, application_type, is_renewal, status, submitted_at, current_officer_id, created_by, updated_by, created_at, updated_at, renewed_from_permit_id)
       OUTPUT INSERTED.id
       VALUES
-        (@param0, @param1, @param2, @param3, @param4, @param5, @param6, @param7, NULL, SYSUTCDATETIME(), NULL)
+        (@param0, @param1, @param2, @param3, @param4, @param5, @param6, @param7, NULL, SYSUTCDATETIME(), NULL, @param8)
       `,
       [
         proponentId,
@@ -751,6 +773,7 @@ async function createApplication({
         isDraft ? null : submitted_at || null,
         officerId,
         createdBy,
+        renewedFromPermitId,
       ]
     );
     const newId = result?.recordset?.[0]?.id;

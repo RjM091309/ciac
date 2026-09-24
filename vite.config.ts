@@ -16,6 +16,24 @@ export default defineConfig(({mode}) => {
         '@': path.resolve(__dirname, '.'),
       },
     },
+    optimizeDeps: {
+      // These are only ever imported inside DatePicker.tsx, which is
+      // lazy-loaded per-route — so Vite's initial cold-start scan misses
+      // them and only discovers them once a page using the date picker
+      // first renders. That triggers a mid-session re-optimization, which
+      // reshuffles the optimizer's internal shared-chunk filenames and
+      // leaves the page holding references to chunks that no longer exist
+      // ("The file does not exist at .../chunk-XXXX.js"). Listing them here
+      // forces them into the initial scan so that never happens.
+      include: [
+        '@mui/material',
+        '@mui/material/styles',
+        '@mui/x-date-pickers/LocalizationProvider',
+        '@mui/x-date-pickers/AdapterDateFns',
+        '@mui/x-date-pickers/DateCalendar',
+        '@mui/x-date-pickers/PickersDay',
+      ],
+    },
     server: {
       host: '0.0.0.0',
       port: 2500,

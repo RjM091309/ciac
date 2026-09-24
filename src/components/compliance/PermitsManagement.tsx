@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, FileSignature, FileText, Pencil, Search, Trash2 } from 'lucide-react';
+import { AlertTriangle, FileSignature, FileText, Pencil, RefreshCw, Search, Trash2 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { toast } from 'sonner';
 import { SidePanel } from '../ui/SidePanel';
@@ -42,6 +42,11 @@ type PermitRow = {
   is_active: number | boolean;
   has_certificate?: boolean;
   has_contract_certificate?: boolean;
+  // Renewal Tracking: set once a renewal application already exists for this
+  // permit (a REJECTED/DISAPPROVED attempt doesn't count) — shows a link to
+  // it instead of another "Renew" button.
+  active_renewal_application_id?: number | null;
+  active_renewal_application_no?: string | null;
 };
 
 type Option = { value: string; label: string };
@@ -332,7 +337,7 @@ export function PermitsManagement({
     const days = daysUntil(p.expiry_date);
     if (p.effective_status === 'REVOKED' || days === null) return null;
     return (
-      <div className="mt-0.5">
+      <div className="mt-0.5 flex items-center gap-1.5 flex-wrap">
         {days < 0 ? (
           <span className="inline-flex items-center gap-1 text-[10px] font-semibold" style={{ color: '#fca5a5' }}>
             <AlertTriangle size={10} /> {Math.abs(days)}d overdue
@@ -340,13 +345,38 @@ export function PermitsManagement({
         ) : (
           <span className="text-[10px] text-secondary">{days}d left</span>
         )}
+        {p.active_renewal_application_no ? (
+          <button
+            className="text-[10px] font-semibold underline decoration-dotted cursor-pointer"
+            style={{ color: '#3b82f6' }}
+            onClick={(e) => {
+              e.stopPropagation();
+              navigate?.(`/applications/renewals?applicationId=${p.active_renewal_application_id}`);
+            }}
+            title="Go to this renewal application"
+          >
+            Renewal filed: {p.active_renewal_application_no}
+          </button>
+        ) : null}
       </div>
     );
   }
 
   function renderRowActions(p: PermitRow) {
+    const dueForRenewal =
+      (p.effective_status === 'EXPIRING' || p.effective_status === 'EXPIRED') && !p.active_renewal_application_id;
     return (
       <>
+        {dueForRenewal && navigate ? (
+          <button
+            className="rounded-md p-1.5 cursor-pointer"
+            style={{ color: '#f59e0b' }}
+            onClick={() => navigate(`/applications/renewals?renewFromPermitId=${p.id}`)}
+            title="Renew"
+          >
+            <RefreshCw size={14} />
+          </button>
+        ) : null}
         {p.has_certificate ? (
           <button
             className="rounded-md p-1.5 text-secondary cursor-pointer"

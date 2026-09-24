@@ -34,9 +34,25 @@ type ApplicationRow = {
   application_no: string;
   application_type: string;
   is_renewal: number;
+  renewed_from_permit_id?: number | null;
   status: string;
   requirements_count?: number;
   created_at?: string | null;
+};
+
+// The permit/contract a renewal is being filed for — arrives via the
+// ?renewFromPermitId= deep link from Permits Management's "Renew" action
+// (GET /api/permits/:id), not chosen from a list on this page.
+type RenewFromPermit = {
+  id: number;
+  proponent_id: number;
+  permit_no: string;
+  expiry_date: string | null;
+  // The application type that originally produced this permit, if it's on
+  // record — lets the renewal form pre-lock the right type. Null for a
+  // legacy/manually-added permit with no linked application, in which case
+  // the officer picks it manually.
+  original_application_type: string | null;
 };
 
 type ProponentRow = {
@@ -214,7 +230,14 @@ export function ApplicationsWorkflow({
     proponent_id: '',
     application_type: 'DIRECT_LEASE',
     save_as_draft: false,
+    renewed_from_permit_id: null as number | null,
   });
+  // Set when arriving via a "Renew" deep link from Permits Management,
+  // instead of the generic "New Renewal" button — locks the locator (and,
+  // when known, the application type) so the filing can't drift onto the
+  // wrong permit/contract.
+  const [renewFromPermit, setRenewFromPermit] = useState<RenewFromPermit | null>(null);
+  const consumedRenewQueryRef = useRef('');
   // Set while resuming an existing DRAFT (see openContinueDraft) instead of
   // filing a brand new one — same New Application panel, but Save patches
   // this draft's own row (and submits it, unless "Save as draft" is still
@@ -394,6 +417,38 @@ export function ApplicationsWorkflow({
   useEffect(() => {
     loadProgressForApplications(filteredApps.map((a) => a.id));
   }, [filteredApps]);
+  // Deep link from Permits Management's "Renew" action on an expiring/
+  // expired permit (?renewFromPermitId=...) — fetches that permit and opens
+  // the filing panel pre-locked to it, same one-shot-consume-then-strip-the-
+  // param pattern PermitsManagement.tsx uses for its own ?permitId= link.
+  useEffect(() => {
+    if (!renewalMode) return;
+    const raw = String(locationSearch || '').trim();
+    if (!raw || consumedRenewQueryRef.current === raw) return;
+    const params = new URLSearchParams(raw.startsWith('?') ? raw : `?${raw}`);
+    const permitId = Number(params.get('renewFromPermitId') || '');
+    if (!Number.isFinite(permitId) || permitId <= 0) return;
+    consumedRenewQueryRef.current = raw;
+
+    (async () => {
+      try {
+        const res = await fetch(api(`/api/permits/${permitId}`), { credentials: 'include' });
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok || !json?.success || !json?.data) {
+          toast.error('Could not load that permit/contract.');
+          return;
+        }
+        openRenewFromPermit(json.data);
+      } catch {
+        toast.error('Could not load that permit/contract.');
+      }
+    })();
+
+    params.delete('renewFromPermitId');
+    const cleaned = params.toString();
+    navigate(`/applications/renewals${cleaned ? `?${cleaned}` : ''}`, { replace: true });
+  }, [locationSearch, navigate, renewalMode]);
+
   useEffect(() => {
     setAppsPage(1);
   }, [appsSearchQuery, appsPageSize, renewalMode]);
@@ -426,10 +481,36 @@ export function ApplicationsWorkflow({
    * generic Edit Application form. */
   function openContinueDraft(row: ApplicationRow) {
     setContinuingDraftId(row.id);
+    setRenewFromPermit(null);
     setCreateForm({
       proponent_id: String(row.proponent_id),
       application_type: row.application_type,
       save_as_draft: true,
+      renewed_from_permit_id: null,
+    });
+    setIsCreateOpen(true);
+  }
+
+  /** "New Renewal" with no specific expiring permit picked — free-form,
+   * same as before this feature existed. */
+  function openManualRenewal() {
+    setContinuingDraftId(null);
+    setRenewFromPermit(null);
+    setCreateForm({ proponent_id: '', application_type: 'DIRECT_LEASE', save_as_draft: false, renewed_from_permit_id: null });
+    setIsCreateOpen(true);
+  }
+
+  /** Arrived via "Renew" on Permits Management's expiring/expired row —
+   * pre-fills and locks the locator (always known) and, when the permit's
+   * originating application is on record, the application type too. */
+  function openRenewFromPermit(permit: RenewFromPermit) {
+    setContinuingDraftId(null);
+    setRenewFromPermit(permit);
+    setCreateForm({
+      proponent_id: String(permit.proponent_id),
+      application_type: permit.original_application_type || '',
+      save_as_draft: false,
+      renewed_from_permit_id: permit.id,
     });
     setIsCreateOpen(true);
   }
@@ -516,6 +597,7 @@ export function ApplicationsWorkflow({
           application_type: createForm.application_type.trim() || 'DIRECT_LEASE',
           is_renewal: renewalMode ? 1 : 0,
           save_as_draft: createForm.save_as_draft,
+          renewed_from_permit_id: createForm.renewed_from_permit_id || undefined,
         }),
       });
       const json = await res.json().catch(() => ({}));
@@ -535,7 +617,8 @@ export function ApplicationsWorkflow({
       }
       requestNotificationsRefresh();
       setIsCreateOpen(false);
-      setCreateForm((p) => ({ ...p, save_as_draft: false }));
+      setRenewFromPermit(null);
+      setCreateForm((p) => ({ ...p, save_as_draft: false, renewed_from_permit_id: null }));
       await refreshBase({ showLoading: false });
     } catch (error: any) {
       toast.error(error?.message || 'Failed to create application');
@@ -672,7 +755,7 @@ export function ApplicationsWorkflow({
           <button
             className="rounded-lg px-3 py-2 text-sm font-semibold inline-flex items-center gap-1.5 shadow-sm cursor-pointer"
             style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
-            onClick={() => setIsCreateOpen(true)}
+            onClick={openManualRenewal}
           >
             <Plus size={15} />
             New Renewal
@@ -681,6 +764,14 @@ export function ApplicationsWorkflow({
       ) : null}
 
       <div className="glass-card p-4 sm:p-5 !border-transparent overflow-hidden" style={{ backgroundColor: 'var(--surface)' }}>
+        {renewalMode ? (
+          <div className="mb-3">
+            <h4 className="text-sm font-bold" style={{ color: 'var(--text)' }}>
+              Filed Renewals
+            </h4>
+            <p className="text-[11px] text-secondary mt-0.5">Renewal applications already submitted, in progress, or decided.</p>
+          </div>
+        ) : null}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-3">
           <div className="relative group w-full sm:w-72">
             <Search
@@ -716,12 +807,13 @@ export function ApplicationsWorkflow({
           </div>
         ) : filteredApps.length === 0 ? (
           <EmptyState
-            title={renewalMode ? 'No renewals found' : 'No applications found'}
+            className="py-10"
+            title={renewalMode ? 'No renewal applications yet' : 'No applications found'}
             description={
               appsSearchQuery
                 ? 'Try adjusting your search filters.'
                 : renewalMode
-                  ? 'There are no records here yet. Click "New Renewal" to get started.'
+                  ? 'Click "Renew" on an expiring/expired permit in Permits Management, or file one manually with "New Renewal" above.'
                   : 'New applications are created from Locator Accounts, along with the locator\'s account.'
             }
             action={
@@ -729,7 +821,7 @@ export function ApplicationsWorkflow({
                 <button
                   className="rounded-lg px-4 py-2 text-sm font-semibold shadow-sm transition-colors"
                   style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
-                  onClick={() => setIsCreateOpen(true)}
+                  onClick={openManualRenewal}
                 >
                   Create Renewal
                 </button>
@@ -910,6 +1002,7 @@ export function ApplicationsWorkflow({
         onClose={() => {
           setIsCreateOpen(false);
           setContinuingDraftId(null);
+          setRenewFromPermit(null);
         }}
         onSave={createApplication}
         saving={saving}
@@ -917,13 +1010,23 @@ export function ApplicationsWorkflow({
         saveLabel={createForm.save_as_draft ? 'Save Draft' : 'Submit Application'}
       >
         <div className="grid grid-cols-1 gap-3">
+          {renewFromPermit ? (
+            <div
+              className="rounded-lg px-3 py-2.5 text-[11px]"
+              style={{ backgroundColor: 'rgba(59,130,246,.10)', border: '1px solid rgba(59,130,246,.28)', color: 'var(--text)' }}
+            >
+              Renewing <span className="font-bold">{renewFromPermit.permit_no}</span> — locator is locked to match
+              {renewFromPermit.original_application_type ? ', and application type is set to what it was filed under.' : '.'}
+            </div>
+          ) : null}
+
           <label className="text-xs font-semibold uppercase tracking-wider text-secondary">Locator</label>
           <AppSelect
             options={proponentSelectOptions}
             value={createForm.proponent_id}
             onChange={(value) => setCreateForm((p) => ({ ...p, proponent_id: value }))}
             placeholder="Select locator..."
-            isDisabled={saving}
+            isDisabled={saving || !!renewFromPermit}
           />
           {continuingDraftId ? (
             <div className="text-[10px] text-secondary -mt-2">Still a draft, so the locator can still be changed if this was filed under the wrong one.</div>
@@ -966,7 +1069,7 @@ export function ApplicationsWorkflow({
             value={createForm.application_type}
             onChange={(value) => setCreateForm((p) => ({ ...p, application_type: value }))}
             placeholder="Select application type..."
-            isDisabled={saving}
+            isDisabled={saving || !!(renewFromPermit && renewFromPermit.original_application_type)}
             isClearable={false}
           />
 

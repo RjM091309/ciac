@@ -121,7 +121,7 @@ exports.getById = async (req, res) => {
 
 exports.create = async (req, res) => {
   try {
-    const { application_type, is_renewal, save_as_draft, submitted_at, current_officer_id } = req.body || {};
+    const { application_type, is_renewal, save_as_draft, submitted_at, current_officer_id, renewed_from_permit_id } = req.body || {};
     let { proponent_id } = req.body || {};
 
     const role = String(req.user?.role || "").toLowerCase();
@@ -161,6 +161,7 @@ exports.create = async (req, res) => {
       submitted_at: submitted_at ?? null,
       current_officer_id,
       created_by: req.user?.id ?? null,
+      renewed_from_permit_id: renewed_from_permit_id ?? null,
     });
 
     // Only a real submission activates a still-pending locator — a draft

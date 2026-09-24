@@ -87,7 +87,25 @@ const SELECT_COLS = `
   p.id, p.proponent_id, p.application_id, p.permit_type, p.permit_no,
   p.issuing_authority, p.issue_date, p.expiry_date, p.status, p.document_id,
   p.remarks, p.is_active, p.created_by, p.updated_by, p.created_at, p.updated_at,
-  p.certificate_path
+  p.certificate_path,
+  -- Renewal Tracking: whether a renewal application already exists for this
+  -- permit (a REJECTED/DISAPPROVED attempt doesn't count, so the permit is
+  -- still renewable again) — lets Permits Management show "Renew" only when
+  -- there truly isn't one in flight yet, and link to it when there is.
+  (
+    SELECT TOP (1) a.id FROM dbo.applications a
+    WHERE a.renewed_from_permit_id = p.id AND a.status NOT IN ('REJECTED', 'DISAPPROVED')
+    ORDER BY a.id DESC
+  ) AS active_renewal_application_id,
+  (
+    SELECT TOP (1) a.application_no FROM dbo.applications a
+    WHERE a.renewed_from_permit_id = p.id AND a.status NOT IN ('REJECTED', 'DISAPPROVED')
+    ORDER BY a.id DESC
+  ) AS active_renewal_application_no,
+  -- The application type that originally produced this permit, if on record
+  -- — lets a renewal filing pre-lock the right type instead of the officer
+  -- having to know/guess it.
+  (SELECT oa.application_type FROM dbo.applications oa WHERE oa.id = p.application_id) AS original_application_type
 `;
 
 function mapRow(r, extra = {}) {
@@ -118,6 +136,9 @@ function mapRow(r, extra = {}) {
     // permit certificate, surfaced so staff can jump to it from the same row
     // instead of hunting through the Approval Queue.
     has_contract_certificate: Boolean(r.contract_certificate_path),
+    active_renewal_application_id: r.active_renewal_application_id ?? null,
+    active_renewal_application_no: r.active_renewal_application_no ?? null,
+    original_application_type: r.original_application_type ?? null,
     ...extra,
   };
 }

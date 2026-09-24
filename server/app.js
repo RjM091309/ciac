@@ -1,3 +1,13 @@
+// msnodesqlv8 (the Windows Trusted-Connection ODBC driver used below) runs
+// its blocking calls on libuv's threadpool — the same pool Node uses for
+// fs/crypto/dns. That pool defaults to 4 threads, which a single page load
+// can saturate outright (e.g. Assessment's list + summary + evaluators +
+// detail firing in parallel is exactly 4 concurrent DB calls) — any query
+// queued behind those then times out ("Query timeout expired") even though
+// the database itself isn't slow. Must be set before any async I/O touches
+// libuv, so this has to run before every other require below.
+process.env.UV_THREADPOOL_SIZE = process.env.UV_THREADPOOL_SIZE || "16";
+
 const express = require("express");
 const path = require("path");
 const cookieParser = require("cookie-parser");
