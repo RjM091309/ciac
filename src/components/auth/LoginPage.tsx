@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
-import { ArrowLeft, ArrowRight, CheckCircle2, Copy, Eye, EyeOff, KeyRound, Mail, Moon, ShieldCheck, Smartphone, Sun } from 'lucide-react';
+import { ArrowLeft, ArrowRight, CheckCircle2, Copy, Eye, EyeOff, KeyRound, Mail, Moon, Smartphone, Sun } from 'lucide-react';
 import { validatePassword } from '../../lib/passwordPolicy';
 
 type Enrollment = { otpauthUrl: string; secret: string; qrDataUrl: string };
@@ -264,6 +264,10 @@ export function LoginPage(props: {
     }
   }
 
+  // The brand artwork has black lettering; the dark theme uses a variant with
+  // the lettering recolored white (the orange mark is unchanged).
+  const brandSrc = theme === 'dark' ? '/images/ciac-brand-white.png' : '/images/ciac-brand.png';
+
   const messageColor =
     message.type === 'error'
       ? 'var(--errorColor)'
@@ -298,18 +302,11 @@ export function LoginPage(props: {
           borderColor: 'var(--border)',
         }}
       >
-        <div className="flex items-center gap-2.5">
-          <div
-            className="w-8 h-8 rounded-lg flex items-center justify-center"
-            style={{
-              backgroundColor: 'var(--nav-active-bg)',
-              color: 'var(--nav-active-text)',
-            }}
-          >
-            <ShieldCheck size={18} />
-          </div>
-          <span className="text-sm sm:text-base font-bold tracking-tight uppercase">3core Portal</span>
-        </div>
+        <img
+          src={brandSrc}
+          alt="Clark Aviation Capital"
+          className="h-11 sm:h-12 w-auto"
+        />
       </div>
 
       <div
@@ -319,26 +316,43 @@ export function LoginPage(props: {
           borderColor: 'var(--border)',
         }}
       >
+        {/* Photo background washed out by a surface-colored fade: heaviest
+            behind the headline, thinning toward the bottom so the building
+            shows through. Uses --surface so it's a white tint in light mode
+            and a dark one in dark mode. */}
+        <div
+          className="absolute inset-0 bg-cover bg-center pointer-events-none"
+          style={{ backgroundImage: "url('/images/leftside-panel-bg.jpg')" }}
+        />
+        <div
+          className="absolute inset-0 pointer-events-none"
+          style={{
+            background:
+              'linear-gradient(to bottom, color-mix(in oklab, var(--surface) 92%, transparent) 0%, color-mix(in oklab, var(--surface) 82%, transparent) 55%, color-mix(in oklab, var(--surface) 45%, transparent) 100%)',
+          }}
+        />
+
         <div className="absolute top-0 left-0 w-full h-full opacity-30 pointer-events-none">
           <div className="absolute top-[-10%] left-[-10%] w-[60%] h-[60%] rounded-full bg-primary/10 blur-[120px] animate-pulse" />
           <div className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] rounded-full bg-primary/5 blur-[100px]" />
         </div>
 
+        <img
+          src="/images/ciac-logo-black.png"
+          alt="CIAC — Clark International Airport Corporation"
+          className="absolute top-8 left-8 2xl:top-10 2xl:left-10 z-10 h-14 2xl:h-16 w-auto pointer-events-none select-none"
+          // Black-only artwork: flip it to white on the dark theme.
+          style={theme === 'dark' ? { filter: 'invert(1)' } : undefined}
+        />
+
+        <img
+          src={brandSrc}
+          alt="Clark Aviation Capital"
+          className="absolute bottom-8 right-8 2xl:bottom-10 2xl:right-10 z-10 w-[220px] 2xl:w-[260px] opacity-60 pointer-events-none select-none"
+        />
+
         <div className="relative z-10 max-w-xl">
           <motion.div initial={{ opacity: 0, x: -30 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.8, ease: 'easeOut' }}>
-            <div className="flex items-center gap-3 mb-12">
-              <div
-                className="w-10 h-10 rounded-xl flex items-center justify-center"
-                style={{
-                  backgroundColor: 'var(--nav-active-bg)',
-                  color: 'var(--nav-active-text)',
-                }}
-              >
-                <ShieldCheck size={24} />
-              </div>
-              <span className="text-xl font-bold tracking-tighter uppercase">3core Portal</span>
-            </div>
-
             <h1 className="text-4xl md:text-5xl xl:text-6xl 2xl:text-7xl font-bold leading-[0.9] tracking-tighter mb-8">
               LOCATOR <br />
               <span className="text-secondary">COMPLIANCE</span> <br />
@@ -370,7 +384,26 @@ export function LoginPage(props: {
         </div>
       </div>
 
-      <div className="flex-1 flex flex-col items-center justify-center px-4 py-6 sm:px-8 sm:py-8 xl:p-24 relative">
+      <div
+        className="flex-1 flex flex-col items-center justify-center px-4 py-6 sm:px-8 sm:py-8 xl:p-24 relative"
+        // Light mode only: navy panel, with the theme tokens re-scoped so text,
+        // inputs and the submit button stay legible on the dark background.
+        style={
+          theme === 'light'
+            ? ({
+            backgroundColor: '#282974',
+            color: '#ffffff',
+            '--text': '#ffffff',
+            '--foreground': '#ffffff',
+            '--text-secondary': 'rgba(255, 255, 255, 0.72)',
+            '--input-bg': 'rgba(255, 255, 255, 0.08)',
+            '--input-border': 'rgba(255, 255, 255, 0.22)',
+            '--nav-active-bg': '#ffffff',
+            '--nav-active-text': '#282974',
+          } as React.CSSProperties)
+            : undefined
+        }
+      >
         <motion.div
           initial={{ opacity: 0, scale: 0.95 }}
           animate={{ opacity: 1, scale: 1 }}
