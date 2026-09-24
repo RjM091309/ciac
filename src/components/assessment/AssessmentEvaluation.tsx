@@ -13,7 +13,7 @@ import {
   RotateCcw,
   Search,
   Send,
-  Trash2,
+  StickyNote,
   UserCheck,
   X,
   XCircle,
@@ -40,9 +40,6 @@ const STAGE_LABELS: Record<string, string> = {
   RETURNED: 'Returned',
 };
 const STAGE_ORDER = ['UNASSIGNED', 'ASSIGNED', 'IN_REVIEW', 'FOR_RECOMMENDATION', 'COMPLETED', 'RETURNED'];
-const FINDING_TYPES = ['FINDING', 'COMMENT', 'REMARK', 'DEFICIENCY', 'RECOMMENDATION'];
-const FINDING_CATEGORIES = ['DOCUMENTARY', 'REGULATORY', 'FINANCIAL', 'TECHNICAL', 'OTHER'];
-const FINDING_STATUSES = ['OPEN', 'RESOLVED', 'WAIVED'];
 
 type AssessmentRow = {
   application_id: number;
@@ -61,24 +58,9 @@ type AssessmentRow = {
   recommendation: string | null;
   recommended_at: string | null;
   days_in_assessment: number | null;
-  total_findings: number;
-  open_findings: number;
   requirements_total: number;
   requirements_verified: number;
   requirements_breakdown: { name: string | null; status: string }[];
-};
-
-type FindingRow = {
-  id: number;
-  finding_type: string;
-  category: string;
-  severity: string | null;
-  requirement_id: number | null;
-  requirement_code: string | null;
-  requirement_name: string | null;
-  description: string;
-  status: string;
-  created_at: string | null;
 };
 
 type RequirementRow = {
@@ -114,7 +96,6 @@ type ActivityRow = {
 
 type DetailPayload = {
   assessment: AssessmentRow;
-  findings: FindingRow[];
   activity: ActivityRow[];
   requirements: RequirementRow[];
   documents: {
@@ -167,26 +148,6 @@ function stageBadge(stage: string) {
     default:
       return { bg: 'rgba(148,163,184,.14)', color: '#94a3b8', border: 'rgba(148,163,184,.28)' };
   }
-}
-
-function findingBadge(type: string) {
-  if (type === 'DEFICIENCY') return { bg: 'rgba(239,68,68,.14)', color: '#ef4444', border: 'rgba(239,68,68,.38)' };
-  if (type === 'RECOMMENDATION') return { bg: 'rgba(59,130,246,.14)', color: '#3b82f6', border: 'rgba(59,130,246,.38)' };
-  return { bg: 'rgba(148,163,184,.14)', color: '#94a3b8', border: 'rgba(148,163,184,.28)' };
-}
-
-function severityBadge(severity: string | null) {
-  if (severity === 'HIGH') return { bg: 'rgba(239,68,68,.14)', color: '#ef4444', border: 'rgba(239,68,68,.38)' };
-  if (severity === 'MEDIUM') return { bg: 'rgba(245,158,11,.14)', color: '#f59e0b', border: 'rgba(245,158,11,.38)' };
-  return { bg: 'rgba(148,163,184,.14)', color: '#94a3b8', border: 'rgba(148,163,184,.28)' };
-}
-
-function findingStatusBadge(status: string) {
-  return status === 'RESOLVED'
-    ? { bg: 'rgba(16,185,129,.14)', color: '#10b981', border: 'rgba(16,185,129,.38)' }
-    : status === 'WAIVED'
-      ? { bg: 'rgba(148,163,184,.14)', color: '#94a3b8', border: 'rgba(148,163,184,.28)' }
-      : { bg: 'rgba(245,158,11,.14)', color: '#f59e0b', border: 'rgba(245,158,11,.38)' };
 }
 
 async function apiFetch(path: string, init?: RequestInit) {
@@ -532,7 +493,7 @@ export function AssessmentEvaluation({
   return (
     <div className="space-y-4 sm:space-y-5">
       {/* Monitoring stat bar */}
-      <div className="grid grid-cols-3 lg:grid-cols-6 gap-2 sm:gap-4 mt-3">
+      <div className="grid grid-cols-3 lg:grid-cols-5 gap-2 sm:gap-4 mt-3">
         <StatTile label="Total" value={summary?.total ?? '—'} />
         <StatTile label="Unassigned" value={summary?.by_stage?.UNASSIGNED ?? '—'} tone="#94a3b8" />
         <StatTile label="Active" value={summary?.active ?? '—'} tone="#3b82f6" />
@@ -543,7 +504,6 @@ export function AssessmentEvaluation({
           tone="#10b981"
           onClick={() => setCompletedOpen(true)}
         />
-        <StatTile label="Returned" value={summary?.by_stage?.RETURNED ?? '—'} tone="#f59e0b" />
       </div>
 
       <div className="flex items-center justify-end gap-2">
@@ -580,7 +540,7 @@ export function AssessmentEvaluation({
                 placeholder="All stages"
                 value={stageFilter}
                 onChange={setStageFilter}
-                options={STAGE_ORDER.filter((s) => s !== 'COMPLETED').map((s) => ({ value: s, label: STAGE_LABELS[s] }))}
+                options={STAGE_ORDER.filter((s) => s !== 'COMPLETED' && s !== 'RETURNED').map((s) => ({ value: s, label: STAGE_LABELS[s] }))}
               />
             </div>
             <div className="min-w-0 sm:w-48">
@@ -597,7 +557,7 @@ export function AssessmentEvaluation({
 
         {loading ? (
           <div className="py-2">
-            <TableSkeleton columns={7} rows={6} />
+            <TableSkeleton columns={6} rows={6} />
           </div>
         ) : rows.length === 0 ? (
           <EmptyState
@@ -657,20 +617,12 @@ export function AssessmentEvaluation({
                     </div>
                   </div>
 
-                  <div className="mt-2.5 grid grid-cols-3 gap-2 text-[11px]">
+                  <div className="mt-2.5 grid grid-cols-2 gap-2 text-[11px]">
                     <div className="min-w-0">
                       <div className="text-[9px] uppercase tracking-wider text-secondary">Evaluator</div>
                       <div className="truncate" style={{ color: 'var(--text)' }}>
                         {r.evaluator_name || r.evaluator_username || '—'}
                       </div>
-                    </div>
-                    <div>
-                      <div className="text-[9px] uppercase tracking-wider text-secondary">Findings</div>
-                      {r.open_findings > 0 ? (
-                        <div style={{ color: '#ef4444' }}>{r.open_findings} open</div>
-                      ) : (
-                        <div style={{ color: 'var(--text)' }}>{r.total_findings || 0}</div>
-                      )}
                     </div>
                     <div className="text-right">
                       <div className="text-[9px] uppercase tracking-wider text-secondary">Working days</div>
@@ -699,7 +651,6 @@ export function AssessmentEvaluation({
                   <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary">Stage</th>
                   <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary">Evaluator</th>
                   <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary">Compliance</th>
-                  <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary">Findings</th>
                   <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary text-right">Working Days</th>
                 </tr>
               </thead>
@@ -726,13 +677,6 @@ export function AssessmentEvaluation({
                       <ComplianceTooltip breakdown={r.requirements_breakdown}>
                         {r.requirements_verified}/{r.requirements_total} verified
                       </ComplianceTooltip>
-                    </td>
-                    <td className="px-3 py-2.5 text-[11px]">
-                      {r.open_findings > 0 ? (
-                        <span style={{ color: '#ef4444' }}>{r.open_findings} open</span>
-                      ) : (
-                        <span className="text-secondary">{r.total_findings || 0}</span>
-                      )}
                     </td>
                     <td className="px-3 py-2.5 text-right text-[11px] tabular-nums">
                       {r.days_in_assessment == null ? (
@@ -945,7 +889,7 @@ function StatTile({
   );
 }
 
-const TABS = ['Overview', 'Compliance', 'Findings', 'Recommendation', 'Activity Log'] as const;
+const TABS = ['Overview', 'Compliance', 'Recommendation', 'Activity Log'] as const;
 type Tab = (typeof TABS)[number];
 
 function AssessmentDetail({
@@ -1071,7 +1015,6 @@ function AssessmentDetail({
               )}
             >
               {t}
-              {t === 'Findings' && data?.findings.length ? ` (${data.findings.length})` : ''}
             </button>
           ))}
         </div>
@@ -1085,8 +1028,6 @@ function AssessmentDetail({
             <OverviewTab data={data} evaluators={evaluators} perms={perms} busy={busy} run={run} />
           ) : tab === 'Compliance' ? (
             <ComplianceTab data={data} canEdit={perms.canEdit} busy={busy} run={run} />
-          ) : tab === 'Findings' ? (
-            <FindingsTab data={data} perms={perms} busy={busy} run={run} />
           ) : tab === 'Recommendation' ? (
             <RecommendationTab data={data} canEdit={perms.canEdit} busy={busy} run={run} />
           ) : (
@@ -1122,7 +1063,7 @@ function OverviewTab({
   const { fullAccess: isAdminReopen } = useControlPanelAccess();
   // Once COMPLETED/RETURNED, Reopen is the one deliberate way back in — the
   // evaluator assignment and raw stage buttons must not offer a side door
-  // around it (same gate as the Recommendation and Findings tabs).
+  // around it (same gate as the Recommendation tab).
   const isClosed = a.stage === 'COMPLETED' || a.stage === 'RETURNED';
 
   return (
@@ -1240,11 +1181,18 @@ function ComplianceTab({
   busy: boolean;
   run: RunFn;
 }) {
-  const [confirmTarget, setConfirmTarget] = useState<{ id: number; status: 'VERIFIED' | 'REJECTED'; label: string } | null>(null);
+  const [confirmTarget, setConfirmTarget] = useState<{
+    id: number;
+    status: 'VERIFIED' | 'REJECTED';
+    label: string;
+    remarks: string | null;
+  } | null>(null);
   const [rejectRemarks, setRejectRemarks] = useState('');
   const [threadRequirement, setThreadRequirement] = useState<RequirementRow | null>(null);
+  const [remarksTarget, setRemarksTarget] = useState<{ id: number; label: string } | null>(null);
+  const [remarksDraft, setRemarksDraft] = useState('');
   const [addingRequirement, setAddingRequirement] = useState(false);
-  // Same lock as FindingsTab/Recommendation — once the assessment is COMPLETED
+  // Same lock as the Recommendation tab — once the assessment is COMPLETED
   // or RETURNED, requirement verification shouldn't keep moving under an
   // already-submitted recommendation (or a decision Approval may have acted on).
   const isClosed = data.assessment.stage === 'COMPLETED' || data.assessment.stage === 'RETURNED';
@@ -1260,11 +1208,21 @@ function ComplianceTab({
       `Requirement ${status.toLowerCase()}`
     );
 
+  const saveRemarks = (id: number, remarks: string) =>
+    run(
+      () =>
+        apiFetch(`/api/assessments/requirements/${id}/remarks`, {
+          method: 'PATCH',
+          body: JSON.stringify({ remarks: remarks.trim() || null }),
+        }),
+      remarks.trim() ? 'Remarks saved' : 'Remarks cleared'
+    );
+
   return (
     <div className="flex flex-col gap-3">
       <div className="flex items-center justify-between gap-2">
         <div className="text-[11px] text-secondary">
-          Documentary requirements pulled from the application. Regulatory items are captured under Findings.
+          Documentary requirements pulled from the application. Add remarks on each document as you review it.
         </div>
         {canEditReqs ? (
           <button
@@ -1318,7 +1276,14 @@ function ComplianceTab({
                     </span>
                   ) : null}
                 </div>
-                {r.remarks ? <div className="text-[11px] text-secondary truncate">{r.remarks}</div> : null}
+                {r.remarks ? (
+                  <div className="mt-0.5 flex items-start gap-1 text-[11px] text-secondary">
+                    <StickyNote size={11} className="mt-[2px] shrink-0 opacity-70" />
+                    <span className="line-clamp-2 whitespace-pre-wrap break-words" title={r.remarks}>
+                      {r.remarks}
+                    </span>
+                  </div>
+                ) : null}
               </div>
               <div className="flex items-center gap-1.5 shrink-0">
                 <Badge
@@ -1343,6 +1308,7 @@ function ComplianceTab({
                           id: r.id,
                           status: 'VERIFIED',
                           label: `${r.requirement_code ? `${r.requirement_code} · ` : ''}${r.requirement_name || `Requirement #${r.id}`}`,
+                          remarks: r.remarks,
                         })
                       }
                     >
@@ -1358,10 +1324,26 @@ function ComplianceTab({
                           id: r.id,
                           status: 'REJECTED',
                           label: `${r.requirement_code ? `${r.requirement_code} · ` : ''}${r.requirement_name || `Requirement #${r.id}`}`,
+                          remarks: r.remarks,
                         });
                       }}
                     >
                       Reject
+                    </button>
+                    <button
+                      className="rounded px-2 py-1 text-[11px] border cursor-pointer inline-flex items-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed"
+                      style={{ borderColor: 'var(--border)' }}
+                      disabled={busy}
+                      onClick={() => {
+                        setRemarksDraft(r.remarks || '');
+                        setRemarksTarget({
+                          id: r.id,
+                          label: `${r.requirement_code ? `${r.requirement_code} · ` : ''}${r.requirement_name || `Requirement #${r.id}`}`,
+                        });
+                      }}
+                      title={r.remarks ? 'Edit remarks on this document' : 'Add remarks on this document'}
+                    >
+                      <StickyNote size={12} /> Remarks
                     </button>
                   </>
                 ) : null}
@@ -1415,11 +1397,20 @@ function ComplianceTab({
         }}
         onConfirm={async () => {
           if (!confirmTarget) return;
-          await setReq(confirmTarget.id, confirmTarget.status, confirmTarget.status === 'REJECTED' ? rejectRemarks : undefined);
+          await setReq(
+            confirmTarget.id,
+            confirmTarget.status,
+            confirmTarget.status === 'REJECTED' ? rejectRemarks : confirmTarget.remarks ?? undefined
+          );
           setConfirmTarget(null);
           setRejectRemarks('');
         }}
       >
+        {confirmTarget?.status === 'VERIFIED' && confirmTarget.remarks ? (
+          <div className="mt-3 text-[11px] text-secondary">
+            Your remarks on this document will be kept: <span className="italic">"{confirmTarget.remarks}"</span>
+          </div>
+        ) : null}
         {confirmTarget?.status === 'REJECTED' ? (
           <div className="mt-3">
             <label className="text-[11px] font-medium text-secondary">
@@ -1436,6 +1427,37 @@ function ComplianceTab({
             <div className="mt-1 text-[10px] text-secondary">Sent to the locator by email along with an in-app notification.</div>
           </div>
         ) : null}
+      </ConfirmModal>
+
+      <ConfirmModal
+        open={remarksTarget !== null}
+        title="Document remarks"
+        description={remarksTarget ? `Notes on "${remarksTarget.label}".` : undefined}
+        confirmText="Save remarks"
+        loading={busy}
+        onCancel={() => {
+          setRemarksTarget(null);
+          setRemarksDraft('');
+        }}
+        onConfirm={async () => {
+          if (!remarksTarget) return;
+          await saveRemarks(remarksTarget.id, remarksDraft);
+          setRemarksTarget(null);
+          setRemarksDraft('');
+        }}
+      >
+        <div className="mt-3">
+          <label className="text-[11px] font-medium text-secondary">Remarks</label>
+          <textarea
+            autoFocus
+            className="app-input mt-1 resize-y"
+            rows={4}
+            placeholder="Observations on this document — e.g. expired, unsigned, figures don't match…"
+            value={remarksDraft}
+            onChange={(e) => setRemarksDraft(e.target.value)}
+          />
+          <div className="mt-1 text-[10px] text-secondary">Leave blank and save to clear the remarks.</div>
+        </div>
       </ConfirmModal>
     </div>
   );
@@ -1650,160 +1672,6 @@ function AddCustomRequirementModal({
   );
 }
 
-function FindingsTab({
-  data,
-  perms,
-  busy,
-  run,
-}: {
-  data: DetailPayload;
-  perms: { canAdd: boolean; canEdit: boolean; canDelete: boolean };
-  busy: boolean;
-  run: RunFn;
-}) {
-  const appId = data.assessment.application_id;
-  // Once the assessment is COMPLETED (recommendation submitted) or RETURNED,
-  // it's no longer "open" — new findings shouldn't be added until an admin
-  // reopens it (same gate as the Recommendation tab's own form).
-  const isClosed = data.assessment.stage === 'COMPLETED' || data.assessment.stage === 'RETURNED';
-  const [form, setForm] = useState({
-    finding_type: 'FINDING',
-    category: 'DOCUMENTARY',
-    severity: '',
-    description: '',
-  });
-
-  const add = () =>
-    run(async () => {
-      await apiFetch(`/api/assessments/${appId}/findings`, {
-        method: 'POST',
-        body: JSON.stringify({
-          finding_type: form.finding_type,
-          category: form.category,
-          severity: form.severity || null,
-          description: form.description.trim(),
-        }),
-      });
-      setForm({ finding_type: 'FINDING', category: 'DOCUMENTARY', severity: '', description: '' });
-    }, 'Finding recorded');
-
-  return (
-    <div className="flex flex-col gap-3">
-      {data.findings.length === 0 ? (
-        <EmptyState
-          icon={<FileText size={40} className="opacity-40" />}
-          title="No findings yet"
-          description="Record findings, deficiencies, remarks and recommendations here."
-        />
-      ) : (
-        <div className="flex flex-col gap-2">
-          {data.findings.map((f) => (
-            <div key={f.id} className="rounded-xl border p-3" style={{ borderColor: 'var(--border)' }}>
-              <div className="flex items-start justify-between gap-3">
-                <div className="text-[13px] flex-1 min-w-0">{f.description}</div>
-                <div className="flex items-center gap-2 shrink-0">
-                  {perms.canEdit && f.status === 'OPEN' && !isClosed ? (
-                    <button
-                      className="rounded px-2 py-0.5 text-[11px] border disabled:opacity-40 whitespace-nowrap"
-                      style={{ borderColor: 'var(--border)' }}
-                      disabled={busy}
-                      onClick={() =>
-                        run(
-                          () =>
-                            apiFetch(`/api/assessments/findings/${f.id}`, {
-                              method: 'PATCH',
-                              body: JSON.stringify({ status: 'RESOLVED' }),
-                            }),
-                          'Finding resolved'
-                        )
-                      }
-                    >
-                      Resolve
-                    </button>
-                  ) : null}
-                  {perms.canDelete && !isClosed ? (
-                    <button
-                      className="text-secondary hover:text-red-500 disabled:opacity-40"
-                      disabled={busy}
-                      onClick={() =>
-                        run(() => apiFetch(`/api/assessments/findings/${f.id}`, { method: 'DELETE' }), 'Finding deleted')
-                      }
-                    >
-                      <Trash2 size={13} />
-                    </button>
-                  ) : null}
-                </div>
-              </div>
-              <div className="flex items-center justify-between gap-2 flex-wrap mt-2.5 pt-2.5 border-t" style={{ borderColor: 'var(--border)' }}>
-                <div className="flex items-center gap-1.5 flex-wrap min-w-0">
-                  <Badge label={f.finding_type} styles={findingBadge(f.finding_type)} />
-                  <Badge label={f.category} styles={{ bg: 'rgba(148,163,184,.14)', color: '#94a3b8', border: 'rgba(148,163,184,.38)' }} />
-                  {f.severity ? <Badge label={f.severity} styles={severityBadge(f.severity)} /> : null}
-                  <Badge label={f.status} styles={findingStatusBadge(f.status)} />
-                </div>
-                <span className="text-[10px] text-secondary shrink-0 whitespace-nowrap">{fmtDateTime(f.created_at)}</span>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {perms.canAdd && !isClosed ? (
-        <div className="rounded-xl border p-3 flex flex-col gap-2" style={{ borderColor: 'var(--border)' }}>
-          <div className="text-[11px] font-bold uppercase tracking-wide text-secondary">Add finding</div>
-          <div className="grid grid-cols-3 gap-2">
-            <Field label="Type">
-              <AppSelect
-                compact
-                isClearable={false}
-                value={form.finding_type}
-                onChange={(v) => setForm((f) => ({ ...f, finding_type: v }))}
-                options={FINDING_TYPES.map((t) => ({ value: t, label: t }))}
-              />
-            </Field>
-            <Field label="Category">
-              <AppSelect
-                compact
-                isClearable={false}
-                value={form.category}
-                onChange={(v) => setForm((f) => ({ ...f, category: v }))}
-                options={FINDING_CATEGORIES.map((t) => ({ value: t, label: t }))}
-              />
-            </Field>
-            <Field label="Severity">
-              <AppSelect
-                compact
-                value={form.severity}
-                onChange={(v) => setForm((f) => ({ ...f, severity: v }))}
-                options={['LOW', 'MEDIUM', 'HIGH'].map((t) => ({ value: t, label: t }))}
-              />
-            </Field>
-          </div>
-          <Field label="Description">
-            <textarea
-              className={cn(inputCls, 'min-h-[64px] resize-y')}
-              value={form.description}
-              onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
-            />
-          </Field>
-          <div className="flex justify-end">
-            <button
-              className="rounded-lg px-3 py-1.5 text-[12px] font-semibold disabled:opacity-50"
-              style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
-              disabled={busy || !form.description.trim()}
-              onClick={add}
-            >
-              <Plus size={13} className="inline mr-1" /> Record
-            </button>
-          </div>
-        </div>
-      ) : null}
-      {/* keep FINDING_STATUSES referenced for future edit UI */}
-      <span className="hidden">{FINDING_STATUSES.join(',')}</span>
-    </div>
-  );
-}
-
 function RecommendationTab({
   data,
   canEdit,
@@ -1822,7 +1690,6 @@ function RecommendationTab({
   // reopens the assessment (which clears a.recommendation back to null) —
   // the form must not look editable in between.
   const alreadySubmitted = Boolean(a.recommendation);
-  const openFindings = data.findings.filter((f) => f.status === 'OPEN').length;
   const totalReq = data.requirements.length;
   const verifiedReq = data.requirements.filter((r) => r.status === 'VERIFIED').length;
   const pendingReq = data.requirements.filter((r) => r.status === 'PENDING').length;
@@ -1835,12 +1702,6 @@ function RecommendationTab({
         className="rounded-xl border p-3 text-[12px]"
         style={{ borderColor: allVerified ? 'rgba(16,185,129,.4)' : 'var(--border)' }}
       >
-        <div className="flex justify-between">
-          <span className="text-secondary">Open findings</span>
-          <span className="font-semibold" style={{ color: openFindings ? '#ef4444' : undefined }}>
-            {openFindings}
-          </span>
-        </div>
         <div className="flex justify-between">
           <span className="text-secondary">Requirements verified</span>
           <span className="font-semibold" style={{ color: allVerified ? '#10b981' : undefined }}>
@@ -1884,7 +1745,6 @@ function RecommendationTab({
             label: 'Endorse to Approval',
             hint: 'Application moves to FOR_APPROVAL for multi-level review; the locator gets an email once their business status is decided.',
           },
-          { v: 'RETURN', label: 'Return to Locator', hint: 'Application status becomes RETURNED; locator is notified by email.' },
           { v: 'DISAPPROVE', label: 'Recommend Disapproval', hint: 'Application status becomes DISAPPROVED; locator is notified by email.' },
         ].map((o) => (
           <label

@@ -188,6 +188,22 @@ exports.updateRequirementStatus = async (req, res) => {
   }
 };
 
+exports.updateRequirementRemarks = async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ success: false, message: "Invalid id" });
+    const { remarks } = req.body || {};
+    const row = await Workflow.updateApplicationRequirementRemarks(id, {
+      remarks: remarks ?? null,
+      updated_by: req.user?.id ?? null,
+    });
+    if (!row) return res.status(404).json({ success: false, message: "Application requirement not found" });
+    return res.json({ success: true, data: row });
+  } catch (error) {
+    return fail(res, error, "Update requirement remarks (assessment)");
+  }
+};
+
 // Documentary compliance thread — proxy to the same requirement-comment
 // workflow the Locator's own portal posts/reads, gated by assessment access
 // rather than requireApplicationsAccess (an Assessment Officer may not hold
@@ -252,73 +268,6 @@ exports.addCustomRequirement = async (req, res) => {
     return res.status(201).json({ success: true, data: row });
   } catch (error) {
     return fail(res, error, "Add custom requirement (assessment)");
-  }
-};
-
-exports.addFinding = async (req, res) => {
-  try {
-    const id = appIdParam(req, res);
-    if (id === null) return undefined;
-    if (!String(req.body?.description ?? "").trim()) {
-      return res.status(400).json({ success: false, message: "description is required" });
-    }
-    const data = await Assessment.addFinding(id, req.body || {}, req.user?.id ?? null);
-    if (!data) return res.status(404).json({ success: false, message: "Application not found" });
-    await AuditLog.record({
-      actorId: req.user?.id,
-      actorUsername: req.user?.username,
-      action: "ASSESSMENT_FINDING_ADDED",
-      entityType: "application",
-      entityId: id,
-      details: { description: String(req.body?.description ?? "").trim().slice(0, 200), finding_type: req.body?.finding_type },
-      req,
-    });
-    return res.status(201).json({ success: true, data });
-  } catch (error) {
-    return fail(res, error, "Add finding");
-  }
-};
-
-exports.updateFinding = async (req, res) => {
-  try {
-    const id = Number(req.params.id);
-    if (!Number.isFinite(id)) return res.status(400).json({ success: false, message: "Invalid id" });
-    const data = await Assessment.updateFinding(id, req.body || {}, req.user?.id ?? null);
-    if (!data) return res.status(404).json({ success: false, message: "Finding not found" });
-    await AuditLog.record({
-      actorId: req.user?.id,
-      actorUsername: req.user?.username,
-      action: "ASSESSMENT_FINDING_UPDATED",
-      entityType: "assessment_finding",
-      entityId: id,
-      details: { description: String(data?.description ?? "").trim().slice(0, 200) },
-      req,
-    });
-    return res.json({ success: true, data });
-  } catch (error) {
-    return fail(res, error, "Update finding");
-  }
-};
-
-exports.deleteFinding = async (req, res) => {
-  try {
-    const id = Number(req.params.id);
-    if (!Number.isFinite(id)) return res.status(400).json({ success: false, message: "Invalid id" });
-    const before = await Assessment.getFindingById(id);
-    const ok = await Assessment.deleteFinding(id, req.user?.id ?? null);
-    if (!ok) return res.status(404).json({ success: false, message: "Finding not found" });
-    await AuditLog.record({
-      actorId: req.user?.id,
-      actorUsername: req.user?.username,
-      action: "ASSESSMENT_FINDING_DELETED",
-      entityType: "assessment_finding",
-      entityId: id,
-      details: { description: String(before?.description ?? "").trim().slice(0, 200) },
-      req,
-    });
-    return res.json({ success: true });
-  } catch (error) {
-    return fail(res, error, "Delete finding");
   }
 };
 

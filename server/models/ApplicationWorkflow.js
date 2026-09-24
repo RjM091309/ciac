@@ -391,7 +391,7 @@ async function ensureSchema() {
 
     -- Lets a Locator mark a rejection remark as read/addressed without that
     -- being the same thing as re-uploading a document — a lightweight
-    -- handshake distinct from the staff-only assessment_findings status.
+    -- handshake distinct from the requirement's own status.
     IF COL_LENGTH('dbo.application_requirements', 'acknowledged_at') IS NULL
       ALTER TABLE dbo.application_requirements ADD acknowledged_at DATETIME2(3) NULL;
     IF COL_LENGTH('dbo.application_requirements', 'acknowledged_by') IS NULL
@@ -1236,6 +1236,56 @@ async function updateApplicationRequirementStatus(id, { status, remarks, updated
   return updated;
 }
 
+/** Evaluator's per-document note — updates only the remarks, leaving the
+ * status (and its notifications) alone. Same "already recommended on" lock
+ * as updateApplicationRequirementStatus. */
+async function updateApplicationRequirementRemarks(id, { remarks, updated_by }) {
+  await ensureSchema();
+  const row = await getApplicationRequirementById(id);
+  if (!row) return null;
+
+  const assessmentRows = await selectData(
+    `SELECT TOP (1) stage FROM dbo.application_assessments WHERE application_id = @param0`,
+    [row.application_id]
+  );
+  const assessmentStage = String(assessmentRows?.[0]?.stage || "").toUpperCase();
+  if (assessmentStage === "COMPLETED" || assessmentStage === "RETURNED") {
+    throw Object.assign(
+      new Error("This application's assessment has already been recommended on. An admin must reopen it before remarks can change."),
+      { status: 400 }
+    );
+  }
+
+  const nextRemarks = remarks == null ? null : String(remarks).trim() || null;
+  await updateData(
+    `
+    UPDATE dbo.application_requirements
+    SET
+      remarks = @param1,
+      updated_by = @param2,
+      updated_at = SYSUTCDATETIME()
+    WHERE id = @param0
+    `,
+    [id, nextRemarks, toInt(updated_by)]
+  );
+
+  const requirementLabel = [String(row.requirement_code || "").trim(), String(row.requirement_name || "").trim()]
+    .filter(Boolean)
+    .join(" - ") || `Requirement #${row.id}`;
+  try {
+    const Assessment = require("./AssessmentEvaluation");
+    await Assessment.logRequirementActivity(row.application_id, {
+      action: "REQUIREMENT_REMARKS_UPDATED",
+      detail: nextRemarks ? `${requirementLabel} — ${nextRemarks}` : `${requirementLabel} — remarks cleared`,
+      actorId: updated_by,
+    });
+  } catch (error) {
+    console.error("Log requirement activity error:", error);
+  }
+
+  return getApplicationRequirementById(id);
+}
+
 /** Bare row lookup used by the comments/acknowledge endpoints to resolve
  * which application a requirement belongs to (for the access check) without
  * pulling in the full requirement-catalog join listApplicationRequirements
@@ -1712,6 +1762,7 @@ module.exports = {
   updateApplicationStatus,
   listApplicationRequirements,
   updateApplicationRequirementStatus,
+  updateApplicationRequirementRemarks,
   getApplicationRequirementById,
   listRequirementComments,
   addRequirementComment,

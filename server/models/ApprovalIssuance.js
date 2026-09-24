@@ -717,12 +717,6 @@ async function getApprovalDetail(applicationId) {
       )
     : [];
 
-  // The Assessment Officer's feedback on the Locator's documentary
-  // compliance — the Account Officer reads this here before deciding, since
-  // Assessment's own Compliance tab (verify/reject + discuss thread) stays
-  // scoped to just the Locator and Assessment.
-  const findings = await Assessment.listFindingsForApplication(appId).catch(() => []);
-
   return {
     approval: header,
     steps,
@@ -733,7 +727,6 @@ async function getApprovalDetail(applicationId) {
     contract,
     documents,
     charges,
-    findings,
   };
 }
 

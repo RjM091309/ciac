@@ -21,22 +21,6 @@ function businessError(message) {
   return Object.assign(new Error(message), { status: 400 });
 }
 
-// setStage/submitRecommendation both re-check the assessment isn't
-// COMPLETED/RETURNED server-side, not just in the frontend's isClosed —
-// Findings CRUD didn't, so it stayed editable via a direct API call even
-// after a recommendation locked the assessment. Shared here so
-// add/update/deleteFinding all enforce the same rule.
-async function assertAssessmentOpen(assessmentId) {
-  const rows = await selectData(
-    `SELECT TOP (1) stage FROM dbo.application_assessments WHERE id = @param0`,
-    [toInt(assessmentId)]
-  );
-  const stage = String(rows?.[0]?.stage || "").toUpperCase();
-  if (stage === "COMPLETED" || stage === "RETURNED") {
-    throw businessError("This assessment has already been recommended on. An admin must reopen it before findings can change.");
-  }
-}
-
 function toDecimal(v) {
   if (v === null || v === undefined || v === "") return null;
   const n = Number(v);
@@ -52,12 +36,8 @@ const STAGES = [
   "RETURNED",
 ];
 
-const FINDING_TYPES = ["FINDING", "COMMENT", "REMARK", "DEFICIENCY", "RECOMMENDATION"];
-const FINDING_CATEGORIES = ["DOCUMENTARY", "REGULATORY", "FINANCIAL", "TECHNICAL", "OTHER"];
-const FINDING_STATUSES = ["OPEN", "RESOLVED", "WAIVED"];
-const FINDING_SEVERITIES = ["LOW", "MEDIUM", "HIGH"];
 const CHARGE_TYPES = ["RENTAL", "PROCESSING_FEE", "TAX", "PENALTY", "OTHER"];
-const RECOMMENDATIONS = ["ENDORSE", "RETURN", "DISAPPROVE"];
+const RECOMMENDATIONS = ["ENDORSE", "DISAPPROVE"];
 
 /** Days after assignment before an in-progress assessment counts as overdue. */
 const OVERDUE_DAYS = 5;
@@ -104,25 +84,6 @@ async function ensureSchemaImpl() {
       CREATE UNIQUE INDEX UX_application_assessments_application_id ON dbo.application_assessments(application_id);
       CREATE INDEX IX_application_assessments_stage ON dbo.application_assessments(stage);
       CREATE INDEX IX_application_assessments_evaluator ON dbo.application_assessments(assigned_evaluator_id);
-    END;
-
-    IF OBJECT_ID('dbo.assessment_findings', 'U') IS NULL
-    BEGIN
-      CREATE TABLE dbo.assessment_findings (
-        id INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
-        assessment_id INT NOT NULL,
-        finding_type NVARCHAR(20) NOT NULL CONSTRAINT DF_assessment_findings_type DEFAULT ('FINDING'),
-        category NVARCHAR(20) NOT NULL CONSTRAINT DF_assessment_findings_category DEFAULT ('DOCUMENTARY'),
-        severity NVARCHAR(10) NULL,
-        requirement_id INT NULL,
-        description NVARCHAR(2000) NOT NULL,
-        status NVARCHAR(15) NOT NULL CONSTRAINT DF_assessment_findings_status DEFAULT ('OPEN'),
-        created_by INT NULL,
-        created_at DATETIME2(3) NOT NULL CONSTRAINT DF_assessment_findings_created_at DEFAULT (SYSUTCDATETIME()),
-        updated_by INT NULL,
-        updated_at DATETIME2(3) NULL
-      );
-      CREATE INDEX IX_assessment_findings_assessment_id ON dbo.assessment_findings(assessment_id);
     END;
 
     IF OBJECT_ID('dbo.assessment_charges', 'U') IS NULL
@@ -285,8 +246,6 @@ const LIST_SELECT = `
     -- it's still aging every day it sits in the list after that.
     CASE WHEN asm.assigned_at IS NULL THEN NULL
       ELSE DATEDIFF(DAY, asm.assigned_at, ISNULL(asm.recommended_at, SYSUTCDATETIME())) END AS days_in_assessment,
-    (SELECT COUNT(1) FROM dbo.assessment_findings f WHERE f.assessment_id = asm.id) AS total_findings,
-    (SELECT COUNT(1) FROM dbo.assessment_findings f WHERE f.assessment_id = asm.id AND f.status = 'OPEN') AS open_findings,
     (SELECT COUNT(1) FROM dbo.application_requirements ar WHERE ar.application_id = a.id) AS requirements_total,
     (SELECT COUNT(1) FROM dbo.application_requirements ar WHERE ar.application_id = a.id AND ar.status = 'VERIFIED') AS requirements_verified,
     -- Per-document breakdown for the list's "X/Y verified" tooltip — small
@@ -420,18 +379,6 @@ async function getAssessmentDetail(applicationId) {
   if (!header) return null;
 
   const assessmentId = toInt(header.assessment_id);
-  const findings = assessmentId
-    ? await selectData(
-        `
-        SELECT f.*, r.code AS requirement_code, r.name AS requirement_name
-        FROM dbo.assessment_findings f
-        LEFT JOIN dbo.requirements r ON r.id = f.requirement_id
-        WHERE f.assessment_id = @param0
-        ORDER BY f.id DESC
-        `,
-        [assessmentId]
-      )
-    : [];
   const charges = assessmentId
     ? await selectData(
         `SELECT * FROM dbo.assessment_charges WHERE assessment_id = @param0 ORDER BY id ASC`,
@@ -454,35 +401,7 @@ async function getAssessmentDetail(applicationId) {
   const requirements = await Workflow.listApplicationRequirements(appId);
   const documents = await Workflow.listDocumentsByApplication(appId);
 
-  return { assessment: header, findings, charges, activity, requirements, documents };
-}
-
-/** Read-only findings feed for the Locator's own application — the fuller
- * getAssessmentDetail() above (charges, activity log, evaluator assignment)
- * stays staff-only via assessment:queue; this just exposes the
- * finding_type/category/severity/status rows so a proponent can see WHY
- * something was flagged, not just the one-line requirement remarks. */
-async function listFindingsForApplication(applicationId) {
-  await ensureSchema();
-  const appId = toInt(applicationId);
-  if (!appId) return [];
-  const asmRows = await selectData(
-    `SELECT TOP (1) id FROM dbo.application_assessments WHERE application_id = @param0`,
-    [appId]
-  );
-  const assessmentId = toInt(asmRows?.[0]?.id);
-  if (!assessmentId) return [];
-  return selectData(
-    `
-    SELECT f.id, f.finding_type, f.category, f.severity, f.requirement_id, f.description, f.status, f.created_at,
-      r.code AS requirement_code, r.name AS requirement_name
-    FROM dbo.assessment_findings f
-    LEFT JOIN dbo.requirements r ON r.id = f.requirement_id
-    WHERE f.assessment_id = @param0
-    ORDER BY f.id DESC
-    `,
-    [assessmentId]
-  );
+  return { assessment: header, charges, activity, requirements, documents };
 }
 
 async function assignEvaluator(applicationId, { evaluatorId, actorId }) {
@@ -585,99 +504,6 @@ async function reopen(applicationId, actorId) {
   );
   await logActivity(asm.id, "REOPENED", `Reopened from ${asm.stage}`, actorId);
   return getAssessmentDetail(applicationId);
-}
-
-async function addFinding(applicationId, payload, actorId) {
-  const asm = await getOrCreateAssessment(applicationId, actorId);
-  if (!asm) return null;
-  await assertAssessmentOpen(asm.id);
-  const description = String(payload?.description ?? "").trim();
-  if (!description) throw new Error("description is required");
-
-  const result = await insertData(
-    `
-    INSERT INTO dbo.assessment_findings
-      (assessment_id, finding_type, category, severity, requirement_id, description, status, created_by, created_at)
-    OUTPUT INSERTED.id
-    VALUES (@param0, @param1, @param2, @param3, @param4, @param5, @param6, @param7, SYSUTCDATETIME())
-    `,
-    [
-      asm.id,
-      pick(payload?.finding_type, FINDING_TYPES, "FINDING"),
-      pick(payload?.category, FINDING_CATEGORIES, "DOCUMENTARY"),
-      pick(payload?.severity, FINDING_SEVERITIES),
-      toInt(payload?.requirement_id),
-      description.slice(0, 2000),
-      pick(payload?.status, FINDING_STATUSES, "OPEN"),
-      toInt(actorId),
-    ]
-  );
-  const id = result?.recordset?.[0]?.id;
-  await logActivity(asm.id, "FINDING_ADDED", description.slice(0, 200), actorId);
-
-  const type = pick(payload?.finding_type, FINDING_TYPES, "FINDING");
-  if (type === "DEFICIENCY") {
-    const app = await getApplicationRow(applicationId);
-    await notify({
-      applicationId,
-      actorId,
-      subject: `Deficiency noted: ${app?.application_no || ""}`.trim(),
-      body: `A deficiency was recorded during assessment of ${app?.application_no || ""}: ${description.slice(0, 300)}`,
-    });
-  }
-  return getFindingById(id);
-}
-
-async function getFindingById(id) {
-  const rows = await selectData(
-    `
-    SELECT f.*, r.code AS requirement_code, r.name AS requirement_name
-    FROM dbo.assessment_findings f
-    LEFT JOIN dbo.requirements r ON r.id = f.requirement_id
-    WHERE f.id = @param0
-    `,
-    [toInt(id)]
-  );
-  return rows?.[0] || null;
-}
-
-async function updateFinding(id, payload, actorId) {
-  await ensureSchema();
-  const existing = await getFindingById(id);
-  if (!existing) return null;
-  await assertAssessmentOpen(existing.assessment_id);
-  const sets = [];
-  const params = [];
-  const push = (frag, value) => {
-    sets.push(frag.replace("?", `@param${params.length}`));
-    params.push(value);
-  };
-  if (payload?.finding_type !== undefined) push("finding_type = ?", pick(payload.finding_type, FINDING_TYPES, existing.finding_type));
-  if (payload?.category !== undefined) push("category = ?", pick(payload.category, FINDING_CATEGORIES, existing.category));
-  if (payload?.severity !== undefined) push("severity = ?", pick(payload.severity, FINDING_SEVERITIES));
-  if (payload?.requirement_id !== undefined) push("requirement_id = ?", toInt(payload.requirement_id));
-  if (payload?.description !== undefined) {
-    const d = String(payload.description ?? "").trim();
-    if (!d) throw new Error("description cannot be empty");
-    push("description = ?", d.slice(0, 2000));
-  }
-  if (payload?.status !== undefined) push("status = ?", pick(payload.status, FINDING_STATUSES, existing.status));
-  push("updated_by = ?", toInt(actorId));
-  const query = `UPDATE dbo.assessment_findings SET ${sets.join(", ")}, updated_at = SYSUTCDATETIME() WHERE id = @param${params.length}`;
-  params.push(toInt(id));
-  await updateData(query, params);
-  await logActivity(existing.assessment_id, "FINDING_UPDATED", `Finding #${id}`, actorId);
-  return getFindingById(id);
-}
-
-async function deleteFinding(id, actorId) {
-  await ensureSchema();
-  const existing = await getFindingById(id);
-  if (!existing) return false;
-  await assertAssessmentOpen(existing.assessment_id);
-  await updateData(`DELETE FROM dbo.assessment_findings WHERE id = @param0`, [toInt(id)]);
-  await logActivity(existing.assessment_id, "FINDING_DELETED", `Finding #${id}`, actorId);
-  return true;
 }
 
 function resolveChargeAmount(payload) {
@@ -798,7 +624,7 @@ async function submitRecommendation(applicationId, { recommendation, summary, ac
   if (!rec) throw new Error("Invalid recommendation");
   const note = String(summary ?? "").trim();
 
-  const nextStage = rec === "RETURN" ? "RETURNED" : "COMPLETED";
+  const nextStage = "COMPLETED";
   // Same compare-and-swap reasoning as setStage — the recommendation===null
   // check above is a stale read, so the write itself re-checks it.
   const result = await updateData(
@@ -825,7 +651,7 @@ async function submitRecommendation(applicationId, { recommendation, summary, ac
   // sees that something needs an admin's attention right away.
   const warnings = [];
 
-  const targetStatus = rec === "RETURN" ? "RETURNED" : rec === "DISAPPROVE" ? "DISAPPROVED" : "FOR_APPROVAL";
+  const targetStatus = rec === "DISAPPROVE" ? "DISAPPROVED" : "FOR_APPROVAL";
   try {
     await Workflow.updateApplicationStatus(applicationId, {
       to_status: targetStatus,
@@ -863,9 +689,6 @@ async function submitRecommendation(applicationId, { recommendation, summary, ac
 module.exports = {
   ensureSchema,
   STAGES,
-  FINDING_TYPES,
-  FINDING_CATEGORIES,
-  FINDING_STATUSES,
   CHARGE_TYPES,
   RECOMMENDATIONS,
   getOrCreateAssessment,
@@ -874,14 +697,9 @@ module.exports = {
   getSummary,
   listAssignableEvaluators,
   getAssessmentDetail,
-  listFindingsForApplication,
   assignEvaluator,
   setStage,
   reopen,
-  addFinding,
-  updateFinding,
-  deleteFinding,
-  getFindingById,
   addCharge,
   updateCharge,
   deleteCharge,

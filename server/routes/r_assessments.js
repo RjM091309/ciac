@@ -19,15 +19,11 @@ router.post("/:applicationId/recommendation", requireMenuAccess(MENU_KEY, "edit"
 
 // Documentary compliance — proxy to the application requirement workflow, gated by assessment access
 router.patch("/requirements/:id/status", requireMenuAccess(MENU_KEY, "edit"), controller.updateRequirementStatus);
+router.patch("/requirements/:id/remarks", requireMenuAccess(MENU_KEY, "edit"), controller.updateRequirementRemarks);
 router.get("/requirements/:id/comments", requireMenuAccess(MENU_KEY, "view"), controller.listRequirementComments);
 router.post("/requirements/:id/comments", requireMenuAccess(MENU_KEY, "edit"), controller.addRequirementComment);
 // Ad-hoc ask outside the pre-seeded requirement catalog, scoped to this one application.
 router.post("/:applicationId/requirements/custom", requireMenuAccess(MENU_KEY, "add"), controller.addCustomRequirement);
-
-// Findings
-router.post("/:applicationId/findings", requireMenuAccess(MENU_KEY, "add"), controller.addFinding);
-router.patch("/findings/:id", requireMenuAccess(MENU_KEY, "edit"), controller.updateFinding);
-router.delete("/findings/:id", requireMenuAccess(MENU_KEY, "delete"), controller.deleteFinding);
 
 // Charges
 router.post("/:applicationId/charges", requireMenuAccess(MENU_KEY, "add"), controller.addCharge);

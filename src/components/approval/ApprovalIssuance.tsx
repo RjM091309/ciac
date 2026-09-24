@@ -1,7 +1,6 @@
 ﻿import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import {
-  AlertTriangle,
   CheckCircle2,
   Clock3,
   Coins,
@@ -126,19 +125,6 @@ type ActivityRow = {
   created_at: string | null;
 };
 
-type FindingRow = {
-  id: number;
-  finding_type: string;
-  category: string;
-  severity: string | null;
-  requirement_id: number | null;
-  requirement_code?: string | null;
-  requirement_name?: string | null;
-  description: string;
-  status: string;
-  created_at: string | null;
-};
-
 type DetailPayload = {
   approval: ApprovalRow;
   steps: StepRow[];
@@ -148,7 +134,6 @@ type DetailPayload = {
   contract: ContractRow;
   documents: { id: number; file_name: string; original_file_name: string | null }[];
   charges: ChargeRow[];
-  findings: FindingRow[];
 };
 
 type Summary = {
@@ -611,7 +596,7 @@ function StatTile({
   );
 }
 
-const TABS = ['Overview', 'Approval Chain', 'Findings', 'Charges', 'Contract', 'History'] as const;
+const TABS = ['Overview', 'Approval Chain', 'Charges', 'Contract', 'History'] as const;
 type Tab = (typeof TABS)[number];
 
 type RunFn = (fn: () => Promise<unknown>, successMsg?: string) => Promise<void>;
@@ -732,7 +717,6 @@ function ApprovalDetail({
             >
               {t}
               {t === 'Approval Chain' && data?.steps.length ? ` (${data.steps.length})` : ''}
-              {t === 'Findings' && data?.findings.length ? ` (${data.findings.length})` : ''}
               {t === 'Charges' && data?.charges.length ? ` (${data.charges.length})` : ''}
             </button>
           ))}
@@ -764,8 +748,6 @@ function ApprovalDetail({
             <OverviewTab data={data} perms={perms} busy={busy} run={run} />
           ) : tab === 'Approval Chain' ? (
             <ChainTab data={data} perms={perms} busy={busy} run={run} />
-          ) : tab === 'Findings' ? (
-            <FindingsReadOnlyTab data={data} />
           ) : tab === 'Charges' ? (
             <ChargesTab data={data} perms={perms} busy={busy} run={run} />
           ) : tab === 'Contract' ? (
@@ -1034,70 +1016,6 @@ function ChainTab({
           </div>
         </div>
       ) : null}
-    </div>
-  );
-}
-
-/** The Assessment Officer's feedback on the Locator's documentary
- * compliance (recorded in Assessment's own Findings tab) — read-only here so
- * the Account Officer has that context before deciding. Assessment's
- * Compliance tab itself (verify/reject + the reply thread) stays scoped to
- * just the Locator and Assessment; this is the one piece meant to carry
- * forward into the approval decision. */
-function FindingsReadOnlyTab({ data }: { data: DetailPayload }) {
-  if (data.findings.length === 0) {
-    return (
-      <EmptyState
-        icon={<AlertTriangle size={40} className="opacity-40" />}
-        title="No findings recorded"
-        description="Assessment didn't flag anything on this application's documentary compliance."
-      />
-    );
-  }
-  return (
-    <div className="flex flex-col gap-2">
-      {data.findings.map((f) => (
-        <div key={f.id} className="rounded-xl border p-3" style={{ borderColor: 'var(--border-subtle)' }}>
-          <div className="text-[12px]">
-            {f.requirement_name ? (
-              <span className="font-semibold" style={{ color: 'var(--text)' }}>{f.requirement_name}: </span>
-            ) : null}
-            {f.description}
-          </div>
-          <div className="flex items-center justify-between gap-2 flex-wrap mt-2.5 pt-2.5 border-t" style={{ borderColor: 'var(--border-subtle)' }}>
-            <div className="flex items-center gap-1.5 flex-wrap min-w-0">
-              <Badge
-                label={f.finding_type}
-                styles={{ bg: 'rgba(99,102,241,.14)', color: '#6366f1', border: 'rgba(99,102,241,.38)' }}
-              />
-              <Badge label={f.category} styles={{ bg: 'rgba(148,163,184,.14)', color: '#94a3b8', border: 'rgba(148,163,184,.38)' }} />
-              {f.severity ? (
-                <Badge
-                  label={f.severity}
-                  styles={
-                    f.severity === 'HIGH'
-                      ? { bg: 'rgba(239,68,68,.14)', color: '#ef4444', border: 'rgba(239,68,68,.38)' }
-                      : f.severity === 'MEDIUM'
-                        ? { bg: 'rgba(245,158,11,.14)', color: '#f59e0b', border: 'rgba(245,158,11,.38)' }
-                        : { bg: 'rgba(148,163,184,.14)', color: '#94a3b8', border: 'rgba(148,163,184,.28)' }
-                  }
-                />
-              ) : null}
-              <Badge
-                label={f.status}
-                styles={
-                  f.status === 'RESOLVED'
-                    ? { bg: 'rgba(16,185,129,.14)', color: '#10b981', border: 'rgba(16,185,129,.38)' }
-                    : f.status === 'WAIVED'
-                      ? { bg: 'rgba(148,163,184,.14)', color: '#94a3b8', border: 'rgba(148,163,184,.28)' }
-                      : { bg: 'rgba(245,158,11,.14)', color: '#f59e0b', border: 'rgba(245,158,11,.38)' }
-                }
-              />
-            </div>
-            <span className="text-[10px] text-secondary shrink-0 whitespace-nowrap">{fmtDateTime(f.created_at)}</span>
-          </div>
-        </div>
-      ))}
     </div>
   );
 }
