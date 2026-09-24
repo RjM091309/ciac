@@ -1221,7 +1221,7 @@ export function AuditLog() {
 
       const { default: ExcelJS } = await import('exceljs');
       const workbook = new ExcelJS.Workbook();
-      workbook.creator = '3CORE';
+      workbook.creator = 'CIAC';
       workbook.created = new Date();
 
       const HEADER_ROW = 5;
@@ -1246,7 +1246,7 @@ export function AuditLog() {
 
       // Title block: name, when/how much, and which filters produced it.
       const titleLines = [
-        { text: '3CORE — Audit Log', font: { bold: true, size: 16, color: { argb: 'FF18181B' } }, height: 26 },
+        { text: 'CIAC — Audit Log', font: { bold: true, size: 16, color: { argb: 'FF18181B' } }, height: 26 },
         {
           text: `Exported ${formatFullDate(new Date().toISOString())}  ·  ${data.length.toLocaleString()} ${
             data.length === 1 ? 'entry' : 'entries'
@@ -1319,7 +1319,7 @@ export function AuditLog() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `3core-audit-log-${new Date().toISOString().slice(0, 10)}.xlsx`;
+      a.download = `ciac-audit-log-${new Date().toISOString().slice(0, 10)}.xlsx`;
       document.body.appendChild(a);
       a.click();
       a.remove();

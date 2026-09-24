@@ -697,7 +697,10 @@ export function LoginPage(props: {
                   />
                   {step === 'mfa' ? (
                     <p className="text-[11px] text-secondary ml-1">
-                      Open your authenticator app and enter the current 6-digit code for 3CORE Portal.
+                      {/* Enrollments before the rebrand were issued as "3CORE Portal"
+                          (server/lib/totp.js), and authenticator apps keep that label. */}
+                      Open your authenticator app and enter the current 6-digit code for CIAC Portal (shown as
+                      3CORE Portal if you set up 2FA before the name change).
                     </p>
                   ) : null}
                 </motion.div>

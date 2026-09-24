@@ -638,7 +638,7 @@ export function ReportsAnalytics({ navigate }: { navigate?: (to: string, opts?: 
         );
       });
       // UTF-8 BOM so Excel doesn't mangle special characters on open.
-      downloadBlob(`3core-applications-report-${Date.now()}.csv`, `﻿${lines.join('\n')}`, 'text/csv;charset=utf-8;');
+      downloadBlob(`ciac-applications-report-${Date.now()}.csv`, `﻿${lines.join('\n')}`, 'text/csv;charset=utf-8;');
       logExport('csv');
       toast.success('Report exported for Excel');
     } finally {
@@ -655,7 +655,7 @@ export function ReportsAnalytics({ navigate }: { navigate?: (to: string, opts?: 
       const doc = new jsPDF({ orientation: 'landscape' });
 
       doc.setFontSize(14);
-      doc.text('3CORE — Reports & Analytics', 14, 16);
+      doc.text('CIAC — Reports & Analytics', 14, 16);
 
       doc.setFontSize(9);
       doc.setTextColor(100);
@@ -691,7 +691,7 @@ export function ReportsAnalytics({ navigate }: { navigate?: (to: string, opts?: 
         headStyles: { fillColor: [30, 41, 59] },
       });
 
-      doc.save(`3core-applications-report-${Date.now()}.pdf`);
+      doc.save(`ciac-applications-report-${Date.now()}.pdf`);
       logExport('pdf');
       toast.success('Report exported to PDF');
     } catch (e: any) {

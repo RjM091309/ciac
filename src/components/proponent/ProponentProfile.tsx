@@ -120,7 +120,7 @@ export function ProponentProfile() {
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json?.message || 'Failed to submit change request');
-      toast.success('Change request submitted for 3CORE review.');
+      toast.success('Change request submitted for CIAC review.');
       setEditing(false);
       await load();
     } catch (e: any) {
@@ -205,7 +205,7 @@ export function ProponentProfile() {
                   {isActive ? 'Active' : 'Inactive'}
                 </span>
               </div>
-              <p className="text-xs text-secondary">Your registered business information on file with 3CORE.</p>
+              <p className="text-xs text-secondary">Your registered business information on file with CIAC.</p>
             </div>
           </div>
 
@@ -242,7 +242,7 @@ export function ProponentProfile() {
             ))}
           </ul>
           <p className="mt-2 text-[11px] text-secondary">
-            You can submit new changes once 3CORE has reviewed this request.
+            You can submit new changes once CIAC has reviewed this request.
           </p>
         </div>
       ) : null}
@@ -253,7 +253,7 @@ export function ProponentProfile() {
             Request profile changes
           </h4>
           <p className="text-[11px] text-secondary mb-4">
-            Edit the fields you want to change. Your request goes to 3CORE for approval before it takes effect.
+            Edit the fields you want to change. Your request goes to CIAC for approval before it takes effect.
           </p>
           <div className="grid grid-cols-2 gap-4">
             {EDITABLE.map((f) => (

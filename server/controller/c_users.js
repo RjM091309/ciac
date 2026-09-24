@@ -58,25 +58,25 @@ async function userAuditSnapshot(id) {
  * to the portal. */
 function sendTempPasswordEmail({ to, name, username, tempPassword, isNewAccount }) {
   const intro = isNewAccount
-    ? "An account was created for you on the 3CORE Locator Portal."
+    ? "An account was created for you on the CIAC Locator Portal."
     : "An administrator reset your password.";
   const loginUrl = `${String(process.env.FRONTEND_URL || "").replace(/\/+$/, "")}/`;
   return sendMail({
     to,
-    subject: isNewAccount ? "Your 3CORE Locator Portal account" : "Your 3CORE Locator Portal password was reset",
+    subject: isNewAccount ? "Your CIAC Locator Portal account" : "Your CIAC Locator Portal password was reset",
     text:
       `Hello ${name},\n\n${intro}\n\n` +
       `Username: ${username}\n` +
       `Temporary password: ${tempPassword}\n\n` +
       `Sign in here: ${loginUrl}\n\n` +
-      `You'll be asked to set a new password right away. If you didn't expect this, contact 3CORE.\n`,
+      `You'll be asked to set a new password right away. If you didn't expect this, contact CIAC.\n`,
     html:
       `<p>Hello ${name},</p>` +
       `<p>${intro}</p>` +
       `<p>Username: <b>${username}</b><br/>` +
       `Temporary password: <span style="font-size:18px;font-weight:bold;letter-spacing:1px;">${tempPassword}</span></p>` +
       `<p><a href="${loginUrl}" style="display:inline-block;padding:10px 18px;background:#111827;color:#fff;text-decoration:none;border-radius:6px;">Sign in to the portal</a></p>` +
-      `<p>You'll be asked to set a new password right away. If you didn't expect this, contact 3CORE.</p>`,
+      `<p>You'll be asked to set a new password right away. If you didn't expect this, contact CIAC.</p>`,
   });
 }
 

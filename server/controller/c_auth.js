@@ -180,7 +180,7 @@ exports.forgotPassword = async (req, res) => {
       const name = result.user.full_name || result.user.username;
       const mailResult = await sendMail({
         to: result.user.email,
-        subject: "Reset your 3CORE Locator Portal password",
+        subject: "Reset your CIAC Locator Portal password",
         text:
           `Hello ${name},\n\n` +
           `We received a request to reset your password. This link expires in ${Auth.RESET_TOKEN_TTL_MINUTES} minutes:\n\n` +

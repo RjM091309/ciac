@@ -134,7 +134,7 @@ const PROPONENT_SUBHEADER: Record<ProponentView, { title: string; description: s
   },
   'me:profile': {
     title: 'My Business Profile',
-    description: 'Your registered business information and contact details on file with 3CORE.',
+    description: 'Your registered business information and contact details on file with CIAC.',
     badge: 'Profile',
   },
   'me:applications': {
@@ -144,7 +144,7 @@ const PROPONENT_SUBHEADER: Record<ProponentView, { title: string; description: s
   },
   'me:contracts-permits': {
     title: 'Contracts & Permits',
-    description: 'Your executed lease contracts and the permits on record with 3CORE.',
+    description: 'Your executed lease contracts and the permits on record with CIAC.',
     badge: 'Compliance',
   },
   'me:activity': {

@@ -580,7 +580,7 @@ export function Dashboard({ data, navigate }: { data: AdminDashboardData | null;
                 </div>
 
                 <div className="md:mt-4 space-y-0.5 md:space-y-1">
-                  <p className="text-xs sm:text-sm font-medium text-secondary">3Core Lease Desk</p>
+                  <p className="text-xs sm:text-sm font-medium text-secondary">CIAC Lease Desk</p>
                   <p className="text-xs font-semibold text-secondary">Application Monitoring</p>
                   <p className="text-[10px] sm:text-xs text-secondary">
                     {currentTime.toLocaleDateString('en-US', {
