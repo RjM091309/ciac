@@ -49,8 +49,6 @@ type ApprovalRow = {
   proponent_name: string | null;
   approval_id: number | null;
   approval_status: string;
-  current_level_no: number | null;
-  current_level_name: string | null;
   current_assignee_name: string | null;
   current_assignee_username: string | null;
   decision: string | null;
@@ -67,14 +65,6 @@ type ApprovalRow = {
 type StepRow = {
   id: number;
   approval_id: number;
-  level_no: number;
-  level_name: string;
-  role_id: number | null;
-  role_name: string | null;
-  /** The level's hand-picked eligible approvers (Control Panel's Approval
-   * Workflow Setup multi-select), snapshotted at approval start — empty when
-   * the level was left open to anyone holding role_name. */
-  assignees: { id: number; full_name: string | null; username: string }[];
   assigned_to: number | null;
   assignee_name: string | null;
   assignee_username: string | null;
@@ -400,7 +390,6 @@ export function ApprovalIssuance({
           {/* Phones: stacked cards instead of a horizontally scrolling table */}
           <div className="sm:hidden space-y-2">
             {pg.pageItems.map((r) => {
-              const stepsPct = r.total_steps ? Math.round((r.approved_steps / r.total_steps) * 100) : 0;
               const assignee = r.current_assignee_name || r.current_assignee_username;
               return (
                 <button
@@ -431,31 +420,12 @@ export function ApprovalIssuance({
                     </div>
                   </div>
 
-                  {r.approval_status === 'IN_PROGRESS' ? (
+                  {r.approval_status === 'IN_PROGRESS' && assignee ? (
                     <div className="mt-2 text-[11px]" style={{ color: 'var(--text)' }}>
-                      <span className="text-secondary">Now at: </span>
-                      {r.current_level_name || `Level ${r.current_level_no ?? '—'}`}
-                      {assignee ? <span className="text-secondary"> · {assignee}</span> : null}
+                      <span className="text-secondary">Assigned to: </span>
+                      {assignee}
                     </div>
                   ) : null}
-
-                  <div className="mt-2.5">
-                    <div className="flex items-center justify-between mb-1 text-[10px]">
-                      <span className="uppercase tracking-wider text-secondary">Approval steps</span>
-                      <span className="font-semibold" style={{ color: 'var(--text)' }}>
-                        {r.total_steps ? `${r.approved_steps}/${r.total_steps}` : '—'}
-                      </span>
-                    </div>
-                    <div className="h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--input-border)' }}>
-                      <div
-                        className="h-full rounded-full"
-                        style={{
-                          width: `${stepsPct}%`,
-                          backgroundColor: stepsPct >= 100 ? '#10b981' : '#3b82f6',
-                        }}
-                      />
-                    </div>
-                  </div>
 
                   <div className="mt-2.5 flex items-center justify-between text-[11px]">
                     <div>
@@ -486,8 +456,8 @@ export function ApprovalIssuance({
                   <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary">Application</th>
                   <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary">Locator</th>
                   <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary">Approval Status</th>
-                  <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary">Current Level</th>
-                  <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary text-right">Progress</th>
+                  <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary">Assigned To</th>
+                  <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary text-right">Decision</th>
                   <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary text-right">Issued</th>
                   <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary text-right">Days</th>
                 </tr>
@@ -515,16 +485,11 @@ export function ApprovalIssuance({
                     </td>
                     <td className="px-3 py-2.5 text-[11px] text-secondary">
                       {r.approval_status === 'IN_PROGRESS'
-                        ? r.current_level_name || `Level ${r.current_level_no ?? '—'}`
+                        ? r.current_assignee_name || r.current_assignee_username || 'Unassigned'
                         : '—'}
-                      {r.current_assignee_name || r.current_assignee_username ? (
-                        <div className="text-[10px] text-secondary">
-                          {r.current_assignee_name || r.current_assignee_username}
-                        </div>
-                      ) : null}
                     </td>
-                    <td className="px-3 py-2.5 text-right text-[11px] text-secondary tabular-nums">
-                      {r.total_steps ? `${r.approved_steps}/${r.total_steps}` : '—'}
+                    <td className="px-3 py-2.5 text-right text-[11px] text-secondary">
+                      {r.total_steps ? (r.approved_steps ? 'Decided' : 'Pending') : '—'}
                     </td>
                     <td className="px-3 py-2.5 text-right text-[11px] text-secondary tabular-nums">{r.issuance_count || '—'}</td>
                     <td className="px-3 py-2.5 text-right text-[11px] tabular-nums">
@@ -796,10 +761,6 @@ function OverviewTab({
         <InfoCell label="Assessment" value={a.assessment_recommendation || '—'} />
         <InfoCell label="Charges assessed" value={peso(a.charges_total)} />
         <InfoCell label="Days in approval" value={a.days_in_approval == null ? '—' : String(a.days_in_approval)} />
-        <InfoCell
-          label="Levels cleared"
-          value={a.total_steps ? `${a.approved_steps}/${a.total_steps}` : '—'}
-        />
         <InfoCell label="Decision" value={a.decision || '—'} />
       </div>
 
@@ -848,12 +809,11 @@ function ChainTab({
   );
   if (data.steps.length === 0) {
     // FOR_APPROVAL with zero steps means routing SHOULD have started
-    // (Assessment already endorsed it) but didn't — usually because no
-    // active Approval Levels are configured. The self-heal-on-view retry
-    // (c_approvals.js's detail endpoint) keeps failing silently in that
-    // case, so surface it as an actual problem with a manual retry instead
-    // of the same "starts automatically" message a genuinely-not-yet-
-    // endorsed application shows.
+    // (Assessment already endorsed it) but didn't. The self-heal-on-view
+    // retry (c_approvals.js's detail endpoint) keeps failing silently in
+    // that case, so surface it as an actual problem with a manual retry
+    // instead of the same "starts automatically" message a genuinely-not-
+    // yet-endorsed application shows.
     const stuck = data.approval.application_status === 'FOR_APPROVAL';
     return (
       <EmptyState
@@ -861,8 +821,8 @@ function ChainTab({
         title={stuck ? 'Routing failed to start' : 'Not routed yet'}
         description={
           stuck
-            ? "This application reached the approval stage, but the routing ladder failed to start — most likely no active Approval Levels are configured (Control Panel → Approval & Issuance). Fix the levels, then retry."
-            : "This application hasn't reached the approval workflow yet — the routing ladder starts automatically once Assessment endorses it."
+            ? 'This application reached the approval stage, but starting its approval failed. Try again — if it keeps failing, contact an admin.'
+            : "This application hasn't reached the approval workflow yet — approval starts automatically once Assessment endorses it."
         }
         action={
           stuck && perms.canEdit ? (
@@ -923,7 +883,7 @@ function ChainTab({
           throw err;
         }
       },
-      `Level ${action.toLowerCase()}d`
+      `Application ${action.toLowerCase()}d`
     ).then(() => setRemarks(''));
   };
 
@@ -955,17 +915,10 @@ function ChainTab({
               style={{ borderColor: 'var(--border-subtle)' }}
             >
               <div className="flex items-center justify-between gap-2">
-                <div className="text-[13px] font-semibold">
-                  Level {s.level_no} · {s.level_name}
-                </div>
+                <div className="text-[13px] font-semibold">Approval</div>
                 <Badge label={s.decision} styles={stepDecisionBadge(s.decision)} />
               </div>
               <div className="text-[11px] text-secondary mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
-                {(s.assignees || []).length > 0 ? (
-                  <span>Requires: {(s.assignees || []).map((a) => a.full_name || a.username).join(', ')}</span>
-                ) : s.role_name ? (
-                  <span>Requires: {s.role_name}</span>
-                ) : null}
                 {s.assignee_name || s.assignee_username ? (
                   <span>Assignee: {s.assignee_name || s.assignee_username}</span>
                 ) : null}
@@ -995,7 +948,7 @@ function ChainTab({
               disabled={busy}
               onClick={() => act('APPROVE')}
             >
-              <CheckCircle2 size={13} className="inline mr-1" /> Approve level
+              <CheckCircle2 size={13} className="inline mr-1" /> Approve
             </button>
             <button
               className="rounded-lg px-3 py-1.5 text-[12px] font-semibold disabled:opacity-50"
@@ -1070,7 +1023,7 @@ function ChargesTab({
   return (
     <div className="flex flex-col gap-3">
       <div className="text-[11px] text-secondary">
-        Assessed here by the Account Officer (Level 1 review).
+        Assessed during Assessment Evaluation.
       </div>
       <div className="rounded-xl border" style={{ borderColor: 'var(--border-subtle)' }}>
         <table className="w-full text-left text-[12px]">

@@ -66,6 +66,11 @@ interface UserData {
   id: number;
   username: string;
   role: Role;
+  /** The literal Control-Panel role name (e.g. "ACCOUNT OFFICER"), before
+   * `normalizeRole()` collapses it into the 3-value `role` above — needed
+   * wherever behavior depends on the specific custom role, not just the
+   * coarse admin/officer/proponent split. */
+  roleName: string;
 }
 
 const VIEW_TO_PATH: Record<AppView, string> = {
@@ -345,6 +350,7 @@ export default function App() {
             id: Number(u.id || 0),
             username: String(u.username || ''),
             role: normalizeRole(u.role),
+            roleName: String(u.role || ''),
           });
           setAuthState('authed');
           return;
@@ -394,7 +400,7 @@ export default function App() {
         resetToken={resetToken}
         onResetHandled={() => navigate('/', { replace: true })}
         onLoggedIn={(u) => {
-          setUser({ id: u.id, username: u.username, role: normalizeRole(u.role) });
+          setUser({ id: u.id, username: u.username, role: normalizeRole(u.role), roleName: String(u.role || '') });
           setAuthState('authed');
           navigate('/dashboard');
         }}
@@ -602,7 +608,7 @@ export default function App() {
               ) : view === 'reports:analytics' ? (
                 <ReportsAnalytics navigate={navigate} />
               ) : view === 'settings:proponents' ? (
-                <ProponentsManagement locationSearch={locationSearch} navigate={navigate} />
+                <ProponentsManagement locationSearch={locationSearch} navigate={navigate} currentUserRoleName={user?.roleName} />
               ) : view === 'settings:requirement-categories' ? (
                 <RequirementCategoriesManagement />
               ) : view === 'settings:inspection-types' ? (

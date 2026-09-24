@@ -15,7 +15,6 @@ const Proponent = require("./Proponent");
 const User = require("./User");
 const Role = require("./Role");
 const ApplicationType = require("./ApplicationType");
-const ControlPanelPermission = require("./ControlPanelPermission");
 const { renderContractCertificate } = require("../lib/contractCertificate");
 const { STORAGE_ROOT, relativeStoragePath } = require("../lib/fileStorage");
 
@@ -80,10 +79,6 @@ const STEP_DECISIONS = ["PENDING", "APPROVED", "DISAPPROVED", "RETURNED", "SKIPP
 const STEP_ACTIONS = ["APPROVE", "DISAPPROVE", "RETURN", "ENDORSE"];
 const ISSUANCE_TYPES = ["APPROVAL_ORDER", "NOTICE_OF_AWARD", "CONTRACT", "PERMIT", "OTHER"];
 
-const DEFAULT_LEVELS = [
-  { level_no: 1, name: "Account Officer Review", role_hint: "Account Officer" },
-];
-
 function pick(value, allowed, fallback = null) {
   const v = String(value ?? "").trim().toUpperCase();
   return allowed.includes(v) ? v : fallback;
@@ -104,44 +99,12 @@ async function ensureSchema() {
 
 async function ensureSchemaImpl() {
   await updateSchema(`
-    IF OBJECT_ID('dbo.approval_levels', 'U') IS NULL
-    BEGIN
-      CREATE TABLE dbo.approval_levels (
-        id INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
-        level_no INT NOT NULL,
-        name NVARCHAR(150) NOT NULL,
-        role_hint NVARCHAR(120) NULL,
-        role_id INT NULL,
-        is_active BIT NOT NULL CONSTRAINT DF_approval_levels_is_active DEFAULT (1),
-        created_by INT NULL,
-        created_at DATETIME2(3) NOT NULL CONSTRAINT DF_approval_levels_created_at DEFAULT (SYSUTCDATETIME()),
-        updated_by INT NULL,
-        updated_at DATETIME2(3) NULL,
-        CONSTRAINT FK_approval_levels_role FOREIGN KEY (role_id) REFERENCES dbo.roles(id)
-      );
-      CREATE INDEX IX_approval_levels_level_no ON dbo.approval_levels(level_no);
-    END;
-
-    IF OBJECT_ID('dbo.approval_level_assignees', 'U') IS NULL
-    BEGIN
-      CREATE TABLE dbo.approval_level_assignees (
-        id INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
-        level_id INT NOT NULL,
-        user_id INT NOT NULL,
-        created_at DATETIME2(3) NOT NULL CONSTRAINT DF_approval_level_assignees_created_at DEFAULT (SYSUTCDATETIME()),
-        CONSTRAINT FK_approval_level_assignees_level FOREIGN KEY (level_id) REFERENCES dbo.approval_levels(id) ON DELETE CASCADE,
-        CONSTRAINT FK_approval_level_assignees_user FOREIGN KEY (user_id) REFERENCES dbo.users(id),
-        CONSTRAINT UX_approval_level_assignees UNIQUE (level_id, user_id)
-      );
-    END;
-
     IF OBJECT_ID('dbo.application_approvals', 'U') IS NULL
     BEGIN
       CREATE TABLE dbo.application_approvals (
         id INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
         application_id INT NOT NULL,
         status NVARCHAR(20) NOT NULL CONSTRAINT DF_application_approvals_status DEFAULT ('PENDING'),
-        current_level_no INT NULL,
         decision NVARCHAR(20) NULL,
         decision_summary NVARCHAR(2000) NULL,
         decided_by INT NULL,
@@ -157,16 +120,13 @@ async function ensureSchemaImpl() {
       CREATE INDEX IX_application_approvals_status ON dbo.application_approvals(status);
     END;
 
+    -- One decision record per application's approval (single-level: there's
+    -- never more than one PENDING row per approval_id).
     IF OBJECT_ID('dbo.approval_steps', 'U') IS NULL
     BEGIN
       CREATE TABLE dbo.approval_steps (
         id INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
         approval_id INT NOT NULL,
-        level_id INT NULL,
-        level_no INT NOT NULL,
-        level_name NVARCHAR(150) NOT NULL,
-        role_id INT NULL,
-        role_name NVARCHAR(120) NULL,
         assigned_to INT NULL,
         decision NVARCHAR(20) NOT NULL CONSTRAINT DF_approval_steps_decision DEFAULT ('PENDING'),
         action NVARCHAR(20) NULL,
@@ -177,18 +137,6 @@ async function ensureSchemaImpl() {
         created_at DATETIME2(3) NOT NULL CONSTRAINT DF_approval_steps_created_at DEFAULT (SYSUTCDATETIME())
       );
       CREATE INDEX IX_approval_steps_approval_id ON dbo.approval_steps(approval_id);
-    END;
-
-    IF OBJECT_ID('dbo.approval_step_assignees', 'U') IS NULL
-    BEGIN
-      CREATE TABLE dbo.approval_step_assignees (
-        id INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
-        step_id INT NOT NULL,
-        user_id INT NOT NULL,
-        CONSTRAINT FK_approval_step_assignees_step FOREIGN KEY (step_id) REFERENCES dbo.approval_steps(id) ON DELETE CASCADE,
-        CONSTRAINT FK_approval_step_assignees_user FOREIGN KEY (user_id) REFERENCES dbo.users(id)
-      );
-      CREATE INDEX IX_approval_step_assignees_step ON dbo.approval_step_assignees(step_id);
     END;
 
     IF OBJECT_ID('dbo.approval_issuances', 'U') IS NULL
@@ -223,33 +171,6 @@ async function ensureSchemaImpl() {
     END;
   `);
 
-  // Migration guards for tables that may already exist without these
-  // columns — role_hint was free text with no real enforcement; role_id
-  // (and its approval_steps snapshot) is what actually gates who can act.
-  await updateSchema(`
-    IF COL_LENGTH('dbo.approval_levels', 'role_id') IS NULL
-    BEGIN
-      ALTER TABLE dbo.approval_levels ADD role_id INT NULL;
-      ALTER TABLE dbo.approval_levels ADD CONSTRAINT FK_approval_levels_role FOREIGN KEY (role_id) REFERENCES dbo.roles(id);
-    END;
-  `);
-  await updateSchema(`
-    IF COL_LENGTH('dbo.approval_steps', 'role_id') IS NULL
-      ALTER TABLE dbo.approval_steps ADD role_id INT NULL, role_name NVARCHAR(120) NULL;
-  `);
-  // level_id links a step back to the level it came from, so authorization
-  // can read that level's CURRENT role/Approvers config live instead of a
-  // frozen-at-start snapshot — an admin fixing a level's approver list (e.g.
-  // swapping in a replacement while someone's on leave) takes effect on
-  // already-in-progress applications immediately, not just new ones.
-  await updateSchema(`
-    IF COL_LENGTH('dbo.approval_steps', 'level_id') IS NULL
-    BEGIN
-      ALTER TABLE dbo.approval_steps ADD level_id INT NULL;
-      ALTER TABLE dbo.approval_steps ADD CONSTRAINT FK_approval_steps_level FOREIGN KEY (level_id) REFERENCES dbo.approval_levels(id);
-    END;
-  `);
-
   // The queue LEFT JOINs application_assessments (assessment endorses into the
   // approval workflow); make sure that table exists even on a DB where the
   // assessment module was never opened.
@@ -257,23 +178,6 @@ async function ensureSchemaImpl() {
     await Assessment.ensureSchema();
   } catch (error) {
     console.error("Approval ensureSchema: assessment schema check failed:", error);
-  }
-
-  const existing = await selectData(`SELECT COUNT(1) AS total FROM dbo.approval_levels`);
-  if (Number(existing?.[0]?.total || 0) === 0) {
-    for (const lvl of DEFAULT_LEVELS) {
-      // Best-effort: resolve the seed level's role_hint to a real role_id if
-      // a role with that exact name already exists. If it doesn't (fresh
-      // install, roles not seeded yet), the level starts unrestricted
-      // (role_id NULL) rather than failing the whole migration — an admin
-      // can bind it later from the Workflow Setup panel.
-      const roleId = await Role.getActiveRoleIdByName(lvl.role_hint).catch(() => null);
-      await insertData(
-        `INSERT INTO dbo.approval_levels (level_no, name, role_hint, role_id, is_active, created_at)
-         VALUES (@param0, @param1, @param2, @param3, 1, SYSUTCDATETIME())`,
-        [lvl.level_no, lvl.name, lvl.role_hint, roleId]
-      );
-    }
   }
 }
 
@@ -312,158 +216,6 @@ async function getApplicationRow(applicationId) {
   return rows?.[0] || null;
 }
 
-/* --------------------------- Configurable levels --------------------------- */
-
-const LEVEL_SELECT = `
-  SELECT l.id, l.level_no, l.name, l.role_hint, l.role_id, r.name AS role_name, l.is_active, l.created_at, l.updated_at
-  FROM dbo.approval_levels l
-  LEFT JOIN dbo.roles r ON r.id = l.role_id
-`;
-
-/** Attaches each level's hand-picked approvers (dbo.approval_level_assignees)
- * as `.assignees: [{id, full_name, username}]`. Two people can hold the same
- * role (e.g. two Assessment Officers) but need to own different levels of
- * the same ladder — this is the level-catalog side of that: a level can be
- * narrowed to specific individuals instead of (or on top of) its role_id, and
- * the multi-select in Control Panel drives this list directly. Batched as one
- * query for all levels instead of N+1. */
-async function attachLevelAssignees(levels) {
-  const ids = levels.map((l) => Number(l.id)).filter((n) => Number.isFinite(n));
-  if (ids.length === 0) return levels;
-  const rows = await selectData(
-    `SELECT la.level_id, u.id, u.full_name, u.username
-     FROM dbo.approval_level_assignees la
-     INNER JOIN dbo.users u ON u.id = la.user_id
-     WHERE la.level_id IN (${ids.map((_, i) => `@param${i}`).join(", ")})
-     ORDER BY u.full_name`,
-    ids
-  );
-  const byLevel = new Map();
-  for (const row of rows) {
-    const key = Number(row.level_id);
-    if (!byLevel.has(key)) byLevel.set(key, []);
-    byLevel.get(key).push({ id: row.id, full_name: row.full_name, username: row.username });
-  }
-  return levels.map((l) => ({ ...l, assignees: byLevel.get(Number(l.id)) || [] }));
-}
-
-async function listLevels({ includeInactive = false } = {}) {
-  await ensureSchema();
-  const rows = await selectData(
-    `${LEVEL_SELECT}
-     ${includeInactive ? "" : "WHERE l.is_active = 1"}
-     ORDER BY l.level_no ASC, l.id ASC`
-  );
-  return attachLevelAssignees(rows);
-}
-
-async function getLevelById(id) {
-  const rows = await selectData(`${LEVEL_SELECT} WHERE l.id = @param0`, [toInt(id)]);
-  if (!rows?.[0]) return null;
-  const [withAssignees] = await attachLevelAssignees(rows);
-  return withAssignees;
-}
-
-/** Replaces a level's assignee set wholesale (delete + reinsert) — simplest
- * correct semantics for a "these are the N people bound to this level" save,
- * and matches how saveSidebarPermissions/saveCrudPermissions already replace
- * their full row sets rather than diffing. Silently drops ids that aren't
- * real active users instead of failing the whole level save over one stale id. */
-async function replaceLevelAssignees(levelId, userIds) {
-  const id = toInt(levelId);
-  if (id === null) return;
-  const wanted = Array.from(
-    new Set((Array.isArray(userIds) ? userIds : []).map((v) => toInt(v)).filter((v) => v !== null))
-  );
-  await updateData(`DELETE FROM dbo.approval_level_assignees WHERE level_id = @param0`, [id]);
-  if (wanted.length === 0) return;
-  const validRows = await selectData(
-    `SELECT id FROM dbo.users WHERE is_active = 1 AND id IN (${wanted.map((_, i) => `@param${i}`).join(", ")})`,
-    wanted
-  );
-  const validIds = validRows.map((r) => Number(r.id));
-  for (const userId of validIds) {
-    await insertData(
-      `INSERT INTO dbo.approval_level_assignees (level_id, user_id, created_at) VALUES (@param0, @param1, SYSUTCDATETIME())`,
-      [id, userId]
-    );
-  }
-}
-
-/** role_id is optional — a level with no role bound stays open to anyone
- * with approval:queue edit access, same as before this was enforceable at
- * all. When set, it must be a real, active role (roleExists), so a level
- * can never point at a role that's since been deactivated/renamed away. */
-async function resolveLevelRoleId(role_id) {
-  const id = toInt(role_id);
-  if (id === null) return null;
-  const ok = await Role.roleExists(id);
-  if (!ok) throw new Error("Unknown or inactive role");
-  return id;
-}
-
-async function createLevel({ level_no, name, role_hint, role_id, assignee_user_ids, actorId }) {
-  await ensureSchema();
-  const label = String(name ?? "").trim();
-  if (!label) throw new Error("name is required");
-  let lvl = toInt(level_no);
-  if (lvl === null) {
-    const maxRows = await selectData(`SELECT ISNULL(MAX(level_no), 0) AS max_no FROM dbo.approval_levels`);
-    lvl = Number(maxRows?.[0]?.max_no || 0) + 1;
-  }
-  const resolvedRoleId = await resolveLevelRoleId(role_id);
-  const result = await insertData(
-    `INSERT INTO dbo.approval_levels (level_no, name, role_hint, role_id, is_active, created_by, created_at)
-     OUTPUT INSERTED.id
-     VALUES (@param0, @param1, @param2, @param3, 1, @param4, SYSUTCDATETIME())`,
-    [lvl, label.slice(0, 150), role_hint ? String(role_hint).slice(0, 120) : null, resolvedRoleId, toInt(actorId)]
-  );
-  const newId = result?.recordset?.[0]?.id;
-  if (assignee_user_ids !== undefined) await replaceLevelAssignees(newId, assignee_user_ids);
-  return getLevelById(newId);
-}
-
-async function updateLevel(id, payload, actorId) {
-  await ensureSchema();
-  const existing = await getLevelById(id);
-  if (!existing) return null;
-  const sets = [];
-  const params = [];
-  const push = (frag, value) => {
-    sets.push(frag.replace("?", `@param${params.length}`));
-    params.push(value);
-  };
-  if (payload?.level_no !== undefined) push("level_no = ?", toInt(payload.level_no) ?? existing.level_no);
-  if (payload?.name !== undefined) {
-    const label = String(payload.name ?? "").trim();
-    if (!label) throw new Error("name cannot be empty");
-    push("name = ?", label.slice(0, 150));
-  }
-  if (payload?.role_hint !== undefined) push("role_hint = ?", payload.role_hint ? String(payload.role_hint).slice(0, 120) : null);
-  if (payload?.role_id !== undefined) push("role_id = ?", await resolveLevelRoleId(payload.role_id));
-  if (payload?.is_active !== undefined) push("is_active = ?", payload.is_active ? 1 : 0);
-  push("updated_by = ?", toInt(actorId));
-  params.push(toInt(id));
-  await updateData(
-    `UPDATE dbo.approval_levels SET ${sets.join(", ")}, updated_at = SYSUTCDATETIME() WHERE id = @param${params.length - 1}`,
-    params
-  );
-  if (payload?.assignee_user_ids !== undefined) await replaceLevelAssignees(id, payload.assignee_user_ids);
-  return getLevelById(id);
-}
-
-async function deleteLevel(id, actorId) {
-  await ensureSchema();
-  const existing = await getLevelById(id);
-  if (!existing) return false;
-  // Soft-disable so historical approval_steps snapshots stay meaningful.
-  await updateData(
-    `UPDATE dbo.approval_levels SET is_active = 0, updated_by = @param1, updated_at = SYSUTCDATETIME() WHERE id = @param0`,
-    [toInt(id), toInt(actorId)]
-  );
-  return true;
-}
-
 /* ------------------------------ Approval header ---------------------------- */
 
 const LIST_SELECT = `
@@ -479,7 +231,6 @@ const LIST_SELECT = `
     a.submitted_at,
     ap.id AS approval_id,
     ISNULL(ap.status, 'PENDING') AS approval_status,
-    ap.current_level_no,
     ap.decision,
     ap.decision_summary,
     ap.decided_at,
@@ -491,7 +242,7 @@ const LIST_SELECT = `
     (SELECT COUNT(1) FROM dbo.approval_steps s WHERE s.approval_id = ap.id) AS total_steps,
     (SELECT COUNT(1) FROM dbo.approval_steps s WHERE s.approval_id = ap.id AND s.decision = 'APPROVED') AS approved_steps,
     (SELECT COUNT(1) FROM dbo.approval_issuances i WHERE i.approval_id = ap.id) AS issuance_count,
-    cur.level_name AS current_level_name,
+    cur.assigned_to AS current_assigned_to,
     cu.full_name AS current_assignee_name,
     cu.username AS current_assignee_username
   FROM dbo.applications a
@@ -500,10 +251,10 @@ const LIST_SELECT = `
   LEFT JOIN dbo.application_approvals ap ON ap.application_id = a.id
   LEFT JOIN dbo.application_assessments asm ON asm.application_id = a.id
   OUTER APPLY (
-    SELECT TOP (1) s.level_name, s.assigned_to
+    SELECT TOP (1) s.assigned_to
     FROM dbo.approval_steps s
     WHERE s.approval_id = ap.id AND s.decision = 'PENDING'
-    ORDER BY s.level_no ASC, s.id ASC
+    ORDER BY s.id ASC
   ) cur
   LEFT JOIN dbo.users cu ON cu.id = cur.assigned_to
 `;
@@ -563,36 +314,6 @@ async function getSummary() {
   };
 }
 
-// Driven by sidebar access to approval:queue, plus admin — same
-// permission-based reasoning as listAssignableEvaluators() in
-// AssessmentEvaluation.js, instead of a hardcoded role-name list that a
-// renamed or custom role granted approval:queue would fall through.
-/** `roleId`, when given, narrows the result to users who actually hold that
- * specific role (still admin-inclusive) — used to populate a step's
- * assignee picker with only people eligible for that level's bound role,
- * instead of everyone with approval:queue access. Omit it for the broad
- * "anyone who can see the Approval Queue" list (unrestricted levels). */
-async function listApprovers(roleId) {
-  await ensureSchema();
-  await ControlPanelPermission.ensureSchema();
-  const id = toInt(roleId);
-  return selectData(
-    `
-    SELECT DISTINCT u.id, u.full_name, u.username
-    FROM dbo.users u
-    INNER JOIN dbo.user_roles ur ON ur.user_id = u.id
-    INNER JOIN dbo.roles r ON r.id = ur.role_id
-    LEFT JOIN dbo.role_sidebar_menu_permissions p
-      ON p.role_id = r.id AND p.menu_key = 'approval:queue' AND p.is_enabled = 1
-    WHERE u.is_active = 1
-      AND (LOWER(LTRIM(RTRIM(r.name))) = 'admin' OR p.role_id IS NOT NULL)
-      ${id !== null ? "AND (LOWER(LTRIM(RTRIM(r.name))) = 'admin' OR r.id = @param0)" : ""}
-    ORDER BY u.full_name
-    `,
-    id !== null ? [id] : []
-  );
-}
-
 async function getOrCreateApproval(applicationId, actorId) {
   await ensureSchema();
   const appId = toInt(applicationId);
@@ -622,7 +343,7 @@ async function getApprovalDetail(applicationId) {
   if (!header) return null;
 
   const approvalId = toInt(header.approval_id);
-  let steps = approvalId
+  const steps = approvalId
     ? await selectData(
         `SELECT s.*, u.full_name AS assignee_name, u.username AS assignee_username,
                 au.full_name AS acted_by_name, au.username AS acted_by_username
@@ -630,55 +351,10 @@ async function getApprovalDetail(applicationId) {
          LEFT JOIN dbo.users u ON u.id = s.assigned_to
          LEFT JOIN dbo.users au ON au.id = s.acted_by
          WHERE s.approval_id = @param0
-         ORDER BY s.level_no ASC, s.id ASC`,
+         ORDER BY s.id ASC`,
         [approvalId]
       )
     : [];
-  if (steps.length > 0) {
-    // Steps linked to a level (level_id) show that level's LIVE current
-    // role/Approvers — same data actOnStep authorizes against — so the
-    // "Requires:" list an officer sees always matches what's actually
-    // enforced, including an admin's just-made edit. Legacy steps from
-    // before level_id existed fall back to their frozen
-    // approval_step_assignees snapshot.
-    const legacyStepIds = steps.filter((s) => !s.level_id).map((s) => Number(s.id));
-    const liveLevelIds = Array.from(new Set(steps.filter((s) => s.level_id).map((s) => Number(s.level_id))));
-
-    const legacyByStep = new Map();
-    if (legacyStepIds.length > 0) {
-      const assigneeRows = await selectData(
-        `SELECT sa.step_id, u.id, u.full_name, u.username
-         FROM dbo.approval_step_assignees sa
-         INNER JOIN dbo.users u ON u.id = sa.user_id
-         WHERE sa.step_id IN (${legacyStepIds.map((_, i) => `@param${i}`).join(", ")})
-         ORDER BY u.full_name`,
-        legacyStepIds
-      );
-      for (const row of assigneeRows) {
-        const key = Number(row.step_id);
-        if (!legacyByStep.has(key)) legacyByStep.set(key, []);
-        legacyByStep.get(key).push({ id: row.id, full_name: row.full_name, username: row.username });
-      }
-    }
-
-    let liveLevelsById = new Map();
-    if (liveLevelIds.length > 0) {
-      const liveLevelRows = await selectData(
-        `${LEVEL_SELECT} WHERE l.id IN (${liveLevelIds.map((_, i) => `@param${i}`).join(", ")})`,
-        liveLevelIds
-      );
-      const withAssignees = await attachLevelAssignees(liveLevelRows);
-      liveLevelsById = new Map(withAssignees.map((l) => [Number(l.id), l]));
-    }
-
-    steps = steps.map((s) => {
-      const live = s.level_id ? liveLevelsById.get(Number(s.level_id)) : null;
-      if (live) {
-        return { ...s, role_id: live.role_id, role_name: live.role_name, assignees: live.assignees || [] };
-      }
-      return { ...s, assignees: legacyByStep.get(Number(s.id)) || [] };
-    });
-  }
   const issuances = approvalId
     ? await selectData(
         `SELECT i.*, d.original_file_name, d.file_name, u.full_name AS created_by_name, u.username AS created_by_username
@@ -706,9 +382,9 @@ async function getApprovalDetail(applicationId) {
   const documents = await Workflow.listDocumentsByApplication(appId);
   const currentStep = steps.find((s) => s.decision === "PENDING") || null;
 
-  // Charges are assessed by the Account Officer here (Level 1 of the routing
-  // ladder), against the same assessment_charges table Assessment Evaluation
-  // uses — reuse its rows rather than duplicating a second charges table.
+  // Charges are assessed during Assessment Evaluation, against the same
+  // assessment_charges table it uses — reuse its rows rather than
+  // duplicating a second charges table.
   const assessmentId = toInt(header.assessment_id);
   const charges = assessmentId
     ? await selectData(
@@ -768,73 +444,39 @@ async function startApproval(applicationId, actorId) {
     throw businessError("This application's approval has already been decided — its routing history can't be restarted automatically.");
   }
 
-  const levels = await listLevels();
-  if (levels.length === 0) throw new Error("No active approval levels configured. Set up the workflow first.");
-
   await runInTransaction(async (tx) => {
     // The status checks above read a stale snapshot — this UPDATE re-checks
     // the same condition atomically (excluding IN_PROGRESS/APPROVED/
     // DISAPPROVED) before anything destructive runs, so a concurrent
-    // start/settle can't race past the checks and still wipe the ladder.
+    // start/settle can't race past the checks and still wipe the step.
     const guard = await tx.query(
       `UPDATE dbo.application_approvals
-       SET status = 'IN_PROGRESS', current_level_no = @param2, decision = NULL, decision_summary = NULL,
+       SET status = 'IN_PROGRESS', decision = NULL, decision_summary = NULL,
            decided_by = NULL, decided_at = NULL, started_by = @param1, started_at = SYSUTCDATETIME(),
            updated_by = @param1, updated_at = SYSUTCDATETIME()
        WHERE id = @param0 AND status NOT IN ('IN_PROGRESS', 'APPROVED', 'DISAPPROVED')`,
-      [approval.id, toInt(actorId), levels[0].level_no]
+      [approval.id, toInt(actorId)]
     );
     if (!guard?.rowsAffected?.[0]) {
       throw businessError("This application's approval can't be restarted right now — it may have just been acted on elsewhere.");
     }
 
     await tx.query(`DELETE FROM dbo.approval_steps WHERE approval_id = @param0`, [approval.id]);
-    for (const lvl of levels) {
-      // level_id links back to dbo.approval_levels so who-can-act is read
-      // LIVE off the level's current role/Approvers config at act time (see
-      // actOnStep), not frozen at this moment — an admin fixing an approver
-      // list (e.g. swapping in a replacement while someone's on leave) takes
-      // effect on this already-in-progress step immediately. level_no/
-      // level_name/role_id/role_name are still stored as a point-in-time
-      // record (for history/audit display), just no longer authoritative
-      // for authorization.
-      await tx.query(
-        `INSERT INTO dbo.approval_steps (approval_id, level_id, level_no, level_name, role_id, role_name, decision, created_at)
-         VALUES (@param0, @param1, @param2, @param3, @param4, @param5, 'PENDING', SYSUTCDATETIME())`,
-        [
-          approval.id,
-          lvl.id,
-          lvl.level_no,
-          String(lvl.name).slice(0, 150),
-          lvl.role_id ?? null,
-          lvl.role_name ? String(lvl.role_name).slice(0, 120) : null,
-        ]
-      );
-    }
+    await tx.query(
+      `INSERT INTO dbo.approval_steps (approval_id, decision, created_at) VALUES (@param0, 'PENDING', SYSUTCDATETIME())`,
+      [approval.id]
+    );
   });
 
-  await logActivity(approval.id, "STARTED", `Routed through ${levels.length} level(s)`, actorId);
+  await logActivity(approval.id, "STARTED", "Approval started", actorId);
   const app = await getApplicationRow(applicationId);
   await notify({
     applicationId,
     actorId,
     subject: `Approval started: ${app?.application_no || ""}`.trim(),
-    body: `Application ${app?.application_no || ""} entered the approval workflow (${levels.length} levels).`,
+    body: `Application ${app?.application_no || ""} entered the approval workflow.`,
   });
   return getApprovalDetail(applicationId);
-}
-
-/** The level's hand-picked approvers, snapshotted onto this specific step at
- * startApproval — the pool actOnStep authorizes against (see its narrowest-
- * first check below), kept separate from `listApprovers()` which reflects
- * the CURRENT (possibly since re-edited) level config, not what this
- * in-progress ladder actually started with. */
-async function getStepAssigneeIds(stepId) {
-  const rows = await selectData(
-    `SELECT user_id FROM dbo.approval_step_assignees WHERE step_id = @param0`,
-    [toInt(stepId)]
-  );
-  return rows.map((r) => Number(r.user_id));
 }
 
 async function endorseStep(stepId, { office, note, assignToUserId, actorId }) {
@@ -842,7 +484,7 @@ async function endorseStep(stepId, { office, note, assignToUserId, actorId }) {
   const rows = await selectData(`SELECT * FROM dbo.approval_steps WHERE id = @param0`, [toInt(stepId)]);
   const step = rows?.[0];
   if (!step) return null;
-  if (step.decision !== "PENDING") throw businessError("This level has already been decided.");
+  if (step.decision !== "PENDING") throw businessError("This approval has already been decided.");
   const officeText = String(office ?? "").trim();
   if (!officeText) throw new Error("Endorsement office is required");
 
@@ -856,7 +498,7 @@ async function endorseStep(stepId, { office, note, assignToUserId, actorId }) {
   await logActivity(
     step.approval_id,
     "ENDORSED",
-    `${step.level_name} endorsed to ${officeText}${note ? `: ${String(note).slice(0, 200)}` : ""}`,
+    `Endorsed to ${officeText}${note ? `: ${String(note).slice(0, 200)}` : ""}`,
     actorId
   );
   const appRows = await selectData(
@@ -869,13 +511,14 @@ async function endorseStep(stepId, { office, note, assignToUserId, actorId }) {
     applicationId,
     actorId,
     subject: `Endorsement: ${app?.application_no || ""}`.trim(),
-    body: `Application ${app?.application_no || ""} was electronically endorsed to ${officeText} at "${step.level_name}".`,
+    body: `Application ${app?.application_no || ""} was electronically endorsed to ${officeText}.`,
   });
   return getApprovalDetail(applicationId);
 }
 
-/** Records a decision on the level currently sitting with an approver and
- * advances (or settles) the ladder. */
+/** Records a decision on the one pending approval step and settles the
+ * approval immediately (APPROVE/DISAPPROVE/RETURN are all final now — there's
+ * no next level to advance to). */
 async function actOnStep(stepId, { action, remarks, actorId, override_unverified }) {
   await ensureSchema();
   const act = pick(action, STEP_ACTIONS);
@@ -885,76 +528,28 @@ async function actOnStep(stepId, { action, remarks, actorId, override_unverified
   const stepRows = await selectData(`SELECT * FROM dbo.approval_steps WHERE id = @param0`, [toInt(stepId)]);
   const step = stepRows?.[0];
   if (!step) return null;
-  if (step.decision !== "PENDING") throw businessError("This level has already been decided.");
+  if (step.decision !== "PENDING") throw businessError("This approval has already been decided.");
 
   const apRows = await selectData(`SELECT * FROM dbo.application_approvals WHERE id = @param0`, [step.approval_id]);
   const approval = apRows?.[0];
   if (!approval) return null;
   if (approval.status !== "IN_PROGRESS") throw businessError("Approval is not in progress.");
 
-  // Enforce order: the acted step must be the earliest still-pending level.
-  const pendingRows = await selectData(
-    `SELECT TOP (1) id FROM dbo.approval_steps WHERE approval_id = @param0 AND decision = 'PENDING' ORDER BY level_no ASC, id ASC`,
-    [step.approval_id]
-  );
-  if (Number(pendingRows?.[0]?.id) !== Number(step.id)) {
-    throw businessError("An earlier approval level is still pending.");
-  }
-
-  // Checked narrowest-first:
-  //  1. assigned_to — a legacy per-instance override some already-in-progress
-  //     approvals may still carry from before per-step reassignment was
-  //     removed; honored here so those don't change behavior mid-flight, but
-  //     nothing sets it anymore.
-  //  2. Approvers — read LIVE off the originating level's CURRENT config
-  //     (step.level_id -> approval_levels), not a frozen-at-start snapshot,
-  //     so an admin fixing a level's Approvers list (e.g. swapping in a
-  //     replacement while someone's on leave) takes effect on this
-  //     already-in-progress step immediately. When the level has specific
-  //     Approvers, ONLY one of them (or admin) may act using their own
-  //     account — this is the actual, current gate. Steps from before
-  //     level_id existed fall back to their frozen role_id/role_name and
-  //     approval_step_assignees snapshot.
-  //  3. role_id (no approvers configured) — anyone holding that role (or
-  //     admin) may act.
-  //  A level with none of the above set stays open to anyone with
-  //  approval:queue edit access.
+  // assigned_to restricts who may act to that one person (or admin); with no
+  // assignee, anyone with approval:queue edit access (enforced by the route's
+  // requireMenuAccess middleware) or admin may act.
   const isAdmin = await Role.userHasRoleName(actorId, "admin");
-  if (!isAdmin) {
-    if (step.assigned_to) {
-      if (Number(step.assigned_to) !== Number(actorId)) {
-        throw businessError("This level is assigned to someone else.");
-      }
-    } else {
-      const liveLevel = step.level_id ? await getLevelById(step.level_id) : null;
-      const assigneeIds = liveLevel ? (liveLevel.assignees || []).map((a) => Number(a.id)) : await getStepAssigneeIds(step.id);
-      const effectiveRoleId = liveLevel ? liveLevel.role_id : step.role_id;
-      const effectiveRoleName = liveLevel ? liveLevel.role_name : step.role_name;
-      if (assigneeIds.length > 0) {
-        if (!assigneeIds.includes(Number(actorId))) {
-          throw businessError("This level is restricted to a specific set of approvers, and you're not one of them.");
-        }
-      } else if (effectiveRoleId) {
-        if (!(await Role.userHasRoleName(actorId, effectiveRoleName))) {
-          throw businessError(`Only ${effectiveRoleName || "the assigned role"} can act on this level.`);
-        }
-      }
-    }
+  if (!isAdmin && step.assigned_to && Number(step.assigned_to) !== Number(actorId)) {
+    throw businessError("This approval is assigned to someone else.");
   }
 
-  // If this APPROVE would clear the last pending level (settling the whole
-  // approval to APPROVED), check mandatory requirements BEFORE writing the
-  // step's decision below — checking only inside settleApproval (after the
-  // step is already committed as APPROVED) would leave the step stuck
-  // "decided" with no way back to PENDING if the check then rejects it.
+  // Approving settles the whole application to APPROVED, so mandatory
+  // requirements must be verified BEFORE writing the step's decision below —
+  // checking only inside settleApproval (after the step is already committed
+  // as APPROVED) would leave it stuck "decided" with no way back to PENDING
+  // if the check then rejects it.
   if (act === "APPROVE") {
-    const otherPendingRows = await selectData(
-      `SELECT COUNT(1) AS n FROM dbo.approval_steps WHERE approval_id = @param0 AND decision = 'PENDING' AND id <> @param1`,
-      [step.approval_id, step.id]
-    );
-    if (Number(otherPendingRows?.[0]?.n || 0) === 0) {
-      await assertMandatoryRequirementsVerified(approval.application_id, { override: override_unverified });
-    }
+    await assertMandatoryRequirementsVerified(approval.application_id, { override: override_unverified });
   }
 
   const note = String(remarks ?? "").trim();
@@ -972,43 +567,17 @@ async function actOnStep(stepId, { action, remarks, actorId, override_unverified
     [toInt(stepId), stepDecision, act, note || null, toInt(actorId)]
   );
   if (!result?.rowsAffected?.[0]) {
-    throw businessError("This level has already been decided.");
+    throw businessError("This approval has already been decided.");
   }
   await logActivity(
     step.approval_id,
     `LEVEL_${stepDecision}`,
-    `${step.level_name}${override_unverified ? " (approved despite unverified mandatory requirements)" : ""}${note ? `: ${note.slice(0, 200)}` : ""}`,
+    `${override_unverified ? "Approved despite unverified mandatory requirements" : stepDecision}${note ? `: ${note.slice(0, 200)}` : ""}`,
     actorId
   );
 
   const applicationId = approval.application_id;
-  const app = await getApplicationRow(applicationId);
-
-  if (act === "APPROVE") {
-    const nextRows = await selectData(
-      `SELECT TOP (1) level_no FROM dbo.approval_steps
-       WHERE approval_id = @param0 AND decision = 'PENDING' ORDER BY level_no ASC, id ASC`,
-      [step.approval_id]
-    );
-    if (nextRows?.[0]) {
-      await updateData(
-        `UPDATE dbo.application_approvals SET current_level_no = @param1, updated_by = @param2, updated_at = SYSUTCDATETIME() WHERE id = @param0`,
-        [step.approval_id, Number(nextRows[0].level_no), toInt(actorId)]
-      );
-      await notify({
-        applicationId,
-        actorId,
-        subject: `Approval progressed: ${app?.application_no || ""}`.trim(),
-        body: `Application ${app?.application_no || ""} cleared "${step.level_name}" and moved to the next approval level.`,
-      });
-    } else {
-      await settleApproval(step.approval_id, applicationId, "APPROVED", note, actorId, { override_unverified });
-    }
-  } else if (act === "DISAPPROVE") {
-    await settleApproval(step.approval_id, applicationId, "DISAPPROVED", note, actorId);
-  } else {
-    await settleApproval(step.approval_id, applicationId, "RETURNED", note, actorId);
-  }
+  await settleApproval(step.approval_id, applicationId, stepDecision, note, actorId, { override_unverified });
 
   return getApprovalDetail(applicationId);
 }
@@ -1058,7 +627,7 @@ async function settleApproval(approvalId, applicationId, outcome, note, actorId,
   await updateData(
     `UPDATE dbo.application_approvals
      SET status = @param1, decision = @param1, decision_summary = @param2, decided_by = @param3,
-         decided_at = SYSUTCDATETIME(), current_level_no = NULL, updated_by = @param3, updated_at = SYSUTCDATETIME()
+         decided_at = SYSUTCDATETIME(), updated_by = @param3, updated_at = SYSUTCDATETIME()
      WHERE id = @param0`,
     [toInt(approvalId), headerStatus, note || null, toInt(actorId)]
   );
@@ -1115,7 +684,7 @@ async function settleApproval(approvalId, applicationId, outcome, note, actorId,
     applicationId,
     actorId,
     subject: `Application ${headerStatus.toLowerCase()}: ${app?.application_no || ""}`.trim(),
-    body: `Application ${app?.application_no || ""} was ${headerStatus.toLowerCase()} by the approving hierarchy${
+    body: `Application ${app?.application_no || ""} was ${headerStatus.toLowerCase()}${
       note ? `: ${note.slice(0, 300)}` : "."
     }${nextStepNote}`,
   });
@@ -1124,10 +693,6 @@ async function settleApproval(approvalId, applicationId, outcome, note, actorId,
 async function reopenApproval(applicationId, actorId) {
   const approval = await getOrCreateApproval(applicationId, actorId);
   if (!approval) return null;
-  const firstRows = await selectData(
-    `SELECT TOP (1) level_no FROM dbo.approval_steps WHERE approval_id = @param0 ORDER BY level_no ASC, id ASC`,
-    [approval.id]
-  );
   await runInTransaction(async (tx) => {
     await tx.query(
       `UPDATE dbo.approval_steps SET decision = 'PENDING', action = NULL, remarks = NULL, acted_by = NULL, acted_at = NULL
@@ -1136,10 +701,10 @@ async function reopenApproval(applicationId, actorId) {
     );
     await tx.query(
       `UPDATE dbo.application_approvals
-       SET status = 'IN_PROGRESS', current_level_no = @param1, decision = NULL, decision_summary = NULL,
-           decided_by = NULL, decided_at = NULL, updated_by = @param2, updated_at = SYSUTCDATETIME()
+       SET status = 'IN_PROGRESS', decision = NULL, decision_summary = NULL,
+           decided_by = NULL, decided_at = NULL, updated_by = @param1, updated_at = SYSUTCDATETIME()
        WHERE id = @param0`,
-      [approval.id, firstRows?.[0] ? Number(firstRows[0].level_no) : null, toInt(actorId)]
+      [approval.id, toInt(actorId)]
     );
   });
   await logActivity(approval.id, "REOPENED", `Reopened from ${approval.status}`, actorId);
@@ -1246,14 +811,8 @@ module.exports = {
   STEP_ACTIONS,
   STEP_DECISIONS,
   ISSUANCE_TYPES,
-  listLevels,
-  createLevel,
-  updateLevel,
-  deleteLevel,
-  getLevelById,
   listApprovals,
   getSummary,
-  listApprovers,
   getOrCreateApproval,
   getApprovalDetail,
   startApproval,

@@ -5,30 +5,18 @@ const { requireMenuAccess, requireRole } = require("../middleware/m_auth");
 
 const MENU_KEY = "approval:queue";
 
-// Configurable approval hierarchy (Workflow Setup). Lives only inside
-// Control Panel's Menu CRUD Permissions tab (under the Approval & Issuance
-// row), not as its own menu/page — so it's admin-gated the same way Control
-// Panel's own permission-write routes are (r_control_panel.js), rather than
-// through the generic menu-key permission system. Declared before the
-// dynamic "/:applicationId" route so "levels" isn't swallowed as an id.
-router.get("/levels", requireRole("admin"), controller.listLevels);
-router.post("/levels", requireRole("admin"), controller.createLevel);
-router.put("/levels/:id", requireRole("admin"), controller.updateLevel);
-router.delete("/levels/:id", requireRole("admin"), controller.deleteLevel);
-
 // Read
 router.get("/", requireMenuAccess(MENU_KEY, "view"), controller.list);
 router.get("/summary", requireMenuAccess(MENU_KEY, "view"), controller.summary);
-router.get("/approvers", requireMenuAccess(MENU_KEY, "view"), controller.approvers);
 router.get("/:applicationId", requireMenuAccess(MENU_KEY, "view"), controller.detail);
 
-// Header / routing ladder
+// Header / approval decision
 router.post("/:applicationId/start", requireMenuAccess(MENU_KEY, "edit"), controller.start);
 router.patch("/:applicationId/reopen", requireRole("admin"), controller.reopen);
 router.patch("/steps/:id/act", requireMenuAccess(MENU_KEY, "edit"), controller.actOnStep);
 router.patch("/steps/:id/endorse", requireMenuAccess(MENU_KEY, "edit"), controller.endorseStep);
 
-// Charges — assessed by the Account Officer at Level 1 review
+// Charges — assessed during Assessment Evaluation
 router.post("/:applicationId/charges", requireMenuAccess(MENU_KEY, "add"), controller.addCharge);
 router.patch("/charges/:id", requireMenuAccess(MENU_KEY, "edit"), controller.updateCharge);
 router.delete("/charges/:id", requireMenuAccess(MENU_KEY, "delete"), controller.deleteCharge);

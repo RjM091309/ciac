@@ -359,10 +359,18 @@ const BLANK_PROFILE_FORM = {
 export function ProponentsManagement({
   locationSearch = '',
   navigate,
+  currentUserRoleName,
 }: {
   locationSearch?: string;
   navigate?: (to: string, opts?: { replace?: boolean }) => void;
+  currentUserRoleName?: string;
 } = {}) {
+  // The Account Officer field shows who a locator is assigned to. An Account
+  // Officer looking at their own assigned locators doesn't need (or should
+  // see) this about themselves, so it's hidden outright for that role; every
+  // other staff role sees it, but read-only — reassignment isn't done from
+  // this dropdown.
+  const isAccountOfficer = (currentUserRoleName || '').trim().toUpperCase() === 'ACCOUNT OFFICER';
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<ProponentRow | null>(null);
@@ -1230,21 +1238,17 @@ export function ProponentsManagement({
                 </Field>
               </div>
               <div>
-                <Field compact label="Account Officer">
-                  <div className="app-form-control app-form-control-sm p-0 overflow-hidden flex items-stretch">
-                    <AppSelect
-                      options={userOptions}
-                      value={form.account_officer_id}
-                      onChange={(value) => setForm((p) => ({ ...p, account_officer_id: value || '' }))}
-                      placeholder="Select..."
-                      isClearable
-                      isDisabled={loadingLocation}
-                      compact
-                      boxed
-                      minHeight={26}
-                    />
-                  </div>
-                </Field>
+                {isAccountOfficer ? null : (
+                  <Field compact label="Account Officer">
+                    <div
+                      className="app-form-control app-form-control-sm flex items-center px-2 overflow-hidden text-ellipsis whitespace-nowrap"
+                      style={{ color: 'var(--text)' }}
+                      title="Not editable here"
+                    >
+                      {editing?.account_officer_name || '—'}
+                    </div>
+                  </Field>
+                )}
               </div>
               <div>
                 <Field compact label="Extension Date">

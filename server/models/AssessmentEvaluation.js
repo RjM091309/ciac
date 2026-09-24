@@ -669,15 +669,15 @@ async function submitRecommendation(applicationId, { recommendation, summary, ac
     try {
       // Lazy require — ApprovalIssuance.js requires this module too (for
       // CHARGE_TYPES/addCharge/etc.), so a top-level require here would be
-      // circular. Auto-starts the routing ladder the moment Assessment
-      // endorses, so the Account Officer never has to click "Start approval
-      // routing" themselves — Level 1 is already PENDING when they open it.
+      // circular. Auto-starts approval the moment Assessment endorses, so
+      // the approving officer never has to click "Start approval" themselves
+      // — it's already PENDING when they open it.
       const ApprovalIssuance = require("./ApprovalIssuance");
       await ApprovalIssuance.startApproval(applicationId, actorId);
     } catch (error) {
       console.error("submitRecommendation: auto-start approval failed:", error);
       warnings.push(
-        `The recommendation was saved, but approval routing could not be started (${error.message || "unknown error"}). An admin needs to start it manually or fix the approval-level configuration.`
+        `The recommendation was saved, but approval could not be started (${error.message || "unknown error"}). An admin needs to start it manually.`
       );
     }
   }

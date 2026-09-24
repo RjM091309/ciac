@@ -52,14 +52,6 @@ exports.summary = async (req, res) => {
   }
 };
 
-exports.approvers = async (req, res) => {
-  try {
-    return res.json({ success: true, data: await Approval.listApprovers(req.query?.role_id) });
-  } catch (error) {
-    return fail(res, error, "List approvers");
-  }
-};
-
 exports.detail = async (req, res) => {
   try {
     const id = appIdParam(req, res);
@@ -372,81 +364,5 @@ exports.deleteCharge = async (req, res) => {
     return res.json({ success: true });
   } catch (error) {
     return fail(res, error, "Delete charge");
-  }
-};
-
-/* --------------------------- Configurable levels ------------------------- */
-
-exports.listLevels = async (req, res) => {
-  try {
-    const includeInactive = String(req.query.includeInactive || "") === "1";
-    return res.json({ success: true, data: await Approval.listLevels({ includeInactive }) });
-  } catch (error) {
-    return fail(res, error, "List approval levels");
-  }
-};
-
-exports.createLevel = async (req, res) => {
-  try {
-    const { level_no, name, role_hint, role_id, assignee_user_ids } = req.body || {};
-    if (!name || !String(name).trim()) {
-      return res.status(400).json({ success: false, message: "name is required" });
-    }
-    const row = await Approval.createLevel({ level_no, name, role_hint, role_id, assignee_user_ids, actorId: req.user?.id ?? null });
-    await AuditLog.record({
-      actorId: req.user?.id,
-      actorUsername: req.user?.username,
-      action: "APPROVAL_LEVEL_CREATED",
-      entityType: "approval_level",
-      entityId: row?.id,
-      details: { name: row?.name, level_no: row?.level_no },
-      req,
-    });
-    return res.status(201).json({ success: true, data: row });
-  } catch (error) {
-    return fail(res, error, "Create approval level");
-  }
-};
-
-exports.updateLevel = async (req, res) => {
-  try {
-    const id = idParam(req, res);
-    if (id === null) return undefined;
-    const row = await Approval.updateLevel(id, req.body || {}, req.user?.id ?? null);
-    if (!row) return res.status(404).json({ success: false, message: "Approval level not found" });
-    await AuditLog.record({
-      actorId: req.user?.id,
-      actorUsername: req.user?.username,
-      action: "APPROVAL_LEVEL_UPDATED",
-      entityType: "approval_level",
-      entityId: id,
-      details: { name: row?.name, level_no: row?.level_no },
-      req,
-    });
-    return res.json({ success: true, data: row });
-  } catch (error) {
-    return fail(res, error, "Update approval level");
-  }
-};
-
-exports.deleteLevel = async (req, res) => {
-  try {
-    const id = idParam(req, res);
-    if (id === null) return undefined;
-    const before = await Approval.getLevelById(id);
-    const ok = await Approval.deleteLevel(id, req.user?.id ?? null);
-    if (!ok) return res.status(404).json({ success: false, message: "Approval level not found" });
-    await AuditLog.record({
-      actorId: req.user?.id,
-      actorUsername: req.user?.username,
-      action: "APPROVAL_LEVEL_DELETED",
-      entityType: "approval_level",
-      entityId: id,
-      details: { name: before?.name, level_no: before?.level_no },
-      req,
-    });
-    return res.json({ success: true });
-  } catch (error) {
-    return fail(res, error, "Delete approval level");
   }
 };
