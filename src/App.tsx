@@ -189,7 +189,9 @@ export default function App() {
   }, []);
 
   const [user, setUser] = useState<UserData | null>(null);
-  const [authState, setAuthState] = useState<'authed' | 'guest'>('guest');
+  // 'checking' until /api/auth/check answers, so a refresh with a live
+  // session doesn't flash the login page first.
+  const [authState, setAuthState] = useState<'checking' | 'authed' | 'guest'>('checking');
   // Shown on the login screen after an automatic sign-out (idle timeout).
   const [loginNotice, setLoginNotice] = useState<string | null>(null);
   const [view, setView] = useState<AppView>('dashboard');
@@ -359,8 +361,9 @@ export default function App() {
           return;
         }
       } catch {
-        // ignore (stay guest)
+        // ignore (fall through to guest)
       }
+      if (!cancelled) setAuthState('guest');
     }
     check();
     return () => {
@@ -431,6 +434,14 @@ export default function App() {
       }
     };
   }, [navigate, path]);
+
+  if (authState === 'checking') {
+    return (
+      <div className="flex h-screen w-screen items-center justify-center" style={{ backgroundColor: 'var(--background)' }}>
+        <Loader2 className="h-8 w-8 animate-spin text-secondary opacity-50" />
+      </div>
+    );
+  }
 
   if (authState === 'guest') {
     const resetToken = path === '/reset-password' ? new URLSearchParams(locationSearch).get('token') : null;

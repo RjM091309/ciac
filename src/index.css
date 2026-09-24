@@ -259,6 +259,11 @@
   border: 0.5px solid var(--border);
   border-radius: 1rem;
   box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  /* No border-color transition: pages often render a loading <div> and then
+     this card in the same spot, so React reuses the element and just swaps
+     its class — the global `*` transition would then fade the border in from
+     the default currentColor, flashing a dark outline on every page load. */
+  transition-property: background-color, color;
 }
 
 /* Tablet landscape only (touch devices). Excludes desktop pointers. */
@@ -401,8 +406,10 @@ select.input-field:-webkit-autofill:hover,
 select.input-field:-webkit-autofill:focus {
   -webkit-text-fill-color: var(--text);
   caret-color: var(--text);
-  box-shadow: 0 0 0px 1000px var(--input-bg) inset;
-  -webkit-box-shadow: 0 0 0px 1000px var(--input-bg) inset;
+  /* A translucent --input-bg would let the browser's own autofill color show
+     through, so a scope can supply an opaque equivalent here. */
+  box-shadow: 0 0 0px 1000px var(--input-autofill-bg, var(--input-bg)) inset;
+  -webkit-box-shadow: 0 0 0px 1000px var(--input-autofill-bg, var(--input-bg)) inset;
   transition: background-color 9999s ease-in-out 0s;
 }
 
