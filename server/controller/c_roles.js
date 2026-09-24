@@ -1,4 +1,5 @@
 const Role = require("../models/Role");
+const ControlPanelPermission = require("../models/ControlPanelPermission");
 const AuditLog = require("../models/AuditLog");
 
 // Fixed roles — locked against rename/retire from the UI. Two different
@@ -52,7 +53,13 @@ function isUniqueNameViolation(error) {
 exports.list = async (req, res) => {
   try {
     const rows = await Role.listRoles();
-    return res.json({ success: true, data: rows });
+    // Lets User Management show the Assessment level picker only for roles
+    // that actually reach the Evaluation Queue.
+    const assessmentRoleIds = await ControlPanelPermission.listRoleIdsWithMenu("assessment:queue");
+    return res.json({
+      success: true,
+      data: rows.map((r) => ({ ...r, has_assessment_queue: assessmentRoleIds.has(Number(r.id)) })),
+    });
   } catch (error) {
     console.error("List roles error:", error);
     return res.status(500).json({ success: false, message: error.message || "Internal server error" });

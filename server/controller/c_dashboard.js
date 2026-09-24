@@ -2,6 +2,7 @@ const Workflow = require("../models/ApplicationWorkflow");
 const Proponent = require("../models/Proponent");
 const Role = require("../models/Role");
 const ControlPanelPermission = require("../models/ControlPanelPermission");
+const Assessment = require("../models/AssessmentEvaluation");
 const Contract = require("../models/Contract");
 const Permit = require("../models/Permit");
 const ActivityLog = require("../models/ActivityLog");
@@ -230,11 +231,14 @@ function hasMenu(sidebarPermissions, menuKey) {
  * switcher showed the exact same system-wide list/stats no matter which
  * role was selected, since only the attention widget was being scoped. Any
  * other role (no queue-specific menu) keeps seeing everything, unscoped. */
-function scopeApplicationsForRole(applications, sidebarPermissions) {
+function scopeApplicationsForRole(applications, sidebarPermissions, assignedIds = null) {
   if (hasMenu(sidebarPermissions, "approval:queue")) {
     return applications.filter((a) => Boolean(Number(a.is_renewal)));
   }
   if (hasMenu(sidebarPermissions, "assessment:queue")) {
+    // A Level 2 Assessment Officer's dashboard is just their own
+    // assignments (assignedIds; null in the admin's identity-less preview).
+    if (assignedIds) return applications.filter((a) => assignedIds.has(Number(a.id)));
     return applications.filter((a) => !Boolean(Number(a.is_renewal)));
   }
   return applications;
@@ -248,7 +252,7 @@ function scopeApplicationsForRole(applications, sidebarPermissions) {
  * hardcoded role name, so this keeps working if either role is renamed and
  * applies the same way to the admin's dashboard-preview switcher. Falls back
  * to the caller's own default attention list for any other role shape. */
-async function buildRoleAttention(sidebarPermissions, fallbackApplications) {
+async function buildRoleAttention(sidebarPermissions, fallbackApplications, assignedIds = null) {
   if (hasMenu(sidebarPermissions, "approval:queue")) {
     const [all, expiryItems] = await Promise.all([
       Workflow.listAllApplicationsWithProgress(),
@@ -259,6 +263,10 @@ async function buildRoleAttention(sidebarPermissions, fallbackApplications) {
     return [...expiryItems, ...appItems];
   }
   if (hasMenu(sidebarPermissions, "assessment:queue")) {
+    if (assignedIds) {
+      // Level 2: everything assigned to them that's still in motion.
+      return attentionQueue(fallbackApplications, { statuses: ["SUBMITTED", "UNDER_REVIEW", "RESUBMITTED", "RETURNED"] });
+    }
     const all = await Workflow.listAllApplicationsWithProgress();
     return attentionQueue(all, { statuses: ["SUBMITTED", "UNDER_REVIEW", "RESUBMITTED"], isRenewal: false });
   }
@@ -324,8 +332,11 @@ exports.getMyDashboard = async (req, res) => {
     const roleId = await Role.getActiveRoleIdByName(role);
     const sidebarPermissions = roleId ? await ControlPanelPermission.getSidebarPermissions(roleId) : [];
     const allApplications = await Workflow.listAllApplicationsWithProgress();
-    const applications = scopeApplicationsForRole(allApplications, sidebarPermissions);
-    const attention = await buildRoleAttention(sidebarPermissions, applications);
+    const assignedIds = (await Assessment.isScopedLevel2(req.user.id, sidebarPermissions))
+      ? await Assessment.listApplicationIdsAssignedTo(req.user.id)
+      : null;
+    const applications = scopeApplicationsForRole(allApplications, sidebarPermissions, assignedIds);
+    const attention = await buildRoleAttention(sidebarPermissions, applications, assignedIds);
     return res.json({
       success: true,
       role: "officer",

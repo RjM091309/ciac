@@ -5,6 +5,7 @@ const AuditLog = require("../models/AuditLog");
 const Proponent = require("../models/Proponent");
 const Role = require("../models/Role");
 const ControlPanelPermission = require("../models/ControlPanelPermission");
+const Assessment = require("../models/AssessmentEvaluation");
 const { resolveStoredPath } = require("../lib/fileStorage");
 
 const APPLICATION_ACCESS_MENU_KEYS = ["applications:new", "applications:renewals", "assessment:queue", "approval:queue"];
@@ -45,6 +46,13 @@ exports.download = async (req, res) => {
     if (!(await hasStaffApplicationAccess(role))) {
       const proponent = await Proponent.getProponentByUserId(req.user.id);
       if (!proponent || Number(document.proponent_id) !== Number(proponent.id)) {
+        return res.status(404).json({ success: false, message: "Document not found" });
+      }
+    } else {
+      // A Level 2 Assessment Officer only reaches documents on applications
+      // assigned to them.
+      const level2UserId = await Assessment.getLevel2OnlyUserId(req.user);
+      if (level2UserId && (await Assessment.getAssignedEvaluatorId(document.application_id)) !== level2UserId) {
         return res.status(404).json({ success: false, message: "Document not found" });
       }
     }

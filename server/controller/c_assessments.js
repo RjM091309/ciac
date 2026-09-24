@@ -18,11 +18,38 @@ function appIdParam(req, res) {
   return id;
 }
 
+/** Level 1 (Manager) vs Level 2 (Officer) for this request — see
+ * Assessment.isManager. Cached on req so a route that checks it twice
+ * doesn't re-query the Control Panel tables. */
+async function scopeFor(req) {
+  if (!req.assessmentScope) {
+    req.assessmentScope = {
+      manager: await Assessment.isManager(req.user),
+      userId: Number(req.user?.id) || null,
+    };
+  }
+  return req.assessmentScope;
+}
+
+/** A Level 2 Officer may only touch applications assigned to them; a Manager
+ * passes straight through. Sends the 403 itself and returns false on denial. */
+async function ensureCanAct(req, res, applicationId) {
+  const scope = await scopeFor(req);
+  if (scope.manager) return true;
+  if (applicationId && scope.userId && (await Assessment.getAssignedEvaluatorId(applicationId)) === scope.userId) {
+    return true;
+  }
+  res.status(403).json({ success: false, message: "This application is not assigned to you." });
+  return false;
+}
+
 exports.list = async (req, res) => {
   try {
+    const scope = await scopeFor(req);
     const rows = await Assessment.listAssessments({
       stage: req.query.stage,
-      evaluatorId: req.query.evaluatorId,
+      // Level 2 only ever sees their own assignments, whatever the query says.
+      evaluatorId: scope.manager ? req.query.evaluatorId : scope.userId,
       search: req.query.search,
     });
     return res.json({ success: true, data: rows });
@@ -31,9 +58,21 @@ exports.list = async (req, res) => {
   }
 };
 
+/** The signed-in user's level, so the screen knows whether to show the
+ * Manager controls (assign, final recommendation). */
+exports.me = async (req, res) => {
+  try {
+    const scope = await scopeFor(req);
+    return res.json({ success: true, data: { level: scope.manager ? 1 : 2, manager: scope.manager } });
+  } catch (error) {
+    return fail(res, error, "Assessment level");
+  }
+};
+
 exports.summary = async (req, res) => {
   try {
-    const data = await Assessment.getSummary();
+    const scope = await scopeFor(req);
+    const data = await Assessment.getSummary({ evaluatorId: scope.manager ? null : scope.userId });
     return res.json({ success: true, data });
   } catch (error) {
     return fail(res, error, "Assessment summary");
@@ -42,7 +81,9 @@ exports.summary = async (req, res) => {
 
 exports.evaluators = async (req, res) => {
   try {
-    const data = await Assessment.listAssignableEvaluators();
+    // Only a Manager assigns, so only a Manager needs the picker's list.
+    const scope = await scopeFor(req);
+    const data = scope.manager ? await Assessment.listAssignableEvaluators() : [];
     return res.json({ success: true, data });
   } catch (error) {
     return fail(res, error, "List evaluators");
@@ -53,6 +94,7 @@ exports.detail = async (req, res) => {
   try {
     const id = appIdParam(req, res);
     if (id === null) return undefined;
+    if (!(await ensureCanAct(req, res, id))) return undefined;
     const data = await Assessment.getAssessmentDetail(id);
     if (!data) return res.status(404).json({ success: false, message: "Application not found" });
     return res.json({ success: true, data });
@@ -65,6 +107,9 @@ exports.assign = async (req, res) => {
   try {
     const id = appIdParam(req, res);
     if (id === null) return undefined;
+    if (!(await scopeFor(req)).manager) {
+      return res.status(403).json({ success: false, message: "Only a Level 1 Manager can assign evaluators." });
+    }
     const { evaluator_id } = req.body || {};
     if (!Number.isFinite(Number(evaluator_id))) {
       return res.status(400).json({ success: false, message: "evaluator_id is required" });
@@ -97,6 +142,7 @@ exports.setStage = async (req, res) => {
   try {
     const id = appIdParam(req, res);
     if (id === null) return undefined;
+    if (!(await ensureCanAct(req, res, id))) return undefined;
     const { stage } = req.body || {};
     const data = await Assessment.setStage(id, { stage, actorId: req.user?.id ?? null });
     if (!data) return res.status(404).json({ success: false, message: "Application not found" });
@@ -137,14 +183,88 @@ exports.reopen = async (req, res) => {
   }
 };
 
+exports.approvers = async (req, res) => {
+  try {
+    // Only the Manager's final recommendation picks an Account Officer.
+    const scope = await scopeFor(req);
+    const data = scope.manager ? await Assessment.listAssignableApprovers() : [];
+    return res.json({ success: true, data });
+  } catch (error) {
+    return fail(res, error, "List approvers");
+  }
+};
+
+/** Level 2 Officer → Manager: the officer's own recommendation. */
+exports.officerReview = async (req, res) => {
+  try {
+    const id = appIdParam(req, res);
+    if (id === null) return undefined;
+    if (!(await ensureCanAct(req, res, id))) return undefined;
+    const { recommendation, summary } = req.body || {};
+    const data = await Assessment.submitOfficerReview(id, {
+      recommendation,
+      summary,
+      actorId: req.user?.id ?? null,
+    });
+    if (!data) return res.status(404).json({ success: false, message: "Application not found" });
+    await AuditLog.record({
+      actorId: req.user?.id,
+      actorUsername: req.user?.username,
+      action: "ASSESSMENT_OFFICER_REVIEW_SUBMITTED",
+      entityType: "application",
+      entityId: id,
+      details: {
+        application_no: data?.assessment?.application_no,
+        proponent_name: data?.assessment?.proponent_name,
+        recommendation,
+        summary: summary || undefined,
+      },
+      req,
+    });
+    return res.json({ success: true, data });
+  } catch (error) {
+    return fail(res, error, "Submit officer review");
+  }
+};
+
+exports.returnToOfficer = async (req, res) => {
+  try {
+    const id = appIdParam(req, res);
+    if (id === null) return undefined;
+    if (!(await scopeFor(req)).manager) {
+      return res.status(403).json({ success: false, message: "Only a Level 1 Manager can return a review." });
+    }
+    const { note } = req.body || {};
+    const data = await Assessment.returnToOfficer(id, { note, actorId: req.user?.id ?? null });
+    if (!data) return res.status(404).json({ success: false, message: "Application not found" });
+    await AuditLog.record({
+      actorId: req.user?.id,
+      actorUsername: req.user?.username,
+      action: "ASSESSMENT_RETURNED_TO_OFFICER",
+      entityType: "application",
+      entityId: id,
+      details: { application_no: data?.assessment?.application_no, proponent_name: data?.assessment?.proponent_name, note: note || undefined },
+      req,
+    });
+    return res.json({ success: true, data });
+  } catch (error) {
+    return fail(res, error, "Return to officer");
+  }
+};
+
+/** Level 1 Manager's final recommendation (Approve → Account Officer, or Disapprove). */
 exports.recommendation = async (req, res) => {
   try {
     const id = appIdParam(req, res);
     if (id === null) return undefined;
-    const { recommendation, summary } = req.body || {};
+    if (!(await scopeFor(req)).manager) {
+      return res.status(403).json({ success: false, message: "Only a Level 1 Manager can make the final recommendation." });
+    }
+    const { recommendation, summary, approver_id } = req.body || {};
     const data = await Assessment.submitRecommendation(id, {
       recommendation,
       summary,
+      approverId: approver_id,
       actorId: req.user?.id ?? null,
     });
     if (!data) return res.status(404).json({ success: false, message: "Application not found" });
@@ -158,6 +278,7 @@ exports.recommendation = async (req, res) => {
         application_no: data?.assessment?.application_no,
         proponent_name: data?.assessment?.proponent_name,
         recommendation,
+        approver_name: data?.assessment?.approver_name || data?.assessment?.approver_username || undefined,
         summary: summary || undefined,
       },
       req,
@@ -172,6 +293,7 @@ exports.updateRequirementStatus = async (req, res) => {
   try {
     const id = Number(req.params.id);
     if (!Number.isFinite(id)) return res.status(400).json({ success: false, message: "Invalid id" });
+    if (!(await ensureCanAct(req, res, await Assessment.getApplicationIdForRequirement(id)))) return undefined;
     const { status, remarks } = req.body || {};
     if (!status || !String(status).trim()) {
       return res.status(400).json({ success: false, message: "status is required" });
@@ -192,6 +314,7 @@ exports.updateRequirementRemarks = async (req, res) => {
   try {
     const id = Number(req.params.id);
     if (!Number.isFinite(id)) return res.status(400).json({ success: false, message: "Invalid id" });
+    if (!(await ensureCanAct(req, res, await Assessment.getApplicationIdForRequirement(id)))) return undefined;
     const { remarks } = req.body || {};
     const row = await Workflow.updateApplicationRequirementRemarks(id, {
       remarks: remarks ?? null,
@@ -212,6 +335,7 @@ exports.listRequirementComments = async (req, res) => {
   try {
     const id = Number(req.params.id);
     if (!Number.isFinite(id)) return res.status(400).json({ success: false, message: "Invalid id" });
+    if (!(await ensureCanAct(req, res, await Assessment.getApplicationIdForRequirement(id)))) return undefined;
     const rows = await Workflow.listRequirementComments(id);
     return res.json({ success: true, data: rows });
   } catch (error) {
@@ -223,6 +347,7 @@ exports.addRequirementComment = async (req, res) => {
   try {
     const id = Number(req.params.id);
     if (!Number.isFinite(id)) return res.status(400).json({ success: false, message: "Invalid id" });
+    if (!(await ensureCanAct(req, res, await Assessment.getApplicationIdForRequirement(id)))) return undefined;
     const { message } = req.body || {};
     if (!message || !String(message).trim()) {
       return res.status(400).json({ success: false, message: "message is required" });
@@ -247,6 +372,7 @@ exports.addCustomRequirement = async (req, res) => {
   try {
     const id = appIdParam(req, res);
     if (id === null) return undefined;
+    if (!(await ensureCanAct(req, res, id))) return undefined;
     const { name, description, is_mandatory } = req.body || {};
     const row = await Workflow.addCustomRequirementToApplication({
       applicationId: id,
@@ -275,6 +401,7 @@ exports.addCharge = async (req, res) => {
   try {
     const id = appIdParam(req, res);
     if (id === null) return undefined;
+    if (!(await ensureCanAct(req, res, id))) return undefined;
     if (!String(req.body?.description ?? "").trim()) {
       return res.status(400).json({ success: false, message: "description is required" });
     }
@@ -299,6 +426,7 @@ exports.updateCharge = async (req, res) => {
   try {
     const id = Number(req.params.id);
     if (!Number.isFinite(id)) return res.status(400).json({ success: false, message: "Invalid id" });
+    if (!(await ensureCanAct(req, res, await Assessment.getApplicationIdForCharge(id)))) return undefined;
     const data = await Assessment.updateCharge(id, req.body || {}, req.user?.id ?? null);
     if (!data) return res.status(404).json({ success: false, message: "Charge not found" });
     await AuditLog.record({
@@ -320,6 +448,7 @@ exports.deleteCharge = async (req, res) => {
   try {
     const id = Number(req.params.id);
     if (!Number.isFinite(id)) return res.status(400).json({ success: false, message: "Invalid id" });
+    if (!(await ensureCanAct(req, res, await Assessment.getApplicationIdForCharge(id)))) return undefined;
     const before = await Assessment.getChargeById(id);
     const ok = await Assessment.deleteCharge(id, req.user?.id ?? null);
     if (!ok) return res.status(404).json({ success: false, message: "Charge not found" });

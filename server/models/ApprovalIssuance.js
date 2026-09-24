@@ -218,6 +218,15 @@ async function getApplicationRow(applicationId) {
 
 /* ------------------------------ Approval header ---------------------------- */
 
+/** Which Account Officer an application's approval belongs to: the latest
+ * step's assignee, else the one the Assessment Manager picked on endorsing.
+ * NULL = unassigned (e.g. approvals that predate assignment), which every
+ * approver can still see so nothing gets orphaned. Needs `ap` and `asm`. */
+const ASSIGNEE_EXPR = `COALESCE(
+    (SELECT TOP (1) s2.assigned_to FROM dbo.approval_steps s2 WHERE s2.approval_id = ap.id ORDER BY s2.id DESC),
+    asm.approver_id
+  )`;
+
 const LIST_SELECT = `
   SELECT
     a.id AS application_id,
@@ -244,7 +253,8 @@ const LIST_SELECT = `
     (SELECT COUNT(1) FROM dbo.approval_issuances i WHERE i.approval_id = ap.id) AS issuance_count,
     cur.assigned_to AS current_assigned_to,
     cu.full_name AS current_assignee_name,
-    cu.username AS current_assignee_username
+    cu.username AS current_assignee_username,
+    ${ASSIGNEE_EXPR} AS approval_assignee_id
   FROM dbo.applications a
   LEFT JOIN dbo.proponents p ON p.id = a.proponent_id
   LEFT JOIN dbo.application_types at ON at.code = a.application_type
@@ -259,10 +269,17 @@ const LIST_SELECT = `
   LEFT JOIN dbo.users cu ON cu.id = cur.assigned_to
 `;
 
-async function listApprovals({ status, search } = {}) {
+/** `assigneeId` limits the queue to one Account Officer's approvals (plus
+ * any still unassigned) — every non-admin approver is scoped this way. */
+async function listApprovals({ status, search, assigneeId } = {}) {
   await ensureSchema();
   const where = ["(ap.id IS NOT NULL OR a.status = 'FOR_APPROVAL')"];
   const params = [];
+  const asgId = toInt(assigneeId);
+  if (asgId) {
+    where.push(`(${ASSIGNEE_EXPR} = @param${params.length} OR ${ASSIGNEE_EXPR} IS NULL)`);
+    params.push(asgId);
+  }
   const statusFilter = pick(status, APPROVAL_STATUSES);
   if (statusFilter) {
     where.push(`ISNULL(ap.status, 'PENDING') = @param${params.length}`);
@@ -281,25 +298,45 @@ async function listApprovals({ status, search } = {}) {
   return selectData(sql, params);
 }
 
-async function getSummary() {
+async function getSummary({ assigneeId } = {}) {
   await ensureSchema();
-  const statusRows = await selectData(`
+  const asgId = toInt(assigneeId);
+  const asgFilter = asgId ? `AND (${ASSIGNEE_EXPR} = @param0 OR ${ASSIGNEE_EXPR} IS NULL)` : "";
+  const asgParams = asgId ? [asgId] : [];
+  const statusRows = await selectData(
+    `
     SELECT ISNULL(ap.status, 'PENDING') AS status, COUNT(1) AS total
     FROM dbo.applications a
     LEFT JOIN dbo.application_approvals ap ON ap.application_id = a.id
-    WHERE ap.id IS NOT NULL OR a.status = 'FOR_APPROVAL'
+    LEFT JOIN dbo.application_assessments asm ON asm.application_id = a.id
+    WHERE (ap.id IS NOT NULL OR a.status = 'FOR_APPROVAL') ${asgFilter}
     GROUP BY ISNULL(ap.status, 'PENDING')
-  `);
+    `,
+    asgParams
+  );
   const byStatus = {};
   APPROVAL_STATUSES.forEach((s) => { byStatus[s] = 0; });
   statusRows.forEach((r) => { byStatus[String(r.status)] = Number(r.total || 0); });
 
-  const issuedRows = await selectData(`SELECT COUNT(1) AS total FROM dbo.approval_issuances`);
-  const avgRows = await selectData(`
+  const issuedRows = await selectData(
+    `
+    SELECT COUNT(1) AS total
+    FROM dbo.approval_issuances i
+    INNER JOIN dbo.application_approvals ap ON ap.id = i.approval_id
+    LEFT JOIN dbo.application_assessments asm ON asm.application_id = ap.application_id
+    WHERE 1 = 1 ${asgFilter}
+    `,
+    asgParams
+  );
+  const avgRows = await selectData(
+    `
     SELECT AVG(CAST(DATEDIFF(DAY, ap.started_at, ap.decided_at) AS FLOAT)) AS avg_days
     FROM dbo.application_approvals ap
-    WHERE ap.started_at IS NOT NULL AND ap.decided_at IS NOT NULL
-  `);
+    LEFT JOIN dbo.application_assessments asm ON asm.application_id = ap.application_id
+    WHERE ap.started_at IS NOT NULL AND ap.decided_at IS NOT NULL ${asgFilter}
+    `,
+    asgParams
+  );
 
   const total = Object.values(byStatus).reduce((sum, n) => sum + n, 0);
   return {
@@ -312,6 +349,37 @@ async function getSummary() {
     avg_days_to_decide:
       avgRows?.[0]?.avg_days != null ? Math.round(Number(avgRows[0].avg_days) * 10) / 10 : null,
   };
+}
+
+/** The Account Officer an application's approval belongs to (see
+ * ASSIGNEE_EXPR); null when unassigned. */
+async function getApprovalAssigneeId(applicationId) {
+  await ensureSchema();
+  const rows = await selectData(
+    `
+    SELECT TOP (1) ${ASSIGNEE_EXPR} AS assignee_id
+    FROM dbo.applications a
+    LEFT JOIN dbo.application_approvals ap ON ap.application_id = a.id
+    LEFT JOIN dbo.application_assessments asm ON asm.application_id = a.id
+    WHERE a.id = @param0
+    `,
+    [toInt(applicationId)]
+  );
+  return toInt(rows?.[0]?.assignee_id);
+}
+
+async function getApplicationIdForStep(stepId) {
+  await ensureSchema();
+  const rows = await selectData(
+    `
+    SELECT TOP (1) ap.application_id
+    FROM dbo.approval_steps s
+    INNER JOIN dbo.application_approvals ap ON ap.id = s.approval_id
+    WHERE s.id = @param0
+    `,
+    [toInt(stepId)]
+  );
+  return toInt(rows?.[0]?.application_id);
 }
 
 async function getOrCreateApproval(applicationId, actorId) {
@@ -429,10 +497,21 @@ async function deleteCharge(id, actorId) {
   return Assessment.deleteCharge(id, actorId);
 }
 
-/** Snapshots the active configurable levels onto the approval as a routing ladder. */
-async function startApproval(applicationId, actorId) {
+/** Opens the single pending approval step. `assignTo` is the Account Officer
+ * the Assessment Manager picked; when omitted (e.g. a manual restart from
+ * the Approval screen) it falls back to the one recorded on the assessment.
+ * The step's assigned_to limits who may act on it — see actOnStep. */
+async function startApproval(applicationId, actorId, { assignTo } = {}) {
   const approval = await getOrCreateApproval(applicationId, actorId);
   if (!approval) return null;
+  let assigneeId = toInt(assignTo);
+  if (!assigneeId) {
+    const asmRows = await selectData(
+      `SELECT TOP (1) approver_id FROM dbo.application_assessments WHERE application_id = @param0`,
+      [toInt(applicationId)]
+    );
+    assigneeId = toInt(asmRows?.[0]?.approver_id);
+  }
   if (approval.status === "IN_PROGRESS") return getApprovalDetail(applicationId);
   // A settled approval with an actual decision on record (a contract may
   // already be issued off of an APPROVED one) must never be silently wiped
@@ -462,19 +541,30 @@ async function startApproval(applicationId, actorId) {
     }
 
     await tx.query(`DELETE FROM dbo.approval_steps WHERE approval_id = @param0`, [approval.id]);
+    // DBs not yet migrated to the single-level schema still have NOT NULL
+    // level_no/level_name columns — fill them with the old level-1 values.
+    const legacyCols = await tx.query(`SELECT COL_LENGTH('dbo.approval_steps', 'level_no') AS level_no`);
+    const hasLegacyLevel = legacyCols?.recordset?.[0]?.level_no != null;
     await tx.query(
-      `INSERT INTO dbo.approval_steps (approval_id, decision, created_at) VALUES (@param0, 'PENDING', SYSUTCDATETIME())`,
-      [approval.id]
+      hasLegacyLevel
+        ? `INSERT INTO dbo.approval_steps (approval_id, level_no, level_name, assigned_to, decision, created_at) VALUES (@param0, 1, N'Account Officer Review', @param1, 'PENDING', SYSUTCDATETIME())`
+        : `INSERT INTO dbo.approval_steps (approval_id, assigned_to, decision, created_at) VALUES (@param0, @param1, 'PENDING', SYSUTCDATETIME())`,
+      [approval.id, assigneeId]
     );
   });
 
-  await logActivity(approval.id, "STARTED", "Approval started", actorId);
+  let assigneeName = null;
+  if (assigneeId) {
+    const u = await selectData(`SELECT TOP (1) full_name, username FROM dbo.users WHERE id = @param0`, [assigneeId]);
+    assigneeName = u?.[0]?.full_name || u?.[0]?.username || null;
+  }
+  await logActivity(approval.id, "STARTED", assigneeName ? `Approval started — assigned to ${assigneeName}` : "Approval started", actorId);
   const app = await getApplicationRow(applicationId);
   await notify({
     applicationId,
     actorId,
     subject: `Approval started: ${app?.application_no || ""}`.trim(),
-    body: `Application ${app?.application_no || ""} entered the approval workflow.`,
+    body: `Application ${app?.application_no || ""} entered the approval workflow${assigneeName ? `, assigned to ${assigneeName}` : ""}.`,
   });
   return getApprovalDetail(applicationId);
 }
@@ -813,6 +903,8 @@ module.exports = {
   ISSUANCE_TYPES,
   listApprovals,
   getSummary,
+  getApprovalAssigneeId,
+  getApplicationIdForStep,
   getOrCreateApproval,
   getApprovalDetail,
   startApproval,

@@ -4,6 +4,7 @@ const Role = require("../models/Role");
 const User = require("../models/User");
 const ApplicationType = require("../models/ApplicationType");
 const ControlPanelPermission = require("../models/ControlPanelPermission");
+const Assessment = require("../models/AssessmentEvaluation");
 const AuditLog = require("../models/AuditLog");
 const { diffChanges } = require("../lib/auditDiff");
 const { generateTempPassword } = require("../lib/password");
@@ -70,7 +71,15 @@ async function loadWithAccess(req, applicationId) {
   if (!application) return { application: null, forbidden: false };
 
   const role = String(req.user?.role || "").toLowerCase();
-  if (await hasStaffApplicationAccess(role)) return { application, forbidden: false };
+  if (await hasStaffApplicationAccess(role)) {
+    // A Level 2 Assessment Officer (no other applications menu) only reaches
+    // the applications a Manager assigned to them.
+    const level2UserId = await Assessment.getLevel2OnlyUserId(req.user);
+    if (level2UserId && (await Assessment.getAssignedEvaluatorId(applicationId)) !== level2UserId) {
+      return { application, forbidden: true };
+    }
+    return { application, forbidden: false };
+  }
 
   if (role === "proponent") {
     const proponent = await Proponent.getProponentByUserId(req.user.id);
@@ -84,6 +93,11 @@ async function loadWithAccess(req, applicationId) {
 exports.list = async (req, res) => {
   try {
     const rows = await Workflow.listApplications();
+    const level2UserId = await Assessment.getLevel2OnlyUserId(req.user);
+    if (level2UserId) {
+      const assigned = await Assessment.listApplicationIdsAssignedTo(level2UserId);
+      return res.json({ success: true, data: rows.filter((r) => assigned.has(Number(r.id))) });
+    }
     return res.json({ success: true, data: rows });
   } catch (error) {
     console.error("List applications error:", error);
@@ -359,6 +373,14 @@ exports.updateRequirementStatus = async (req, res) => {
     }
 
     const before = await Workflow.getApplicationRequirementById(id);
+    if (!before) return res.status(404).json({ success: false, message: "Application requirement not found" });
+    // Same Level 1/2 rule as Assessment's own requirement route: a Level 2
+    // Officer may only verify/reject on applications assigned to them.
+    if (!(await Assessment.isManager(req.user))) {
+      if ((await Assessment.getAssignedEvaluatorId(before.application_id)) !== Number(req.user?.id)) {
+        return res.status(403).json({ success: false, message: "This application is not assigned to you." });
+      }
+    }
     const row = await Workflow.updateApplicationRequirementStatus(id, {
       status: String(status).trim(),
       remarks: remarks ?? null,

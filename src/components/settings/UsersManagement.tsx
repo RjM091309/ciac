@@ -21,6 +21,8 @@ type Role = {
   name: string;
   description?: string | null;
   is_active?: number;
+  /** Role reaches the Evaluation Queue — its users get an Assessment level. */
+  has_assessment_queue?: boolean;
 };
 
 type AccountStatus = 'ACTIVE' | 'SUSPENDED' | 'DEACTIVATED';
@@ -37,6 +39,8 @@ type UserRow = {
   created_at?: string | null;
   updated_at?: string | null;
   roles: { id: number; name: string; description?: string | null }[];
+  /** 1 = Assessment Manager (Level 1), 2 = Officer (Level 2). */
+  assessment_level?: number;
 };
 
 type UsersRolesData = {
@@ -80,7 +84,7 @@ export function UsersManagement({
   const [page, setPage] = useState(1);
 
   const { data: usersRoles, isLoading, isRevalidating, refresh } = useSessionStorageCachedResource<UsersRolesData>({
-    cacheKey: 'ciac.users_roles.v1',
+    cacheKey: 'ciac.users_roles.v2',
     ttlMs: 5 * 60 * 1000, // 5 minutes
     fetcher: async () => {
       setError(null);
@@ -128,6 +132,7 @@ export function UsersManagement({
     full_name: '',
     password: '',
     role_id: '',
+    assessment_level: '2',
   });
 
   const stats = useMemo(() => {
@@ -184,6 +189,15 @@ export function UsersManagement({
     () => roles.map((r) => ({ value: String(r.id), label: roleDisplayName(r.name) })),
     [roles]
   );
+  // Level 1 / Level 2 only means something for a role with the Evaluation
+  // Queue (e.g. ASSESSMENT OFFICER) — one role, two levels, set per user.
+  const roleHasAssessment = (roleId: string) =>
+    Boolean(roles.find((r) => String(r.id) === roleId)?.has_assessment_queue);
+  const showAssessmentLevel = roleHasAssessment(form.role_id);
+  const levelOptions = [
+    { value: '1', label: 'Level 1' },
+    { value: '2', label: 'Level 2' },
+  ];
   const passwordError = useMemo(
     () => (form.password.trim() ? validatePassword(form.password.trim()) : null),
     [form.password]
@@ -211,15 +225,18 @@ export function UsersManagement({
     const originalFullName = (editing.full_name || '').trim();
     const originalRoleId = editing.roles?.[0]?.id ? String(editing.roles[0].id) : roles[0]?.id ? String(roles[0].id) : '';
 
+    const originalLevel = String(editing.assessment_level === 1 ? 1 : 2);
+
     const hasChanged =
       username !== originalUsername ||
       email !== originalEmail ||
       fullName !== originalFullName ||
       roleId !== originalRoleId ||
+      form.assessment_level !== originalLevel ||
       Boolean(password);
 
     return hasChanged;
-  }, [editing, form.email, form.full_name, form.password, form.role_id, form.username, roles, passwordError]);
+  }, [editing, form.email, form.full_name, form.password, form.role_id, form.username, form.assessment_level, roles, passwordError]);
 
   useEffect(() => {
     setPage(1);
@@ -237,6 +254,7 @@ export function UsersManagement({
       full_name: '',
       password: '',
       role_id: roles[0]?.id ? String(roles[0].id) : '',
+      assessment_level: '2',
     });
     setIsCreateOpen(true);
   }
@@ -250,6 +268,7 @@ export function UsersManagement({
       full_name: u.full_name || '',
       password: '',
       role_id: u.roles?.[0]?.id ? String(u.roles[0].id) : roles[0]?.id ? String(roles[0].id) : '',
+      assessment_level: String(u.assessment_level === 1 ? 1 : 2),
     });
   }
 
@@ -264,6 +283,7 @@ export function UsersManagement({
         role_id: form.role_id ? Number(form.role_id) : null,
       };
       if (form.password.trim()) payload.password = form.password;
+      if (showAssessmentLevel) payload.assessment_level = Number(form.assessment_level);
 
       if (!payload.username) throw new Error('Username is required');
       if (!payload.email) throw new Error('Email is required');
@@ -392,6 +412,22 @@ export function UsersManagement({
     } finally {
       setSaving(false);
     }
+  }
+
+  function renderLevelBadge(u: UserRow) {
+    if (!(u.roles || []).some((r) => roleHasAssessment(String(r.id)))) return null;
+    const manager = u.assessment_level === 1;
+    return (
+      <span
+        className="ml-1.5 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold"
+        style={{
+          backgroundColor: manager ? 'rgba(59,130,246,.14)' : 'rgba(148,163,184,.18)',
+          color: manager ? 'rgba(59,130,246,.95)' : 'var(--text-muted)',
+        }}
+      >
+        {manager ? 'Level 1' : 'Level 2'}
+      </span>
+    );
   }
 
   function renderStatusBadges(u: UserRow) {
@@ -627,6 +663,7 @@ export function UsersManagement({
                     <span className="text-secondary truncate">
                       {u.roles && u.roles.length ? u.roles.map((r) => roleDisplayName(r.name)).join(', ') : 'No role'}
                     </span>
+                    {renderLevelBadge(u)}
                     {u.totp_enabled === 1 ? (
                       <span
                         className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold"
@@ -670,6 +707,7 @@ export function UsersManagement({
                     <td className="px-3 py-2 text-[11px] text-secondary">{u.email || '-'}</td>
                     <td className="px-3 py-2 text-[11px] text-secondary">
                       {u.roles && u.roles.length ? u.roles.map((r) => roleDisplayName(r.name)).join(', ') : '-'}
+                      {renderLevelBadge(u)}
                     </td>
                     <td className="px-3 py-2 text-[11px]">
                       {u.totp_enabled === 1 ? (
@@ -741,6 +779,16 @@ export function UsersManagement({
               isDisabled={saving}
             />
           </Field>
+          {showAssessmentLevel ? (
+            <Field label="Assessment level">
+              <AppSelect
+                options={levelOptions}
+                value={form.assessment_level}
+                onChange={(value) => setForm((p) => ({ ...p, assessment_level: value || '2' }))}
+                isDisabled={saving}
+              />
+            </Field>
+          ) : null}
           <Field label="Full name">
             <input
               className="app-input"

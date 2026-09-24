@@ -154,6 +154,16 @@ async function hasCrudPermission(roleId, menuKey, action) {
   return Number(rows[0][column]) === 1;
 }
 
+/** Ids of every role with `menuKey` enabled in its sidebar. */
+async function listRoleIdsWithMenu(menuKey) {
+  await ensureSchema();
+  const rows = await selectData(
+    `SELECT role_id FROM role_sidebar_menu_permissions WHERE menu_key = @param0 AND is_enabled = 1`,
+    [menuKey]
+  );
+  return new Set(rows.map((r) => Number(r.role_id)));
+}
+
 async function getDashboardWidgetPermissions(roleId) {
   await ensureSchema();
   return await selectData(
@@ -209,6 +219,7 @@ module.exports = {
   setMenuCrudPermissions,
   isSidebarVisible,
   hasCrudPermission,
+  listRoleIdsWithMenu,
   getDashboardWidgetPermissions,
   setDashboardWidgetPermissions,
   isDashboardWidgetVisible,

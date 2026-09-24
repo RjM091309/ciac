@@ -8,6 +8,7 @@ const {
 const Notification = require("./Notification");
 const Workflow = require("./ApplicationWorkflow");
 const ControlPanelPermission = require("./ControlPanelPermission");
+const Role = require("./Role");
 
 function toInt(v) {
   const n = Number(v);
@@ -118,6 +119,27 @@ async function ensureSchemaImpl() {
       );
       CREATE INDEX IX_assessment_activity_assessment_id ON dbo.assessment_activity(assessment_id);
     END;
+
+    -- Two-level review: the Level 2 Officer's recommendation (officer_*)
+    -- is held for the Level 1 Manager, whose own decision is the final
+    -- recommendation/recommended_* above. approver_id is the Account Officer
+    -- the Manager picked to take the approval.
+    IF COL_LENGTH('dbo.application_assessments', 'officer_recommendation') IS NULL
+      ALTER TABLE dbo.application_assessments ADD
+        officer_recommendation NVARCHAR(20) NULL,
+        officer_recommendation_summary NVARCHAR(2000) NULL,
+        officer_recommended_by INT NULL,
+        officer_recommended_at DATETIME2(3) NULL;
+    IF COL_LENGTH('dbo.application_assessments', 'approver_id') IS NULL
+      ALTER TABLE dbo.application_assessments ADD approver_id INT NULL;
+  `);
+
+  // Assigned/In Review need an evaluator — rows moved there by hand before
+  // that rule existed go back to Unassigned. No-op once clean.
+  await updateSchema(`
+    UPDATE dbo.application_assessments
+    SET stage = 'UNASSIGNED'
+    WHERE assigned_evaluator_id IS NULL AND stage IN ('ASSIGNED', 'IN_REVIEW');
   `);
 }
 
@@ -239,7 +261,16 @@ const LIST_SELECT = `
     ev.username AS evaluator_username,
     asm.assigned_at,
     asm.recommendation,
+    asm.recommendation_summary,
     asm.recommended_at,
+    rb.full_name AS recommended_by_name,
+    asm.officer_recommendation,
+    asm.officer_recommendation_summary,
+    asm.officer_recommended_at,
+    ob.full_name AS officer_recommended_by_name,
+    asm.approver_id,
+    apv.full_name AS approver_name,
+    apv.username AS approver_username,
     ISNULL(asm.charges_total, 0) AS charges_total,
     -- Freezes at recommended_at once a recommendation is submitted (COMPLETED
     -- or RETURNED both set it) so a finished assessment stops looking like
@@ -264,6 +295,9 @@ const LIST_SELECT = `
   LEFT JOIN dbo.application_types at ON at.code = a.application_type
   LEFT JOIN dbo.application_assessments asm ON asm.application_id = a.id
   LEFT JOIN dbo.users ev ON ev.id = asm.assigned_evaluator_id
+  LEFT JOIN dbo.users rb ON rb.id = asm.recommended_by
+  LEFT JOIN dbo.users ob ON ob.id = asm.officer_recommended_by
+  LEFT JOIN dbo.users apv ON apv.id = asm.approver_id
 `;
 
 async function listAssessments({ stage, evaluatorId, search } = {}) {
@@ -308,15 +342,22 @@ async function listAssessments({ stage, evaluatorId, search } = {}) {
   }));
 }
 
-async function getSummary() {
+/** `evaluatorId` scopes every count to one evaluator's assignments — used
+ * for a Level 2 Officer, whose stat bar should reflect only their own work. */
+async function getSummary({ evaluatorId } = {}) {
   await ensureSchema();
-  const stageRows = await selectData(`
+  const evId = toInt(evaluatorId);
+  const evFilter = evId ? "AND asm.assigned_evaluator_id = @param0" : "";
+  const stageRows = await selectData(
+    `
     SELECT ISNULL(asm.stage, 'UNASSIGNED') AS stage, COUNT(1) AS total
     FROM dbo.applications a
     LEFT JOIN dbo.application_assessments asm ON asm.application_id = a.id
-    WHERE (a.status NOT IN ('DRAFT', 'REJECTED') OR asm.id IS NOT NULL)
+    WHERE (a.status NOT IN ('DRAFT', 'REJECTED') OR asm.id IS NOT NULL) ${evFilter}
     GROUP BY ISNULL(asm.stage, 'UNASSIGNED')
-  `);
+    `,
+    evId ? [evId] : []
+  );
   const byStage = {};
   STAGES.forEach((s) => { byStage[s] = 0; });
   stageRows.forEach((r) => { byStage[String(r.stage)] = Number(r.total || 0); });
@@ -327,16 +368,20 @@ async function getSummary() {
     FROM dbo.application_assessments asm
     WHERE asm.stage IN ('ASSIGNED', 'IN_REVIEW', 'FOR_RECOMMENDATION')
       AND asm.assigned_at IS NOT NULL
-      AND DATEDIFF(DAY, asm.assigned_at, SYSUTCDATETIME()) > @param0
+      AND DATEDIFF(DAY, asm.assigned_at, SYSUTCDATETIME()) > @param${evId ? 1 : 0}
+      ${evFilter}
     `,
-    [OVERDUE_DAYS]
+    evId ? [evId, OVERDUE_DAYS] : [OVERDUE_DAYS]
   );
 
-  const avgRows = await selectData(`
+  const avgRows = await selectData(
+    `
     SELECT AVG(CAST(DATEDIFF(DAY, asm.assigned_at, asm.recommended_at) AS FLOAT)) AS avg_days
     FROM dbo.application_assessments asm
-    WHERE asm.recommended_at IS NOT NULL AND asm.assigned_at IS NOT NULL
-  `);
+    WHERE asm.recommended_at IS NOT NULL AND asm.assigned_at IS NOT NULL ${evFilter}
+    `,
+    evId ? [evId] : []
+  );
 
   const total = Object.values(byStage).reduce((sum, n) => sum + n, 0);
   return {
@@ -354,20 +399,121 @@ async function getSummary() {
  * survives a rename and extends to any future custom role automatically,
  * same reasoning as hasStaffApplicationAccess/getApprovalQueueStaffEmails
  * elsewhere in this app. */
-async function listAssignableEvaluators() {
+async function listUsersWithMenu(menuKey) {
   await ensureSchema();
   await ControlPanelPermission.ensureSchema();
-  return selectData(`
+  return selectData(
+    `
     SELECT DISTINCT u.id, u.full_name, u.username
     FROM dbo.users u
     INNER JOIN dbo.user_roles ur ON ur.user_id = u.id
     INNER JOIN dbo.roles r ON r.id = ur.role_id
     LEFT JOIN dbo.role_sidebar_menu_permissions p
-      ON p.role_id = r.id AND p.menu_key = 'assessment:queue' AND p.is_enabled = 1
+      ON p.role_id = r.id AND p.menu_key = @param0 AND p.is_enabled = 1
     WHERE u.is_active = 1
       AND (LOWER(LTRIM(RTRIM(r.name))) = 'admin' OR p.role_id IS NOT NULL)
     ORDER BY u.full_name
-  `);
+    `,
+    [menuKey]
+  );
+}
+
+async function listAssignableEvaluators() {
+  return listUsersWithMenu("assessment:queue");
+}
+
+/** Who a Manager can hand an endorsed application to for approval — anyone
+ * with approval:queue (conventionally the Account Officer), plus admin. */
+async function listAssignableApprovers() {
+  return listUsersWithMenu("approval:queue");
+}
+
+/** The user's Assessment level (users.assessment_level, set per account in
+ * User Management): 1 = Manager, anything else = Level 2 Officer. */
+async function getUserLevel(userId) {
+  const rows = await selectData(`SELECT TOP (1) assessment_level FROM dbo.users WHERE id = @param0`, [toInt(userId)]);
+  return Number(rows?.[0]?.assessment_level) === 1 ? 1 : 2;
+}
+
+/** Level 1 (Manager) check for the signed-in user: admin, or an account set
+ * to Level 1. Everyone else who got past the assessment:queue route guard is
+ * a Level 2 Officer. */
+async function isManager(user) {
+  const role = String(user?.role || "").trim().toLowerCase();
+  if (role === "admin") return true;
+  if (!user?.id) return false;
+  return (await getUserLevel(user.id)) === 1;
+}
+
+function hasEnabledMenu(sidebarRows, menuKey) {
+  return (sidebarRows || []).some(
+    (p) => p.menu_key === menuKey && (Number(p.is_enabled) === 1 || p.is_enabled === true)
+  );
+}
+
+/** A Level 2 Officer whose applications view should be limited to their own
+ * assignments: Evaluation Queue access, not Level 1, and not also an
+ * approver (approval:queue is its own, separate door to applications). */
+async function isScopedLevel2(userId, sidebarRows) {
+  if (!hasEnabledMenu(sidebarRows, "assessment:queue")) return false;
+  if (hasEnabledMenu(sidebarRows, "approval:queue")) return false;
+  return (await getUserLevel(userId)) !== 1;
+}
+
+/** For the app-wide application endpoints (/api/applications, document
+ * download): returns the user id to scope to when the caller is a Level 2
+ * Officer, so they see just their own assignments there too — even if
+ * their role also shows New Applications/Renewals, since Level 1 and Level 2
+ * share one role. null means unrestricted (admin, a Manager, an approver) or
+ * not staff at all — the existing route guards/ownership checks still decide
+ * that part. */
+async function getLevel2OnlyUserId(user) {
+  const role = String(user?.role || "").trim().toLowerCase();
+  if (!role || role === "admin" || role === "proponent") return null;
+  const roleId = await Role.getActiveRoleIdByName(user?.role);
+  if (!roleId) return null;
+  const rows = await ControlPanelPermission.getSidebarPermissions(roleId);
+  return (await isScopedLevel2(user?.id, rows)) ? toInt(user?.id) : null;
+}
+
+async function listApplicationIdsAssignedTo(userId) {
+  await ensureSchema();
+  const rows = await selectData(
+    `SELECT application_id FROM dbo.application_assessments WHERE assigned_evaluator_id = @param0`,
+    [toInt(userId)]
+  );
+  return new Set(rows.map((r) => toInt(r.application_id)));
+}
+
+async function getAssignedEvaluatorId(applicationId) {
+  await ensureSchema();
+  const rows = await selectData(
+    `SELECT TOP (1) assigned_evaluator_id FROM dbo.application_assessments WHERE application_id = @param0`,
+    [toInt(applicationId)]
+  );
+  return toInt(rows?.[0]?.assigned_evaluator_id);
+}
+
+async function getApplicationIdForCharge(chargeId) {
+  await ensureSchema();
+  const rows = await selectData(
+    `
+    SELECT TOP (1) asm.application_id
+    FROM dbo.assessment_charges c
+    INNER JOIN dbo.application_assessments asm ON asm.id = c.assessment_id
+    WHERE c.id = @param0
+    `,
+    [toInt(chargeId)]
+  );
+  return toInt(rows?.[0]?.application_id);
+}
+
+async function getApplicationIdForRequirement(applicationRequirementId) {
+  const rows = await selectData(
+    `SELECT TOP (1) application_id FROM dbo.application_requirements WHERE id = @param0`,
+    [toInt(applicationRequirementId)]
+  );
+  return toInt(rows?.[0]?.application_id);
 }
 
 async function getAssessmentDetail(applicationId) {
@@ -439,8 +585,17 @@ async function assignEvaluator(applicationId, { evaluatorId, actorId }) {
 async function setStage(applicationId, { stage, actorId }) {
   const asm = await getOrCreateAssessment(applicationId, actorId);
   if (!asm) return null;
-  const next = pick(stage, STAGES);
+  // Only the working stages are moved by hand — FOR_RECOMMENDATION is reached
+  // by the Officer submitting their review, and left by the Manager's final
+  // decision or Return to Officer; COMPLETED/RETURNED by the final decision.
+  const next = pick(stage, ["ASSIGNED", "IN_REVIEW"]);
   if (!next) throw new Error("Invalid stage");
+  if (asm.stage === "FOR_RECOMMENDATION") {
+    throw businessError("This assessment is waiting for the Manager's recommendation — the Manager can return it to the officer.");
+  }
+  if (!asm.assigned_evaluator_id) {
+    throw businessError("Assign an evaluator first.");
+  }
   // A closed assessment (COMPLETED/RETURNED) only leaves that state through
   // the admin-gated reopen() — which also clears the stale recommendation.
   // Without this, any evaluator with ordinary edit rights could move it
@@ -458,7 +613,8 @@ async function setStage(applicationId, { stage, actorId }) {
     `
     UPDATE dbo.application_assessments
     SET stage = @param1, updated_by = @param2, updated_at = SYSUTCDATETIME()
-    WHERE id = @param0 AND stage NOT IN ('COMPLETED', 'RETURNED')
+    WHERE id = @param0 AND stage NOT IN ('COMPLETED', 'RETURNED', 'FOR_RECOMMENDATION')
+      AND assigned_evaluator_id IS NOT NULL
     `,
     [asm.id, next, toInt(actorId)]
   );
@@ -497,6 +653,8 @@ async function reopen(applicationId, actorId) {
     `
     UPDATE dbo.application_assessments
     SET stage = 'IN_REVIEW', recommendation = NULL, recommended_by = NULL, recommended_at = NULL,
+        officer_recommendation = NULL, officer_recommendation_summary = NULL,
+        officer_recommended_by = NULL, officer_recommended_at = NULL,
         updated_by = @param1, updated_at = SYSUTCDATETIME()
     WHERE id = @param0
     `,
@@ -608,7 +766,86 @@ async function deleteCharge(id, actorId) {
   return true;
 }
 
-async function submitRecommendation(applicationId, { recommendation, summary, actorId }) {
+async function userName(userId) {
+  const rows = await selectData(`SELECT TOP (1) full_name, username FROM dbo.users WHERE id = @param0`, [toInt(userId)]);
+  return rows?.[0]?.full_name || rows?.[0]?.username || `User #${userId}`;
+}
+
+/** Level 2 Officer finishes the compliance review and sends their
+ * recommendation up to the Level 1 Manager (stage → FOR_RECOMMENDATION).
+ * Nothing about the application itself changes yet — the Manager's
+ * submitRecommendation below is the decision that counts. */
+async function submitOfficerReview(applicationId, { recommendation, summary, actorId }) {
+  const asm = await getOrCreateAssessment(applicationId, actorId);
+  if (!asm) return null;
+  if (!asm.assigned_evaluator_id) throw businessError("Assign an evaluator before submitting a review.");
+  if (!["ASSIGNED", "IN_REVIEW"].includes(asm.stage)) {
+    throw businessError("This review has already been submitted to the Manager.");
+  }
+  const rec = pick(recommendation, RECOMMENDATIONS);
+  if (!rec) throw new Error("Invalid recommendation");
+  const note = String(summary ?? "").trim();
+
+  const result = await updateData(
+    `
+    UPDATE dbo.application_assessments
+    SET officer_recommendation = @param1, officer_recommendation_summary = @param2,
+        officer_recommended_by = @param3, officer_recommended_at = SYSUTCDATETIME(),
+        stage = 'FOR_RECOMMENDATION', updated_by = @param3, updated_at = SYSUTCDATETIME()
+    WHERE id = @param0 AND stage IN ('ASSIGNED', 'IN_REVIEW')
+    `,
+    [asm.id, rec, note || null, toInt(actorId)]
+  );
+  if (!result?.rowsAffected?.[0]) {
+    throw businessError("This review has already been submitted to the Manager.");
+  }
+  await logActivity(asm.id, "OFFICER_RECOMMENDED", `${rec}${note ? `: ${note.slice(0, 200)}` : ""}`, actorId);
+
+  const app = await getApplicationRow(applicationId);
+  await notify({
+    applicationId,
+    actorId,
+    subject: `For recommendation: ${app?.application_no || ""}`.trim(),
+    body: `${await userName(actorId)} finished reviewing application ${app?.application_no || ""} (${rec}) — it's waiting for the Manager's recommendation.`,
+  });
+  return getAssessmentDetail(applicationId);
+}
+
+/** Level 1 Manager sends a submitted review back to the assigned officer to
+ * redo (stage → IN_REVIEW, officer's recommendation cleared). */
+async function returnToOfficer(applicationId, { note, actorId }) {
+  const asm = await getOrCreateAssessment(applicationId, actorId);
+  if (!asm) return null;
+  const text = String(note ?? "").trim();
+  const result = await updateData(
+    `
+    UPDATE dbo.application_assessments
+    SET stage = 'IN_REVIEW', officer_recommendation = NULL, officer_recommendation_summary = NULL,
+        officer_recommended_by = NULL, officer_recommended_at = NULL,
+        updated_by = @param1, updated_at = SYSUTCDATETIME()
+    WHERE id = @param0 AND stage = 'FOR_RECOMMENDATION'
+    `,
+    [asm.id, toInt(actorId)]
+  );
+  if (!result?.rowsAffected?.[0]) {
+    throw businessError("Only a review waiting for the Manager's recommendation can be returned to the officer.");
+  }
+  await logActivity(asm.id, "RETURNED_TO_OFFICER", text ? text.slice(0, 1000) : null, actorId);
+
+  const app = await getApplicationRow(applicationId);
+  await notify({
+    applicationId,
+    actorId,
+    subject: `Returned for review: ${app?.application_no || ""}`.trim(),
+    body: `The Manager returned application ${app?.application_no || ""} for further review${text ? `: ${text.slice(0, 300)}` : "."}`,
+  });
+  return getAssessmentDetail(applicationId);
+}
+
+/** Level 1 Manager's final recommendation on the Officer's review. ENDORSE
+ * (Approve) sends the application to Approval, assigned to the Account
+ * Officer in `approverId`; DISAPPROVE closes it as DISAPPROVED. */
+async function submitRecommendation(applicationId, { recommendation, summary, approverId, actorId }) {
   const asm = await getOrCreateAssessment(applicationId, actorId);
   if (!asm) return null;
   // The frontend disables the Submit button once a.recommendation is set,
@@ -620,9 +857,20 @@ async function submitRecommendation(applicationId, { recommendation, summary, ac
   if (asm.recommendation) {
     throw businessError("A recommendation has already been submitted for this assessment. An admin must reopen it first.");
   }
+  if (asm.stage !== "FOR_RECOMMENDATION") {
+    throw businessError("The assigned officer must submit their review before the Manager's recommendation.");
+  }
   const rec = pick(recommendation, RECOMMENDATIONS);
   if (!rec) throw new Error("Invalid recommendation");
   const note = String(summary ?? "").trim();
+
+  let approver = null;
+  if (rec === "ENDORSE") {
+    const apId = toInt(approverId);
+    if (!apId) throw businessError("Choose the Account Officer who will handle the approval.");
+    approver = (await listAssignableApprovers()).find((u) => Number(u.id) === apId) || null;
+    if (!approver) throw businessError("The selected Account Officer can't take approvals.");
+  }
 
   const nextStage = "COMPLETED";
   // Same compare-and-swap reasoning as setStage — the recommendation===null
@@ -631,15 +879,22 @@ async function submitRecommendation(applicationId, { recommendation, summary, ac
     `
     UPDATE dbo.application_assessments
     SET recommendation = @param1, recommendation_summary = @param2, recommended_by = @param3,
-        recommended_at = SYSUTCDATETIME(), stage = @param4, updated_by = @param3, updated_at = SYSUTCDATETIME()
-    WHERE id = @param0 AND recommendation IS NULL
+        recommended_at = SYSUTCDATETIME(), stage = @param4, approver_id = @param5,
+        updated_by = @param3, updated_at = SYSUTCDATETIME()
+    WHERE id = @param0 AND recommendation IS NULL AND stage = 'FOR_RECOMMENDATION'
     `,
-    [asm.id, rec, note || null, toInt(actorId), nextStage]
+    [asm.id, rec, note || null, toInt(actorId), nextStage, approver ? toInt(approver.id) : null]
   );
   if (!result?.rowsAffected?.[0]) {
     throw businessError("A recommendation has already been submitted for this assessment. An admin must reopen it first.");
   }
-  await logActivity(asm.id, "RECOMMENDED", `${rec}${note ? `: ${note.slice(0, 200)}` : ""}`, actorId);
+  const approverName = approver ? approver.full_name || approver.username : null;
+  await logActivity(
+    asm.id,
+    "RECOMMENDED",
+    `${rec}${approverName ? ` → ${approverName}` : ""}${note ? `: ${note.slice(0, 200)}` : ""}`,
+    actorId
+  );
 
   // The recommendation write above already committed and is now locked (only
   // an admin Reopen can undo it), so these two follow-through steps can't be
@@ -673,7 +928,7 @@ async function submitRecommendation(applicationId, { recommendation, summary, ac
       // the approving officer never has to click "Start approval" themselves
       // — it's already PENDING when they open it.
       const ApprovalIssuance = require("./ApprovalIssuance");
-      await ApprovalIssuance.startApproval(applicationId, actorId);
+      await ApprovalIssuance.startApproval(applicationId, actorId, { assignTo: approver?.id });
     } catch (error) {
       console.error("submitRecommendation: auto-start approval failed:", error);
       warnings.push(
@@ -691,11 +946,19 @@ module.exports = {
   STAGES,
   CHARGE_TYPES,
   RECOMMENDATIONS,
+  isManager,
+  isScopedLevel2,
+  getLevel2OnlyUserId,
+  listApplicationIdsAssignedTo,
+  getAssignedEvaluatorId,
+  getApplicationIdForCharge,
+  getApplicationIdForRequirement,
   getOrCreateAssessment,
   logRequirementActivity,
   listAssessments,
   getSummary,
   listAssignableEvaluators,
+  listAssignableApprovers,
   getAssessmentDetail,
   assignEvaluator,
   setStage,
@@ -704,5 +967,7 @@ module.exports = {
   updateCharge,
   deleteCharge,
   getChargeById,
+  submitOfficerReview,
+  returnToOfficer,
   submitRecommendation,
 };

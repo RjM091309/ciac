@@ -1,5 +1,6 @@
 const Role = require("../models/Role");
 const ControlPanelPermission = require("../models/ControlPanelPermission");
+const Assessment = require("../models/AssessmentEvaluation");
 const { BUCKET_MENU_KEYS, searchApplications } = require("../models/Search");
 
 /** Which buckets (queue) the requesting role may see through search — same
@@ -56,7 +57,25 @@ exports.search = async (req, res) => {
       return res.json({ success: true, data: [] });
     }
 
-    const rows = await searchApplications(term);
+    const allRows = await searchApplications(term);
+    // A Level 2 Assessment Officer only finds, through the Evaluation Queue
+    // door, the applications a Manager assigned to them.
+    const level2UserId =
+      allowedBuckets.has("in_assessment") && !(await Assessment.isManager(req.user)) ? Number(req.user?.id) : null;
+    // Likewise an Account Officer only finds, through the Approval Queue door,
+    // approvals assigned to them (or still unassigned).
+    const approverId =
+      allowedBuckets.has("in_approval") && String(req.user?.role || "").toLowerCase() !== "admin"
+        ? Number(req.user?.id)
+        : null;
+    const rows = allRows.map((row) => {
+      let next = row;
+      if (level2UserId && Number(row.assessment_evaluator_id) !== level2UserId) next = { ...next, in_assessment: 0 };
+      if (approverId && row.approval_assignee_id != null && Number(row.approval_assignee_id) !== approverId) {
+        next = { ...next, in_approval: 0 };
+      }
+      return next;
+    });
     const visible = rows.filter((row) =>
       Object.keys(BUCKET_MENU_KEYS).some((bucket) => Number(row[bucket]) === 1 && allowedBuckets.has(bucket))
     );

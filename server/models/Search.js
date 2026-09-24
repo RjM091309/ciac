@@ -42,7 +42,12 @@ async function searchApplications(term) {
         WHEN asm.id IS NULL AND a.status IN ('SUBMITTED', 'RESUBMITTED', 'UNDER_REVIEW', 'RETURNED') THEN 1
         ELSE 0
       END AS in_assessment,
-      CASE WHEN ap.id IS NOT NULL OR a.status = 'FOR_APPROVAL' THEN 1 ELSE 0 END AS in_approval
+      CASE WHEN ap.id IS NOT NULL OR a.status = 'FOR_APPROVAL' THEN 1 ELSE 0 END AS in_approval,
+      asm.assigned_evaluator_id AS assessment_evaluator_id,
+      COALESCE(
+        (SELECT TOP (1) s.assigned_to FROM dbo.approval_steps s WHERE s.approval_id = ap.id ORDER BY s.id DESC),
+        asm.approver_id
+      ) AS approval_assignee_id
     FROM dbo.applications a
     LEFT JOIN dbo.proponents p ON p.id = a.proponent_id
     LEFT JOIN dbo.application_assessments asm ON asm.application_id = a.id

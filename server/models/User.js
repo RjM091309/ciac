@@ -18,6 +18,11 @@ function toInt(v) {
   return Number.isFinite(n) ? n : null;
 }
 
+/** 1 = Assessment Manager (Level 1); everything else is Level 2 (Officer). */
+function normalizeAssessmentLevel(value) {
+  return Number(value) === 1 ? 1 : 2;
+}
+
 async function hashPasswordIfNeeded(password) {
   const value = String(password ?? "");
   if (!value) return value;
@@ -192,6 +197,15 @@ async function ensureSchema() {
       ALTER TABLE dbo.users ADD CONSTRAINT FK_users_department FOREIGN KEY (department_id) REFERENCES dbo.department(id);
   `);
 
+  // Assessment & Evaluation level for staff with the Evaluation Queue:
+  // 1 = Manager (whole queue, assigns, final recommendation), anything else
+  // (NULL/2) = Officer (only what's assigned to them). Per user, not per
+  // role, so one ASSESSMENT OFFICER role can hold both levels.
+  await updateSchema(`
+    IF COL_LENGTH('dbo.users', 'assessment_level') IS NULL
+      ALTER TABLE dbo.users ADD assessment_level TINYINT NULL;
+  `);
+
   // user_roles
   await updateSchema(`
     IF OBJECT_ID('dbo.user_roles', 'U') IS NULL
@@ -251,6 +265,7 @@ async function listUsers() {
       ${includeStatus ? "u.status, u.registration_note, u.locked_until" : "'ACTIVE' AS status, NULL AS registration_note, NULL AS locked_until"},
       u.full_name,
       u.is_active,
+      u.assessment_level,
       u.created_at,
       u.updated_at,
       u.password_hash
@@ -273,6 +288,7 @@ async function listUsers() {
     full_name: u.full_name ?? null,
     is_active: u.is_active,
     is_locked: Boolean(u.locked_until && new Date(u.locked_until).getTime() > now),
+    assessment_level: normalizeAssessmentLevel(u.assessment_level),
     created_at: u.created_at ?? null,
     updated_at: u.updated_at ?? null,
     roles: rolesMap.get(u.id) || [],
@@ -294,6 +310,7 @@ async function getUserById(id) {
       ${includeStatus ? "u.status, u.registration_note, u.locked_until" : "'ACTIVE' AS status, NULL AS registration_note, NULL AS locked_until"},
       u.full_name,
       u.is_active,
+      u.assessment_level,
       u.created_at,
       u.updated_at
     FROM users u
@@ -326,13 +343,24 @@ async function getUserById(id) {
     full_name: user.full_name ?? null,
     is_active: user.is_active,
     is_locked: Boolean(user.locked_until && new Date(user.locked_until).getTime() > Date.now()),
+    assessment_level: normalizeAssessmentLevel(user.assessment_level),
     created_at: user.created_at ?? null,
     updated_at: user.updated_at ?? null,
     roles: roles.map((r) => ({ id: r.id, name: r.name, description: r.description ?? null })),
   };
 }
 
-async function createUser({ username, email, phone, full_name, password, is_active = 1, role_id, status = "ACTIVE" }) {
+async function createUser({
+  username,
+  email,
+  phone,
+  full_name,
+  password,
+  is_active = 1,
+  role_id,
+  status = "ACTIVE",
+  assessment_level,
+}) {
   const active = is_active ? 1 : 0;
   const roleId = toInt(role_id);
   const hashedPassword = await hashPasswordIfNeeded(password);
@@ -368,7 +396,22 @@ async function createUser({ username, email, phone, full_name, password, is_acti
   if (newId && roleId) {
     await setUserPrimaryRole(newId, roleId);
   }
+  if (newId && assessment_level !== undefined) {
+    await setAssessmentLevel(newId, assessment_level);
+  }
   return await getUserById(newId);
+}
+
+async function setAssessmentLevel(userId, level) {
+  await updateData(`UPDATE users SET assessment_level = @param1 WHERE id = @param0`, [
+    toInt(userId),
+    normalizeAssessmentLevel(level),
+  ]);
+}
+
+async function getAssessmentLevel(userId) {
+  const rows = await selectData(`SELECT TOP (1) assessment_level FROM users WHERE id = @param0`, [toInt(userId)]);
+  return normalizeAssessmentLevel(rows?.[0]?.assessment_level);
 }
 
 /** Live availability check for a single field (username/email/phone) while
@@ -468,7 +511,7 @@ async function setUserPrimaryRole(userId, roleId) {
   );
 }
 
-async function updateUser(id, { username, email, phone, full_name, password, is_active, role_id }) {
+async function updateUser(id, { username, email, phone, full_name, password, is_active, role_id, assessment_level }) {
   const includePhone = await hasPhoneColumn();
   const sets = [];
   const params = [];
@@ -487,6 +530,7 @@ async function updateUser(id, { username, email, phone, full_name, password, is_
     passwordChanged = true;
   }
   if (is_active !== undefined) pushSet("is_active = ?", is_active ? 1 : 0);
+  if (assessment_level !== undefined) pushSet("assessment_level = ?", normalizeAssessmentLevel(assessment_level));
 
   if (sets.length) {
     const query = `
@@ -828,5 +872,7 @@ module.exports = {
   getUserByResetTokenHash,
   completePasswordReset,
   setMustChangePassword,
+  setAssessmentLevel,
+  getAssessmentLevel,
 };
 

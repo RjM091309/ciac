@@ -8,13 +8,19 @@ const MENU_KEY = "assessment:queue";
 // Read
 router.get("/", requireMenuAccess(MENU_KEY, "view"), controller.list);
 router.get("/summary", requireMenuAccess(MENU_KEY, "view"), controller.summary);
+router.get("/me", requireMenuAccess(MENU_KEY, "view"), controller.me);
 router.get("/evaluators", requireMenuAccess(MENU_KEY, "view"), controller.evaluators);
+router.get("/approvers", requireMenuAccess(MENU_KEY, "view"), controller.approvers);
 router.get("/:applicationId", requireMenuAccess(MENU_KEY, "view"), controller.detail);
 
 // Assessment header actions
 router.patch("/:applicationId/assign", requireMenuAccess(MENU_KEY, "edit"), controller.assign);
 router.patch("/:applicationId/stage", requireMenuAccess(MENU_KEY, "edit"), controller.setStage);
 router.patch("/:applicationId/reopen", requireRole("admin"), controller.reopen);
+// Two-level review: Level 2 Officer submits their review, Level 1 Manager
+// either returns it or makes the final recommendation.
+router.post("/:applicationId/officer-review", requireMenuAccess(MENU_KEY, "edit"), controller.officerReview);
+router.post("/:applicationId/return-to-officer", requireMenuAccess(MENU_KEY, "edit"), controller.returnToOfficer);
 router.post("/:applicationId/recommendation", requireMenuAccess(MENU_KEY, "edit"), controller.recommendation);
 
 // Documentary compliance — proxy to the application requirement workflow, gated by assessment access

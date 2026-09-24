@@ -43,6 +43,7 @@ async function userAuditSnapshot(id) {
     full_name: user.full_name,
     is_active: Boolean(user.is_active),
     role: (user.roles || []).map((r) => r.name).join(", ") || null,
+    assessment_level: user.assessment_level === 1 ? "Level 1" : "Level 2",
     business_name: proponent?.business_name ?? null,
     address: proponent?.address ?? null,
     lease_address: proponent?.lease_address ?? null,
@@ -151,6 +152,7 @@ exports.create = async (req, res) => {
       password,
       is_active,
       role_id,
+      assessment_level,
       business_name,
       address,
       lease_address,
@@ -193,6 +195,7 @@ exports.create = async (req, res) => {
       is_active: isDeferredLocator ? 0 : is_active,
       role_id,
       status: isDeferredLocator ? "PENDING" : "ACTIVE",
+      assessment_level,
     });
 
     // Create the linked proponent record now so it's pickable from the New
@@ -443,6 +446,7 @@ exports.update = async (req, res) => {
       password,
       is_active,
       role_id,
+      assessment_level,
       business_name,
       address,
       lease_address,
@@ -456,7 +460,16 @@ exports.update = async (req, res) => {
       if (passwordError) return res.status(400).json({ success: false, message: passwordError });
     }
     const before = await userAuditSnapshot(id);
-    const row = await User.updateUser(id, { username, email, phone, full_name, password, is_active, role_id });
+    const row = await User.updateUser(id, {
+      username,
+      email,
+      phone,
+      full_name,
+      password,
+      is_active,
+      role_id,
+      assessment_level,
+    });
     if (!row) return res.status(404).json({ success: false, message: "User not found" });
 
     // Mirrors exports.create's best-effort linked-proponent write: this is

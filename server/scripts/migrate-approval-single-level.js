@@ -45,16 +45,22 @@ async function tableExists(table) {
 async function run() {
   await initializeDatabase();
 
-  if (await columnExists("approval_steps", "level_id")) {
-    console.log("Dropping FK_approval_steps_level (if present)...");
-    await updateSchema(`
-      IF EXISTS (SELECT 1 FROM sys.foreign_keys WHERE name = 'FK_approval_steps_level')
-        ALTER TABLE dbo.approval_steps DROP CONSTRAINT FK_approval_steps_level;
-    `);
-    console.log("Dropping dbo.approval_steps.level_id/level_no/level_name/role_id/role_name...");
-    await updateData(`ALTER TABLE dbo.approval_steps DROP COLUMN level_id, level_no, level_name, role_id, role_name`);
-  } else {
-    console.log("dbo.approval_steps already has no level_id column — skipping.");
+  console.log("Dropping FK_approval_steps_level (if present)...");
+  await updateSchema(`
+    IF EXISTS (SELECT 1 FROM sys.foreign_keys WHERE name = 'FK_approval_steps_level')
+      ALTER TABLE dbo.approval_steps DROP CONSTRAINT FK_approval_steps_level;
+  `);
+
+  // Checked per column: some DBs were only partially on the old schema (e.g.
+  // level_no/level_name present but level_id never added), so gating all of
+  // these on level_id alone left NOT NULL level_no behind and broke INSERTs.
+  for (const column of ["level_id", "level_no", "level_name", "role_id", "role_name"]) {
+    if (await columnExists("approval_steps", column)) {
+      console.log(`Dropping dbo.approval_steps.${column}...`);
+      await updateData(`ALTER TABLE dbo.approval_steps DROP COLUMN ${column}`);
+    } else {
+      console.log(`dbo.approval_steps already has no ${column} column — skipping.`);
+    }
   }
 
   if (await columnExists("application_approvals", "current_level_no")) {

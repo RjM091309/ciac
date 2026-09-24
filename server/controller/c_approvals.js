@@ -33,11 +33,37 @@ function idParam(req, res, label = "id") {
   return id;
 }
 
+/** Admin sees every approval; any other approver (Account Officer) only the
+ * ones assigned to them, plus any still unassigned. */
+function assigneeScope(req) {
+  const isAdmin = String(req.user?.role || "").toLowerCase() === "admin";
+  return isAdmin ? null : Number(req.user?.id) || -1;
+}
+
+/** Per-application gate for everything past the queue list — sends the
+ * 403/404 itself and returns false on denial. */
+async function ensureApprovalAccess(req, res, applicationId) {
+  const me = assigneeScope(req);
+  if (me === null) return true;
+  if (!applicationId) {
+    res.status(404).json({ success: false, message: "Not found" });
+    return false;
+  }
+  const assignee = await Approval.getApprovalAssigneeId(applicationId);
+  if (assignee === null || assignee === me) return true;
+  res.status(403).json({ success: false, message: "This approval is assigned to another Account Officer." });
+  return false;
+}
+
 /* --------------------------------- Queue ---------------------------------- */
 
 exports.list = async (req, res) => {
   try {
-    const rows = await Approval.listApprovals({ status: req.query.status, search: req.query.search });
+    const rows = await Approval.listApprovals({
+      status: req.query.status,
+      search: req.query.search,
+      assigneeId: assigneeScope(req),
+    });
     return res.json({ success: true, data: rows });
   } catch (error) {
     return fail(res, error, "List approvals");
@@ -46,7 +72,7 @@ exports.list = async (req, res) => {
 
 exports.summary = async (req, res) => {
   try {
-    return res.json({ success: true, data: await Approval.getSummary() });
+    return res.json({ success: true, data: await Approval.getSummary({ assigneeId: assigneeScope(req) }) });
   } catch (error) {
     return fail(res, error, "Approval summary");
   }
@@ -56,6 +82,7 @@ exports.detail = async (req, res) => {
   try {
     const id = appIdParam(req, res);
     if (id === null) return undefined;
+    if (!(await ensureApprovalAccess(req, res, id))) return undefined;
     let data = await Approval.getApprovalDetail(id);
     if (!data) return res.status(404).json({ success: false, message: "Application not found" });
     // Self-healing: an application that's reached FOR_APPROVAL but hasn't had
@@ -81,6 +108,7 @@ exports.start = async (req, res) => {
   try {
     const id = appIdParam(req, res);
     if (id === null) return undefined;
+    if (!(await ensureApprovalAccess(req, res, id))) return undefined;
     const data = await Approval.startApproval(id, req.user?.id ?? null);
     if (!data) return res.status(404).json({ success: false, message: "Application not found" });
     await AuditLog.record({
@@ -103,6 +131,7 @@ exports.reopen = async (req, res) => {
   try {
     const id = appIdParam(req, res);
     if (id === null) return undefined;
+    if (!(await ensureApprovalAccess(req, res, id))) return undefined;
     const data = await Approval.reopenApproval(id, req.user?.id ?? null);
     if (!data) return res.status(404).json({ success: false, message: "Application not found" });
     await AuditLog.record({
@@ -124,6 +153,7 @@ exports.actOnStep = async (req, res) => {
   try {
     const id = idParam(req, res, "step id");
     if (id === null) return undefined;
+    if (!(await ensureApprovalAccess(req, res, await Approval.getApplicationIdForStep(id)))) return undefined;
     const { action, remarks, override_unverified } = req.body || {};
     const data = await Approval.actOnStep(id, { action, remarks, override_unverified: Boolean(override_unverified), actorId: req.user?.id ?? null });
     if (!data) return res.status(404).json({ success: false, message: "Approval step not found" });
@@ -157,6 +187,7 @@ exports.endorseStep = async (req, res) => {
   try {
     const id = idParam(req, res, "step id");
     if (id === null) return undefined;
+    if (!(await ensureApprovalAccess(req, res, await Approval.getApplicationIdForStep(id)))) return undefined;
     const { office, note, assign_to_user_id } = req.body || {};
     if (!office || !String(office).trim()) {
       return res.status(400).json({ success: false, message: "office is required" });
@@ -189,6 +220,7 @@ exports.addIssuance = async (req, res) => {
   try {
     const id = appIdParam(req, res);
     if (id === null) return undefined;
+    if (!(await ensureApprovalAccess(req, res, id))) return undefined;
     if (!String(req.body?.title ?? "").trim()) {
       return res.status(400).json({ success: false, message: "title is required" });
     }
@@ -214,6 +246,7 @@ exports.deleteIssuance = async (req, res) => {
     const id = idParam(req, res);
     if (id === null) return undefined;
     const before = await Approval.getIssuanceById(id);
+    if (!(await ensureApprovalAccess(req, res, before?.application_id))) return undefined;
     const ok = await Approval.deleteIssuance(id, req.user?.id ?? null);
     if (!ok) return res.status(404).json({ success: false, message: "Issuance not found" });
     await AuditLog.record({
@@ -235,6 +268,7 @@ exports.saveContract = async (req, res) => {
   try {
     const id = appIdParam(req, res);
     if (id === null) return undefined;
+    if (!(await ensureApprovalAccess(req, res, id))) return undefined;
     const row = await Approval.saveContract(id, req.body || {}, req.user?.id ?? null);
     if (!row) return res.status(404).json({ success: false, message: "Application not found" });
     await AuditLog.record({
@@ -259,6 +293,8 @@ exports.downloadContractCertificate = async (req, res) => {
   try {
     const id = Number(req.params.id);
     if (!Number.isFinite(id)) return res.status(400).json({ success: false, message: "Invalid id" });
+    const owner = await Contract.getById(id).catch(() => null);
+    if (!(await ensureApprovalAccess(req, res, owner?.application_id))) return undefined;
     const certificatePath = await Contract.getCertificatePath(id);
     if (!certificatePath) {
       return res.status(404).json({ success: false, message: "No certificate has been generated for this contract yet." });
@@ -290,6 +326,7 @@ exports.previewContractNo = async (req, res) => {
   try {
     const id = appIdParam(req, res);
     if (id === null) return undefined;
+    if (!(await ensureApprovalAccess(req, res, id))) return undefined;
     const contractNo = await Approval.previewContractNo(id);
     if (!contractNo) return res.status(404).json({ success: false, message: "Application not found" });
     return res.json({ success: true, data: { contract_no: contractNo } });
@@ -304,6 +341,7 @@ exports.addCharge = async (req, res) => {
   try {
     const id = appIdParam(req, res);
     if (id === null) return undefined;
+    if (!(await ensureApprovalAccess(req, res, id))) return undefined;
     if (!String(req.body?.description ?? "").trim()) {
       return res.status(400).json({ success: false, message: "description is required" });
     }
@@ -328,6 +366,7 @@ exports.updateCharge = async (req, res) => {
   try {
     const id = idParam(req, res);
     if (id === null) return undefined;
+    if (!(await ensureApprovalAccess(req, res, await Assessment.getApplicationIdForCharge(id)))) return undefined;
     const data = await Approval.updateCharge(id, req.body || {}, req.user?.id ?? null);
     if (!data) return res.status(404).json({ success: false, message: "Charge not found" });
     await AuditLog.record({
@@ -349,6 +388,7 @@ exports.deleteCharge = async (req, res) => {
   try {
     const id = idParam(req, res);
     if (id === null) return undefined;
+    if (!(await ensureApprovalAccess(req, res, await Assessment.getApplicationIdForCharge(id)))) return undefined;
     const before = await Assessment.getChargeById(id);
     const ok = await Approval.deleteCharge(id, req.user?.id ?? null);
     if (!ok) return res.status(404).json({ success: false, message: "Charge not found" });

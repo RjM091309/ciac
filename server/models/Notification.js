@@ -32,6 +32,7 @@ function normalizeEventType(value) {
     raw === "compliance" ||
     raw === "assessment" ||
     raw === "approval" ||
+    raw === "approval_ready" ||
     raw === "contract"
   ) {
     return raw;
@@ -162,7 +163,16 @@ async function resolveApplicationRecipients(application, actorId, eventType) {
   const menuKeys = EVENT_TYPE_MENU_KEYS[normalizeEventType(eventType)] || [];
   if (menuKeys.length) {
     await ControlPanelPermission.ensureSchema();
+    // Lazy require — AssessmentEvaluation.js requires this module too. Its
+    // table must exist before the EXISTS below can compile.
+    const Assessment = require("./AssessmentEvaluation");
+    await Assessment.ensureSchema();
+    await require("./ApprovalIssuance").ensureSchema();
     const placeholders = menuKeys.map((_, i) => `@param${i}`).join(", ");
+    const appParam = `@param${menuKeys.length}`;
+    // Through assessment:queue, a Level 2 Assessment Officer only hears about
+    // applications assigned to them — only a Level 1 Manager
+    // (users.assessment_level = 1) gets the whole queue's events.
     const staffRows = await selectData(
       `
       SELECT DISTINCT u.id
@@ -174,8 +184,35 @@ async function resolveApplicationRecipients(application, actorId, eventType) {
         AND LOWER(LTRIM(RTRIM(r.name))) <> 'admin'
         AND p.is_enabled = 1
         AND p.menu_key IN (${placeholders})
+        AND (
+          p.menu_key <> 'assessment:queue'
+          OR u.assessment_level = 1
+          OR EXISTS (
+            SELECT 1 FROM dbo.application_assessments asm
+            WHERE asm.application_id = ${appParam} AND asm.assigned_evaluator_id = u.id
+          )
+        )
+        -- Through approval:queue, an Account Officer only hears about the
+        -- approvals assigned to them (or still unassigned) — same rule as
+        -- ApprovalIssuance's ASSIGNEE_EXPR.
+        AND (
+          p.menu_key <> 'approval:queue'
+          OR NOT EXISTS (
+            SELECT 1 FROM dbo.application_assessments asm2
+            LEFT JOIN dbo.application_approvals ap2 ON ap2.application_id = asm2.application_id
+            WHERE asm2.application_id = ${appParam}
+              AND COALESCE(
+                (SELECT TOP (1) s.assigned_to FROM dbo.approval_steps s WHERE s.approval_id = ap2.id ORDER BY s.id DESC),
+                asm2.approver_id
+              ) IS NOT NULL
+              AND COALESCE(
+                (SELECT TOP (1) s.assigned_to FROM dbo.approval_steps s WHERE s.approval_id = ap2.id ORDER BY s.id DESC),
+                asm2.approver_id
+              ) <> u.id
+          )
+        )
       `,
-      menuKeys
+      [...menuKeys, toInt(application?.id)]
     );
     for (const row of staffRows) {
       const userId = toInt(row?.id);
