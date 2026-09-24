@@ -59,6 +59,90 @@ async function loginRequest(args: {
 
 const EMPTY_USER = { id: 0, username: '' };
 
+/** Abstract backdrop for the sign-in panel: concentric arcs (a bridge / radar
+ * sweep) from the bottom-right, two flight-path curves, a fading dot grid and
+ * soft orange/blue glows. White strokes at low opacity so it works on both
+ * the light-mode navy and the dark theme's black. The dark tone drops the
+ * colored glows (blue reads off-palette and orange turns muddy on black) for a
+ * faint white one, keeping only the orange arc as an accent. Sits at z -1
+ * inside the panel's `isolate` stacking context: above the panel background,
+ * below the form. */
+function SignInPanelBackdrop({ tone }: { tone: 'light' | 'dark' }) {
+  const dark = tone === 'dark';
+  const arcs = [240, 360, 480, 600, 720, 840, 960];
+  return (
+    <div aria-hidden="true" className="absolute inset-0 -z-10 overflow-hidden pointer-events-none select-none">
+      <svg className="absolute inset-0 h-full w-full" viewBox="0 0 800 1000" preserveAspectRatio="xMidYMid slice">
+        <defs>
+          <radialGradient id="signin-glow-orange" cx="0" cy="1" r="0.75">
+            <stop offset="0" stopColor="#F7931E" stopOpacity="0.28" />
+            <stop offset="1" stopColor="#F7931E" stopOpacity="0" />
+          </radialGradient>
+          <radialGradient id="signin-glow-blue" cx="1" cy="0" r="0.8">
+            <stop offset="0" stopColor={dark ? '#ffffff' : '#7C8CFF'} stopOpacity={dark ? 0.07 : 0.32} />
+            <stop offset="1" stopColor="#7C8CFF" stopOpacity="0" />
+          </radialGradient>
+          <linearGradient id="signin-path-fade" x1="0" y1="1" x2="1" y2="0">
+            <stop offset="0" stopColor="#ffffff" stopOpacity="0" />
+            <stop offset="0.5" stopColor="#ffffff" stopOpacity="0.35" />
+            <stop offset="1" stopColor="#ffffff" stopOpacity="0" />
+          </linearGradient>
+          <pattern id="signin-dots" width="22" height="22" patternUnits="userSpaceOnUse">
+            <circle cx="1.5" cy="1.5" r="1.2" fill="#ffffff" fillOpacity="0.22" />
+          </pattern>
+          <radialGradient id="signin-dots-fade" cx="0.15" cy="0.12" r="0.55">
+            <stop offset="0" stopColor="#ffffff" stopOpacity="1" />
+            <stop offset="1" stopColor="#ffffff" stopOpacity="0" />
+          </radialGradient>
+          <mask id="signin-dots-mask">
+            <rect width="800" height="1000" fill="url(#signin-dots-fade)" />
+          </mask>
+        </defs>
+
+        <rect width="800" height="1000" fill="url(#signin-glow-blue)" />
+        {!dark && <rect width="800" height="1000" fill="url(#signin-glow-orange)" />}
+        <rect width="800" height="1000" fill="url(#signin-dots)" mask="url(#signin-dots-mask)" />
+
+        {arcs.map((r, i) => (
+          <circle
+            key={r}
+            cx="860"
+            cy="1080"
+            r={r}
+            fill="none"
+            stroke="#ffffff"
+            strokeOpacity={0.14 - i * 0.015}
+            strokeWidth="1"
+          />
+        ))}
+        {/* One arc picked out in the brand orange. */}
+        <circle
+          cx="860"
+          cy="1080"
+          r="480"
+          fill="none"
+          stroke="#F7931E"
+          strokeOpacity="0.55"
+          strokeWidth="2"
+          strokeDasharray="120 2900"
+          strokeDashoffset="-2150"
+          strokeLinecap="round"
+        />
+
+        <path d="M -40 820 C 200 700, 380 420, 860 90" fill="none" stroke="url(#signin-path-fade)" strokeWidth="1.5" />
+        <path
+          d="M -40 900 C 260 800, 480 560, 860 300"
+          fill="none"
+          stroke="url(#signin-path-fade)"
+          strokeWidth="1.2"
+          strokeDasharray="2 10"
+          strokeLinecap="round"
+        />
+      </svg>
+    </div>
+  );
+}
+
 export function LoginPage(props: {
   backendUrl: string;
   /** Present (and truthy) when the URL is an emailed reset link
@@ -68,6 +152,9 @@ export function LoginPage(props: {
   /** Called once a reset link has been consumed (success or "start over"),
    * so App.tsx can drop ?token=... from the URL. */
   onResetHandled: () => void;
+  /** Explanation for an automatic sign-out (e.g. idle timeout), shown until
+   * the user does something else on this screen. */
+  notice?: string | null;
   onLoggedIn: (user: { id: number; username: string; role?: string }) => void;
 }) {
   const backend = useMemo(() => normalizeBaseUrl(props.backendUrl), [props.backendUrl]);
@@ -101,10 +188,9 @@ export function LoginPage(props: {
     return 'dark';
   });
   const [submitting, setSubmitting] = useState(false);
-  const [message, setMessage] = useState<{ type: 'muted' | 'error' | 'success'; text: string }>({
-    type: 'muted',
-    text: '',
-  });
+  const [message, setMessage] = useState<{ type: 'muted' | 'error' | 'success'; text: string }>(() =>
+    props.notice ? { type: 'error', text: props.notice } : { type: 'muted', text: '' }
+  );
 
   const step: 'credentials' | 'enroll' | 'mfa' | 'forceChangePassword' | 'forgotEmail' | 'forgotSent' | 'resetPassword' =
     props.resetToken
@@ -283,9 +369,12 @@ export function LoginPage(props: {
       <button
         onClick={() => setTheme((p) => (p === 'dark' ? 'light' : 'dark'))}
         className="fixed top-3 right-3 sm:top-4 sm:right-4 xl:top-6 xl:right-6 p-2.5 sm:p-3 rounded-full control-btn touch-target z-50 backdrop-blur-md"
+        // In light mode this always sits over navy (the mobile header, or the
+        // sign-in panel on the split layout), so it goes white-on-navy there.
         style={{
-          backgroundColor: 'color-mix(in oklab, var(--surface) 78%, transparent)',
-          color: 'var(--text)',
+          backgroundColor:
+            theme === 'light' ? 'rgba(255, 255, 255, 0.12)' : 'color-mix(in oklab, var(--surface) 78%, transparent)',
+          color: theme === 'light' ? '#ffffff' : 'var(--text)',
           border: 'none',
           boxShadow: 'none',
         }}
@@ -297,15 +386,20 @@ export function LoginPage(props: {
 
       <div
         className="xl:hidden w-full border-b px-4 sm:px-6 py-4 sm:py-5 pr-16 sm:pr-20"
-        style={{
-          backgroundColor: 'var(--surface)',
-          borderColor: 'var(--border)',
-        }}
+        // Light mode: same navy as the sign-in panel below it, so the header
+        // and form read as one block. Dark background on both themes, so the
+        // black-only CIAC logo is always inverted to white here.
+        style={
+          theme === 'light'
+            ? { backgroundColor: '#282974', borderColor: 'rgba(255, 255, 255, 0.12)' }
+            : { backgroundColor: 'var(--surface)', borderColor: 'var(--border)' }
+        }
       >
         <img
-          src={brandSrc}
-          alt="Clark Aviation Capital"
-          className="h-11 sm:h-12 w-auto"
+          src="/images/ciac-logo-black.png"
+          alt="CIAC — Clark International Airport Corporation"
+          className="h-10 sm:h-11 w-auto"
+          style={{ filter: 'invert(1)' }}
         />
       </div>
 
@@ -353,10 +447,17 @@ export function LoginPage(props: {
 
         <div className="relative z-10 max-w-xl">
           <motion.div initial={{ opacity: 0, x: -30 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.8, ease: 'easeOut' }}>
-            <h1 className="text-4xl md:text-5xl xl:text-6xl 2xl:text-7xl font-bold leading-[0.9] tracking-tighter mb-8">
-              LOCATOR <br />
-              <span className="text-secondary">COMPLIANCE</span> <br />
-              SYSTEM.
+            <h1 className="mb-8">
+              <span
+                className="block text-5xl md:text-6xl xl:text-7xl 2xl:text-8xl font-bold leading-[0.9] tracking-tighter"
+                // Same navy as the light-mode sign-in panel.
+                style={theme === 'light' ? { color: '#282974' } : undefined}
+              >
+                BRIDGE+
+              </span>
+              <span className="block mt-5 text-xl xl:text-2xl 2xl:text-3xl font-semibold leading-snug tracking-tight text-secondary">
+                Business Registration &amp; Information Digital Gateway for Enterprises Plus
+              </span>
             </h1>
 
             <p className="text-lg text-secondary max-w-md leading-relaxed mb-10">
@@ -365,8 +466,8 @@ export function LoginPage(props: {
 
             <div className="flex items-center gap-8">
               <div className="flex flex-col">
-                <span className="text-3xl font-bold">24h</span>
-                <span className="text-xs uppercase tracking-widest text-secondary">Session</span>
+                <span className="text-3xl font-bold">15m</span>
+                <span className="text-xs uppercase tracking-widest text-secondary">Idle timeout</span>
               </div>
               <div className="w-px h-10 bg-border" />
               <div className="flex flex-col">
@@ -379,13 +480,13 @@ export function LoginPage(props: {
 
         <div className="absolute right-8 top-1/2 -translate-y-1/2 hidden xl:block">
           <span className="writing-mode-vertical text-[10px] uppercase tracking-[0.4em] text-secondary opacity-50 rotate-180">
-            3core • LOCATOR &amp; COMPLIANCE PORTAL
+            CIAC • LOCATOR &amp; COMPLIANCE PORTAL
           </span>
         </div>
       </div>
 
       <div
-        className="flex-1 flex flex-col items-center justify-center px-4 py-6 sm:px-8 sm:py-8 xl:p-24 relative"
+        className="flex-1 flex flex-col items-center justify-center px-4 py-6 sm:px-8 sm:py-8 xl:p-24 relative isolate"
         // Light mode only: navy panel, with the theme tokens re-scoped so text,
         // inputs and the submit button stay legible on the dark background.
         style={
@@ -404,6 +505,8 @@ export function LoginPage(props: {
             : undefined
         }
       >
+        <SignInPanelBackdrop tone={theme} />
+
         <motion.div
           initial={{ opacity: 0, scale: 0.95 }}
           animate={{ opacity: 1, scale: 1 }}

@@ -4,7 +4,7 @@ const AuditLog = require("./AuditLog");
 
 // One row per sign-in, so the audit log can say how long a session lasted
 // and how it ended — including the two endings nobody clicks: the JWT
-// running out (24h), and an admin/system action invalidating it (password
+// running out (15-minute idle timeout, see Auth.js), and an admin/system action invalidating it (password
 // reset, deactivation, "sign out of all devices" — all of which bump
 // users.token_version). Neither of those produces a request the server
 // could log at the moment it happens, so sweep() below finds them after
@@ -111,6 +111,80 @@ function touch(id) {
     .catch((error) => console.error("Session touch failed:", error.message));
 }
 
+/** Pushes out a session's expiry after a refresh, so sweep() doesn't close a
+ * session that's still in use. Best-effort like start(). */
+async function extend(id, expiresAt) {
+  if (!id) return;
+  try {
+    await ensureSchema();
+    await insertData(
+      `UPDATE dbo.user_sessions SET expires_at = @param1, last_seen_at = SYSUTCDATETIME() WHERE id = @param0 AND ended_at IS NULL`,
+      [id, expiresAt]
+    );
+  } catch (error) {
+    console.error("Session extend write failed:", error.message);
+  }
+}
+
+/** True when the user ended this session themselves (sign-out, or closing
+ * their last tab), so m_auth.js can reject a token that is still unexpired.
+ * Deliberately ignores 'expired'/'revoked': those are already enforced by the
+ * JWT's own expiry and token_version, and trusting sweep() here would let a
+ * failed extend() write kick out a session that's still in use. */
+async function isClosedByUser(id) {
+  if (!id) return false;
+  await ensureSchema();
+  const rows = await selectData(
+    `SELECT TOP (1) 1 AS closed FROM dbo.user_sessions WHERE id = @param0 AND end_reason IN ('logout', 'tab_closed')`,
+    [id]
+  );
+  return Boolean(rows?.length);
+}
+
+// Closing any tab signs the whole session out (every tab). The frontend can't
+// tell a close from a reload (both fire pagehide), so it reports each one
+// with its per-tab id, and the session is ended unless that same tab comes
+// back within the grace period — a reloaded page keeps its id (sessionStorage)
+// and cancels via POST /api/auth/refresh?tab=... Requests from OTHER tabs
+// deliberately don't cancel. In-memory, so it assumes a single backend
+// process; a restart just drops pending closes and the 15-minute idle expiry
+// covers them.
+const TAB_CLOSE_GRACE_MS = 10 * 1000;
+const pendingTabCloses = new Map();
+
+function scheduleTabClose({ id, tabId, userId, username, ipAddress, userAgent }) {
+  if (!id) return;
+  const existing = pendingTabCloses.get(id);
+  if (existing) clearTimeout(existing.timer);
+  const timer = setTimeout(async () => {
+    pendingTabCloses.delete(id);
+    const ended = await end(id, "tab_closed");
+    if (!ended) return;
+    await AuditLog.record({
+      actorId: userId,
+      actorUsername: username,
+      action: "LOGOUT",
+      entityType: "user",
+      entityId: userId,
+      sessionId: id,
+      ipAddress,
+      userAgent,
+      details: { reason: "tab_closed", duration_seconds: ended.durationSeconds ?? undefined },
+    });
+  }, TAB_CLOSE_GRACE_MS);
+  timer.unref?.();
+  pendingTabCloses.set(id, { timer, tabId: tabId || null });
+}
+
+/** Cancels a pending tab-close sign-out, but only for the tab that reported
+ * closing — i.e. it was a reload/navigation, not a close. */
+function cancelTabClose(id, tabId) {
+  const pending = id ? pendingTabCloses.get(id) : null;
+  if (!pending || !tabId || pending.tabId !== tabId) return;
+  clearTimeout(pending.timer);
+  pendingTabCloses.delete(id);
+}
+
 /** Closes one session (sign-out). Returns { durationSeconds } or null when
  * the session isn't tracked / already closed. */
 async function end(id, reason) {
@@ -138,7 +212,8 @@ async function end(id, reason) {
 /**
  * Closes sessions that ended without a sign-out and writes one audit entry
  * for each:
- *  - SESSION_EXPIRED: the 24h JWT ran out. ended_at is the real expiry time.
+ *  - SESSION_EXPIRED: the session sat idle past its timeout. ended_at is the
+ *    real expiry time.
  *  - SESSION_REVOKED: the account's token_version moved on (password reset,
  *    deactivation, suspension, "sign out of all devices") or the account is
  *    gone/inactive. ended_at is when this sweep noticed, so it can trail the
@@ -204,4 +279,16 @@ function startSweeper() {
   sweepTimer.unref?.();
 }
 
-module.exports = { ensureSchema, newSessionId, start, touch, end, sweep, startSweeper };
+module.exports = {
+  ensureSchema,
+  newSessionId,
+  start,
+  touch,
+  extend,
+  end,
+  isClosedByUser,
+  scheduleTabClose,
+  cancelTabClose,
+  sweep,
+  startSweeper,
+};

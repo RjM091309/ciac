@@ -265,15 +265,31 @@ async function loginViaDatabase(username, password, totpCode, newPassword) {
   // sid ties every audit entry made with this token back to this sign-in
   // (see UserSession.js).
   const sessionId = UserSession.newSessionId();
-  const token = jwt.sign({ ...user, tv: tokenVersion, sid: sessionId }, getJwtSecret(), { expiresIn: "24h" });
-  const { exp } = jwt.decode(token);
+  const { token, expiresAt } = issueSessionToken(user, tokenVersion, sessionId);
   return {
     success: true,
     message: "Login successful",
     user,
     token,
-    session: { id: sessionId, tokenVersion, expiresAt: new Date(exp * 1000) },
+    session: { id: sessionId, tokenVersion, expiresAt },
   };
+}
+
+// Idle timeout: a session token lives 15 minutes and is only extended by
+// POST /api/auth/refresh, which the frontend calls while the user is
+// actively using the app (see src/lib/idleSession.ts). Background polling
+// and the notification stream deliberately don't extend it, so an
+// unattended tab lets the session lapse.
+const SESSION_IDLE_TIMEOUT_SECONDS = 15 * 60;
+
+function issueSessionToken(user, tokenVersion, sessionId) {
+  const token = jwt.sign(
+    { id: user.id, username: user.username, role: user.role, tv: tokenVersion, sid: sessionId },
+    getJwtSecret(),
+    { expiresIn: SESSION_IDLE_TIMEOUT_SECONDS }
+  );
+  const { exp } = jwt.decode(token);
+  return { token, expiresAt: new Date(exp * 1000) };
 }
 
 async function login(username, password, totpCode, newPassword) {
@@ -297,7 +313,7 @@ async function login(username, password, totpCode, newPassword) {
     if (!matches) return { success: false, reason: "wrong_password", message: "Username and Password incorrect!" };
 
     const user = { id: 1, username: adminUser, role: "admin" };
-    const token = jwt.sign(user, getJwtSecret(), { expiresIn: "24h" });
+    const token = jwt.sign(user, getJwtSecret(), { expiresIn: SESSION_IDLE_TIMEOUT_SECONDS });
     return { success: true, message: "Login successful", user, token };
   }
 }
@@ -341,5 +357,7 @@ module.exports = {
   requestPasswordReset,
   resetPasswordWithToken,
   RESET_TOKEN_TTL_MINUTES,
+  SESSION_IDLE_TIMEOUT_SECONDS,
+  issueSessionToken,
 };
 

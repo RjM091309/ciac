@@ -33,11 +33,18 @@ async function attachUserFromJwt(req, res, next) {
       sid: decoded.sid,
       iat: decoded.iat,
     };
+    // Needed to re-issue the same session's token on refresh (c_auth.js).
+    req.tokenVersion = Number(decoded.tv || 0);
     res.locals.user = req.user;
 
     try {
       const check = await User.getSessionCheck(decoded.id);
-      if (check && (!check.isActive || check.tokenVersion !== Number(decoded.tv || 0))) {
+      // A token outlives its session when the user signed out or closed
+      // their last tab (UserSession.isClosedByUser) — reject it too.
+      if (
+        (check && (!check.isActive || check.tokenVersion !== Number(decoded.tv || 0))) ||
+        (await UserSession.isClosedByUser(decoded.sid))
+      ) {
         req.user = undefined;
         res.locals.user = undefined;
         res.clearCookie("jwt");

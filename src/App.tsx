@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState, Suspense, lazy } from 'react';
+import React, { useCallback, useEffect, useMemo, useState, Suspense, lazy } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { AppLayout, AppView } from './layout/AppLayout';
 import { SubHeader, type DashboardPreviewRole } from './components/SubHeader';
@@ -9,6 +9,7 @@ import { locatorSetupSkipKey } from './lib/locatorSetup';
 import { DataTableControls } from './components/ui/DataTableControls';
 import { PageSkeleton } from './components/ui/PageSkeleton';
 import { Toaster } from 'sonner';
+import { useIdleSession } from './lib/idleSession';
 
 const RoleDashboard = lazy(() => import('./components/dashboard/RoleDashboard').then((m) => ({ default: m.RoleDashboard })));
 const PreviewDashboard = lazy(() => import('./components/dashboard/PreviewDashboard').then((m) => ({ default: m.PreviewDashboard })));
@@ -189,6 +190,8 @@ export default function App() {
 
   const [user, setUser] = useState<UserData | null>(null);
   const [authState, setAuthState] = useState<'authed' | 'guest'>('guest');
+  // Shown on the login screen after an automatic sign-out (idle timeout).
+  const [loginNotice, setLoginNotice] = useState<string | null>(null);
   const [view, setView] = useState<AppView>('dashboard');
   const [proponentView, setProponentView] = useState<ProponentView>('dashboard');
   const [dashboardPreviewRole, setDashboardPreviewRole] = useState<DashboardPreviewRole>('admin');
@@ -365,6 +368,43 @@ export default function App() {
     };
   }, [backendUrl]);
 
+  const logout = useCallback(
+    async (notice?: string) => {
+      try {
+        const primaryUrl = `${String(backendUrl).replace(/\/+$/, '')}/api/auth/logout`;
+        let res = await fetch(primaryUrl, {
+          method: 'POST',
+          credentials: 'include',
+        });
+        if (!res.ok) {
+          await fetch('/api/auth/logout', {
+            method: 'POST',
+            credentials: 'include',
+          });
+        }
+      } catch {
+        // ignore
+      } finally {
+        setUser(null);
+        setAuthState('guest');
+        setLoginNotice(notice ?? null);
+        navigate('/', { replace: true });
+      }
+    },
+    [backendUrl, navigate]
+  );
+
+  useIdleSession({
+    enabled: authState === 'authed',
+    backendUrl,
+    onSignedOut: (reason) =>
+      logout(
+        reason === 'idle'
+          ? 'You were signed out after 15 minutes of inactivity.'
+          : 'Your session has ended. Please sign in again.'
+      ),
+  });
+
   useEffect(() => {
     // Once authenticated, default landing should be /dashboard
     if (authState === 'authed' && (path === '/' || path === '')) {
@@ -398,10 +438,12 @@ export default function App() {
       <LoginPage
         backendUrl={backendUrl}
         resetToken={resetToken}
+        notice={loginNotice}
         onResetHandled={() => navigate('/', { replace: true })}
         onLoggedIn={(u) => {
           setUser({ id: u.id, username: u.username, role: normalizeRole(u.role), roleName: String(u.role || '') });
           setAuthState('authed');
+          setLoginNotice(null);
           navigate('/dashboard');
         }}
       />
@@ -505,27 +547,7 @@ export default function App() {
         sidebarPermissionOverride={dashboardPreviewRole !== 'admin' ? previewSidebarPermissions : null}
         userId={user?.id ?? null}
         backendUrl={backendUrl}
-        onLogout={async () => {
-          try {
-            const primaryUrl = `${String(backendUrl).replace(/\/+$/, '')}/api/auth/logout`;
-            let res = await fetch(primaryUrl, {
-              method: 'POST',
-              credentials: 'include',
-            });
-            if (!res.ok) {
-              await fetch('/api/auth/logout', {
-                method: 'POST',
-                credentials: 'include',
-              });
-            }
-          } catch {
-            // ignore
-          } finally {
-            setUser(null);
-            setAuthState('guest');
-            navigate('/', { replace: true });
-          }
-        }}
+        onLogout={() => logout()}
       >
         {isProponent ? (
           <SubHeader

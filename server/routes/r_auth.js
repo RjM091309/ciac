@@ -42,5 +42,7 @@ router.get("/logout", (req, res) => {
   return res.redirect("/");
 });
 router.get("/check", authController.checkAuth);
+router.post("/refresh", authController.refresh);
+router.post("/tab-closed", authController.tabClosed);
 
 module.exports = router;

@@ -7,6 +7,17 @@ const { sendMail } = require("../lib/mailer");
 // How far back the audit log looks when counting repeat failed sign-ins.
 const RECENT_FAILURE_WINDOW_MINUTES = 15;
 
+// No maxAge: a browser-session cookie, dropped when the browser quits. The
+// 15-minute idle limit is enforced by the JWT's own expiry (Auth.js), not
+// the cookie's lifetime.
+function sessionCookieOptions() {
+  return {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+  };
+}
+
 exports.login = async (req, res) => {
   try {
     const { username, password, token, newPassword } = req.body || {};
@@ -59,12 +70,7 @@ exports.login = async (req, res) => {
       });
     }
 
-    res.cookie("jwt", result.token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
-      maxAge: 24 * 60 * 60 * 1000,
-    });
+    res.cookie("jwt", result.token, sessionCookieOptions());
 
     if (result.session) {
       await UserSession.start({
@@ -122,6 +128,38 @@ exports.logout = async (req, res) => {
   }
   res.clearCookie("jwt");
   return res.json({ success: true, message: "Logged out successfully" });
+};
+
+/** Extends an active session by another idle-timeout window. Called by the
+ * frontend only while the user is actually interacting with the page; the
+ * token_version/is_active check in m_auth.js has already run, so a revoked
+ * session can't be refreshed. */
+exports.refresh = async (req, res) => {
+  if (!req.user) return res.status(401).json({ success: false, message: "Session expired" });
+  // ?tab= is sent by a page that just loaded: if that tab reported closing a
+  // moment ago, it was a reload — keep the session (UserSession.js).
+  UserSession.cancelTabClose(req.user.sid, typeof req.query.tab === "string" ? req.query.tab : null);
+  const { token, expiresAt } = Auth.issueSessionToken(req.user, req.tokenVersion, req.user.sid);
+  res.cookie("jwt", token, sessionCookieOptions());
+  await UserSession.extend(req.user.sid, expiresAt);
+  return res.json({ success: true, expiresAt });
+};
+
+/** Sent (keepalive fetch) by the frontend when any tab of the app goes away;
+ * closing one tab signs out all of them. Only schedules the sign-out — see
+ * UserSession.scheduleTabClose for why it waits. */
+exports.tabClosed = (req, res) => {
+  if (req.user) {
+    UserSession.scheduleTabClose({
+      id: req.user.sid,
+      tabId: typeof req.query.tab === "string" ? req.query.tab : null,
+      userId: req.user.id,
+      username: req.user.username,
+      ipAddress: AuditLog.normalizeIp(req.ip),
+      userAgent: req.get("user-agent"),
+    });
+  }
+  return res.status(204).end();
 };
 
 exports.checkAuth = async (req, res) => {

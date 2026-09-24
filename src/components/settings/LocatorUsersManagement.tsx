@@ -75,6 +75,8 @@ function isLocatorRoleName(name: string) {
   return String(name || '').trim().toUpperCase() === 'PROPONENT';
 }
 
+const EMPTY_PROGRESS: Record<number, ProgressSummary> = {};
+
 export function LocatorUsersManagement({
   locationSearch = '',
   navigate,
@@ -242,8 +244,14 @@ export function LocatorUsersManagement({
   // "holds Locator among possibly several roles" instead would also sweep in
   // a multi-role staff account (e.g. admin also holding Proponent, for the
   // dashboard role-preview switcher) that isn't really a locator.
-  const userRows = (Array.isArray(usersRoles?.users) ? usersRoles.users : []).filter(
-    (u) => (u.roles || []).length === 1 && isLocatorRoleName(u.roles[0].name)
+  // Memoized: a fresh array every render would cascade through
+  // filteredUsers/pagedUsers and re-fire the per-row progress fetch below.
+  const userRows = useMemo(
+    () =>
+      (Array.isArray(usersRoles?.users) ? usersRoles.users : []).filter(
+        (u) => (u.roles || []).length === 1 && isLocatorRoleName(u.roles[0].name)
+      ),
+    [usersRoles?.users]
   );
 
   const [form, setForm] = useState({
@@ -369,15 +377,43 @@ export function LocatorUsersManagement({
   // ApplicationsWorkflow.tsx uses, but this page can list hundreds of
   // accounts, so it's scoped to the current page to avoid firing that many
   // parallel requirement/document fetches at once.
-  const [progressByApp, setProgressByApp] = useState<Record<number, ProgressSummary>>({});
+  // Keyed on the visible application ids (not the pagedUsers array itself),
+  // and results are merged into a cache, so typing in the search box only
+  // fetches applications that weren't already loaded. The cache is tied to
+  // the usersRoles snapshot it was built for, so a data reload starts fresh
+  // (progress may have changed) without a separate reset effect racing the
+  // fetch below.
+  const [progressCache, setProgressCache] = useState<{
+    source: UsersRolesData | null | undefined;
+    data: Record<number, ProgressSummary>;
+  }>({ source: null, data: {} });
+  const progressByApp = progressCache.source === usersRoles ? progressCache.data : EMPTY_PROGRESS;
+  const visibleAppIdsKey = useMemo(
+    () =>
+      Array.from(
+        new Set(pagedUsers.map((u) => applicationByUserId[u.id]?.id).filter((id): id is number => Boolean(id)))
+      )
+        .sort((a, b) => a - b)
+        .join(','),
+    [pagedUsers, applicationByUserId]
+  );
   useEffect(() => {
-    const appIds = Array.from(
-      new Set(pagedUsers.map((u) => applicationByUserId[u.id]?.id).filter((id): id is number => Boolean(id)))
-    );
+    const missing = visibleAppIdsKey
+      ? visibleAppIdsKey
+          .split(',')
+          .map(Number)
+          .filter((id) => !(id in progressByApp))
+      : [];
+    if (!missing.length) return;
     let cancelled = false;
-    loadProgressForApplications(appIds, api)
+    const source = usersRoles;
+    loadProgressForApplications(missing, api)
       .then((next) => {
-        if (!cancelled) setProgressByApp(next);
+        if (cancelled) return;
+        setProgressCache((prev) => ({
+          source,
+          data: { ...(prev.source === source ? prev.data : {}), ...next },
+        }));
       })
       .catch(() => {
         // keep the table usable even if the progress fetch fails
@@ -385,8 +421,10 @@ export function LocatorUsersManagement({
     return () => {
       cancelled = true;
     };
+    // progressByApp is read, not tracked: including it would re-run this
+    // after every merge.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pagedUsers]);
+  }, [visibleAppIdsKey, usersRoles]);
 
   const showingRange = useMemo(() => {
     if (filteredUsers.length === 0) return { from: 0, to: 0 };
