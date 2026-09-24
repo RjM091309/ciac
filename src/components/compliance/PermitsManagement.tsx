@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, FileSignature, FileText, Pencil, Search, Trash2 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { toast } from 'sonner';
@@ -86,7 +86,13 @@ function daysUntil(v: string | null): number | null {
 
 type ExpiryFilter = 'THIS_MONTH' | 'NEXT_90' | 'OVERDUE' | null;
 
-export function PermitsManagement() {
+export function PermitsManagement({
+  locationSearch = '',
+  navigate,
+}: {
+  locationSearch?: string;
+  navigate?: (to: string, opts?: { replace?: boolean }) => void;
+} = {}) {
   const { fullAccess, crudPermissions } = useControlPanelAccess();
   const perm = crudPermissions[MENU_KEY] || { can_add: false, can_edit: false, can_delete: false };
   const canAdd = fullAccess || perm.can_add;
@@ -99,6 +105,43 @@ export function PermitsManagement() {
   const [search, setSearch] = useState('');
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
   const [expiryFilter, setExpiryFilter] = useState<ExpiryFilter>(null);
+
+  // Deep-link from the Dashboard's "Needs Attention" widget (?permitId=...):
+  // clears any filter that would hide the row, scrolls to it, and highlights
+  // it — otherwise landing here just showed the whole unfiltered list with no
+  // indication of which permit needed attention.
+  const [highlightId, setHighlightId] = useState<number | null>(null);
+  const highlightedRowRef = useRef<HTMLDivElement | HTMLTableRowElement | null>(null);
+  const consumedHighlightQueryRef = useRef('');
+  useEffect(() => {
+    const raw = String(locationSearch || '').trim();
+    if (!raw || consumedHighlightQueryRef.current === raw) return;
+    const params = new URLSearchParams(raw.startsWith('?') ? raw : `?${raw}`);
+    const permitId = Number(params.get('permitId') || '');
+    if (!Number.isFinite(permitId) || permitId <= 0) return;
+    consumedHighlightQueryRef.current = raw;
+    setHighlightId(permitId);
+    setExpiryFilter(null);
+    setSearch('');
+    if (navigate) {
+      params.delete('permitId');
+      const cleaned = params.toString();
+      navigate(`/compliance/permits${cleaned ? `?${cleaned}` : ''}`, { replace: true });
+    }
+  }, [locationSearch, navigate]);
+
+  // The highlight is a "here's the one you clicked from the dashboard" cue,
+  // not a persistent state — the next click anywhere (row action, filter,
+  // elsewhere on the page) dismisses it instead of leaving a stale ring on a
+  // row the officer has already moved past.
+  useEffect(() => {
+    if (highlightId == null) return;
+    function clear() {
+      setHighlightId(null);
+    }
+    document.addEventListener('click', clear);
+    return () => document.removeEventListener('click', clear);
+  }, [highlightId]);
 
   const { data, isLoading, refresh } = useSessionStorageCachedResource<Bundle>({
     cacheKey: 'ciac.permits_bundle.v3',
@@ -143,6 +186,9 @@ export function PermitsManagement() {
   });
 
   const permits = data?.permits ?? [];
+  useEffect(() => {
+    if (highlightId != null) highlightedRowRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, [highlightId, permits]);
   const proponentOptions = data?.proponents ?? [];
   const approvedApplications = data?.approvedApplications ?? [];
   // Scoped to the currently selected locator (if any) — picking a business
@@ -335,6 +381,16 @@ export function PermitsManagement() {
 
   return (
     <div className="space-y-4 sm:space-y-5">
+      {/* Background-color pulse, not box-shadow — a box-shadow "ring" on a
+          <tr> paints inconsistently (bleeds into the row above/below instead
+          of outlining just the one row), so the highlight is a plain
+          background wash plus a solid left-edge accent instead. */}
+      <style>{`
+        @keyframes ciac-permit-highlight-pulse {
+          0%, 100% { background-color: rgba(148,163,184,.28); }
+          50% { background-color: rgba(148,163,184,.08); }
+        }
+      `}</style>
       <div className="grid grid-cols-3 gap-2 sm:gap-3">
         <ExpiryStatCard
           label="Expiring This Month"
@@ -392,13 +448,17 @@ export function PermitsManagement() {
           <div className="sm:hidden space-y-2">
             {filtered.map((p) => {
               const s = STATUS_STYLE[p.effective_status] || STATUS_STYLE.REVOKED;
+              const isHighlighted = p.id === highlightId;
               return (
                 <div
                   key={p.id}
+                  ref={isHighlighted ? (highlightedRowRef as React.RefObject<HTMLDivElement>) : undefined}
                   className="rounded-xl p-3"
                   style={{
                     border: '1px solid var(--border-subtle)',
-                    backgroundColor: 'color-mix(in oklab, var(--control-bg) 35%, transparent)',
+                    borderLeft: isHighlighted ? '4px solid #94a3b8' : '1px solid var(--border-subtle)',
+                    backgroundColor: isHighlighted ? undefined : 'color-mix(in oklab, var(--control-bg) 35%, transparent)',
+                    ...(isHighlighted ? { animation: 'ciac-permit-highlight-pulse 1.6s ease-in-out infinite' } : {}),
                   }}
                 >
                   <div className="flex items-start justify-between gap-2">
@@ -454,9 +514,23 @@ export function PermitsManagement() {
               <tbody>
                 {filtered.map((p) => {
                   const s = STATUS_STYLE[p.effective_status] || STATUS_STYLE.REVOKED;
+                  const isHighlighted = p.id === highlightId;
                   return (
-                    <tr key={p.id} className="border-b last:border-b-0" style={{ borderColor: 'var(--border-subtle)' }}>
-                      <td className="px-3 py-2 text-[11px]" style={{ color: 'var(--text)' }}>{p.proponent_name || `#${p.proponent_id}`}</td>
+                    <tr
+                      key={p.id}
+                      ref={isHighlighted ? (highlightedRowRef as React.RefObject<HTMLTableRowElement>) : undefined}
+                      className="border-b last:border-b-0"
+                      style={{
+                        borderColor: 'var(--border-subtle)',
+                        ...(isHighlighted ? { animation: 'ciac-permit-highlight-pulse 1.6s ease-in-out infinite' } : {}),
+                      }}
+                    >
+                      <td
+                        className="px-3 py-2 text-[11px]"
+                        style={{ color: 'var(--text)', borderLeft: isHighlighted ? '4px solid #94a3b8' : undefined }}
+                      >
+                        {p.proponent_name || `#${p.proponent_id}`}
+                      </td>
                       <td className="px-3 py-2 text-[11px] text-secondary">{typeLabel[p.permit_type] || p.permit_type}</td>
                       <td className="px-3 py-2 text-[11px] font-semibold" style={{ color: 'var(--text)' }}>{p.permit_no}</td>
                       <td className="px-3 py-2 text-[11px] text-secondary">{p.issuing_authority || '—'}</td>

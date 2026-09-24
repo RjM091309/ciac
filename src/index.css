@@ -487,6 +487,15 @@ select.input-field:-webkit-autofill:focus {
   background: color-mix(in oklab, var(--foreground) 34%, transparent);
 }
 
+/*
+ * Fades the bottom edge of an overflowing list so a partially-clipped next
+ * row reads as an intentional scroll cue instead of an abruptly cut-off card.
+ */
+.attention-fade-bottom {
+  mask-image: linear-gradient(to bottom, black calc(100% - 20px), transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, black calc(100% - 20px), transparent 100%);
+}
+
 /* Hide scrollbar for role pills / horizontal scroll on mobile */
 .scrollbar-hide {
   -ms-overflow-style: none;

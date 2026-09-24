@@ -27,6 +27,11 @@ type AttentionItem = {
   // contracts, navigation.
   kind?: 'application' | 'permit' | 'contract';
   application_id: number;
+  /** The permit's own id (kind === 'permit' only) — for deep-linking to and
+   * highlighting the specific row on the Permits page, distinct from
+   * application_id above which a CONTRACT-type permit also carries but
+   * refers to a different record. */
+  permit_id?: number;
   application_no: string;
   proponent_name: string | null;
   status: string;
@@ -174,11 +179,14 @@ export function OfficerDashboard({
               description="Nothing is currently waiting on you."
             />
           ) : (
-          <div className="space-y-1.5">
+          // Fits ~5 rows without a scrollbar; more than that scrolls with the
+          // same invisible-until-hover scrollbar as the sidebar
+          // ("sidebar-scroll") instead of growing the whole card.
+          <div className="sidebar-scroll space-y-1.5 h-[280px] overflow-y-auto pr-0.5">
             {attention.map((item) => {
               const attentionTarget =
                 item.kind === 'permit'
-                  ? '/compliance/permits'
+                  ? `/compliance/permits?permitId=${item.permit_id ?? item.application_id}`
                   : item.kind === 'contract'
                     ? `/approval?applicationId=${item.application_id}`
                     : `/applications/${item.is_renewal ? 'renewals' : 'new'}?applicationId=${item.application_id}`;

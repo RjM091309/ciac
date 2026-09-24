@@ -652,7 +652,7 @@ export default function App() {
               ) : view === 'settings:control-panel' ? (
                 <ControlPanelManagement locationSearch={locationSearch} />
               ) : view === 'compliance:permits' ? (
-                <PermitsManagement />
+                <PermitsManagement locationSearch={locationSearch} navigate={navigate} />
               ) : (
                 <SectionLanding view={view} />
               )}

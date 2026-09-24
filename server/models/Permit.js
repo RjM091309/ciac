@@ -5,7 +5,10 @@ const ComplianceType = require("./ComplianceType");
 // this exact type whenever a contract is issued (see keepContractPermitInSync
 // there); it is not one of the configurable Settings -> Compliance Types.
 const RESERVED_PERMIT_TYPE = "CONTRACT";
-const EXPIRING_WINDOW_DAYS = 30;
+// A permit/contract needs at least a year's runway for renewal to be
+// processed in time — flag it as EXPIRING once less than 12 months remain,
+// not just in the final weeks.
+const EXPIRING_WINDOW_DAYS = 365;
 
 function toInt(v) {
   if (v === null || v === undefined || v === "") return null;
@@ -244,6 +247,7 @@ async function getCertificatePath(id) {
 module.exports = {
   ensureSchema,
   effectiveStatus,
+  EXPIRING_WINDOW_DAYS,
   listAll,
   listByProponent,
   listByApplication,

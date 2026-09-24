@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'motion/react';
 import {
   AlertTriangle,
@@ -181,6 +182,146 @@ function statusProgress(status: string) {
   const percent = status === 'COMPLETED' ? 100 : status === 'IN_PROGRESS' ? 50 : status === 'CANCELLED' ? 0 : 0;
   const barColor = percent >= 100 ? '#10b981' : percent >= 50 ? '#3b82f6' : '#f59e0b';
   return { percent, barColor };
+}
+
+const TOOLTIP_WIDTH = 250;
+const TOOLTIP_ROW_HEIGHT = 42;
+const TOOLTIP_PADDING = 16;
+const TOOLTIP_VIEWPORT_MARGIN = 8;
+const TOOLTIP_ARROW_OFFSET = 16;
+
+/** Hover breakdown for the Progress bar — the bar itself is just a 0/50/100%
+ * proxy for `status`, so this surfaces the actual detail behind it (inspector,
+ * dates, findings, overdue actions) that got dropped from their own columns
+ * when this table was condensed to Locator/Type/Progress/Status/Actions.
+ * Same portal-positioned, frosted-glass idiom as the Compliance column
+ * tooltip on the Assessment & Evaluation page. */
+function InspectionProgressTooltip({ row, children }: { row: InspectionRow; children: React.ReactNode }) {
+  const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState<{ top: number; left: number; openUp: boolean; arrowLeft: number } | null>(null);
+  const triggerRef = useRef<HTMLDivElement>(null);
+
+  type Row = { Icon: typeof CalendarClock; label: string; value: string; tone?: string };
+  const rows: Row[] = [
+    { Icon: UserCheck, label: 'Inspector', value: row.inspector_name || row.inspector_username || 'Unassigned' },
+    { Icon: CalendarClock, label: 'Scheduled', value: fmtDate(row.scheduled_date) },
+    ...(row.conducted_date ? [{ Icon: CalendarClock, label: 'Conducted', value: fmtDate(row.conducted_date) }] : []),
+    {
+      Icon: FileText,
+      label: 'Findings',
+      value: row.total_findings ? `${row.open_findings} open / ${row.total_findings} total` : 'None',
+      tone: row.open_findings > 0 ? '#ef4444' : undefined,
+    },
+    ...(row.overdue_actions > 0
+      ? [{ Icon: AlertTriangle, label: 'Corrective actions', value: `${row.overdue_actions} overdue`, tone: '#ef4444' }]
+      : []),
+    ...(row.result ? [{ Icon: ShieldCheck, label: 'Result', value: RESULT_LABELS[row.result] || row.result, tone: resultBadge(row.result).color }] : []),
+  ];
+
+  const computePosition = () => {
+    const trigger = triggerRef.current;
+    if (!trigger) return;
+    const rect = trigger.getBoundingClientRect();
+    const tooltipHeight = rows.length * TOOLTIP_ROW_HEIGHT + TOOLTIP_PADDING;
+    const spaceBelow = window.innerHeight - rect.bottom;
+    const openUp = spaceBelow < tooltipHeight + TOOLTIP_VIEWPORT_MARGIN && rect.top > tooltipHeight + TOOLTIP_VIEWPORT_MARGIN;
+    const left = Math.min(Math.max(TOOLTIP_VIEWPORT_MARGIN, rect.left), window.innerWidth - TOOLTIP_WIDTH - TOOLTIP_VIEWPORT_MARGIN);
+    const top = openUp ? rect.top - 10 : rect.bottom + 10;
+    const arrowLeft = Math.min(Math.max(rect.left + TOOLTIP_ARROW_OFFSET - left, 16), TOOLTIP_WIDTH - 16);
+    setPos({ top, left, openUp, arrowLeft });
+  };
+
+  useEffect(() => {
+    if (!open) return;
+    function close() {
+      setOpen(false);
+    }
+    window.addEventListener('scroll', close, true);
+    window.addEventListener('resize', close);
+    return () => {
+      window.removeEventListener('scroll', close, true);
+      window.removeEventListener('resize', close);
+    };
+  }, [open]);
+
+  return (
+    <>
+      <div
+        ref={triggerRef}
+        className="cursor-help"
+        onMouseEnter={() => {
+          computePosition();
+          setOpen(true);
+        }}
+        onMouseLeave={() => setOpen(false)}
+      >
+        {children}
+      </div>
+      {createPortal(
+        <AnimatePresence>
+          {open && pos ? (
+            <motion.div
+              className="pointer-events-none fixed z-[150] overflow-hidden"
+              style={{
+                top: pos.openUp ? undefined : pos.top,
+                bottom: pos.openUp ? window.innerHeight - pos.top : undefined,
+                left: pos.left,
+                width: TOOLTIP_WIDTH,
+                transformOrigin: `${pos.arrowLeft}px ${pos.openUp ? '100%' : '0%'}`,
+                backgroundColor: 'color-mix(in oklab, var(--surface) 82%, transparent)',
+                backdropFilter: 'blur(20px) saturate(180%)',
+                WebkitBackdropFilter: 'blur(20px) saturate(180%)',
+                border: '1px solid color-mix(in oklab, var(--border) 70%, transparent)',
+                boxShadow: '0 4px 12px rgba(0,0,0,.10), 0 1px 3px rgba(0,0,0,.08)',
+              }}
+              initial={{ opacity: 0, scale: 0.92 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.94 }}
+              transition={{ type: 'spring', stiffness: 420, damping: 32 }}
+            >
+              <span
+                className="absolute h-2.5 w-2.5 rotate-45"
+                style={{
+                  left: pos.arrowLeft - 5,
+                  top: pos.openUp ? undefined : -5,
+                  bottom: pos.openUp ? -5 : undefined,
+                  backgroundColor: 'color-mix(in oklab, var(--surface) 82%, transparent)',
+                  borderLeft: pos.openUp ? 'none' : '1px solid color-mix(in oklab, var(--border) 70%, transparent)',
+                  borderTop: pos.openUp ? 'none' : '1px solid color-mix(in oklab, var(--border) 70%, transparent)',
+                  borderRight: pos.openUp ? '1px solid color-mix(in oklab, var(--border) 70%, transparent)' : 'none',
+                  borderBottom: pos.openUp ? '1px solid color-mix(in oklab, var(--border) 70%, transparent)' : 'none',
+                }}
+              />
+              <div className="relative py-2">
+                {rows.map((r, idx) => (
+                  <div
+                    key={idx}
+                    className={cn('flex items-center gap-2.5 px-3.5', idx !== rows.length - 1 && 'border-b')}
+                    style={{ height: TOOLTIP_ROW_HEIGHT, borderColor: 'color-mix(in oklab, var(--border) 45%, transparent)' }}
+                  >
+                    <span
+                      className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full"
+                      style={{
+                        backgroundColor: r.tone ? `color-mix(in oklab, ${r.tone} 15%, transparent)` : 'var(--control-bg)',
+                        color: r.tone || 'var(--text-muted)',
+                      }}
+                    >
+                      <r.Icon size={13} strokeWidth={2.5} />
+                    </span>
+                    <span className="min-w-0 flex-1 truncate text-[11px] font-medium text-secondary">{r.label}</span>
+                    <span className="shrink-0 text-[11px] font-semibold text-right" style={{ color: r.tone || 'var(--text)' }}>
+                      {r.value}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </motion.div>
+          ) : null}
+        </AnimatePresence>,
+        document.body
+      )}
+    </>
+  );
 }
 
 function isOverdue(a: ActionRow) {
@@ -581,12 +722,14 @@ export function ComplianceInspections({
                             )}
                           </td>
                           <td className="px-3 py-2.5 min-w-[180px]">
-                            <div className="flex items-center gap-2">
-                              <div className="h-2.5 rounded-full overflow-hidden w-[120px]" style={{ backgroundColor: 'var(--input-border)' }}>
-                                <div className="h-full rounded-full transition-all" style={{ width: `${percent}%`, backgroundColor: barColor }} />
+                            <InspectionProgressTooltip row={r}>
+                              <div className="flex items-center gap-2">
+                                <div className="h-2.5 rounded-full overflow-hidden w-[120px]" style={{ backgroundColor: 'var(--input-border)' }}>
+                                  <div className="h-full rounded-full transition-all" style={{ width: `${percent}%`, backgroundColor: barColor }} />
+                                </div>
+                                <span className="text-[11px] font-semibold">{percent}%</span>
                               </div>
-                              <span className="text-[11px] font-semibold">{percent}%</span>
-                            </div>
+                            </InspectionProgressTooltip>
                           </td>
                           <td className="px-3 py-2.5">
                             <span

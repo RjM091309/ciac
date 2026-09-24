@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import {
   AlertTriangle,
   Building2,
+  Calendar,
   Check,
   ChevronLeft,
   ChevronRight,
@@ -50,7 +51,23 @@ export type AdminDashboardData = {
     avgOpenAgeDays: number | null;
     oldestOpenDays: number | null;
   };
-  attention?: { application_id: number; application_no: string; proponent_name: string | null; status: string; is_renewal?: boolean; days_waiting: number }[];
+  attention?: {
+    // Absent/'application' = a queued application; 'permit'/'contract' are
+    // expiring/expired compliance records — application_id is then that
+    // record's own id (permit, when permit_id is absent) or the application
+    // it belongs to (contract).
+    kind?: 'application' | 'permit' | 'contract';
+    application_id: number;
+    /** The permit's own id (kind === 'permit' only) — for deep-linking to
+     * and highlighting the specific row on the Permits page. */
+    permit_id?: number;
+    application_no: string;
+    proponent_name: string | null;
+    status: string;
+    is_renewal?: boolean;
+    is_expired?: boolean;
+    days_waiting: number;
+  }[];
 };
 
 type QuickTask = { id: number; title: string; is_done: boolean; created_at: string };
@@ -378,6 +395,38 @@ const MetricCard = ({
 );
 
 type Navigate = (to: string, opts?: { replace?: boolean }) => void;
+
+/** Colors/labels the attention-list day-count pill by urgency. Permits and
+ * contracts count down to expiry (fewer days = more urgent, and an
+ * already-expired one is most urgent of all); a queued application counts up
+ * from when it was filed (more days waiting = more urgent). */
+function attentionBadge(item: { kind?: 'application' | 'permit' | 'contract'; is_expired?: boolean; days_waiting: number }) {
+  const isExpiry = item.kind === 'permit' || item.kind === 'contract';
+  const urgency: 'critical' | 'warning' | 'normal' = isExpiry
+    ? item.is_expired || item.days_waiting <= 7
+      ? 'critical'
+      : item.days_waiting <= 30
+        ? 'warning'
+        : 'normal'
+    : item.days_waiting > 14
+      ? 'critical'
+      : item.days_waiting > 7
+        ? 'warning'
+        : 'normal';
+  const days = `${item.days_waiting} day${item.days_waiting === 1 ? '' : 's'}`;
+  const label = isExpiry ? (item.is_expired ? `${days} overdue` : `${days} left`) : `waiting ${days}`;
+  const palette = {
+    critical: { bg: 'rgba(244,63,94,.14)', color: '#f43f5e' },
+    warning: { bg: 'rgba(249,115,22,.14)', color: '#f97316' },
+    normal: { bg: 'var(--control-bg)', color: 'var(--text-muted)' },
+  }[urgency];
+  return {
+    label,
+    Icon: isExpiry && item.is_expired ? AlertTriangle : Calendar,
+    pulse: urgency !== 'normal',
+    ...palette,
+  };
+}
 
 export function Dashboard({ data, navigate }: { data: AdminDashboardData | null; navigate?: Navigate }) {
   const [currentTime, setCurrentTime] = useState(new Date());
@@ -707,28 +756,43 @@ export function Dashboard({ data, navigate }: { data: AdminDashboardData | null;
               Needs Attention
             </h4>
           </div>
-          <p className="text-[10px] text-secondary mb-4 sm:mb-6">Oldest applications still awaiting action</p>
+          <p className="text-[10px] text-secondary mb-4 sm:mb-6">Applications, permits, and contracts waiting on you</p>
 
           {attention.length === 0 ? (
             <p className="text-[11px] text-secondary">Nothing waiting — the queue is clear.</p>
           ) : (
-            <div className="space-y-2">
-              {attention.map((item) => (
+            // Fits ~5 rows without a scrollbar; once there are more, this
+            // scrolls with the same invisible-until-hover scrollbar as the
+            // sidebar ("sidebar-scroll") instead of growing the whole card.
+            // Only constrained to a fixed height (with a bottom fade so the
+            // next row's edge never awkwardly peeks in mid-row) once there's
+            // actually more than fits — otherwise it sizes to its content.
+            <div
+              className={cn(
+                'sidebar-scroll space-y-2 pr-0.5',
+                attention.length > 5 && 'h-[310px] overflow-y-auto attention-fade-bottom'
+              )}
+            >
+              {attention.map((item) => {
+                const target =
+                  item.kind === 'permit'
+                    ? `/compliance/permits?permitId=${item.permit_id ?? item.application_id}`
+                    : item.kind === 'contract'
+                      ? `/approval?applicationId=${item.application_id}`
+                      : `/applications/${item.is_renewal ? 'renewals' : 'new'}?applicationId=${item.application_id}`;
+                const badge = attentionBadge(item);
+                return (
                 <div
-                  key={item.application_id}
+                  key={`${item.kind || 'application'}-${item.application_id}`}
                   role={navigate ? 'button' : undefined}
                   tabIndex={navigate ? 0 : undefined}
-                  onClick={
-                    navigate
-                      ? () => navigate(`/applications/${item.is_renewal ? 'renewals' : 'new'}?applicationId=${item.application_id}`)
-                      : undefined
-                  }
+                  onClick={navigate ? () => navigate(target) : undefined}
                   onKeyDown={
                     navigate
                       ? (e) => {
                           if (e.key === 'Enter' || e.key === ' ') {
                             e.preventDefault();
-                            navigate(`/applications/${item.is_renewal ? 'renewals' : 'new'}?applicationId=${item.application_id}`);
+                            navigate(target);
                           }
                         }
                       : undefined
@@ -749,16 +813,18 @@ export function Dashboard({ data, navigate }: { data: AdminDashboardData | null;
                     <p className="text-[10px] text-secondary truncate">{item.proponent_name || 'Unknown business'}</p>
                   </div>
                   <span
-                    className="shrink-0 text-[10px] font-bold px-2 py-1 rounded-full"
-                    style={{
-                      backgroundColor: item.days_waiting > 14 ? 'rgba(244,63,94,.12)' : 'var(--control-bg)',
-                      color: item.days_waiting > 14 ? '#f43f5e' : 'var(--text-muted)',
-                    }}
+                    className={cn(
+                      'shrink-0 inline-flex items-center gap-1 text-[10px] font-bold px-2.5 py-1 rounded-full',
+                      badge.pulse && 'shimmer-badge'
+                    )}
+                    style={{ backgroundColor: badge.bg, color: badge.color }}
                   >
-                    {item.days_waiting}d
+                    <badge.Icon size={11} />
+                    {badge.label}
                   </span>
                 </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>

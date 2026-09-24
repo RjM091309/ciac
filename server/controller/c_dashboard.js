@@ -166,7 +166,9 @@ function attentionQueue(
     .slice(0, limit);
 }
 
-const EXPIRY_ATTENTION_WINDOW_DAYS = 30;
+// Shares Permit.js's window so a permit and a contract are flagged "about to
+// expire" on the same timeline (currently: less than 12 months left).
+const EXPIRY_ATTENTION_WINDOW_DAYS = Permit.EXPIRING_WINDOW_DAYS;
 
 function daysUntil(dateStr) {
   if (!dateStr) return null;
@@ -188,6 +190,12 @@ async function buildExpiryAttentionItems(limit) {
       const days = daysUntil(p.expiry_date);
       return {
         kind: "permit",
+        // The permit's own id — used to deep-link/highlight it on the
+        // Permits page. Keep separate from application_id (which a
+        // CONTRACT-type permit does have, but that's the *application's*
+        // id, not this permit's — conflating the two here used to make
+        // navigation land on an unrelated record).
+        permit_id: p.id,
         application_id: p.application_id || p.id,
         application_no: `Permit ${p.permit_no}`,
         proponent_name: p.proponent_name,
@@ -303,12 +311,17 @@ exports.getMyDashboard = async (req, res) => {
       // every proponent) instead of its own scoped view. Not just an
       // "OFFICER can't be renamed" problem — a real data-exposure bug for
       // any custom role the moment a user was assigned to it.
-      const [applications, proponents, categoryCompletion, turnaround] = await Promise.all([
+      const [applications, proponents, categoryCompletion, turnaround, expiryItems] = await Promise.all([
         Workflow.listAllApplicationsWithProgress(),
         Proponent.listProponents(),
         Workflow.getRequirementCompletionByCategory(),
         Workflow.getApplicationTurnaroundStats(),
+        buildExpiryAttentionItems(6),
       ]);
+      // Same merge buildRoleAttention() does for the Approval Queue role —
+      // admin's "Needs Attention" was application-only and never surfaced
+      // permits/contracts about to expire, unlike every other role's.
+      const remaining = Math.max(0, 6 - expiryItems.length);
       return res.json({
         success: true,
         role,
@@ -316,7 +329,7 @@ exports.getMyDashboard = async (req, res) => {
           ...summarizeAdmin(applications, proponents),
           categoryCompletion,
           turnaround,
-          attention: attentionQueue(applications),
+          attention: [...expiryItems, ...attentionQueue(applications, { limit: remaining })],
         },
       });
     }
