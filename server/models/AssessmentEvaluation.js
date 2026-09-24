@@ -288,7 +288,18 @@ const LIST_SELECT = `
     (SELECT COUNT(1) FROM dbo.assessment_findings f WHERE f.assessment_id = asm.id) AS total_findings,
     (SELECT COUNT(1) FROM dbo.assessment_findings f WHERE f.assessment_id = asm.id AND f.status = 'OPEN') AS open_findings,
     (SELECT COUNT(1) FROM dbo.application_requirements ar WHERE ar.application_id = a.id) AS requirements_total,
-    (SELECT COUNT(1) FROM dbo.application_requirements ar WHERE ar.application_id = a.id AND ar.status = 'VERIFIED') AS requirements_verified
+    (SELECT COUNT(1) FROM dbo.application_requirements ar WHERE ar.application_id = a.id AND ar.status = 'VERIFIED') AS requirements_verified,
+    -- Per-document breakdown for the list's "X/Y verified" tooltip — small
+    -- enough per application (a handful of requirements) to inline here
+    -- rather than a separate round trip per row on hover.
+    (
+      SELECT r.name AS name, ar.status AS status
+      FROM dbo.application_requirements ar
+      LEFT JOIN dbo.requirements r ON r.id = ar.requirement_id
+      WHERE ar.application_id = a.id
+      ORDER BY r.name
+      FOR JSON PATH
+    ) AS requirements_breakdown
   FROM dbo.applications a
   LEFT JOIN dbo.proponents p ON p.id = a.proponent_id
   LEFT JOIN dbo.application_types at ON at.code = a.application_type
@@ -331,7 +342,11 @@ async function listAssessments({ stage, evaluatorId, search } = {}) {
       WHEN 'UNASSIGNED' THEN 0 WHEN 'ASSIGNED' THEN 1 WHEN 'IN_REVIEW' THEN 2
       WHEN 'FOR_RECOMMENDATION' THEN 3 WHEN 'RETURNED' THEN 4 WHEN 'COMPLETED' THEN 5 ELSE 6 END,
     a.id DESC`;
-  return selectData(sql, params);
+  const rows = await selectData(sql, params);
+  return rows.map((r) => ({
+    ...r,
+    requirements_breakdown: r.requirements_breakdown ? JSON.parse(r.requirements_breakdown) : [],
+  }));
 }
 
 async function getSummary() {

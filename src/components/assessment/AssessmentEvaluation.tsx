@@ -1,4 +1,5 @@
 ﻿import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'motion/react';
 import {
   AlertTriangle,
@@ -15,6 +16,7 @@ import {
   Trash2,
   UserCheck,
   X,
+  XCircle,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '../../lib/utils';
@@ -63,6 +65,7 @@ type AssessmentRow = {
   open_findings: number;
   requirements_total: number;
   requirements_verified: number;
+  requirements_breakdown: { name: string | null; status: string }[];
 };
 
 type FindingRow = {
@@ -207,6 +210,161 @@ function Badge({ label, styles }: { label: string; styles: { bg: string; color: 
     >
       {label}
     </span>
+  );
+}
+
+const REQ_STATUS_STYLE: Record<string, { color: string; bg: string; Icon: typeof CheckCircle2 }> = {
+  VERIFIED: { color: '#10b981', bg: 'rgba(16,185,129,.15)', Icon: CheckCircle2 },
+  REJECTED: { color: '#ef4444', bg: 'rgba(239,68,68,.15)', Icon: XCircle },
+  PENDING: { color: '#f59e0b', bg: 'rgba(245,158,11,.15)', Icon: Clock3 },
+};
+
+const TOOLTIP_WIDTH = 250;
+const TOOLTIP_ROW_HEIGHT = 42;
+const TOOLTIP_PADDING = 16;
+const TOOLTIP_VIEWPORT_MARGIN = 8;
+const TOOLTIP_ARROW_OFFSET = 16;
+
+/** Hover breakdown for a "X/Y verified" compliance count — which particular
+ * requirement documents are Verified/Rejected/Pending, without having to
+ * open the full assessment detail drawer just to check.
+ *
+ * Portaled to document.body with `position: fixed` (not `absolute` inside
+ * the row) — same reasoning as RowActionsMenu: the table wrapper is
+ * `overflow-x-auto`, which clips (and flickers) an absolutely-positioned
+ * tooltip near the table's bottom/right edge instead of just letting it
+ * float over the page. Position is computed from the trigger's own screen
+ * rect and flips upward when there isn't enough room below. Styled like an
+ * iOS context-menu popover — frosted glass, a small pointer caret, a soft
+ * spring pop-in, and hairline-divided rows with a status glyph per item. */
+function ComplianceTooltip({
+  breakdown,
+  children,
+}: {
+  breakdown: { name: string | null; status: string }[];
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState<{ top: number; left: number; openUp: boolean; arrowLeft: number } | null>(null);
+  const triggerRef = useRef<HTMLSpanElement>(null);
+
+  const computePosition = () => {
+    const trigger = triggerRef.current;
+    if (!trigger) return;
+    const rect = trigger.getBoundingClientRect();
+    const tooltipHeight = breakdown.length * TOOLTIP_ROW_HEIGHT + TOOLTIP_PADDING;
+    const spaceBelow = window.innerHeight - rect.bottom;
+    const openUp = spaceBelow < tooltipHeight + TOOLTIP_VIEWPORT_MARGIN && rect.top > tooltipHeight + TOOLTIP_VIEWPORT_MARGIN;
+    const left = Math.min(Math.max(TOOLTIP_VIEWPORT_MARGIN, rect.left), window.innerWidth - TOOLTIP_WIDTH - TOOLTIP_VIEWPORT_MARGIN);
+    const top = openUp ? rect.top - 10 : rect.bottom + 10;
+    // Keeps the caret pointing at the trigger even after `left` gets clamped
+    // to stay on-screen (e.g. a row near the right edge of the viewport).
+    const arrowLeft = Math.min(Math.max(rect.left + TOOLTIP_ARROW_OFFSET - left, 16), TOOLTIP_WIDTH - 16);
+    setPos({ top, left, openUp, arrowLeft });
+  };
+
+  useEffect(() => {
+    if (!open) return;
+    function close() {
+      setOpen(false);
+    }
+    window.addEventListener('scroll', close, true);
+    window.addEventListener('resize', close);
+    return () => {
+      window.removeEventListener('scroll', close, true);
+      window.removeEventListener('resize', close);
+    };
+  }, [open]);
+
+  if (!breakdown || breakdown.length === 0) return <>{children}</>;
+
+  return (
+    <>
+      <span
+        ref={triggerRef}
+        className="cursor-help border-b border-dotted"
+        style={{ borderColor: 'var(--text-muted)' }}
+        onMouseEnter={() => {
+          computePosition();
+          setOpen(true);
+        }}
+        onMouseLeave={() => setOpen(false)}
+      >
+        {children}
+      </span>
+      {createPortal(
+        <AnimatePresence>
+          {open && pos ? (
+            <motion.div
+              className="pointer-events-none fixed z-[150] overflow-hidden"
+              style={{
+                top: pos.openUp ? undefined : pos.top,
+                bottom: pos.openUp ? window.innerHeight - pos.top : undefined,
+                left: pos.left,
+                width: TOOLTIP_WIDTH,
+                transformOrigin: `${pos.arrowLeft}px ${pos.openUp ? '100%' : '0%'}`,
+                backgroundColor: 'color-mix(in oklab, var(--surface) 82%, transparent)',
+                backdropFilter: 'blur(20px) saturate(180%)',
+                WebkitBackdropFilter: 'blur(20px) saturate(180%)',
+                border: '1px solid color-mix(in oklab, var(--border) 70%, transparent)',
+                boxShadow: '0 4px 12px rgba(0,0,0,.10), 0 1px 3px rgba(0,0,0,.08)',
+              }}
+              initial={{ opacity: 0, scale: 0.92 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.94 }}
+              transition={{ type: 'spring', stiffness: 420, damping: 32 }}
+            >
+              <span
+                className="absolute h-2.5 w-2.5 rotate-45"
+                style={{
+                  left: pos.arrowLeft - 5,
+                  top: pos.openUp ? undefined : -5,
+                  bottom: pos.openUp ? -5 : undefined,
+                  backgroundColor: 'color-mix(in oklab, var(--surface) 82%, transparent)',
+                  borderLeft: pos.openUp ? 'none' : '1px solid color-mix(in oklab, var(--border) 70%, transparent)',
+                  borderTop: pos.openUp ? 'none' : '1px solid color-mix(in oklab, var(--border) 70%, transparent)',
+                  borderRight: pos.openUp ? '1px solid color-mix(in oklab, var(--border) 70%, transparent)' : 'none',
+                  borderBottom: pos.openUp ? '1px solid color-mix(in oklab, var(--border) 70%, transparent)' : 'none',
+                }}
+              />
+              <div className="relative py-2">
+                {breakdown.map((b, idx) => {
+                  const s = REQ_STATUS_STYLE[b.status] || REQ_STATUS_STYLE.PENDING;
+                  const Icon = s.Icon;
+                  return (
+                    <div
+                      key={idx}
+                      className={cn(
+                        'flex items-center gap-2.5 px-3.5',
+                        idx !== breakdown.length - 1 && 'border-b'
+                      )}
+                      style={{ height: TOOLTIP_ROW_HEIGHT, borderColor: 'color-mix(in oklab, var(--border) 45%, transparent)' }}
+                    >
+                      <span
+                        className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full"
+                        style={{ backgroundColor: s.bg, color: s.color }}
+                      >
+                        <Icon size={13} strokeWidth={2.5} />
+                      </span>
+                      <span className="min-w-0 flex-1 truncate text-[12px] font-medium" style={{ color: 'var(--text)' }}>
+                        {b.name || 'Requirement'}
+                      </span>
+                      <span
+                        className="shrink-0 text-[9px] font-bold uppercase tracking-wide"
+                        style={{ color: s.color }}
+                      >
+                        {b.status === 'VERIFIED' ? 'Verified' : b.status === 'REJECTED' ? 'Rejected' : 'Pending'}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </motion.div>
+          ) : null}
+        </AnimatePresence>,
+        document.body
+      )}
+    </>
   );
 }
 
@@ -565,7 +723,9 @@ export function AssessmentEvaluation({
                     </td>
                     <td className="px-3 py-2.5 text-[11px] text-secondary">{r.evaluator_name || r.evaluator_username || '—'}</td>
                     <td className="px-3 py-2.5 text-[11px] text-secondary">
-                      {r.requirements_verified}/{r.requirements_total} verified
+                      <ComplianceTooltip breakdown={r.requirements_breakdown}>
+                        {r.requirements_verified}/{r.requirements_total} verified
+                      </ComplianceTooltip>
                     </td>
                     <td className="px-3 py-2.5 text-[11px]">
                       {r.open_findings > 0 ? (
