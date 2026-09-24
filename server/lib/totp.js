@@ -8,7 +8,7 @@ const EPOCH_TOLERANCE_SECONDS = 30;
 const ENC_PREFIX = "enc:v1:";
 
 function getIssuer() {
-  return process.env.TOTP_ISSUER || "3CORE Portal";
+  return process.env.TOTP_ISSUER || "CIAC Portal";
 }
 
 /**

@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { AnimatePresence, motion } from 'motion/react';
+import { AnimatePresence, motion, type Variants } from 'motion/react';
 import { ArrowLeft, ArrowRight, CheckCircle2, Copy, Eye, EyeOff, KeyRound, Mail, Moon, Smartphone, Sun } from 'lucide-react';
 import { validatePassword } from '../../lib/passwordPolicy';
 
@@ -58,6 +58,30 @@ async function loginRequest(args: {
 }
 
 const EMPTY_USER = { id: 0, username: '' };
+
+/** Staggered reveal for the sign-in form: the container staggers its
+ * children, each item fades up. On mobile it plays when the bottom sheet
+ * opens; at xl, on mount. */
+const revealContainer: Variants = {
+  hidden: {},
+  shown: { transition: { staggerChildren: 0.06, delayChildren: 0.15 } },
+};
+const revealItem: Variants = {
+  hidden: { opacity: 0, y: 16 },
+  shown: { opacity: 1, y: 0, transition: { duration: 0.35, ease: 'easeOut' } },
+};
+
+function useIsDesktop() {
+  const query = '(min-width: 1280px)';
+  const [matches, setMatches] = useState(() => typeof window !== 'undefined' && window.matchMedia(query).matches);
+  React.useEffect(() => {
+    const mql = window.matchMedia(query);
+    const onChange = () => setMatches(mql.matches);
+    mql.addEventListener('change', onChange);
+    return () => mql.removeEventListener('change', onChange);
+  }, []);
+  return matches;
+}
 
 /** Abstract backdrop for the sign-in panel: concentric arcs (a bridge / radar
  * sweep) from the bottom-right, two flight-path curves, a fading dot grid and
@@ -187,6 +211,12 @@ export function LoginPage(props: {
     if (stored === 'light' || stored === 'dark') return stored;
     return 'dark';
   });
+  // Mobile only (below xl): a full-screen photo intro comes first, and its
+  // Continue button slides the sign-in form in. Skipped when the visitor
+  // arrives with something to act on (reset link, sign-out notice).
+  const [mobileFormOpen, setMobileFormOpen] = useState(() => Boolean(props.resetToken || props.notice));
+  const isDesktop = useIsDesktop();
+  const formRevealed = isDesktop || mobileFormOpen;
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState<{ type: 'muted' | 'error' | 'success'; text: string }>(() =>
     props.notice ? { type: 'error', text: props.notice } : { type: 'muted', text: '' }
@@ -361,20 +391,132 @@ export function LoginPage(props: {
         ? 'var(--trend-growth)'
         : 'var(--text-secondary)';
 
+  // Mobile only: the sign-in panel is a bottom sheet that rises over the
+  // intro photo once Continue is tapped. `xl:contents` drops the wrapper box
+  // at xl, so the panel lays out as a normal split-screen column there.
+  const sheetClass = `max-xl:fixed max-xl:inset-x-0 max-xl:bottom-0 max-xl:top-[4.75rem] max-xl:z-[45] max-xl:overflow-y-auto max-xl:overscroll-contain max-xl:border-t max-xl:transition-transform max-xl:duration-500 max-xl:ease-[cubic-bezier(0.32,0.72,0,1)] xl:contents ${
+    mobileFormOpen ? 'max-xl:translate-y-0' : 'max-xl:translate-y-full'
+  }`;
+
   return (
     <div
       className="min-h-screen flex flex-col xl:flex-row overflow-x-hidden transition-all duration-300"
       style={{ backgroundColor: 'var(--background)', color: 'var(--foreground)' }}
     >
+      {/* Mobile intro: photo background with the BRIDGE+ pitch, themed like
+          the desktop left panel. Stays behind the sign-in sheet once it
+          opens, blurred and dimmed, with only the CIAC logo left showing
+          above the sheet. */}
+      <div
+        className="xl:hidden fixed inset-0 z-40 flex flex-col overflow-hidden"
+        aria-hidden={mobileFormOpen}
+        style={{ pointerEvents: mobileFormOpen ? 'none' : undefined, backgroundColor: 'var(--surface)', color: 'var(--text)' }}
+      >
+        <motion.div
+          className="absolute inset-0 bg-cover bg-center pointer-events-none"
+          style={{ backgroundImage: "url('/images/leftside-panel-bg.jpg')" }}
+          initial={false}
+          animate={mobileFormOpen ? { scale: 1.08, filter: 'blur(6px)' } : { scale: 1, filter: 'blur(0px)' }}
+          transition={{ duration: 0.6, ease: 'easeOut' }}
+        />
+        <div
+          className="absolute inset-0 pointer-events-none"
+          style={{
+            background:
+              'linear-gradient(to bottom, color-mix(in oklab, var(--surface) 92%, transparent) 0%, color-mix(in oklab, var(--surface) 78%, transparent) 50%, color-mix(in oklab, var(--surface) 40%, transparent) 100%)',
+          }}
+        />
+        {/* Fades in as the sheet opens so the strip left above it reads as
+            the sign-in header: navy in light mode, surface in dark. */}
+        <motion.div
+          className="absolute inset-0 pointer-events-none"
+          style={{ backgroundColor: theme === 'light' ? '#282974' : 'var(--surface)' }}
+          initial={false}
+          animate={{ opacity: mobileFormOpen ? 1 : 0 }}
+          transition={{ duration: 0.5 }}
+        />
+
+        <img
+          src="/images/ciac-logo-black.png"
+          alt="CIAC — Clark International Airport Corporation"
+          className="relative z-10 mt-5 ml-5 sm:mt-6 sm:ml-8 h-11 sm:h-12 w-auto self-start pointer-events-none select-none"
+          // Black-only artwork: flip it to white on the dark theme, and over
+          // the navy header once the sheet is open.
+          style={{
+            filter: theme === 'dark' || mobileFormOpen ? 'invert(1)' : 'none',
+            transition: 'filter 0.5s ease-out',
+          }}
+        />
+
+        <motion.div
+          className="relative z-10 flex-1 flex flex-col overflow-y-auto"
+          initial={false}
+          animate={mobileFormOpen ? { opacity: 0, y: -24 } : { opacity: 1, y: 0 }}
+          transition={{ duration: 0.35, ease: 'easeOut' }}
+        >
+          <div className="relative z-10 flex-1 flex items-center px-6 sm:px-12 py-10">
+            <div className="max-w-xl">
+              <h1 className="mb-6">
+                <span
+                  className="block text-6xl sm:text-7xl font-bold leading-[0.9] tracking-tighter"
+                  style={theme === 'light' ? { color: '#282974' } : undefined}
+                >
+                  BRIDGE+
+                </span>
+                <span className="block mt-4 text-xl sm:text-2xl font-semibold leading-snug tracking-tight text-secondary">
+                  Business Registration &amp; Information Digital Gateway for Enterprises Plus
+                </span>
+              </h1>
+
+              <p className="text-base sm:text-lg text-secondary max-w-md leading-relaxed mb-8">
+                Sign in securely to continue to your workspace and dashboard.
+              </p>
+
+              <div className="flex items-center justify-center gap-8 mb-10">
+                <div className="flex flex-col items-center">
+                  <span className="text-2xl sm:text-3xl font-bold">15m</span>
+                  <span className="text-[11px] uppercase tracking-widest text-secondary">Idle timeout</span>
+                </div>
+                <div className="w-px h-10 bg-border" />
+                <div className="flex flex-col items-center">
+                  <span className="text-2xl sm:text-3xl font-bold">2FA</span>
+                  <span className="text-[11px] uppercase tracking-widest text-secondary">Authenticator app</span>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setMobileFormOpen(true)}
+                className="w-full sm:w-auto sm:px-12 font-bold py-4 rounded-xl active:scale-[0.98] transition-all flex items-center justify-center gap-3 shadow-xl min-h-[48px] cursor-pointer"
+                style={
+                  theme === 'light'
+                    ? { backgroundColor: '#282974', color: '#ffffff', boxShadow: '0 10px 30px rgba(40, 41, 116, 0.3)' }
+                    : { backgroundColor: '#ffffff', color: '#282974', boxShadow: '0 10px 30px rgba(0, 0, 0, 0.35)' }
+                }
+              >
+                Continue
+                <ArrowRight size={18} />
+              </button>
+            </div>
+          </div>
+
+          <img
+            src={brandSrc}
+            alt="Clark Aviation Capital"
+            className="relative z-10 self-end mr-5 mb-6 sm:mr-8 sm:mb-8 w-[170px] sm:w-[220px] opacity-80 pointer-events-none select-none"
+          />
+        </motion.div>
+      </div>
+
       <button
         onClick={() => setTheme((p) => (p === 'dark' ? 'light' : 'dark'))}
         className="fixed top-3 right-3 sm:top-4 sm:right-4 xl:top-6 xl:right-6 p-2.5 sm:p-3 rounded-full control-btn touch-target z-50 backdrop-blur-md"
-        // In light mode this always sits over navy (the mobile header, or the
-        // sign-in panel on the split layout), so it goes white-on-navy there.
+        // Light mode: white-on-navy over the navy sign-in panel (split layout)
+        // or the navy mobile header; dark-on-light over the mobile intro.
         style={{
           backgroundColor:
-            theme === 'light' ? 'rgba(255, 255, 255, 0.12)' : 'color-mix(in oklab, var(--surface) 78%, transparent)',
-          color: theme === 'light' ? '#ffffff' : 'var(--text)',
+            theme === 'light' && formRevealed ? 'rgba(255, 255, 255, 0.12)' : 'color-mix(in oklab, var(--surface) 78%, transparent)',
+          color: theme === 'light' && formRevealed ? '#ffffff' : 'var(--text)',
           border: 'none',
           boxShadow: 'none',
         }}
@@ -383,25 +525,6 @@ export function LoginPage(props: {
       >
         {theme === 'dark' ? <Sun size={20} /> : <Moon size={20} />}
       </button>
-
-      <div
-        className="xl:hidden w-full border-b px-4 sm:px-6 py-4 sm:py-5 pr-16 sm:pr-20"
-        // Light mode: same navy as the sign-in panel below it, so the header
-        // and form read as one block. Dark background on both themes, so the
-        // black-only CIAC logo is always inverted to white here.
-        style={
-          theme === 'light'
-            ? { backgroundColor: '#282974', borderColor: 'rgba(255, 255, 255, 0.12)' }
-            : { backgroundColor: 'var(--surface)', borderColor: 'var(--border)' }
-        }
-      >
-        <img
-          src="/images/ciac-logo-black.png"
-          alt="CIAC — Clark International Airport Corporation"
-          className="h-10 sm:h-11 w-auto"
-          style={{ filter: 'invert(1)' }}
-        />
-      </div>
 
       <div
         className="hidden xl:flex xl:w-1/2 relative items-center justify-center p-12 overflow-hidden border-r"
@@ -486,7 +609,18 @@ export function LoginPage(props: {
       </div>
 
       <div
-        className="flex-1 flex flex-col items-center justify-center px-4 py-6 sm:px-8 sm:py-8 xl:p-24 relative isolate"
+        className={sheetClass}
+        // Same color as the panel inside it, so no lighter fringe shows along
+        // the sheet's rounded corners on mobile.
+        style={
+          theme === 'light'
+            ? { backgroundColor: '#282974', borderColor: 'rgba(255, 255, 255, 0.12)' }
+            : { backgroundColor: 'var(--background)', borderColor: 'var(--border)' }
+        }
+        inert={!formRevealed || undefined}
+      >
+      <div
+        className="flex-1 flex flex-col items-center justify-center px-4 pt-10 pb-6 sm:px-8 sm:pt-12 sm:pb-8 xl:p-24 relative isolate max-xl:min-h-full"
         // Light mode only: navy panel, with the theme tokens re-scoped so text,
         // inputs and the submit button stay legible on the dark background.
         style={
@@ -498,6 +632,8 @@ export function LoginPage(props: {
             '--foreground': '#ffffff',
             '--text-secondary': 'rgba(255, 255, 255, 0.72)',
             '--input-bg': 'rgba(255, 255, 255, 0.08)',
+            // 8% white flattened over the navy, for autofilled inputs.
+            '--input-autofill-bg': '#393a7f',
             '--input-border': 'rgba(255, 255, 255, 0.22)',
             '--nav-active-bg': '#ffffff',
             '--nav-active-text': '#282974',
@@ -508,12 +644,12 @@ export function LoginPage(props: {
         <SignInPanelBackdrop tone={theme} />
 
         <motion.div
-          initial={{ opacity: 0, scale: 0.95 }}
-          animate={{ opacity: 1, scale: 1 }}
-          transition={{ duration: 0.5, delay: 0.2 }}
+          initial="hidden"
+          animate={formRevealed ? 'shown' : 'hidden'}
+          variants={revealContainer}
           className="w-full max-w-[420px] min-w-0"
         >
-          <div className="mb-7 sm:mb-10">
+          <motion.div variants={revealItem} className="mb-7 sm:mb-10">
             <h2 className="text-3xl sm:text-4xl font-bold tracking-tight mb-2 sm:mb-3">
               {step === 'enroll'
                 ? 'Set up two-factor'
@@ -544,12 +680,12 @@ export function LoginPage(props: {
                           : 'Choose a new password for your account.'
                         : 'Welcome back to your workspace.'}
             </p>
-          </div>
+          </motion.div>
 
-          <form onSubmit={onSubmit} className="space-y-5 sm:space-y-6" autoComplete="off">
+          <motion.form variants={revealContainer} onSubmit={onSubmit} className="space-y-5 sm:space-y-6" autoComplete="off">
             {step === 'credentials' || step === 'mfa' || step === 'forceChangePassword' ? (
               <>
-                <div className="space-y-2">
+                <motion.div variants={revealItem} className="space-y-2">
                   <div className="flex items-center justify-between ml-1">
                     <label className="text-xs font-bold uppercase tracking-widest text-secondary" htmlFor="username">
                       Username
@@ -568,9 +704,9 @@ export function LoginPage(props: {
                     required
                     disabled={mfaRequired || mustChangePassword}
                   />
-                </div>
+                </motion.div>
 
-                <div className="space-y-2">
+                <motion.div variants={revealItem} className="space-y-2">
                   <div className="flex items-center justify-between ml-1">
                     <label className="text-xs font-bold uppercase tracking-widest text-secondary" htmlFor="password">
                       Password
@@ -610,7 +746,7 @@ export function LoginPage(props: {
                       {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
                     </button>
                   </div>
-                </div>
+                </motion.div>
               </>
             ) : null}
 
@@ -697,7 +833,10 @@ export function LoginPage(props: {
                   />
                   {step === 'mfa' ? (
                     <p className="text-[11px] text-secondary ml-1">
-                      Open your authenticator app and enter the current 6-digit code for 3CORE Portal.
+                      {/* Enrollments before the rebrand were issued as "3CORE Portal"
+                          (server/lib/totp.js), and authenticator apps keep that label. */}
+                      Open your authenticator app and enter the current 6-digit code for CIAC Portal (shown as
+                      3CORE Portal if you set up 2FA before the name change).
                     </p>
                   ) : null}
                 </motion.div>
@@ -925,6 +1064,7 @@ export function LoginPage(props: {
               ) : null}
             </AnimatePresence>
 
+            <motion.div variants={revealItem}>
             {step === 'forgotSent' || (step === 'resetPassword' && resetDone) ? (
               <button
                 type="button"
@@ -992,7 +1132,7 @@ export function LoginPage(props: {
                       </>
                     ) : (
                       <>
-                        Continue
+                        Sign in
                         <ArrowRight size={18} />
                       </>
                     )}
@@ -1000,17 +1140,20 @@ export function LoginPage(props: {
                 )}
               </button>
             )}
+            </motion.div>
 
-            <div className="min-h-5">
+            <motion.div variants={revealItem} className="min-h-5">
               <span className="text-xs" style={{ color: messageColor }} role="status" aria-live="polite">
                 {message.text}
               </span>
-            </div>
-          </form>
+            </motion.div>
+          </motion.form>
 
-          <p className="mt-8 sm:mt-12 text-center text-[10px] uppercase tracking-[0.2em] text-secondary opacity-60">
-            Protected by HTTP-only cookies
-          </p>
+          <motion.div variants={revealItem}>
+            <p className="mt-8 sm:mt-12 text-center text-[10px] uppercase tracking-[0.2em] text-secondary opacity-60">
+              Protected by HTTP-only cookies
+            </p>
+          </motion.div>
         </motion.div>
 
         <div className="w-full mt-8 sm:mt-10 flex justify-center gap-5 sm:gap-8 text-[9px] sm:text-[10px] uppercase tracking-[0.16em] sm:tracking-widest text-secondary opacity-50 xl:hidden">
@@ -1024,6 +1167,7 @@ export function LoginPage(props: {
             Support
           </button>
         </div>
+      </div>
       </div>
     </div>
   );

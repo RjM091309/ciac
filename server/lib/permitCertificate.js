@@ -73,7 +73,7 @@ async function renderPermitCertificate({
   ];
 
   const html = buildCertificateHtml({
-    officeLine: "Office of Compliance & Permits — 3CORE Locator & Compliance System",
+    officeLine: "Office of Compliance & Permits — CIAC Locator & Compliance System",
     titleText: certificateTitle(permit.permit_type, typeName),
     certLabel: "CERTIFICATE NO",
     certNo: certificateNo(permit),

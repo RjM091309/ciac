@@ -93,7 +93,7 @@ authenticator anyway, its code is still enforced).
 No frontend config is required. Optional backend env values (see
 `server/.env.example`):
 
-- `TOTP_ISSUER` — name shown in the user's authenticator app (default `3CORE Portal`).
+- `TOTP_ISSUER` — name shown in the user's authenticator app (default `CIAC Portal`; accounts enrolled before the rename still show `3CORE Portal`).
 - `TOTP_ENC_KEY` — 32+ char random string used to encrypt stored TOTP secrets at
   rest. If omitted, a key derived from `JWT_SECRET` is used.
 

@@ -141,7 +141,6 @@ function getNotificationTypeMeta(item: NotificationItem) {
 }
 
 export function AppHeader({
-  onToggleSidebar,
   theme,
   onToggleTheme,
   userRole,
@@ -150,7 +149,6 @@ export function AppHeader({
   navigate,
   onLogout,
 }: {
-  onToggleSidebar: () => void;
   theme: 'light' | 'dark';
   onToggleTheme: () => void;
   userRole: Role;
@@ -573,32 +571,16 @@ export function AppHeader({
       >
         {/* Left: hamburger + logo */}
         <div className="flex items-center gap-1.5 sm:gap-2 md:gap-3 min-w-0 shrink">
-          <button
-            type="button"
-            onClick={onToggleSidebar}
-            aria-label="Toggle sidebar"
-            // Hidden on mobile (< md) — the bottom nav's "More" tab opens the drawer there.
-            className="h-9 w-9 sm:h-9 sm:w-9 rounded-full hidden md:flex flex-col items-center justify-center gap-[3px] text-[var(--text-muted)] hover:text-[var(--text)] transition-colors shrink-0"
-            style={{
-              backgroundColor: 'color-mix(in oklab, var(--control-bg) 88%, transparent)',
-            }}
-          >
-            <span className="w-3.5 h-0.5 rounded-full bg-current" />
-            <span className="w-3.5 h-0.5 rounded-full bg-current" />
-            <span className="w-3.5 h-0.5 rounded-full bg-current" />
-          </button>
-
-          <div
-            className="p-1 rounded-lg shadow-sm shrink-0"
-            style={{
-              backgroundImage: 'var(--greeting-gradient)',
-              boxShadow: '0 0 0 1px color-mix(in oklab, var(--border-subtle) 75%, transparent)',
-            }}
-          >
-            <Zap className="text-[var(--foreground)]" size={14} fill="currentColor" />
-          </div>
+          <img
+            src="/images/ciac-logo-only.png"
+            alt="CIAC"
+            className="h-7 w-auto shrink-0 select-none"
+            // Black-only artwork: flip it to white on the dark theme.
+            style={theme === 'dark' ? { filter: 'invert(1)' } : undefined}
+            draggable={false}
+          />
           <span className="text-[11px] sm:text-sm font-bold tracking-tight text-[var(--text)] truncate max-w-[4.25rem] sm:max-w-none">
-            3Core
+            BRIDGE+
           </span>
         </div>
 

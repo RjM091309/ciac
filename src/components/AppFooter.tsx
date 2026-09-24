@@ -27,7 +27,7 @@ export function AppFooter() {
                 '0 2px 6px rgba(0,0,0,0.12), 0 0 0 1px color-mix(in oklab, var(--border-subtle) 70%, transparent)',
             }}
           >
-            Ver.1.0.0
+            BRIDGE+ Ver.1.0.0
           </div>
         </div>
       </div>
