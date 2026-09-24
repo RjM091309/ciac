@@ -234,7 +234,6 @@ export function AppLayout({
       >
         <LoadingBar />
         <AppHeader
-          onToggleSidebar={toggleSidebar}
           theme={theme}
           onToggleTheme={toggleTheme}
           userRole={userRole}
@@ -283,6 +282,7 @@ export function AppLayout({
               onViewChange={onViewChange}
               onLogout={onLogout}
               collapsed={sidebarCollapsed}
+              onToggleCollapse={toggleSidebar}
               permissionOverride={sidebarPermissionOverride}
             />
           )}

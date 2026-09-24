@@ -266,6 +266,7 @@ export function AppSidebar({
   onViewChange,
   onLogout,
   collapsed,
+  onToggleCollapse,
   variant = 'default',
   permissionOverride,
   accountActions,
@@ -274,6 +275,8 @@ export function AppSidebar({
   onViewChange: (view: string) => void;
   onLogout: () => void;
   collapsed?: boolean;
+  /** Desktop sidebar: the collapse/expand toggle in its footer. */
+  onToggleCollapse?: () => void;
   variant?: 'default' | 'drawer' | 'sheet';
   /** Set only during the admin's dashboard-role preview: the previewed
    * role's actual saved sidebar permissions, shown in place of the logged-in
@@ -592,15 +595,25 @@ export function AppSidebar({
             borderColor: 'var(--border-subtle)',
           }}
         >
+          {/* Collapse/expand toggle (moved here from the header). Logout
+              lives in the header's account menu on desktop, and in the
+              mobile sheet's Account section. */}
           <button
-            onClick={onLogout}
-            className="flex items-center justify-center gap-3 px-3 py-2 rounded-lg transition-all duration-200 w-full text-[var(--text-muted)] hover:text-[var(--text)] group cursor-pointer"
+            type="button"
+            onClick={onToggleCollapse}
+            aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            className="flex items-center justify-center gap-3 px-3 py-2 rounded-lg transition-all duration-200 w-full text-[var(--text-muted)] hover:text-[var(--text)] cursor-pointer"
             style={{
               backgroundColor: 'color-mix(in oklab, var(--control-bg) 88%, transparent)',
             }}
           >
-            <LogOut size={16} className="group-hover:rotate-12 transition-transform" />
-            {!collapsed && <span className="text-[13px] font-medium">Logout</span>}
+            <span className="flex flex-col items-center justify-center gap-[3px] w-4 h-4 shrink-0" aria-hidden>
+              <span className="w-3.5 h-0.5 rounded-full bg-current" />
+              <span className="w-3.5 h-0.5 rounded-full bg-current" />
+              <span className="w-3.5 h-0.5 rounded-full bg-current" />
+            </span>
+            {!collapsed && <span className="text-[13px] font-medium">Collapse</span>}
           </button>
         </div>
       </div>
