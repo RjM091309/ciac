@@ -240,7 +240,8 @@ export function AppLayout({
           userRole={userRole}
           userId={userId}
           backendUrl={backendUrl}
-        navigate={navigate}
+          navigate={navigate}
+          onLogout={onLogout}
         />
 
         <div className="flex-1 flex overflow-hidden relative">

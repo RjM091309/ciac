@@ -7,6 +7,7 @@ import {
   FileSignature,
   FileText,
   KeyRound,
+  LogOut,
   Moon,
   Search,
   Settings,
@@ -15,6 +16,7 @@ import {
   X,
   Zap,
 } from 'lucide-react';
+import { AnimatePresence, motion } from 'motion/react';
 import { ChangePasswordModal } from './ChangePasswordModal';
 import { ConfirmModal } from './ui/ConfirmModal';
 import { cn } from '../lib/utils';
@@ -146,6 +148,7 @@ export function AppHeader({
   userId,
   backendUrl,
   navigate,
+  onLogout,
 }: {
   onToggleSidebar: () => void;
   theme: 'light' | 'dark';
@@ -154,6 +157,7 @@ export function AppHeader({
   userId?: number | null;
   backendUrl: string;
   navigate: (to: string, opts?: { replace?: boolean }) => void;
+  onLogout: () => void;
 }) {
   const [currentUser, setCurrentUser] = useState<{ username: string; role: string } | null>(null);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
@@ -969,39 +973,92 @@ export function AppHeader({
               />
             </button>
 
-            {userMenuOpen && (
-              <div
-                className="absolute right-0 mt-2 w-48 rounded-2xl border z-[120] overflow-hidden py-1.5"
-                style={{
-                  backgroundColor: theme === 'dark' ? '#0f1115' : '#ffffff',
-                  borderColor: 'var(--border-subtle)',
-                  boxShadow: '0 12px 34px rgba(0,0,0,0.24)',
-                }}
-              >
-                <button
-                  onClick={() => {
-                    setUserMenuOpen(false);
-                    navigate('/me/profile');
+            {/* Same iOS-style popover as the "X/Y verified" compliance
+                breakdown (AssessmentEvaluation's ComplianceTooltip) — a caret
+                pointing at the trigger, a spring pop-in, and hairline-divided
+                rows with a tinted glyph per item — but on a solid background. */}
+            <AnimatePresence>
+              {userMenuOpen && (
+                <motion.div
+                  className="absolute right-0 mt-2.5 w-56 z-[120]"
+                  style={{
+                    transformOrigin: 'calc(100% - 20px) 0%',
+                    backgroundColor: theme === 'dark' ? '#0f1115' : '#ffffff',
+                    border: '1px solid color-mix(in oklab, var(--border) 70%, transparent)',
+                    boxShadow: '0 4px 12px rgba(0,0,0,.10), 0 1px 3px rgba(0,0,0,.08)',
                   }}
-                  className="w-full flex items-center gap-2.5 px-3.5 py-2 text-xs font-medium text-left cursor-pointer transition-colors hover:bg-[var(--hover-bg)]"
-                  style={{ color: 'var(--text)' }}
+                  initial={{ opacity: 0, scale: 0.92 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.94 }}
+                  transition={{ type: 'spring', stiffness: 420, damping: 32 }}
                 >
-                  <Settings size={14} className="text-secondary" />
-                  Settings
-                </button>
-                <button
-                  onClick={() => {
-                    setUserMenuOpen(false);
-                    setChangePasswordOpen(true);
-                  }}
-                  className="w-full flex items-center gap-2.5 px-3.5 py-2 text-xs font-medium text-left cursor-pointer transition-colors hover:bg-[var(--hover-bg)]"
-                  style={{ color: 'var(--text)' }}
-                >
-                  <KeyRound size={14} className="text-secondary" />
-                  Change Password
-                </button>
-              </div>
-            )}
+                  <span
+                    className="absolute -top-[5px] right-[15px] h-2.5 w-2.5 rotate-45"
+                    style={{
+                      backgroundColor: theme === 'dark' ? '#0f1115' : '#ffffff',
+                      borderLeft: '1px solid color-mix(in oklab, var(--border) 70%, transparent)',
+                      borderTop: '1px solid color-mix(in oklab, var(--border) 70%, transparent)',
+                    }}
+                  />
+                  <div className="relative py-1.5">
+                    {[
+                      {
+                        key: 'settings',
+                        label: 'Settings',
+                        Icon: Settings,
+                        tint: { bg: 'rgba(59,130,246,0.14)', color: '#3b82f6' },
+                        onSelect: () => navigate('/me/profile'),
+                      },
+                      {
+                        key: 'password',
+                        label: 'Change Password',
+                        Icon: KeyRound,
+                        tint: { bg: 'rgba(245,158,11,0.16)', color: '#f59e0b' },
+                        onSelect: () => setChangePasswordOpen(true),
+                      },
+                      {
+                        key: 'logout',
+                        label: 'Logout',
+                        Icon: LogOut,
+                        tint: { bg: 'rgba(239,68,68,0.14)', color: '#ef4444' },
+                        onSelect: onLogout,
+                        danger: true,
+                      },
+                    ].map((item, idx, items) => (
+                      <button
+                        key={item.key}
+                        onClick={() => {
+                          setUserMenuOpen(false);
+                          item.onSelect();
+                        }}
+                        className={cn(
+                          'group/item w-full h-[42px] flex items-center gap-2.5 px-3.5 text-left cursor-pointer transition-colors hover:bg-[var(--hover-bg)]',
+                          idx !== items.length - 1 && 'border-b'
+                        )}
+                        style={{ borderColor: 'color-mix(in oklab, var(--border) 45%, transparent)' }}
+                      >
+                        <span
+                          className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full"
+                          style={{ backgroundColor: item.tint.bg, color: item.tint.color }}
+                        >
+                          <item.Icon size={13} strokeWidth={2.5} />
+                        </span>
+                        <span
+                          className="min-w-0 flex-1 truncate text-[12px] font-medium"
+                          style={{ color: 'danger' in item && item.danger ? '#ef4444' : 'var(--text)' }}
+                        >
+                          {item.label}
+                        </span>
+                        <ChevronRight
+                          size={13}
+                          className="shrink-0 text-[var(--text-muted)] transition-transform group-hover/item:translate-x-0.5"
+                        />
+                      </button>
+                    ))}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
         </div>
       </div>

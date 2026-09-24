@@ -13,15 +13,13 @@ export function AppFooter() {
             '0 3px 10px rgba(0,0,0,0.10), 0 0 0 1px color-mix(in oklab, var(--border-subtle) 70%, transparent)',
         }}
       >
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <span>© {year}</span>
-            <span className="text-secondary">•</span>
-            <span>v1.0.0</span>
-          </div>
+        <div className="flex items-center justify-between gap-4">
+          <span>
+            © {year} Clark International Airport Corporation. All rights reserved.
+          </span>
 
           <div
-            className="h-7 px-3 rounded-full text-[10px] font-bold inline-flex items-center shimmer-badge"
+            className="h-7 px-3 rounded-full text-[10px] font-bold tracking-wide inline-flex items-center shrink-0 shimmer-badge"
             style={{
               backgroundColor: 'var(--badge-bg)',
               color: 'var(--nav-active-text)',
@@ -29,7 +27,7 @@ export function AppFooter() {
                 '0 2px 6px rgba(0,0,0,0.12), 0 0 0 1px color-mix(in oklab, var(--border-subtle) 70%, transparent)',
             }}
           >
-            3CORE
+            Ver.1.0.0
           </div>
         </div>
       </div>
