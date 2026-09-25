@@ -741,12 +741,12 @@ export function ComplianceInspections({
   return (
     <div className="flex flex-col gap-4">
       <div className="grid grid-cols-3 lg:grid-cols-6 gap-2">
-        <StatTile icon={ClipboardCheck} label="Locators" value={loading ? '—' : tiles.locators} />
-        <StatTile icon={ShieldCheck} label="Completed" value={loading ? '—' : tiles.completed} tone="#10b981" />
-        <StatTile icon={ClipboardList} label="In Progress" value={loading ? '—' : tiles.inProgress} tone="#3b82f6" />
-        <StatTile icon={X} label="Not Complied" value={loading ? '—' : tiles.notComplied} tone="#ef4444" />
-        <StatTile icon={CalendarClock} label="Expiring Soon" value={loading ? '—' : tiles.expiring} tone="#f59e0b" />
-        <StatTile icon={AlertTriangle} label="Expired" value={loading ? '—' : tiles.expired} tone="#ef4444" />
+        <StatTile label="Locators" value={loading ? '—' : tiles.locators} />
+        <StatTile label="Completed" value={loading ? '—' : tiles.completed} tone="#10b981" />
+        <StatTile label="In Progress" value={loading ? '—' : tiles.inProgress} tone="#3b82f6" />
+        <StatTile label="Not Complied" value={loading ? '—' : tiles.notComplied} tone="#ef4444" />
+        <StatTile label="Expiring Soon" value={loading ? '—' : tiles.expiring} tone="#f59e0b" />
+        <StatTile label="Expired" value={loading ? '—' : tiles.expired} tone="#ef4444" />
       </div>
 
       <div className="flex items-center gap-1 border-b" style={{ borderColor: 'var(--border)' }}>
@@ -995,19 +995,19 @@ export function ComplianceInspections({
   );
 }
 
-function StatTile({ icon: Icon, label, value, tone }: { icon: any; label: string; value: React.ReactNode; tone?: string }) {
+/** Same stat card as Assessment & Evaluation and the other module pages. */
+function StatTile({ label, value, tone }: { label: string; value: React.ReactNode; tone?: string }) {
   return (
     <div
-      className="rounded-xl border px-2.5 sm:px-3 py-2.5 shadow-sm min-w-0"
-      style={{ borderColor: 'var(--border)', backgroundColor: 'var(--surface)' }}
+      className="rounded-xl px-2.5 sm:px-3 py-2.5 sm:py-3 flex flex-col gap-1 shadow-sm min-w-0"
+      style={{ backgroundColor: 'color-mix(in oklab, var(--surface) 94%, white 6%)' }}
     >
-      <div className="flex items-center gap-1 sm:gap-1.5 text-[9px] sm:text-[10px] uppercase tracking-wide text-secondary">
-        <Icon size={12} className="shrink-0" style={{ color: tone }} />
-        <span className="truncate">{label}</span>
-      </div>
-      <div className="text-lg font-bold mt-0.5" style={{ color: tone }}>
+      <span className="text-[9px] sm:text-[10px] font-semibold text-secondary uppercase tracking-wide sm:tracking-widest truncate">
+        {label}
+      </span>
+      <span className="text-lg font-bold leading-tight" style={{ color: tone || 'var(--text)' }}>
         {value}
-      </div>
+      </span>
     </div>
   );
 }
@@ -1089,57 +1089,65 @@ function MonitorTab({
       })}
     </div>
 
+    {/* Same table look as the Locators tab. */}
     <div
-      className="hidden sm:block rounded-xl border overflow-x-auto shadow-sm"
+      className="hidden sm:block rounded-xl border overflow-hidden shadow-sm"
       style={{ borderColor: 'var(--border)', backgroundColor: 'var(--surface)' }}
     >
-      <table className="w-full text-left text-[13px]">
-        <thead>
-          <tr
-            className="text-[11px] uppercase tracking-wide text-secondary"
-            style={{ backgroundColor: 'var(--control-bg)' }}
-          >
-            <th className="px-3 py-2.5 font-semibold">Locator</th>
-            <th className="px-3 py-2.5 font-semibold text-right">Inspections</th>
-            <th className="px-3 py-2.5 font-semibold text-right">Completed</th>
-            <th className="px-3 py-2.5 font-semibold text-right">Failed</th>
-            <th className="px-3 py-2.5 font-semibold text-right">Open Findings</th>
-            <th className="px-3 py-2.5 font-semibold text-right">Open Actions</th>
-            <th className="px-3 py-2.5 font-semibold text-right">Overdue</th>
-            <th className="px-3 py-2.5 font-semibold">Last Inspection</th>
-            <th className="px-3 py-2.5 font-semibold">Standing</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((r) => {
-            const standing = standingOf(r);
-            return (
-              <tr
-                key={r.proponent_id}
-                className="border-t cursor-pointer hover:bg-[var(--selected-bg)]"
-                style={{ borderColor: 'var(--border)' }}
-                onClick={() => onOpenProponent(r.proponent_id, r.proponent_name)}
-              >
-                <td className="px-3 py-2.5 font-semibold">{r.proponent_name}</td>
-                <td className="px-3 py-2.5 text-right tabular-nums">{r.total_inspections}</td>
-                <td className="px-3 py-2.5 text-right tabular-nums">{r.completed_inspections}</td>
-                <td className="px-3 py-2.5 text-right tabular-nums" style={{ color: r.failed_inspections ? '#ef4444' : undefined }}>
-                  {r.failed_inspections}
-                </td>
-                <td className="px-3 py-2.5 text-right tabular-nums">{r.open_findings}</td>
-                <td className="px-3 py-2.5 text-right tabular-nums">{r.open_actions}</td>
-                <td className="px-3 py-2.5 text-right tabular-nums" style={{ color: r.overdue_actions ? '#ef4444' : undefined }}>
-                  {r.overdue_actions}
-                </td>
-                <td className="px-3 py-2.5 text-[12px]">{fmtDate(r.last_inspection_date)}</td>
-                <td className="px-3 py-2.5">
-                  <Badge label={standing.label} styles={standing.styles} />
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
+      <div className="overflow-x-auto">
+        <table className="min-w-full text-left text-xs">
+          <thead>
+            <tr style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+              {['Locator', 'Inspections', 'Completed', 'Failed', 'Open Findings', 'Open Actions', 'Overdue', 'Last Inspection', 'Standing'].map(
+                (col) => (
+                  <th key={col} className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary whitespace-nowrap">
+                    {col}
+                  </th>
+                )
+              )}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => {
+              const standing = standingOf(r);
+              return (
+                <tr
+                  key={r.proponent_id}
+                  className="transition-colors cursor-pointer hover:bg-[var(--selected-bg)]"
+                  style={{ borderTop: '1px solid var(--border-subtle)' }}
+                  onClick={() => onOpenProponent(r.proponent_id, r.proponent_name)}
+                >
+                  <td className="px-3 py-2.5">
+                    <div className="font-semibold" style={{ color: 'var(--text)' }}>
+                      {r.proponent_name}
+                    </div>
+                  </td>
+                  <td className="px-3 py-2.5 text-[11px] text-secondary tabular-nums">{r.total_inspections}</td>
+                  <td className="px-3 py-2.5 text-[11px] text-secondary tabular-nums">{r.completed_inspections}</td>
+                  <td
+                    className="px-3 py-2.5 text-[11px] text-secondary tabular-nums"
+                    style={r.failed_inspections ? { color: '#ef4444' } : undefined}
+                  >
+                    {r.failed_inspections}
+                  </td>
+                  <td className="px-3 py-2.5 text-[11px] text-secondary tabular-nums">{r.open_findings}</td>
+                  <td className="px-3 py-2.5 text-[11px] text-secondary tabular-nums">{r.open_actions}</td>
+                  <td
+                    className="px-3 py-2.5 text-[11px] text-secondary tabular-nums"
+                    style={r.overdue_actions ? { color: '#ef4444' } : undefined}
+                  >
+                    {r.overdue_actions}
+                  </td>
+                  <td className="px-3 py-2.5 text-[11px] text-secondary whitespace-nowrap">{fmtDate(r.last_inspection_date)}</td>
+                  <td className="px-3 py-2.5">
+                    <Badge label={standing.label} styles={standing.styles} />
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
     </div>
     </>
   );
@@ -1341,7 +1349,7 @@ function LocatorActivity({ proponentId, reloadKey }: { proponentId: number; relo
   return (
     <ol className="flex flex-col gap-2">
       {rows.map((a) => (
-        <li key={a.id} className="rounded-xl border px-3 py-2.5 text-[12px]" style={{ borderColor: 'var(--border)' }}>
+        <li key={a.id} className="rounded-xl border px-3 py-2.5 text-[12px]" style={{ borderColor: CHECKLIST_LINE }}>
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
               <div className="font-semibold truncate" style={{ color: 'var(--text)' }}>
@@ -1763,6 +1771,13 @@ const CHECKLIST_GROUPS = [
   { key: 'PERFORMANCE', label: 'Performance Commitment' },
 ] as const;
 
+/** Hairline for the checklist and activity lists: --border is nearly the
+ * surface colour in dark mode, so this derives from the text colour instead. */
+const CHECKLIST_LINE = 'color-mix(in oklab, var(--text) 12%, transparent)';
+const EDITOR_FIELD = 'bg-[var(--input-bg)]';
+/** Same white field box as Particular/Remarks, for the date pickers and select. */
+const FIELD_BOX = 'rounded-lg bg-[var(--input-bg)]';
+
 const CHECKLIST_GROUP_LABEL: Record<string, string> = {
   COMPLIANCE: 'Compliance',
   PERMITS: 'Permits & Clearances',
@@ -1823,9 +1838,9 @@ function LocatorChecklist({
           : 'Required documents for this locator. Record what was submitted, how long it is valid, and whether it complies.'}
       </p>
 
-      <div className="rounded-xl border overflow-hidden" style={{ borderColor: 'var(--border)' }}>
+      <div className="rounded-xl border overflow-hidden" style={{ borderColor: CHECKLIST_LINE }}>
         {visible.map((it, idx) => (
-          <div key={it.code} style={idx > 0 ? { borderTop: '1px solid var(--border)' } : undefined}>
+          <div key={it.code} style={idx > 0 ? { borderTop: `1px solid ${CHECKLIST_LINE}` } : undefined}>
             {editing === it.code ? (
               <ChecklistEditor
                 item={it}
@@ -1887,7 +1902,7 @@ function ChecklistRow({ item, canEdit, onEdit }: { item: ComplianceItem; canEdit
             onClick={onEdit}
           >
             <Pencil size={12} />
-            Edit
+            Update
           </button>
         ) : null}
       </div>
@@ -1943,7 +1958,8 @@ function ChecklistEditor({
   };
 
   return (
-    <div className="px-3 py-3 flex flex-col gap-2.5" style={{ backgroundColor: 'var(--selected-bg)' }}>
+    // Page background behind the form so its fields stand out in both themes.
+    <div className="px-3 py-3 flex flex-col gap-2.5" style={{ backgroundColor: 'var(--background)' }}>
       <div className="text-[13px] font-semibold" style={{ color: 'var(--text)' }}>
         {item.name}
       </div>
@@ -1951,16 +1967,16 @@ function ChecklistEditor({
       {isPerformance ? (
         <div className="grid grid-cols-2 gap-2">
           <Field label="Commitment">
-            <input className={inputCls} value={form.commitment} onChange={(e) => set({ commitment: e.target.value })} />
+            <input className={cn(inputCls, EDITOR_FIELD)} value={form.commitment} onChange={(e) => set({ commitment: e.target.value })} />
           </Field>
           <Field label="Actual">
-            <input className={inputCls} value={form.actual} onChange={(e) => set({ actual: e.target.value })} />
+            <input className={cn(inputCls, EDITOR_FIELD)} value={form.actual} onChange={(e) => set({ actual: e.target.value })} />
           </Field>
         </div>
       ) : item.group === 'PERMITS' ? null : (
         <Field label="Particular">
           <textarea
-            className={cn(inputCls, 'min-h-[52px] resize-y')}
+            className={cn(inputCls, EDITOR_FIELD, 'min-h-[52px] resize-y')}
             value={form.particular}
             onChange={(e) => set({ particular: e.target.value })}
             placeholder="e.g. policy / document no., coverage, issuing office"
@@ -1970,43 +1986,51 @@ function ChecklistEditor({
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
         <Field label="Validity from">
-          <DatePicker
-            mode="single"
-            bordered
-            fullWidth
-            placeholder="Start"
-            value={parseYmd(form.validity_from)}
-            onChange={(d: Date | null) => set({ validity_from: toYmd(d) })}
-          />
+          <div className={FIELD_BOX}>
+            <DatePicker
+              mode="single"
+              bordered
+              fullWidth
+              placeholder="Start"
+              value={parseYmd(form.validity_from)}
+              onChange={(d: Date | null) => set({ validity_from: toYmd(d) })}
+            />
+          </div>
         </Field>
         <Field label="Validity to">
-          <DatePicker
-            mode="single"
-            bordered
-            fullWidth
-            placeholder="End"
-            value={parseYmd(form.validity_to)}
-            onChange={(d: Date | null) => set({ validity_to: toYmd(d) })}
-          />
+          <div className={FIELD_BOX}>
+            <DatePicker
+              mode="single"
+              bordered
+              fullWidth
+              placeholder="End"
+              value={parseYmd(form.validity_to)}
+              onChange={(d: Date | null) => set({ validity_to: toYmd(d) })}
+            />
+          </div>
         </Field>
         <Field label="Status">
-          <AppSelect
-            compact
-            isClearable={false}
-            value={form.status}
-            onChange={(v) => set({ status: v || 'PENDING' })}
-            options={Object.entries(CHECKLIST_STATUS_LABELS).map(([value, label]) => ({ value, label }))}
-          />
+          <div className={FIELD_BOX}>
+            <AppSelect
+              compact
+              isClearable={false}
+              value={form.status}
+              onChange={(v) => set({ status: v || 'PENDING' })}
+              options={Object.entries(CHECKLIST_STATUS_LABELS).map(([value, label]) => ({ value, label }))}
+            />
+          </div>
         </Field>
         <Field label="Date submitted">
-          <DatePicker
-            mode="single"
-            bordered
-            fullWidth
-            placeholder="Select date"
-            value={parseYmd(form.date_submitted)}
-            onChange={(d: Date | null) => set({ date_submitted: toYmd(d) })}
-          />
+          <div className={FIELD_BOX}>
+            <DatePicker
+              mode="single"
+              bordered
+              fullWidth
+              placeholder="Select date"
+              value={parseYmd(form.date_submitted)}
+              onChange={(d: Date | null) => set({ date_submitted: toYmd(d) })}
+            />
+          </div>
         </Field>
       </div>
       {validityInvalid ? (
@@ -2017,7 +2041,7 @@ function ChecklistEditor({
 
       <Field label="Remarks">
         <textarea
-          className={cn(inputCls, 'min-h-[52px] resize-y')}
+          className={cn(inputCls, EDITOR_FIELD, 'min-h-[52px] resize-y')}
           value={form.remarks}
           onChange={(e) => set({ remarks: e.target.value })}
         />
