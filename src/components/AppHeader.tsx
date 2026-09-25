@@ -13,6 +13,7 @@ import {
   Settings,
   ShieldCheck,
   SunMedium,
+  UserRound,
   X,
   Zap,
 } from 'lucide-react';
@@ -41,6 +42,8 @@ import {
 import { NOTIFICATIONS_REFRESH_EVENT, requestNotificationsRefresh } from '../lib/notificationRefresh';
 import { requestPermissionsRefresh } from '../lib/permissionsRefresh';
 import { roleDisplayName } from '../lib/roleDisplay';
+import { useMyProfile } from '../lib/myProfile';
+import { UserAvatar } from './ui/UserAvatar';
 import { toast } from 'sonner';
 
 type SearchResult = {
@@ -148,6 +151,7 @@ export function AppHeader({
   backendUrl,
   navigate,
   onLogout,
+  onOpenProfile,
 }: {
   theme: 'light' | 'dark';
   onToggleTheme: () => void;
@@ -156,6 +160,9 @@ export function AppHeader({
   backendUrl: string;
   navigate: (to: string, opts?: { replace?: boolean }) => void;
   onLogout: () => void;
+  /** Staff: opens the My Profile panel. Locators leave it unset and keep
+   * "Settings", which goes to their business profile page. */
+  onOpenProfile?: () => void;
 }) {
   const [currentUser, setCurrentUser] = useState<{ username: string; role: string } | null>(null);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
@@ -195,9 +202,8 @@ export function AppHeader({
   // consistently with every other role's badge, regardless of roleDisplayName
   // forcing "LOCATOR" (all caps) or the raw stored name's own casing.
   const displayRole = currentUser?.role ? roleDisplayName(currentUser.role).toLowerCase() : undefined;
-  const avatarInitials = displayName
-    ? displayName.replace(/[^a-zA-Z0-9]/g, ' ').trim().split(/\s+/).slice(0, 2).map((s) => s[0]?.toUpperCase()).join('')
-    : '';
+  // Photo for the account pill; falls back to the username's initials.
+  const myProfile = useMyProfile(Boolean(currentUser));
   const [notificationFilter, setNotificationFilter] = useState<NotificationFilter>('all');
   const notificationWrapRef = useRef<HTMLDivElement | null>(null);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
@@ -919,8 +925,8 @@ export function AppHeader({
           />
 
           {/* Desktop/tablet only — on mobile (< md, same as AppLayout's
-              MOBILE_BREAKPOINT) Settings and Change Password live in the
-              sidebar drawer instead. */}
+              MOBILE_BREAKPOINT) My Profile / Settings and Change Password
+              live in the mobile menu sheet instead. */}
           <div className="relative shrink-0 hidden md:block" ref={userMenuWrapRef}>
             <button
               aria-label="Account menu"
@@ -931,14 +937,14 @@ export function AppHeader({
                 backgroundColor: 'color-mix(in oklab, var(--control-bg) 88%, transparent)',
               }}
             >
-              <div
-                className="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0 text-[var(--foreground)] uppercase"
+              <UserAvatar
+                version={myProfile?.avatar_version}
+                name={displayName}
+                className="w-7 h-7 text-[10px] font-bold text-[var(--foreground)]"
                 style={{
                   backgroundColor: 'color-mix(in oklab, var(--control-bg) 55%, transparent)',
                 }}
-              >
-                {avatarInitials || '?'}
-              </div>
+              />
               <span className="hidden sm:flex flex-col leading-tight min-w-0">
                 <span className="text-xs font-bold truncate max-w-[6rem] md:max-w-[8rem] lg:max-w-[12rem]">
                   {displayName || 'Not signed in'}
@@ -984,13 +990,21 @@ export function AppHeader({
                   />
                   <div className="relative py-1.5">
                     {[
-                      {
-                        key: 'settings',
-                        label: 'Settings',
-                        Icon: Settings,
-                        tint: { bg: 'rgba(59,130,246,0.14)', color: '#3b82f6' },
-                        onSelect: () => navigate('/me/profile'),
-                      },
+                      onOpenProfile
+                        ? {
+                            key: 'profile',
+                            label: 'My Profile',
+                            Icon: UserRound,
+                            tint: { bg: 'rgba(59,130,246,0.14)', color: '#3b82f6' },
+                            onSelect: onOpenProfile,
+                          }
+                        : {
+                            key: 'settings',
+                            label: 'Settings',
+                            Icon: Settings,
+                            tint: { bg: 'rgba(59,130,246,0.14)', color: '#3b82f6' },
+                            onSelect: () => navigate('/me/profile'),
+                          },
                       {
                         key: 'password',
                         label: 'Change Password',

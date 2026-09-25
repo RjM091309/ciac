@@ -391,8 +391,27 @@ async function listDistinctActions() {
   return rows.map((r) => r.action);
 }
 
+/** The sign-in before the current one — shown as "Previous sign-in" so the
+ * user can spot one they don't remember. */
+async function previousLoginFor(userId, currentSessionId) {
+  await ensureSchema();
+  const rows = await selectData(
+    `
+    SELECT TOP (1) created_at, ip_address
+    FROM dbo.audit_logs
+    WHERE action = 'LOGIN_SUCCESS' AND user_id = @param0
+      AND (session_id IS NULL OR session_id <> @param1)
+    ORDER BY created_at DESC, id DESC
+    `,
+    [userId, String(currentSessionId || "")]
+  );
+  const row = rows?.[0];
+  return row ? { at: row.created_at, ip_address: normalizeIp(row.ip_address) } : null;
+}
+
 module.exports = {
   ensureSchema,
+  previousLoginFor,
   normalizeIp,
   record,
   recordFileAccess,

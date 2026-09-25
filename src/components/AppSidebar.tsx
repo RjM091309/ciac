@@ -9,6 +9,7 @@ import {
   LogOut,
   RefreshCw,
   Settings,
+  UserRound,
   ShieldCheck,
   Stamp,
   Users,
@@ -633,7 +634,7 @@ export function AppSidebar({
           {isDrawer && accountActions && (
           <SidebarGroup title="Account" collapsed={collapsed}>
             <div className="flex flex-col gap-1.5">
-              <SidebarItem icon={Settings} label="Settings" onClick={withClose(accountActions.onOpenSettings)} collapsed={collapsed} />
+              <SidebarItem icon={UserRound} label="My Profile" onClick={withClose(accountActions.onOpenSettings)} collapsed={collapsed} />
               <SidebarItem icon={KeyRound} label="Change Password" onClick={withClose(accountActions.onChangePassword)} collapsed={collapsed} />
             </div>
           </SidebarGroup>

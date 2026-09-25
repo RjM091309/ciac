@@ -1,8 +1,10 @@
 import React from 'react';
 import { AnimatePresence, motion, useDragControls } from 'motion/react';
-import { ChevronRight, Settings } from 'lucide-react';
+import { ChevronRight, Settings, UserRound } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { roleDisplayName } from '../lib/roleDisplay';
+import { useMyProfile } from '../lib/myProfile';
+import { UserAvatar } from './ui/UserAvatar';
 
 type IconType = React.ComponentType<{ size?: number; strokeWidth?: number; className?: string }>;
 
@@ -42,21 +44,23 @@ export function MobileMenuSheet({
   onClose,
   backendUrl,
   onOpenSettings,
+  profileMode = false,
   children,
 }: {
   open: boolean;
   onClose: () => void;
   backendUrl: string;
   onOpenSettings: () => void;
+  /** Staff: the card's button opens My Profile (and says so) instead of
+   * Locators' "Settings" → business profile page. */
+  profileMode?: boolean;
   children: React.ReactNode;
 }) {
   const dragControls = useDragControls();
   const user = useCurrentUser(backendUrl, open);
   const name = user?.username || '';
   const role = user?.role ? roleDisplayName(user.role).toLowerCase() : '';
-  const initials = name
-    ? name.replace(/[^a-zA-Z0-9]/g, ' ').trim().split(/\s+/).slice(0, 2).map((s) => s[0]?.toUpperCase()).join('')
-    : '';
+  const profile = useMyProfile(open);
 
   React.useEffect(() => {
     if (!open) return;
@@ -116,29 +120,34 @@ export function MobileMenuSheet({
               className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 custom-scrollbar"
               style={{ paddingBottom: 'max(1rem, env(safe-area-inset-bottom, 0px))' }}
             >
-              <div className="flex items-center gap-3 rounded-2xl px-3 py-3" style={{ backgroundColor: 'var(--control-bg)' }}>
-                <div
-                  className="h-10 w-10 shrink-0 rounded-full flex items-center justify-center text-sm font-bold"
+              {/* The whole card is the button — the icon on the right is just a hint. */}
+              <button
+                type="button"
+                onClick={onOpenSettings}
+                aria-label={profileMode ? 'Open My Profile' : 'Open account settings'}
+                className="group w-full flex items-center gap-3 rounded-2xl px-3 py-3 text-left cursor-pointer transition-opacity active:opacity-80"
+                style={{ backgroundColor: 'var(--control-bg)' }}
+              >
+                <UserAvatar
+                  version={profile?.avatar_version}
+                  name={name}
+                  className="h-10 w-10 text-sm font-bold"
                   style={{ backgroundColor: 'var(--surface)', color: 'var(--text)' }}
-                >
-                  {initials || '?'}
-                </div>
+                />
                 <div className="flex-1 min-w-0">
                   <div className="text-sm font-bold truncate" style={{ color: 'var(--text)' }}>
                     {name || '—'}
                   </div>
                   {role ? <div className="text-[11px] text-secondary capitalize truncate">{role}</div> : null}
                 </div>
-                <button
-                  type="button"
-                  onClick={onOpenSettings}
-                  aria-label="Account settings"
-                  className="h-9 w-9 shrink-0 inline-flex items-center justify-center rounded-full text-[var(--text-muted)] hover:text-[var(--text)] cursor-pointer"
+                <span
+                  aria-hidden
+                  className="h-9 w-9 shrink-0 inline-flex items-center justify-center rounded-full text-[var(--text-muted)] group-hover:text-[var(--text)]"
                   style={{ backgroundColor: 'var(--surface)' }}
                 >
-                  <Settings size={16} />
-                </button>
-              </div>
+                  {profileMode ? <UserRound size={16} /> : <Settings size={16} />}
+                </span>
+              </button>
 
               {children}
             </div>

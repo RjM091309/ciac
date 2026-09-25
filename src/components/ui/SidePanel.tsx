@@ -52,6 +52,10 @@ export function SidePanel({
               exit={{ x: '100%' }}
               transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
             >
+              {/* Full-screen on phones: keep the header clear of the notch and
+                  the footer buttons clear of the home indicator. Both are 0 on
+                  desktop, so wider layouts are unaffected. */}
+              <div className="shrink-0" style={{ height: 'env(safe-area-inset-top, 0px)' }} aria-hidden />
               <div className="flex items-start justify-between gap-3 border-b pb-3" style={{ borderColor: 'var(--input-border)' }}>
                 <div>
                   <div className="text-sm font-bold" style={{ color: 'var(--text)' }}>
@@ -71,7 +75,10 @@ export function SidePanel({
                 </button>
               </div>
 
-              <div className="flex-1 overflow-y-auto py-4">{children}</div>
+              {/* Thin scrollbar tucked into the panel's right padding (-mr-3), with
+                  pr-1.5 so the content's right edge lines up with the header
+                  instead of running into the scrollbar. */}
+              <div className="flex-1 overflow-y-auto py-4 -mr-3 pr-1.5 custom-scrollbar">{children}</div>
 
               <div
                 className={`border-t pt-3 flex items-center gap-2 ${footerNote ? 'justify-between' : 'justify-end'}`}
@@ -101,6 +108,7 @@ export function SidePanel({
                 </button>
                 </div>
               </div>
+              <div className="shrink-0" style={{ height: 'env(safe-area-inset-bottom, 0px)' }} aria-hidden />
             </motion.div>
           </div>
         </div>

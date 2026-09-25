@@ -8,6 +8,7 @@ import { locatorSetupSkipKey } from './lib/locatorSetup';
 import { PageSkeleton } from './components/ui/PageSkeleton';
 import { Toaster } from 'sonner';
 import { useIdleSession } from './lib/idleSession';
+import { setMyProfile } from './lib/myProfile';
 
 // Both pull in react-select (via AppSelect), which otherwise lands in the
 // entry chunk every visitor downloads before the login page renders.
@@ -391,6 +392,9 @@ export default function App() {
         // ignore
       } finally {
         setUser(null);
+        // No page reload on sign-out, so drop the cached profile — otherwise the
+        // next person to sign in here would briefly see this one's photo.
+        setMyProfile(null);
         setAuthState('guest');
         setLoginNotice(notice ?? null);
         navigate('/', { replace: true });

@@ -6,6 +6,7 @@ import { ProponentSidebar } from '../components/proponent/ProponentSidebar';
 import { ProponentBottomNav, BOTTOM_NAV_HEIGHT } from '../components/proponent/ProponentBottomNav';
 import { MobileMenuSheet } from '../components/MobileMenuSheet';
 import { ChangePasswordModal } from '../components/ChangePasswordModal';
+import { MyProfilePanel } from '../components/profile/MyProfilePanel';
 import { LoadingBar } from '../components/ui/LoadingBar';
 import { ControlPanelAccessProvider } from '../context/ControlPanelAccessContext';
 import { cn } from '../lib/utils';
@@ -150,6 +151,11 @@ export function AppLayout({
   }, [theme, themeMode]);
 
   const [changePasswordOpen, setChangePasswordOpen] = useState(false);
+  // Staff get the My Profile panel; Locators keep "Settings", which goes to
+  // their My Business Profile page. Based on the real role, so an admin
+  // previewing the Locator sidebar still gets their own profile.
+  const hasProfilePanel = userRole !== 'proponent';
+  const [profileOpen, setProfileOpen] = useState(false);
 
   const closeSidebar = () => setSidebarCollapsed(true);
   const toggleSidebar = () => setSidebarCollapsed((prev) => !prev);
@@ -241,6 +247,7 @@ export function AppLayout({
           backendUrl={backendUrl}
           navigate={navigate}
           onLogout={onLogout}
+          onOpenProfile={hasProfilePanel ? () => setProfileOpen(true) : undefined}
         />
 
         <div className="flex-1 flex overflow-hidden relative">
@@ -250,9 +257,11 @@ export function AppLayout({
               open={!sidebarCollapsed}
               onClose={closeSidebar}
               backendUrl={backendUrl}
+              profileMode={hasProfilePanel}
               onOpenSettings={() => {
                 closeSidebar();
-                navigate('/me/profile');
+                if (hasProfilePanel) setProfileOpen(true);
+                else navigate('/me/profile');
               }}
             >
               <SidebarComponent
@@ -267,7 +276,8 @@ export function AppLayout({
                 accountActions={{
                   onOpenSettings: () => {
                     closeSidebar();
-                    navigate('/me/profile');
+                    if (hasProfilePanel) setProfileOpen(true);
+                    else navigate('/me/profile');
                   },
                   onChangePassword: () => {
                     closeSidebar();
@@ -320,6 +330,14 @@ export function AppLayout({
         {/* Mobile drawer's Change Password (the header's own modal is
             unreachable there since its account menu is hidden below md). */}
         <ChangePasswordModal open={changePasswordOpen} onClose={() => setChangePasswordOpen(false)} />
+
+        {hasProfilePanel ? (
+          <MyProfilePanel
+            open={profileOpen}
+            onClose={() => setProfileOpen(false)}
+            onChangePassword={() => setChangePasswordOpen(true)}
+          />
+        ) : null}
       </div>
     </ControlPanelAccessProvider>
     </ThemeProvider>

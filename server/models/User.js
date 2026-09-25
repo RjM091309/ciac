@@ -219,6 +219,21 @@ async function createSchema() {
       ALTER TABLE dbo.users ADD assessment_level TINYINT NULL;
   `);
 
+  // My Profile: the account's own photo, stored on disk under
+  // server/uploads/avatars (see server/lib/avatarStorage.js) — this holds
+  // just the file name.
+  await updateSchema(`
+    IF COL_LENGTH('dbo.users', 'avatar_path') IS NULL
+      ALTER TABLE dbo.users ADD avatar_path NVARCHAR(255) NULL;
+  `);
+  // My Profile's "move to a new phone": the new authenticator's secret waits
+  // here (encrypted like totp_secret) until the user confirms a code from it,
+  // so the authenticator they already have keeps working until then.
+  await updateSchema(`
+    IF COL_LENGTH('dbo.users', 'totp_pending_secret') IS NULL
+      ALTER TABLE dbo.users ADD totp_pending_secret NVARCHAR(512) NULL;
+  `);
+
   // user_roles
   await updateSchema(`
     IF OBJECT_ID('dbo.user_roles', 'U') IS NULL
@@ -678,8 +693,81 @@ async function disableTotp(userId) {
   await updateData(
     `
     UPDATE users
-    SET totp_secret = NULL, totp_enabled = 0, updated_at = GETDATE()
+    SET totp_secret = NULL, totp_pending_secret = NULL, totp_enabled = 0, updated_at = GETDATE()
     WHERE id = @param0
+    `,
+    [userId]
+  );
+  return getTotpRecord(userId);
+}
+
+// --- My Profile (self-service) ---
+
+/** The signed-in user's own account, as the My Profile panel shows it. */
+async function getOwnProfile(userId) {
+  const rows = await selectData(
+    `
+    SELECT TOP (1)
+      u.id, u.username, u.email, u.phone, u.full_name, u.totp_enabled,
+      u.avatar_path, u.created_at, u.updated_at
+    FROM users u
+    WHERE u.id = @param0
+    `,
+    [userId]
+  );
+  const row = rows?.[0];
+  if (!row) return null;
+  const roles = await selectData(
+    `
+    SELECT r.name
+    FROM user_roles ur
+    INNER JOIN roles r ON r.id = ur.role_id
+    WHERE ur.user_id = @param0
+    ORDER BY CASE WHEN LOWER(r.name) = 'admin' THEN 0 ELSE 1 END, r.id ASC
+    `,
+    [userId]
+  );
+  return {
+    id: row.id,
+    username: row.username,
+    email: row.email ?? null,
+    phone: row.phone ?? null,
+    full_name: row.full_name ?? null,
+    totp_enabled: Number(row.totp_enabled) ? 1 : 0,
+    avatar_path: row.avatar_path ?? null,
+    created_at: row.created_at ?? null,
+    updated_at: row.updated_at ?? null,
+    roles: roles.map((r) => r.name),
+  };
+}
+
+async function setAvatarPath(userId, fileName) {
+  await updateData(`UPDATE users SET avatar_path = @param1, updated_at = GETDATE() WHERE id = @param0`, [
+    userId,
+    fileName ?? null,
+  ]);
+}
+
+async function getTotpPendingSecret(userId) {
+  const rows = await selectData(`SELECT TOP (1) totp_pending_secret FROM users WHERE id = @param0`, [userId]);
+  return rows?.[0]?.totp_pending_secret ?? null;
+}
+
+async function setTotpPendingSecret(userId, encryptedSecret) {
+  await updateData(`UPDATE users SET totp_pending_secret = @param1 WHERE id = @param0`, [
+    userId,
+    encryptedSecret ?? null,
+  ]);
+}
+
+/** Swaps the confirmed pending secret in as the live one — the previous
+ * authenticator stops working from this moment. */
+async function activatePendingTotp(userId) {
+  await updateData(
+    `
+    UPDATE users
+    SET totp_secret = totp_pending_secret, totp_pending_secret = NULL, totp_enabled = 1, updated_at = GETDATE()
+    WHERE id = @param0 AND totp_pending_secret IS NOT NULL
     `,
     [userId]
   );
@@ -884,6 +972,11 @@ module.exports = {
   setTotpSecret,
   enableTotp,
   disableTotp,
+  getOwnProfile,
+  setAvatarPath,
+  getTotpPendingSecret,
+  setTotpPendingSecret,
+  activatePendingTotp,
   getLoginLockState,
   registerFailedLogin,
   resetFailedLogins,

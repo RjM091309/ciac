@@ -86,6 +86,14 @@ const ACTION_LABELS: Record<string, string> = {
   USER_PASSWORD_SELF_CHANGE: 'Password changed',
   PASSWORD_RESET_REQUESTED: 'Password reset requested',
   PASSWORD_RESET_VIA_EMAIL: 'Password reset via email',
+  // My Profile (self-service)
+  USER_PROFILE_UPDATED: 'Profile updated',
+  USER_PROFILE_EMAIL_CHANGED: 'Email changed',
+  USER_AVATAR_UPDATED: 'Profile photo updated',
+  USER_AVATAR_REMOVED: 'Profile photo removed',
+  USER_TOTP_SELF_ENABLED: 'Two-factor turned on',
+  USER_TOTP_SELF_REPLACED: 'Authenticator moved',
+  USER_TOTP_SELF_DISABLED: 'Two-factor turned off',
   // Locators / Proponents
   PROPONENT_CREATED: 'Locator created',
   PROPONENT_UPDATED: 'Locator updated',
@@ -550,6 +558,22 @@ function describeActivity(row: AuditLogRow): string {
       return d.emailSent === false ? 'Requested a password reset (email not sent)' : 'Requested a password reset by email';
     case 'PASSWORD_RESET_VIA_EMAIL':
       return 'Set a new password using the emailed reset link';
+    case 'USER_PROFILE_UPDATED':
+      return 'Updated their own profile';
+    case 'USER_PROFILE_EMAIL_CHANGED':
+      return d.from || d.to
+        ? `Changed their email from ${String(d.from || '(none)')} to ${String(d.to || '(none)')}`
+        : 'Changed their email';
+    case 'USER_AVATAR_UPDATED':
+      return 'Uploaded a new profile photo';
+    case 'USER_AVATAR_REMOVED':
+      return 'Removed their profile photo';
+    case 'USER_TOTP_SELF_ENABLED':
+      return 'Turned on two-factor authentication';
+    case 'USER_TOTP_SELF_REPLACED':
+      return 'Moved their authenticator app to a new device';
+    case 'USER_TOTP_SELF_DISABLED':
+      return 'Turned off two-factor authentication';
     case 'ROLE_CREATED':
       return d.name ? `Created role "${String(d.name)}"` : 'Created a role';
     case 'ROLE_UPDATED': {
