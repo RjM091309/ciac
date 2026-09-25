@@ -158,6 +158,10 @@ export function MobileMenuSheet({
   );
 }
 
+/** Outline for the sheet's transparent boxes — from the text colour so it
+ * shows on both the light and dark sheet surface. */
+const SHEET_OUTLINE = 'color-mix(in oklab, var(--text) 12%, transparent)';
+
 export function SheetSection({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <section className="mt-4">
@@ -188,9 +192,11 @@ export function SheetTile({
       type="button"
       onClick={onClick}
       aria-current={active ? 'page' : undefined}
-      className="flex flex-col items-center justify-center gap-2 rounded-2xl px-1.5 py-4 cursor-pointer transition-colors"
+      className="flex flex-col items-center justify-center gap-2 rounded-2xl border px-1.5 py-4 cursor-pointer transition-colors"
+      // Transparent tile with a hairline outline; only the active one is filled.
       style={{
-        backgroundColor: active ? 'var(--nav-active-bg)' : 'var(--control-bg)',
+        backgroundColor: active ? 'var(--nav-active-bg)' : 'transparent',
+        borderColor: active ? 'var(--nav-active-bg)' : SHEET_OUTLINE,
         color: active ? 'var(--nav-active-text)' : 'var(--text)',
       }}
     >
@@ -249,7 +255,7 @@ export function SheetRow({
 
 export function SheetRowGroup({ children }: { children: React.ReactNode }) {
   return (
-    <div className="rounded-2xl p-1 flex flex-col gap-0.5" style={{ backgroundColor: 'var(--control-bg)' }}>
+    <div className="rounded-2xl border p-1 flex flex-col gap-0.5" style={{ backgroundColor: 'transparent', borderColor: SHEET_OUTLINE }}>
       {children}
     </div>
   );
