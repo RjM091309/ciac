@@ -29,7 +29,6 @@ function toBit(v) {
 const APPLICATION_STATUSES = [
   "DRAFT",
   "SUBMITTED",
-  "UNDER_REVIEW",
   "RESUBMITTED",
   "RETURNED",
   "REJECTED",
@@ -161,7 +160,7 @@ async function createStatusChangeNotifications({ application, toStatus, remarks,
   // The locator's business only has a handful of moments worth emailing
   // about rather than watching the portal for: the application was
   // returned/rejected/disapproved, or it was finally approved (sign-contract
-  // follows from there). Everything in between (UNDER_REVIEW, FOR_APPROVAL,
+  // follows from there). Everything in between (FOR_APPROVAL,
   // etc.) stays an in-app notification only.
   const DECISION_STATUSES = ["APPROVED", "DISAPPROVED", "RETURNED", "REJECTED"];
   if (DECISION_STATUSES.includes(String(toStatus || "").toUpperCase())) {
@@ -934,7 +933,7 @@ async function submitApplication(id, { changed_by }) {
 // for as long as the application is still somewhere in Assessment — once it
 // has an Assessment decision behind it (FOR_APPROVAL onward) or a terminal
 // outcome (REJECTED), the type is locked in for good.
-const TYPE_EDITABLE_STATUSES = ["DRAFT", "SUBMITTED", "UNDER_REVIEW", "RESUBMITTED", "RETURNED"];
+const TYPE_EDITABLE_STATUSES = ["DRAFT", "SUBMITTED", "RESUBMITTED", "RETURNED"];
 
 /** Edits application_type/is_renewal — the two fields set at filing time —
  * for as long as the application hasn't moved past Assessment (see

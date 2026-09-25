@@ -11,7 +11,7 @@ Full-stack app: React 19 + Vite frontend (`/`) and an Express backend (`server/`
 
 - Frontend: React 19, TypeScript, Vite 6, Tailwind CSS 4, MUI 7 (+ `x-date-pickers-pro`), `recharts`, `sonner`, `lucide-react`, `exceljs`/`jspdf` for exports.
 - Backend: Express 4 (CommonJS), MSSQL via `mssql` (or `mssql/msnodesqlv8` when `DB_TRUSTED_CONNECTION` is on — see `server/config/database.js`), JWT in an httpOnly cookie, TOTP 2FA (`otplib` + `qrcode`), `nodemailer`, `multer` uploads, `helmet`, `express-rate-limit`, `playwright` (only for rendering certificate PDFs in `server/lib/certificateRenderer.js`).
-- Unused leftovers from the original template: root `better-sqlite3` dependency + `bizreg.db`, and `@google/genai` / `GEMINI_API_KEY` — nothing in `src/` or `server/` reads them. MSSQL is the only live datastore.
+- Unused leftovers from the original template: root `better-sqlite3` + `@google/genai` dependencies and `bizreg.db` — nothing in `src/` or `server/` uses them. MSSQL is the only live datastore.
 
 ## Repo layout
 
@@ -109,12 +109,12 @@ Backend (`server/.env`): `PORT`, `NODE_ENV`, `JWT_SECRET`, `FRONTEND_URL` (/`FRO
 
 **High-level:** Locator Account → Filing → Locator uploads → Assessment (Level 2 Officer review → Level 1 Manager recommendation) → Approval & Issuance (Account Officer) → Contract/Permits → Expiry monitoring → Renewal.
 
-**Application statuses** (`APPLICATION_STATUSES`, `server/models/ApplicationWorkflow.js`): `DRAFT, SUBMITTED, UNDER_REVIEW (dead — nothing sets it), RESUBMITTED, RETURNED, REJECTED, FOR_APPROVAL, DISAPPROVED, APPROVED`.
+**Application statuses** (`APPLICATION_STATUSES`, `server/models/ApplicationWorkflow.js`): `DRAFT, SUBMITTED, RESUBMITTED, RETURNED, REJECTED, FOR_APPROVAL, DISAPPROVED, APPROVED`. (`UNDER_REVIEW` was removed 2026-09-25 — nothing ever set it.)
 
 **Stage 0 — Locator Account.** Staff with `settings:locator-users` (`LocatorUsersManagement.tsx` → `POST /api/users`, or `POST /api/users/locator-with-application`) create the Locator's login. It starts `PENDING`/inactive with a placeholder password. Filing later *activates* an existing PENDING account; it never creates one.
 
 **Stage 1 — Filing** (`ApplicationsWorkflow.tsx`). Staff pick a Locator and Application Type (plus `is_renewal`), then "Save as draft" or submit.
-- DRAFT = on hold: no notification, no email, no activation. A DRAFT row reopens pre-filled ("Continue Draft"). The Locator can only be changed while DRAFT. The type can be changed while in `TYPE_EDITABLE_STATUSES` (DRAFT/SUBMITTED/UNDER_REVIEW/RESUBMITTED/RETURNED), but not once documents exist and the type actually changes.
+- DRAFT = on hold: no notification, no email, no activation. A DRAFT row reopens pre-filled ("Continue Draft"). The Locator can only be changed while DRAFT. The type can be changed while in `TYPE_EDITABLE_STATUSES` (DRAFT/SUBMITTED/RESUBMITTED/RETURNED), but not once documents exist and the type actually changes.
 - The mandatory-document check applies only to RETURNED → RESUBMITTED, never the first DRAFT → SUBMITTED. This is deliberate: the locator has no portal access until that first submit activates them.
 - `activateLocatorIfPending()` (`c_applications.js`) resets the password and emails it, but fires only on a non-draft create or on submit. It no-ops if the account is already ACTIVE.
 - One proponent can have many applications, including multiple DRAFTs. "One login, multiple businesses" is unsupported: `requireProponentSelf` resolves a single proponent with `TOP(1)` and no `ORDER BY`.
@@ -153,4 +153,4 @@ Backend (`server/.env`): `PORT`, `NODE_ENV`, `JWT_SECRET`, `FRONTEND_URL` (/`FRO
 - `msnodesqlv8` runs on libuv's threadpool, so `server/app.js` sets `UV_THREADPOOL_SIZE=16` before any require. Keep that line first, or parallel page loads hit "Query timeout expired".
 - `vite.config.ts` `optimizeDeps.include` lists the MUI date-picker modules on purpose, to avoid stale-chunk errors after lazy routes load. Don't remove them.
 - PM2 `ignore_watch` must keep excluding `server/uploads` (backend) and `server`/`src` (frontend). Otherwise uploads restart processes and reload the browser.
-- Cleanup candidates: the `UNDER_REVIEW` status, `/api/contracts`, `better-sqlite3` + `bizreg.db`, and `@google/genai`.
+- Cleanup candidates: `/api/contracts` (`r_contracts.js` + `c_contracts.js`; keep `models/Contract.js`, Approval uses it), `better-sqlite3` + `@google/genai` (`npm uninstall`), and `bizreg.db`.

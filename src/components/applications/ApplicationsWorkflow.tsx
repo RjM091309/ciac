@@ -25,7 +25,7 @@ const NOTIFICATION_HIGHLIGHT_DURATION_MS = 5000;
 // Mirrors server/models/ApplicationWorkflow.js's TYPE_EDITABLE_STATUSES —
 // fixing a wrong application_type/is_renewal is allowed for as long as the
 // application hasn't moved past Assessment.
-const TYPE_EDITABLE_STATUSES = ['DRAFT', 'SUBMITTED', 'UNDER_REVIEW', 'RESUBMITTED', 'RETURNED'];
+const TYPE_EDITABLE_STATUSES = ['DRAFT', 'SUBMITTED', 'RESUBMITTED', 'RETURNED'];
 
 type ApplicationRow = {
   id: number;
@@ -123,7 +123,7 @@ function getBadgeStyles(status: string) {
   if (s === 'REJECTED' || s === 'INCOMPLETE') {
     return { bg: 'rgba(239,68,68,.14)', color: '#ef4444', border: 'rgba(239,68,68,.38)' };
   }
-  if (s === 'UNDER_REVIEW' || s === 'FOR_APPROVAL') {
+  if (s === 'FOR_APPROVAL') {
     return { bg: 'rgba(59,130,246,.14)', color: '#3b82f6', border: 'rgba(59,130,246,.38)' };
   }
   if (s === 'DISAPPROVED') {

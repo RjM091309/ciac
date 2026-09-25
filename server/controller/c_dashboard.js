@@ -148,7 +148,7 @@ function summarizeAdmin(applications, proponents) {
  * pre-assessment mix. */
 function attentionQueue(
   applications,
-  { limit = 6, statuses = ["SUBMITTED", "UNDER_REVIEW", "RESUBMITTED"], isRenewal } = {}
+  { limit = 6, statuses = ["SUBMITTED", "RESUBMITTED"], isRenewal } = {}
 ) {
   const now = Date.now();
   return applications
@@ -273,10 +273,10 @@ async function buildRoleAttention(sidebarPermissions, fallbackApplications, assi
   if (hasMenu(sidebarPermissions, "assessment:queue")) {
     if (assignedIds) {
       // Level 2: everything assigned to them that's still in motion.
-      return attentionQueue(fallbackApplications, { statuses: ["SUBMITTED", "UNDER_REVIEW", "RESUBMITTED", "RETURNED"] });
+      return attentionQueue(fallbackApplications, { statuses: ["SUBMITTED", "RESUBMITTED", "RETURNED"] });
     }
     const all = await Workflow.listAllApplicationsWithProgress();
-    return attentionQueue(all, { statuses: ["SUBMITTED", "UNDER_REVIEW", "RESUBMITTED"], isRenewal: false });
+    return attentionQueue(all, { statuses: ["SUBMITTED", "RESUBMITTED"], isRenewal: false });
   }
   return attentionQueue(fallbackApplications);
 }

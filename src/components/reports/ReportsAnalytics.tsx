@@ -25,7 +25,6 @@ import { Skeleton, TableSkeleton } from '../ui/Skeleton';
 
 const STATUS_LABELS: Record<string, string> = {
   SUBMITTED: 'Submitted',
-  UNDER_REVIEW: 'Under Review',
   RESUBMITTED: 'Resubmitted',
   RETURNED: 'Returned',
   REJECTED: 'Rejected',
@@ -37,7 +36,7 @@ const STATUS_ORDER = Object.keys(STATUS_LABELS);
 // Applications-by-Status is split in two so the ever-growing Approved total
 // never dwarfs the handful of applications still moving through the queue —
 // each group gets its own bar scale.
-const IN_PROGRESS_STATUSES = ['SUBMITTED', 'UNDER_REVIEW', 'RESUBMITTED', 'RETURNED', 'FOR_APPROVAL'];
+const IN_PROGRESS_STATUSES = ['SUBMITTED', 'RESUBMITTED', 'RETURNED', 'FOR_APPROVAL'];
 const OUTCOME_STATUSES = ['APPROVED', 'DISAPPROVED', 'REJECTED'];
 
 // Matches NO_TYPE_CODE in server/models/Report.js — applications with no type.
@@ -1140,7 +1139,6 @@ export function ReportsAnalytics({ navigate }: { navigate?: (to: string, opts?: 
 const STATUS_TONE: Record<string, { bg: string; color: string }> = {
   APPROVED: { bg: 'rgba(16,185,129,0.12)', color: '#10b981' },
   FOR_APPROVAL: { bg: 'rgba(59,130,246,0.12)', color: '#3b82f6' },
-  UNDER_REVIEW: { bg: 'rgba(59,130,246,0.12)', color: '#3b82f6' },
   SUBMITTED: { bg: 'rgba(148,163,184,0.14)', color: '#94a3b8' },
   RESUBMITTED: { bg: 'rgba(148,163,184,0.14)', color: '#94a3b8' },
   RETURNED: { bg: 'rgba(245,158,11,0.14)', color: '#f59e0b' },

@@ -622,7 +622,7 @@ export function Dashboard({ data, navigate }: { data: AdminDashboardData | null;
             // Same statuses c_dashboard.js counts as pending (everything but DRAFT/APPROVED/REJECTED/RETURNED).
             onClick={
               navigate
-                ? () => navigate('/applications/new?status=SUBMITTED,UNDER_REVIEW,RESUBMITTED,FOR_APPROVAL,DISAPPROVED')
+                ? () => navigate('/applications/new?status=SUBMITTED,RESUBMITTED,FOR_APPROVAL,DISAPPROVED')
                 : undefined
             }
           />

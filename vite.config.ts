@@ -8,9 +8,6 @@ export default defineConfig(({mode}) => {
   const backendTarget = env.VITE_BACKEND_URL || 'http://127.0.0.1:2501';
   return {
     plugins: [react(), tailwindcss()],
-    define: {
-      'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),
-    },
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),

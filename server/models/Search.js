@@ -39,7 +39,7 @@ async function searchApplications(term) {
       CASE WHEN a.is_renewal = 0 AND a.status = 'APPROVED' THEN 1 ELSE 0 END AS in_completed,
       CASE
         WHEN asm.id IS NOT NULL AND asm.stage <> 'COMPLETED' THEN 1
-        WHEN asm.id IS NULL AND a.status IN ('SUBMITTED', 'RESUBMITTED', 'UNDER_REVIEW', 'RETURNED') THEN 1
+        WHEN asm.id IS NULL AND a.status IN ('SUBMITTED', 'RESUBMITTED', 'RETURNED') THEN 1
         ELSE 0
       END AS in_assessment,
       CASE WHEN ap.id IS NOT NULL OR a.status = 'FOR_APPROVAL' THEN 1 ELSE 0 END AS in_approval,
