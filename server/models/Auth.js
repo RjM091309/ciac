@@ -167,9 +167,6 @@ async function loginViaDatabase(username, password, totpCode, newPassword) {
     };
   }
 
-  // Password confirmed — the attack this throttles (guessing the password)
-  // is over regardless of whether TOTP succeeds next.
-  await User.resetFailedLogins(id);
   const effectiveRole = row.role_name || row.role || "user";
   const isAdmin = String(effectiveRole).toLowerCase() === "admin";
 
@@ -213,6 +210,22 @@ async function loginViaDatabase(username, password, totpCode, newPassword) {
         return { success: false, mfaRequired: true, message: "Enter the 6-digit code from your authenticator app." };
       }
       if (!(await verifyToken(code, secret))) {
+        // A wrong code counts toward the same lockout as a wrong password —
+        // otherwise someone who already has the password could keep guessing
+        // 6-digit codes, limited only by the per-IP rate limit.
+        if (!isAdmin) {
+          const { maxAttempts, lockoutMinutes } = getLockoutConfig();
+          await User.registerFailedLogin(id, maxAttempts, lockoutMinutes);
+          if (Number(row.failed_login_attempts || 0) + 1 >= maxAttempts) {
+            return {
+              success: false,
+              locked: true,
+              reason: "invalid_mfa_code",
+              userId: id,
+              message: `Too many failed attempts. Your account is locked for ${lockoutMinutes} minutes.`,
+            };
+          }
+        }
         return { success: false, mfaRequired: true, reason: "invalid_mfa_code", userId: id, message: "Invalid authenticator code. Try again." };
       }
     } else if (!isAdmin) {
@@ -252,6 +265,10 @@ async function loginViaDatabase(username, password, totpCode, newPassword) {
     }
   }
 
+  // Fully signed in (password and, where required, authenticator code) — only
+  // now clear the failed-attempt counter, so a correct password alone can't
+  // reset it between code guesses.
+  await User.resetFailedLogins(id);
   const user = { id, username: row.username || row.email || userKey, role: effectiveRole };
   const tokenVersion = Number(row.token_version || 0);
   // sid ties every audit entry made with this token back to this sign-in

@@ -11,7 +11,7 @@ const { diffChanges } = require("../lib/auditDiff");
 const { generateTempPassword } = require("../lib/password");
 const { sendTempPasswordEmail } = require("./c_users");
 const { publicErrorMessage } = require("../lib/httpError");
-const { resolveStoredPath } = require("../lib/fileStorage");
+const { resolveStoredPath, relativeStoragePath } = require("../lib/fileStorage");
 
 /** A locator account created via Locator Accounts with a business profile
  * starts PENDING (see c_users.js's exports.create) — no login access, no
@@ -503,14 +503,24 @@ exports.listDocuments = async (req, res) => {
 /** Runs after multer (upload.single("file")) has already saved the file to
  * disk — req.file holds where it landed and its original name/type/size. */
 exports.createDocument = async (req, res) => {
+  // multer has already written the file by the time any check below runs, so
+  // every rejection must delete it (same as the portal upload handler).
+  const discardFile = () => {
+    if (req.file?.path) fs.unlink(req.file.path, () => {});
+  };
   try {
     const applicationId = Number(req.body?.application_id);
     if (!Number.isFinite(applicationId)) {
+      discardFile();
       return res.status(400).json({ success: false, message: "application_id is required" });
     }
     const { forbidden, application } = await loadWithAccess(req, applicationId);
-    if (forbidden) return res.status(403).json({ success: false, message: "Forbidden" });
-    if (!application) return res.status(404).json({ success: false, message: "Application not found" });
+    if (forbidden || !application) {
+      discardFile();
+      return forbidden
+        ? res.status(403).json({ success: false, message: "Forbidden" })
+        : res.status(404).json({ success: false, message: "Application not found" });
+    }
 
     if (!req.file) {
       return res.status(400).json({ success: false, message: "A file is required" });
@@ -521,7 +531,7 @@ exports.createDocument = async (req, res) => {
       requirement_id: req.body?.requirement_id ?? null,
       file_name: req.file.filename,
       original_file_name: req.file.originalname,
-      storage_path: req.file.path,
+      storage_path: relativeStoragePath(req.file.path), // relative, like portal uploads — survives moving STORAGE_DIR
       content_type: req.file.mimetype,
       file_size_bytes: req.file.size,
       created_by: req.user?.id ?? null,
@@ -538,6 +548,7 @@ exports.createDocument = async (req, res) => {
     return res.status(201).json({ success: true, data: row });
   } catch (error) {
     console.error("Create document error:", error);
+    discardFile();
     return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };

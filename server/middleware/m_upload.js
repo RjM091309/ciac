@@ -2,11 +2,14 @@ const fs = require("fs");
 const path = require("path");
 const multer = require("multer");
 const { EXTENSIONS } = require("../lib/uploadCheck");
+const { STORAGE_ROOT } = require("../lib/fileStorage");
 
 // Actual documentary-requirement uploads (BRM-04): files land on disk under
 // server/uploads/documents with a generated name; the original name and
 // mimetype are kept in the documents table row so downloads can restore them.
-const UPLOAD_ROOT = path.join(__dirname, "..", "uploads", "documents");
+// Under the same STORAGE_ROOT as portal uploads (honours STORAGE_DIR), so
+// resolveStoredPath() accepts these files for download.
+const UPLOAD_ROOT = path.join(STORAGE_ROOT, "documents");
 fs.mkdirSync(UPLOAD_ROOT, { recursive: true });
 
 const ALLOWED_MIME = new Set([

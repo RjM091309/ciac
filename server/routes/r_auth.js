@@ -35,12 +35,6 @@ router.post("/login", loginLimiter, authController.login);
 router.post("/logout", authController.logout);
 router.post("/forgot-password", forgotPasswordLimiter, authController.forgotPassword);
 router.post("/reset-password", resetPasswordLimiter, authController.resetPassword);
-router.get("/logout", (req, res) => {
-  res.clearCookie("jwt");
-  const frontend = process.env.FRONTEND_URL;
-  if (frontend) return res.redirect(String(frontend).replace(/\/+$/, "") + "/");
-  return res.redirect("/");
-});
 router.get("/check", authController.checkAuth);
 router.post("/refresh", authController.refresh);
 router.post("/tab-closed", authController.tabClosed);
