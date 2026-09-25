@@ -1,6 +1,29 @@
 const { selectData, updateSchema, runInTransaction } = require("../config/database");
+const cache = require("../config/cache");
 
-async function ensureSchema() {
+// Every guarded request reads its role's permissions (m_auth.js), so each
+// role's three permission lists are cached and dropped whenever Control Panel
+// saves them. Rows are copied out so a caller can't mutate the cached ones.
+const cacheKey = (kind, roleId) => `cpp:${kind}:${Number(roleId)}`;
+async function cachedRows(kind, roleId, load) {
+  const rows = await cache.remember(cacheKey(kind, roleId), load);
+  return rows.map((row) => ({ ...row }));
+}
+
+// Once per process: the DDL below is idempotent but not free, and
+// ensureSchema() is awaited at the top of most queries in this file.
+let schemaReady = null;
+function ensureSchema() {
+  if (!schemaReady) {
+    schemaReady = createSchema().catch((error) => {
+      schemaReady = null; // retry on the next call if the DDL failed
+      throw error;
+    });
+  }
+  return schemaReady;
+}
+
+async function createSchema() {
   await updateSchema(`
     IF OBJECT_ID('dbo.role_sidebar_menu_permissions', 'U') IS NULL
     BEGIN
@@ -53,14 +76,16 @@ async function ensureSchema() {
 
 async function getSidebarPermissions(roleId) {
   await ensureSchema();
-  return await selectData(
-    `
-      SELECT role_id, menu_key, is_enabled
-      FROM role_sidebar_menu_permissions
-      WHERE role_id = @param0
-      ORDER BY menu_key ASC
-    `,
-    [roleId]
+  return cachedRows("sidebar", roleId, () =>
+    selectData(
+      `
+        SELECT role_id, menu_key, is_enabled
+        FROM role_sidebar_menu_permissions
+        WHERE role_id = @param0
+        ORDER BY menu_key ASC
+      `,
+      [roleId]
+    )
   );
 }
 
@@ -85,18 +110,21 @@ async function setSidebarPermissions(roleId, permissions) {
       );
     }
   });
+  cache.del(cacheKey("sidebar", roleId));
 }
 
 async function getMenuCrudPermissions(roleId) {
   await ensureSchema();
-  return await selectData(
-    `
-      SELECT role_id, menu_key, can_add, can_edit, can_delete
-      FROM role_menu_crud_permissions
-      WHERE role_id = @param0
-      ORDER BY menu_key ASC
-    `,
-    [roleId]
+  return cachedRows("crud", roleId, () =>
+    selectData(
+      `
+        SELECT role_id, menu_key, can_add, can_edit, can_delete
+        FROM role_menu_crud_permissions
+        WHERE role_id = @param0
+        ORDER BY menu_key ASC
+      `,
+      [roleId]
+    )
   );
 }
 
@@ -118,21 +146,14 @@ async function setMenuCrudPermissions(roleId, permissions) {
       );
     }
   });
+  cache.del(cacheKey("crud", roleId));
 }
 
 /** Fail-closed: a menu with no saved row for this role is treated as hidden. */
 async function isSidebarVisible(roleId, menuKey) {
-  await ensureSchema();
-  const rows = await selectData(
-    `
-      SELECT is_enabled
-      FROM role_sidebar_menu_permissions
-      WHERE role_id = @param0 AND menu_key = @param1
-    `,
-    [roleId, menuKey]
-  );
-  if (!rows.length) return false;
-  return Number(rows[0].is_enabled) === 1;
+  const row = (await getSidebarPermissions(roleId)).find((r) => r.menu_key === menuKey);
+  if (!row) return false;
+  return Number(row.is_enabled) === 1;
 }
 
 const CRUD_ACTION_COLUMNS = { add: "can_add", edit: "can_edit", delete: "can_delete" };
@@ -141,17 +162,9 @@ const CRUD_ACTION_COLUMNS = { add: "can_add", edit: "can_edit", delete: "can_del
 async function hasCrudPermission(roleId, menuKey, action) {
   const column = CRUD_ACTION_COLUMNS[action];
   if (!column) return false;
-  await ensureSchema();
-  const rows = await selectData(
-    `
-      SELECT can_add, can_edit, can_delete
-      FROM role_menu_crud_permissions
-      WHERE role_id = @param0 AND menu_key = @param1
-    `,
-    [roleId, menuKey]
-  );
-  if (!rows.length) return false;
-  return Number(rows[0][column]) === 1;
+  const row = (await getMenuCrudPermissions(roleId)).find((r) => r.menu_key === menuKey);
+  if (!row) return false;
+  return Number(row[column]) === 1;
 }
 
 /** Ids of every role with `menuKey` enabled in its sidebar. */
@@ -166,14 +179,16 @@ async function listRoleIdsWithMenu(menuKey) {
 
 async function getDashboardWidgetPermissions(roleId) {
   await ensureSchema();
-  return await selectData(
-    `
-      SELECT role_id, widget_key, is_enabled
-      FROM role_dashboard_widget_permissions
-      WHERE role_id = @param0
-      ORDER BY widget_key ASC
-    `,
-    [roleId]
+  return cachedRows("widgets", roleId, () =>
+    selectData(
+      `
+        SELECT role_id, widget_key, is_enabled
+        FROM role_dashboard_widget_permissions
+        WHERE role_id = @param0
+        ORDER BY widget_key ASC
+      `,
+      [roleId]
+    )
   );
 }
 
@@ -191,6 +206,7 @@ async function setDashboardWidgetPermissions(roleId, permissions) {
       );
     }
   });
+  cache.del(cacheKey("widgets", roleId));
 }
 
 /** Fail-OPEN, unlike sidebar/CRUD access above: a widget is a display
@@ -198,17 +214,9 @@ async function setDashboardWidgetPermissions(roleId, permissions) {
  * role defaults to visible instead of vanishing the moment this feature
  * ships, for every role, until an admin revisits Control Panel. */
 async function isDashboardWidgetVisible(roleId, widgetKey) {
-  await ensureSchema();
-  const rows = await selectData(
-    `
-      SELECT is_enabled
-      FROM role_dashboard_widget_permissions
-      WHERE role_id = @param0 AND widget_key = @param1
-    `,
-    [roleId, widgetKey]
-  );
-  if (!rows.length) return true;
-  return Number(rows[0].is_enabled) === 1;
+  const row = (await getDashboardWidgetPermissions(roleId)).find((r) => r.widget_key === widgetKey);
+  if (!row) return true;
+  return Number(row.is_enabled) === 1;
 }
 
 module.exports = {

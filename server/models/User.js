@@ -64,7 +64,20 @@ async function hasStatusColumn() {
   return hasStatusColumnCache;
 }
 
-async function ensureSchema() {
+// Once per process: the DDL below is idempotent but not free, and
+// ensureSchema() is awaited at the top of most queries in this file.
+let schemaReady = null;
+function ensureSchema() {
+  if (!schemaReady) {
+    schemaReady = createSchema().catch((error) => {
+      schemaReady = null; // retry on the next call if the DDL failed
+      throw error;
+    });
+  }
+  return schemaReady;
+}
+
+async function createSchema() {
   // users
   await updateSchema(`
     IF OBJECT_ID('dbo.users', 'U') IS NULL

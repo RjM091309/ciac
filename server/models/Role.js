@@ -1,4 +1,10 @@
 const { selectData, insertData, updateData, updateSchema } = require("../config/database");
+const cache = require("../config/cache");
+
+// getActiveRoleIdByName runs on every permission-guarded request, so its
+// answers are cached; any change to a role's name or active flag drops them.
+const ROLE_ID_PREFIX = "role-id:";
+const forgetRoleIds = () => cache.delPrefix(ROLE_ID_PREFIX);
 
 async function listRoles() {
   return await selectData("SELECT * FROM roles WHERE is_active = 1 ORDER BY name ASC");
@@ -7,16 +13,18 @@ async function listRoles() {
 /** roles.name has a UNIQUE index, so this is deterministic (never more than one match). */
 async function getActiveRoleIdByName(roleName) {
   if (!roleName) return null;
-  const rows = await selectData(
-    `
-      SELECT TOP (1) id
-      FROM roles
-      WHERE LOWER(name) = LOWER(@param0) AND is_active = 1
-    `,
-    [roleName]
-  );
-  const id = Number(rows?.[0]?.id);
-  return Number.isFinite(id) ? id : null;
+  return cache.remember(ROLE_ID_PREFIX + String(roleName).toLowerCase(), async () => {
+    const rows = await selectData(
+      `
+        SELECT TOP (1) id
+        FROM roles
+        WHERE LOWER(name) = LOWER(@param0) AND is_active = 1
+      `,
+      [roleName]
+    );
+    const id = Number(rows?.[0]?.id);
+    return Number.isFinite(id) ? id : null;
+  });
 }
 
 /** Whether a user holds a given role via user_roles — distinct from that
@@ -64,6 +72,7 @@ async function createRole({ name, description }) {
     [trimmedName, description ?? null]
   );
   const id = result?.recordset?.[0]?.id;
+  forgetRoleIds();
   return getRoleById(id);
 }
 
@@ -79,17 +88,20 @@ async function updateRole(id, { name, description }) {
   if (sets.length) {
     params.push(id);
     await updateData(`UPDATE roles SET ${sets.join(", ")} WHERE id = @param${params.length - 1}`, params);
+    forgetRoleIds();
   }
   return getRoleById(id);
 }
 
 async function deactivateRole(id) {
   await updateData(`UPDATE roles SET is_active = 0 WHERE id = @param0`, [id]);
+  forgetRoleIds();
   return getRoleById(id);
 }
 
 async function reactivateRole(id) {
   await updateData(`UPDATE roles SET is_active = 1 WHERE id = @param0`, [id]);
+  forgetRoleIds();
   return getRoleById(id);
 }
 
@@ -106,7 +118,20 @@ async function listUserIdsByRole(id) {
   return rows.map((r) => r.user_id);
 }
 
-async function ensureSchema() {
+// Once per process: the DDL below is idempotent but not free, and
+// ensureSchema() is awaited at the top of most queries in this file.
+let schemaReady = null;
+function ensureSchema() {
+  if (!schemaReady) {
+    schemaReady = createSchema().catch((error) => {
+      schemaReady = null; // retry on the next call if the DDL failed
+      throw error;
+    });
+  }
+  return schemaReady;
+}
+
+async function createSchema() {
   // roles
   await updateSchema(`
     IF OBJECT_ID('dbo.roles', 'U') IS NULL

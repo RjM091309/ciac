@@ -9,9 +9,9 @@ Full-stack app: React 19 + Vite frontend (`/`) and an Express backend (`server/`
 
 ## Stack
 
-- Frontend: React 19, TypeScript, Vite 6, Tailwind CSS 4, MUI 7 (+ `x-date-pickers-pro`), `recharts`, `sonner`, `lucide-react`, `exceljs`/`jspdf` for exports.
+- Frontend: React 19, TypeScript, Vite 6, Tailwind CSS 4, MUI 7 (+ `x-date-pickers` with the date-fns adapter; the commercial `-pro` package was removed), `recharts`, `sonner`, `lucide-react`, `exceljs`/`jspdf` for exports.
 - Backend: Express 4 (CommonJS), MSSQL via `mssql` (or `mssql/msnodesqlv8` when `DB_TRUSTED_CONNECTION` is on — see `server/config/database.js`), JWT in an httpOnly cookie, TOTP 2FA (`otplib` + `qrcode`), `nodemailer`, `multer` uploads, `helmet`, `express-rate-limit`, `playwright` (only for rendering certificate PDFs in `server/lib/certificateRenderer.js`).
-- Unused leftovers from the original template: root `better-sqlite3` + `@google/genai` dependencies and `bizreg.db` — nothing in `src/` or `server/` uses them. MSSQL is the only live datastore.
+- MSSQL is the only datastore. Backend-only packages (`express`, `dotenv`, …) belong in `server/package.json`, not the root.
 
 ## Repo layout
 
@@ -36,9 +36,11 @@ server/                 Backend (separate npm workspace, CommonJS)
   app.js                bootstrap: helmet, CORS allowlist, CSRF origin guard, JWT attach, routes, ensureSchema steps
   routes/r_*.js         one router per resource, mounted in routes/routes.js under /api/*
   controller/c_*.js     matches each router
-  models/               raw-SQL models; most own an idempotent ensureSchema()
-  middleware/           m_auth.js (guards), m_csrf.js (Origin check), m_upload.js (multer, 15 MB, mimetype allowlist)
-  lib/                  totp, mailer, notificationStream (SSE), fileStorage, certificate renderers, auditDiff
+  models/               raw-SQL models; most own an idempotent ensureSchema(), memoized once per process (`schemaReady` promise)
+  middleware/           m_auth.js (guards), m_csrf.js (Origin check), m_upload.js (multer, 15 MB, mimetype allowlist, extension taken from the mimetype)
+  lib/                  totp, mailer, notificationStream (SSE), fileStorage (+ contentDisposition), certificate renderers, auditDiff,
+                        httpError (publicErrorMessage), uploadCheck (magic-byte check after multer)
+  config/cache.js       node-cache `remember()` — role ids + Control Panel permissions (30s TTL, invalidated on save)
   sql/, scripts/        one-off SQL files and migration/backfill/import scripts (run manually)
   uploads/              uploaded documents (gitignored, runtime data)
 ecosystem.config.cjs    PM2 config (ciac-dev = Vite, ciac-backend-dev = Express)
@@ -53,7 +55,7 @@ docs/                   SYSTEM-GUIDE.md, PROCESS-MODULES.md (last updated 2026-0
 - Permits & compliance: `/api/permits`, `/api/inspections`
 - Lookups (File Maintenance): `/api/requirements`, `/api/requirement-categories`, `/api/application-types`, `/api/compliance-types`, `/api/inspection-types`, `/api/account-officers`, `/api/departments`, `/api/type-of-contract`, `/api/building`, `/api/land-use`
 - Misc: `/api/dashboard`, `/api/reports`, `/api/search`, `/api/notifications` (includes an SSE `/stream`), `/api/quick-tasks`, `/api/audit-logs` (admin only)
-- Legacy: `/api/contracts` is admin-only and no longer called by the frontend — contracts are saved through `/api/approvals/:applicationId/contract`.
+- Contracts are saved through `/api/approvals/:applicationId/contract` (the old `/api/contracts` route was removed; `models/Contract.js` stays).
 
 ### Auth & access control
 
@@ -153,4 +155,6 @@ Backend (`server/.env`): `PORT`, `NODE_ENV`, `JWT_SECRET`, `FRONTEND_URL` (/`FRO
 - `msnodesqlv8` runs on libuv's threadpool, so `server/app.js` sets `UV_THREADPOOL_SIZE=16` before any require. Keep that line first, or parallel page loads hit "Query timeout expired".
 - `vite.config.ts` `optimizeDeps.include` lists the MUI date-picker modules on purpose, to avoid stale-chunk errors after lazy routes load. Don't remove them.
 - PM2 `ignore_watch` must keep excluding `server/uploads` (backend) and `server`/`src` (frontend). Otherwise uploads restart processes and reload the browser.
-- Cleanup candidates: `/api/contracts` (`r_contracts.js` + `c_contracts.js`; keep `models/Contract.js`, Approval uses it), `better-sqlite3` + `@google/genai` (`npm uninstall`), and `bizreg.db`.
+- Error responses: controllers send `publicErrorMessage(error)` (`server/lib/httpError.js`), never raw `error.message`. Plain `new Error("…")` messages and errors with a 4xx `.status` reach the client; DB, system and runtime errors become a generic message (the real one is only in the server log). So throw user-facing validation errors as plain `Error`.
+- Uploads: both upload paths (`m_upload.js` for staff, `fileStorage.handleUpload` for the portal) run `verifyUploadedFile` from `lib/uploadCheck.js`. A new allowed mimetype needs a signature in `SIGNATURES` there, or every upload of it is rejected.
+- Permission caching: anything that writes `role_*_permissions` or `roles` outside `ControlPanelPermission.set*` / `Role.*` must clear `config/cache.js`, or the change can take up to 30s to apply.

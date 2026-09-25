@@ -9,7 +9,20 @@ function toInt(v) {
 // A personal, per-user to-do list on the dashboard (DBM-06). Deliberately
 // separate from `applications` — these are ad-hoc reminders a staff member
 // jots down for themselves, not part of the application workflow.
-async function ensureSchema() {
+// Once per process: the DDL below is idempotent but not free, and
+// ensureSchema() is awaited at the top of most queries in this file.
+let schemaReady = null;
+function ensureSchema() {
+  if (!schemaReady) {
+    schemaReady = createSchema().catch((error) => {
+      schemaReady = null; // retry on the next call if the DDL failed
+      throw error;
+    });
+  }
+  return schemaReady;
+}
+
+async function createSchema() {
   await updateSchema(`
     IF OBJECT_ID('dbo.quick_tasks', 'U') IS NULL
     BEGIN

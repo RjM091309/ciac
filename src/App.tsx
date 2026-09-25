@@ -4,13 +4,15 @@ import { AppLayout, AppView } from './layout/AppLayout';
 import { SubHeader, type DashboardPreviewRole } from './components/SubHeader';
 import { FileCheck, FolderTree, ShieldCheck, Users, Loader2, Search, BarChart3 } from 'lucide-react';
 import { LoginPage } from './components/auth/LoginPage';
-import { LocatorProfileSetup } from './components/proponent/LocatorProfileSetup';
 import { locatorSetupSkipKey } from './lib/locatorSetup';
-import { DataTableControls } from './components/ui/DataTableControls';
 import { PageSkeleton } from './components/ui/PageSkeleton';
 import { Toaster } from 'sonner';
 import { useIdleSession } from './lib/idleSession';
 
+// Both pull in react-select (via AppSelect), which otherwise lands in the
+// entry chunk every visitor downloads before the login page renders.
+const LocatorProfileSetup = lazy(() => import('./components/proponent/LocatorProfileSetup').then((m) => ({ default: m.LocatorProfileSetup })));
+const DataTableControls = lazy(() => import('./components/ui/DataTableControls').then((m) => ({ default: m.DataTableControls })));
 const RoleDashboard = lazy(() => import('./components/dashboard/RoleDashboard').then((m) => ({ default: m.RoleDashboard })));
 const PreviewDashboard = lazy(() => import('./components/dashboard/PreviewDashboard').then((m) => ({ default: m.PreviewDashboard })));
 const ProponentProfile = lazy(() => import('./components/proponent/ProponentProfile').then((m) => ({ default: m.ProponentProfile })));
@@ -471,19 +473,21 @@ export default function App() {
 
   if (isProponent && proponentSetupComplete === false) {
     return (
-      <LocatorProfileSetup
-        onComplete={() => setProponentSetupComplete(true)}
-        onSkip={() => {
-          if (user?.id) {
-            try {
-              window.localStorage.setItem(locatorSetupSkipKey(user.id), '1');
-            } catch {
-              // ignore — worst case, they're prompted again next login
+      <Suspense fallback={<PageSkeleton />}>
+        <LocatorProfileSetup
+          onComplete={() => setProponentSetupComplete(true)}
+          onSkip={() => {
+            if (user?.id) {
+              try {
+                window.localStorage.setItem(locatorSetupSkipKey(user.id), '1');
+              } catch {
+                // ignore — worst case, they're prompted again next login
+              }
             }
-          }
-          setProponentSetupComplete(true);
-        }}
-      />
+            setProponentSetupComplete(true);
+          }}
+        />
+      </Suspense>
     );
   }
 
@@ -1172,18 +1176,20 @@ function SectionLanding({ view }: { view: AppView }) {
           </table>
         </div>
 
-        <DataTableControls
-          page={safePage}
-          totalPages={totalPages}
-          totalItems={filteredRows.length}
-          showingFrom={showingFrom}
-          showingTo={showingTo}
-          visiblePageNumbers={visiblePageNumbers}
-          pageSize={pageSize}
-          pageSizeOptions={[5, 20, 50, 100, 200]}
-          onPageSizeChange={setPageSize}
-          onPageChange={setPage}
-        />
+        <Suspense fallback={null}>
+          <DataTableControls
+            page={safePage}
+            totalPages={totalPages}
+            totalItems={filteredRows.length}
+            showingFrom={showingFrom}
+            showingTo={showingTo}
+            visiblePageNumbers={visiblePageNumbers}
+            pageSize={pageSize}
+            pageSizeOptions={[5, 20, 50, 100, 200]}
+            onPageSizeChange={setPageSize}
+            onPageChange={setPage}
+          />
+        </Suspense>
       </div>
     </div>
   );

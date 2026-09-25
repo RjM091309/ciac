@@ -18,7 +18,20 @@ const DEFAULT_TYPES = [
   { code: "SUBLEASE", name: "Sublease", description: null },
 ];
 
-async function ensureSchema() {
+// Once per process: the DDL below is idempotent but not free, and
+// ensureSchema() is awaited at the top of most queries in this file.
+let schemaReady = null;
+function ensureSchema() {
+  if (!schemaReady) {
+    schemaReady = createSchema().catch((error) => {
+      schemaReady = null; // retry on the next call if the DDL failed
+      throw error;
+    });
+  }
+  return schemaReady;
+}
+
+async function createSchema() {
   await updateSchema(`
     IF OBJECT_ID('dbo.application_types', 'U') IS NULL
     BEGIN
