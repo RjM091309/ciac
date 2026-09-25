@@ -18,6 +18,12 @@ router.patch("/:id/assign", requireMenuAccess(MENU_KEY, "edit"), controller.assi
 router.patch("/:id/status", requireMenuAccess(MENU_KEY, "edit"), controller.setStatus);
 router.patch("/:id/result", requireMenuAccess(MENU_KEY, "edit"), controller.setResult);
 
+// Locator compliance checklist (legacy Compliance / Permits / Performance tabs)
+router.get("/locators/compliance", requireMenuAccess(MENU_KEY, "view"), controller.listLocatorCompliance);
+router.get("/locators/:id/compliance", requireMenuAccess(MENU_KEY, "view"), controller.listComplianceItems);
+router.get("/locators/:id/activity", requireMenuAccess(MENU_KEY, "view"), controller.listLocatorActivity);
+router.put("/locators/:id/compliance/:code", requireMenuAccess(MENU_KEY, "edit"), controller.saveComplianceItem);
+
 // Findings
 router.post("/:id/findings", requireMenuAccess(MENU_KEY, "add"), controller.addFinding);
 router.patch("/findings/:id", requireMenuAccess(MENU_KEY, "edit"), controller.updateFinding);

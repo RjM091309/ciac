@@ -156,12 +156,11 @@ export function PermitsManagement({
         fetch('/api/permits', { credentials: 'include' }),
         fetch('/api/proponents', { credentials: 'include' }),
         fetch('/api/applications', { credentials: 'include' }),
-        fetch('/api/compliance-types', { credentials: 'include' }),
+        fetch('/api/permits/types', { credentials: 'include' }),
       ]);
       const [pJson, prJson, aJson, ctJson] = await Promise.all([pRes.json(), prRes.json(), aRes.json(), ctRes.json().catch(() => ({}))]);
       if (!pRes.ok) throw new Error(pJson?.message || 'Failed to load permits');
       const complianceTypeOptions: Option[] = (ctRes.ok && Array.isArray(ctJson?.data) ? ctJson.data : [])
-        .filter((t: any) => Number(t?.is_active))
         .map((t: any) => ({ value: String(t.code), label: String(t.name) }));
 
       // Only an APPROVED application means the locator has actually cleared

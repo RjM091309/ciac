@@ -6,6 +6,7 @@ const {
   runInTransaction,
 } = require("../config/database");
 const Notification = require("./Notification");
+const ComplianceRequirement = require("./ComplianceRequirement");
 
 function toInt(v) {
   const n = Number(v);
@@ -19,32 +20,15 @@ const FINDING_STATUSES = ["OPEN", "RESOLVED", "WAIVED"];
 const ACTION_STATUSES = ["PENDING", "IN_PROGRESS", "DONE", "OVERDUE"];
 const DOC_KINDS = ["REPORT", "SUPPORTING"];
 
-/** TOR Module 10 inspection coverage — seeded into inspection_types if missing. */
-const SEED_INSPECTION_TYPES = [
-  ["PERF_COMMITMENT", "Performance Commitment"],
-  ["COMPLIANCE", "Compliance Inspection"],
-  ["AUDIT", "Audit Inspection"],
-  ["ENGINEERING", "Engineering Inspection"],
-  ["PROPERTY", "Property Inspection"],
-  ["MARKETING", "Marketing Inspection"],
-  ["SAFETY", "Safety Inspection"],
-  ["SECURITY", "Security Inspection"],
-  ["LEGAL", "Legal Inspection"],
-];
-
 function pick(value, allowed, fallback = null) {
   const v = String(value ?? "").trim().toUpperCase();
   return allowed.includes(v) ? v : fallback;
 }
 
 let schemaReady = false;
-let typesSeeded = false;
 
 async function ensureSchema() {
-  if (schemaReady) {
-    if (!typesSeeded) await seedInspectionTypes();
-    return;
-  }
+  if (schemaReady) return;
   await updateSchema(`
     IF OBJECT_ID('dbo.inspections', 'U') IS NULL
     BEGIN
@@ -72,6 +56,59 @@ async function ensureSchema() {
       CREATE INDEX IX_inspections_proponent_id ON dbo.inspections(proponent_id);
       CREATE INDEX IX_inspections_status ON dbo.inspections(status);
       CREATE INDEX IX_inspections_inspector ON dbo.inspections(assigned_inspector_id);
+    END;
+
+    -- Validity period of what the inspection certifies (legacy BRIDGE
+    -- compliance "Validity" from/to).
+    IF COL_LENGTH('dbo.inspections', 'validity_from') IS NULL
+      ALTER TABLE dbo.inspections ADD validity_from DATE NULL;
+    IF COL_LENGTH('dbo.inspections', 'validity_to') IS NULL
+      ALTER TABLE dbo.inspections ADD validity_to DATE NULL;
+
+    -- Legacy BRIDGE compliance checklist, one row per locator per item
+    -- (see dbo.compliance_requirements). Rows are created on first save; an item with no
+    -- row is simply still Pending.
+    IF OBJECT_ID('dbo.locator_compliance_items', 'U') IS NULL
+    BEGIN
+      CREATE TABLE dbo.locator_compliance_items (
+        id INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+        proponent_id INT NOT NULL,
+        item_code NVARCHAR(40) NOT NULL,
+        particular NVARCHAR(1000) NULL,
+        commitment NVARCHAR(255) NULL,
+        actual NVARCHAR(255) NULL,
+        validity_from DATE NULL,
+        validity_to DATE NULL,
+        status NVARCHAR(20) NOT NULL CONSTRAINT DF_locator_compliance_items_status DEFAULT ('PENDING'),
+        remarks NVARCHAR(2000) NULL,
+        date_submitted DATE NULL,
+        updated_by INT NULL,
+        updated_at DATETIME2(3) NULL
+      );
+      CREATE UNIQUE INDEX UX_locator_compliance_items ON dbo.locator_compliance_items(proponent_id, item_code);
+    END;
+
+    -- The checklist briefly lived per inspection (dbo.inspection_compliance_items).
+    -- Carry anything saved there over to its locator — the most recent save
+    -- per item — without touching items the locator already has.
+    IF OBJECT_ID('dbo.inspection_compliance_items', 'U') IS NOT NULL
+    BEGIN
+      INSERT INTO dbo.locator_compliance_items
+        (proponent_id, item_code, particular, commitment, actual, validity_from, validity_to,
+         status, remarks, date_submitted, updated_by, updated_at)
+      SELECT x.proponent_id, x.item_code, x.particular, x.commitment, x.actual, x.validity_from, x.validity_to,
+             x.status, x.remarks, x.date_submitted, x.updated_by, x.updated_at
+      FROM (
+        SELECT c.*, i.proponent_id AS proponent_id,
+               ROW_NUMBER() OVER (PARTITION BY i.proponent_id, c.item_code ORDER BY c.updated_at DESC, c.id DESC) AS rn
+        FROM dbo.inspection_compliance_items c
+        INNER JOIN dbo.inspections i ON i.id = c.inspection_id
+      ) x
+      WHERE x.rn = 1
+        AND NOT EXISTS (
+          SELECT 1 FROM dbo.locator_compliance_items l
+          WHERE l.proponent_id = x.proponent_id AND l.item_code = x.item_code
+        );
     END;
 
     IF OBJECT_ID('dbo.inspection_findings', 'U') IS NULL
@@ -142,17 +179,18 @@ async function ensureSchema() {
       CREATE INDEX IX_inspection_activity_inspection_id ON dbo.inspection_activity(inspection_id);
     END;
   `);
+  await ensureLegacyTypesTable();
+  await ComplianceRequirement.ensureSchema();
   schemaReady = true;
-  await seedInspectionTypes();
 }
 
 /**
- * Adds the TOR inspection types to dbo.inspection_types if missing. Runs at most
- * once per process. The live table sometimes has `created_by` NOT NULL, so we
- * always pass a real user id (falls back to any existing user).
+ * Inspections now name the Compliance Requirement they cover (stored in
+ * inspection_type_code). dbo.inspection_types only labels inspections created
+ * before that, so it just has to exist for LIST_SELECT's join — nothing is
+ * seeded into it any more.
  */
-async function seedInspectionTypes() {
-  if (typesSeeded) return;
+async function ensureLegacyTypesTable() {
   try {
     await updateSchema(`
       IF OBJECT_ID('dbo.inspection_types', 'U') IS NULL
@@ -170,27 +208,8 @@ async function seedInspectionTypes() {
         );
       END
     `);
-    // Only seed a fresh install. If the deployment already manages its own
-    // inspection types, leave them alone.
-    const existing = await selectData(`SELECT COUNT(1) AS n FROM dbo.inspection_types`);
-    if (Number(existing?.[0]?.n || 0) === 0) {
-      const sysUser = await selectData(`SELECT TOP (1) id FROM dbo.users ORDER BY id`);
-      const uid = toInt(sysUser?.[0]?.id);
-      for (const [code, name] of SEED_INSPECTION_TYPES) {
-        await insertData(
-          `
-          INSERT INTO dbo.inspection_types (code, name, description, is_active, created_at, created_by)
-          VALUES (@param0, @param1, NULL, 1, SYSUTCDATETIME(), @param2)
-          `,
-          [code, name, uid]
-        );
-      }
-    }
-    typesSeeded = true;
   } catch (error) {
-    // Non-fatal — the module still works with whatever types already exist.
-    typesSeeded = true;
-    console.error("Seed inspection types skipped:", error.message || error);
+    console.error("Ensure inspection_types table skipped:", error.message || error);
   }
 }
 
@@ -231,14 +250,20 @@ const LIST_SELECT = `
     i.id,
     i.proponent_id,
     p.business_name AS proponent_name,
+    p.ref_no AS proponent_ref_no,
+    latest_apt.name AS proponent_business_type,
     i.contract_id,
     i.application_id,
     i.inspection_type_id,
     i.inspection_type_code,
-    it.name AS inspection_type_name,
+    -- The requirement it covers; older inspections carry an inspection type.
+    COALESCE(cr.name, it.name) AS inspection_type_name,
+    cr.category AS inspection_category,
     i.title,
     i.scheduled_date,
     i.conducted_date,
+    i.validity_from,
+    i.validity_to,
     i.assigned_inspector_id,
     ins.full_name AS inspector_name,
     ins.username AS inspector_username,
@@ -255,11 +280,21 @@ const LIST_SELECT = `
         AND c.due_date IS NOT NULL AND c.due_date < CAST(SYSUTCDATETIME() AS DATE)) AS overdue_actions
   FROM dbo.inspections i
   LEFT JOIN dbo.proponents p ON p.id = i.proponent_id
+  -- The locator's most recently filed application type — the same
+  -- "Industry" the Registered Locator list shows.
+  OUTER APPLY (
+    SELECT TOP (1) la.application_type
+    FROM dbo.applications la
+    WHERE la.proponent_id = i.proponent_id
+    ORDER BY la.created_at DESC, la.id DESC
+  ) latest_app
+  LEFT JOIN dbo.application_types latest_apt ON latest_apt.code = latest_app.application_type
   LEFT JOIN dbo.inspection_types it ON it.id = i.inspection_type_id
+  LEFT JOIN dbo.compliance_requirements cr ON cr.code = i.inspection_type_code
   LEFT JOIN dbo.users ins ON ins.id = i.assigned_inspector_id
 `;
 
-async function listInspections({ status, result, typeId, inspectorId, proponentId, search } = {}) {
+async function listInspections({ status, result, typeCode, inspectorId, proponentId, search } = {}) {
   await ensureSchema();
   const where = [];
   const params = [];
@@ -271,15 +306,17 @@ async function listInspections({ status, result, typeId, inspectorId, proponentI
   if (st) add("i.status = ?", st);
   const rs = pick(result, RESULTS);
   if (rs) add("i.result = ?", rs);
-  const tId = toInt(typeId);
-  if (tId) add("i.inspection_type_id = ?", tId);
+  const tCode = String(typeCode ?? "").trim();
+  if (tCode) add("i.inspection_type_code = ?", tCode);
   const insId = toInt(inspectorId);
   if (insId) add("i.assigned_inspector_id = ?", insId);
   const pId = toInt(proponentId);
   if (pId) add("i.proponent_id = ?", pId);
   const term = String(search ?? "").trim();
   if (term) {
-    where.push(`(i.title LIKE @param${params.length} OR p.business_name LIKE @param${params.length})`);
+    where.push(
+      `(i.title LIKE @param${params.length} OR p.business_name LIKE @param${params.length} OR p.ref_no LIKE @param${params.length})`
+    );
     params.push(`%${term}%`);
   }
   const sql = `${LIST_SELECT} ${where.length ? `WHERE ${where.join(" AND ")}` : ""} ORDER BY
@@ -291,6 +328,190 @@ async function listInspections({ status, result, typeId, inspectorId, proponentI
 async function getInspectionById(id) {
   const rows = await selectData(`${LIST_SELECT} WHERE i.id = @param0`, [toInt(id)]);
   return rows?.[0] || null;
+}
+
+// ---- Compliance checklist (legacy BRIDGE Compliance / Permits / Performance tabs) ----
+// The requirements themselves are file-maintained in dbo.compliance_requirements.
+const CHECKLIST_STATUSES = ["PENDING", "SUBMITTED", "COMPLIED", "NOT_COMPLIED"];
+
+/** Every checklist item for a locator, saved values merged over the catalog
+ * (unsaved items come back Pending and blank). */
+async function listComplianceItems(proponentId) {
+  await ensureSchema();
+  const rows = await selectData(
+    `SELECT * FROM dbo.locator_compliance_items WHERE proponent_id = @param0`,
+    [toInt(proponentId)]
+  );
+  const byCode = new Map(rows.map((r) => [String(r.item_code), r]));
+  const requirements = await ComplianceRequirement.listRequirements({ activeOnly: true });
+  return requirements.map((item) => {
+    const r = byCode.get(item.code) || {};
+    return {
+      code: item.code,
+      group: item.category,
+      name: item.name,
+      particular: r.particular ?? null,
+      commitment: r.commitment ?? null,
+      actual: r.actual ?? null,
+      validity_from: r.validity_from ?? null,
+      validity_to: r.validity_to ?? null,
+      status: r.status || "PENDING",
+      remarks: r.remarks ?? null,
+      date_submitted: r.date_submitted ?? null,
+      updated_at: r.updated_at ?? null,
+    };
+  });
+}
+
+/**
+ * Every active locator with its compliance checklist rolled up against the
+ * active Compliance Requirements — the Compliance & Inspection main table.
+ * An item nobody has saved yet counts as Pending.
+ */
+async function listLocatorCompliance() {
+  await ensureSchema();
+  const [requirements, locators, saved] = await Promise.all([
+    ComplianceRequirement.listRequirements({ activeOnly: true }),
+    selectData(`
+      SELECT
+        p.id,
+        p.business_name,
+        p.ref_no,
+        latest_apt.name AS business_type,
+        (SELECT COUNT(1) FROM dbo.inspections i WHERE i.proponent_id = p.id) AS inspections
+      FROM dbo.proponents p
+      OUTER APPLY (
+        SELECT TOP (1) la.application_type
+        FROM dbo.applications la
+        WHERE la.proponent_id = p.id
+        ORDER BY la.created_at DESC, la.id DESC
+      ) latest_app
+      LEFT JOIN dbo.application_types latest_apt ON latest_apt.code = latest_app.application_type
+      WHERE p.is_active = 1
+      ORDER BY p.business_name
+    `),
+    selectData(`SELECT proponent_id, item_code, status, validity_to FROM dbo.locator_compliance_items`),
+  ]);
+
+  const byLocator = new Map();
+  for (const s of saved) {
+    const key = Number(s.proponent_id);
+    if (!byLocator.has(key)) byLocator.set(key, new Map());
+    byLocator.get(key).set(String(s.item_code), s);
+  }
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const soon = new Date(today.getTime() + 30 * 86400000);
+
+  return locators.map((p) => {
+    const mine = byLocator.get(Number(p.id)) || new Map();
+    const counts = { COMPLIED: 0, SUBMITTED: 0, PENDING: 0, NOT_COMPLIED: 0 };
+    let expired = 0;
+    let expiring = 0;
+    const items = requirements.map((r) => {
+      const s = mine.get(r.code);
+      const status = s?.status || "PENDING";
+      counts[status] = (counts[status] || 0) + 1;
+      const to = s?.validity_to ? new Date(s.validity_to) : null;
+      if (to && !Number.isNaN(to.getTime())) {
+        if (to < today) expired += 1;
+        else if (to <= soon) expiring += 1;
+      }
+      return { code: r.code, name: r.name, category: r.category, status, validity_to: s?.validity_to ?? null };
+    });
+    return {
+      proponent_id: p.id,
+      proponent_name: p.business_name,
+      ref_no: p.ref_no ?? null,
+      business_type: p.business_type ?? null,
+      inspections: Number(p.inspections || 0),
+      total: items.length,
+      complied: counts.COMPLIED,
+      submitted: counts.SUBMITTED,
+      pending: counts.PENDING,
+      not_complied: counts.NOT_COMPLIED,
+      expired,
+      expiring,
+      // Completed only once every requirement is Complied.
+      status: items.length > 0 && counts.COMPLIED === items.length ? "COMPLETED" : "IN_PROGRESS",
+      items,
+    };
+  });
+}
+
+/** Checklist changes for one locator, newest first — read back from the
+ * audit log entries saveComplianceItem's controller writes. */
+async function listLocatorActivity(proponentId) {
+  const rows = await selectData(
+    `
+    SELECT TOP (200) a.id, a.created_at, a.actor_username, u.full_name AS actor_name, a.metadata_json
+    FROM dbo.audit_logs a
+    LEFT JOIN dbo.users u ON u.id = a.user_id
+    WHERE a.entity_type = 'proponent' AND a.entity_id = @param0 AND a.action = 'LOCATOR_COMPLIANCE_UPDATED'
+    ORDER BY a.id DESC
+    `,
+    [toInt(proponentId)]
+  );
+  return rows.map((r) => {
+    let meta = {};
+    try {
+      meta = r.metadata_json ? JSON.parse(r.metadata_json) : {};
+    } catch {
+      meta = {};
+    }
+    return {
+      id: r.id,
+      created_at: r.created_at,
+      actor_name: r.actor_name ?? null,
+      actor_username: r.actor_username ?? null,
+      item: meta.item ?? null,
+      status: meta.status ?? null,
+      changes: Array.isArray(meta.changes) ? meta.changes : [],
+    };
+  });
+}
+
+async function saveComplianceItem(proponentId, code, payload, actorId) {
+  await ensureSchema();
+  const pid = toInt(proponentId);
+  const exists = await selectData(`SELECT TOP (1) id FROM dbo.proponents WHERE id = @param0`, [pid]);
+  if (!exists?.length) return null;
+  const item = await ComplianceRequirement.getActiveRequirementByCode(code);
+  if (!item) throw new Error("Unknown or inactive compliance requirement");
+  const { from, to } = readValidity(payload);
+  const text = (v, max) => (v == null ? null : String(v).trim().slice(0, max) || null);
+  await updateData(
+    `
+    MERGE dbo.locator_compliance_items AS t
+    USING (SELECT @param0 AS proponent_id, @param1 AS item_code) AS s
+      ON t.proponent_id = s.proponent_id AND t.item_code = s.item_code
+    WHEN MATCHED THEN UPDATE SET
+      particular = @param2, commitment = @param3, actual = @param4,
+      validity_from = @param5, validity_to = @param6, status = @param7,
+      remarks = @param8, date_submitted = @param9,
+      updated_by = @param10, updated_at = SYSUTCDATETIME()
+    WHEN NOT MATCHED THEN INSERT
+      (proponent_id, item_code, particular, commitment, actual, validity_from, validity_to,
+       status, remarks, date_submitted, updated_by, updated_at)
+      VALUES (@param0, @param1, @param2, @param3, @param4, @param5, @param6,
+       @param7, @param8, @param9, @param10, SYSUTCDATETIME());
+    `,
+    [
+      pid,
+      item.code,
+      text(payload?.particular, 1000),
+      text(payload?.commitment, 255),
+      text(payload?.actual, 255),
+      from,
+      to,
+      pick(payload?.status, CHECKLIST_STATUSES, "PENDING"),
+      text(payload?.remarks, 2000),
+      payload?.date_submitted || null,
+      toInt(actorId),
+    ]
+  );
+  const items = await listComplianceItems(pid);
+  return items.find((i) => i.code === item.code) || null;
 }
 
 async function getInspectionDetail(id) {
@@ -401,47 +622,64 @@ async function getMeta() {
       ORDER BY u.full_name
     `),
     selectData(`SELECT id, business_name FROM dbo.proponents WHERE is_active = 1 ORDER BY business_name`),
-    selectData(`SELECT id, code, name FROM dbo.inspection_types WHERE is_active = 1 ORDER BY name`),
+    ComplianceRequirement.listRequirements({ activeOnly: true }).then((rows) =>
+      rows.map((r) => ({ code: r.code, name: r.name, category: r.category }))
+    ),
   ]);
   return { inspectors, proponents, types };
 }
 
+/** Validity dates from a payload; `to` may not be before `from`. */
+function readValidity(payload, existing) {
+  const from = payload?.validity_from !== undefined ? payload.validity_from || null : existing?.validity_from ?? null;
+  const to = payload?.validity_to !== undefined ? payload.validity_to || null : existing?.validity_to ?? null;
+  if (from && to && new Date(to) < new Date(from)) throw new Error("Validity end date cannot be before its start date");
+  return { from, to };
+}
+
 async function createInspection(payload, actorId) {
   await ensureSchema();
+  const validity = readValidity(payload);
   const proponentId = toInt(payload?.proponent_id);
   if (!proponentId) throw new Error("proponent_id is required");
   const title = String(payload?.title ?? "").trim();
   if (!title) throw new Error("title is required");
 
-  const typeId = toInt(payload?.inspection_type_id);
+  // What's inspected: an active Compliance Requirement, by code.
+  const typeId = null;
   let typeCode = payload?.inspection_type_code ? String(payload.inspection_type_code).trim() : null;
-  if (typeId && !typeCode) {
-    const t = await selectData(`SELECT TOP (1) code FROM dbo.inspection_types WHERE id = @param0`, [typeId]);
-    typeCode = t?.[0]?.code || null;
+  if (typeCode) {
+    const req = await ComplianceRequirement.getActiveRequirementByCode(typeCode);
+    if (!req) throw new Error("Choose an active compliance requirement");
+    typeCode = req.code;
   }
 
   const result = await insertData(
     `
     INSERT INTO dbo.inspections
       (proponent_id, contract_id, application_id, inspection_type_id, inspection_type_code, title,
-       scheduled_date, assigned_inspector_id, assigned_by, assigned_at, status, created_by, created_at)
+       scheduled_date, assigned_inspector_id, assigned_by, assigned_at, status, created_by, created_at,
+       validity_from, validity_to)
     OUTPUT INSERTED.id
     VALUES
       (@param0, @param1, @param2, @param3, @param4, @param5, @param6, @param7,
        CASE WHEN @param7 IS NULL THEN NULL ELSE @param8 END,
        CASE WHEN @param7 IS NULL THEN NULL ELSE SYSUTCDATETIME() END,
-       'SCHEDULED', @param8, SYSUTCDATETIME())
+       'SCHEDULED', @param8, SYSUTCDATETIME(), @param9, @param10)
     `,
     [
       proponentId,
       toInt(payload?.contract_id),
-      toInt(payload?.application_id),
+      // toInt(null) is 0, not null — keep "no application" as NULL.
+      toInt(payload?.application_id) || null,
       typeId,
       typeCode,
       title.slice(0, 255),
       payload?.scheduled_date || null,
       toInt(payload?.assigned_inspector_id),
       toInt(actorId),
+      validity.from,
+      validity.to,
     ]
   );
   const id = result?.recordset?.[0]?.id;
@@ -466,14 +704,20 @@ async function updateInspection(id, payload, actorId) {
   }
   if (payload?.scheduled_date !== undefined) push("scheduled_date = ?", payload.scheduled_date || null);
   if (payload?.conducted_date !== undefined) push("conducted_date = ?", payload.conducted_date || null);
+  if (payload?.validity_from !== undefined || payload?.validity_to !== undefined) {
+    const validity = readValidity(payload, existing);
+    push("validity_from = ?", validity.from);
+    push("validity_to = ?", validity.to);
+  }
   if (payload?.contract_id !== undefined) push("contract_id = ?", toInt(payload.contract_id));
   if (payload?.application_id !== undefined) push("application_id = ?", toInt(payload.application_id));
-  if (payload?.inspection_type_id !== undefined) {
-    push("inspection_type_id = ?", toInt(payload.inspection_type_id));
-    const t = toInt(payload.inspection_type_id)
-      ? await selectData(`SELECT TOP (1) code FROM dbo.inspection_types WHERE id = @param0`, [toInt(payload.inspection_type_id)])
-      : null;
-    push("inspection_type_code = ?", t?.[0]?.code || null);
+  if (payload?.inspection_type_code !== undefined) {
+    const code = payload.inspection_type_code ? String(payload.inspection_type_code).trim() : null;
+    if (code && !(await ComplianceRequirement.getActiveRequirementByCode(code))) {
+      throw new Error("Choose an active compliance requirement");
+    }
+    push("inspection_type_id = ?", null);
+    push("inspection_type_code = ?", code);
   }
   if (payload?.summary !== undefined) push("summary = ?", payload.summary ? String(payload.summary).slice(0, 2000) : null);
   if (!sets.length) return getInspectionDetail(id);
@@ -783,4 +1027,8 @@ module.exports = {
   addDocument,
   deleteDocument,
   getDocumentById,
+  listComplianceItems,
+  listLocatorCompliance,
+  listLocatorActivity,
+  saveComplianceItem,
 };

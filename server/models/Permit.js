@@ -1,9 +1,9 @@
 const { selectData, insertData, updateData, updateSchema } = require("../config/database");
-const ComplianceType = require("./ComplianceType");
+const ComplianceRequirement = require("./ComplianceRequirement");
 
 // System-generated only — Contract.js auto-creates/syncs a permit row with
 // this exact type whenever a contract is issued (see keepContractPermitInSync
-// there); it is not one of the configurable Settings -> Compliance Types.
+// there); it is not one of the configurable Compliance Requirements.
 const RESERVED_PERMIT_TYPE = "CONTRACT";
 // A permit/contract needs at least a year's runway for renewal to be
 // processed in time — flag it as EXPIRING once less than 12 months remain,
@@ -16,21 +16,24 @@ function toInt(v) {
   return Number.isFinite(n) ? n : null;
 }
 
-/** Permit "type" is now driven by Settings -> Compliance Types (File
- * Maintenance) instead of a hardcoded enum, so a locator/staff-added type
- * (e.g. a new "Fire Safety" or "Environmental Compliance" entry) is usable
- * here immediately — same pattern as isValidApplicationType. */
+/** Permit types are the active "Applicable Permits and Clearances"
+ * requirements in File Maintenance -> Compliance Requirements. */
+async function listPermitTypes() {
+  const rows = await ComplianceRequirement.listRequirements({ activeOnly: true });
+  return rows.filter((r) => r.category === "PERMITS").map((r) => ({ code: r.code, name: r.name }));
+}
+
 async function isValidPermitType(v) {
   const raw = String(v ?? "").trim().toUpperCase();
   if (raw === RESERVED_PERMIT_TYPE) return true;
-  const activeCodes = await ComplianceType.listActiveCodes();
-  return activeCodes.includes(raw);
+  const types = await listPermitTypes();
+  return types.some((t) => t.code === raw);
 }
 
 async function normalizeType(v) {
   const raw = String(v ?? "").trim().toUpperCase();
   if (!(await isValidPermitType(raw))) {
-    throw new Error(`Invalid permit type: "${v}". Choose one of the active Compliance Types.`);
+    throw new Error(`Invalid permit type: "${v}". Choose one of the active permit requirements.`);
   }
   return raw;
 }
@@ -93,6 +96,16 @@ async function createSchema() {
       IF COL_LENGTH('dbo.permits', 'certificate_path') IS NULL
         ALTER TABLE dbo.permits ADD certificate_path NVARCHAR(1000) NULL;
     END;
+
+    -- Permit types moved from dbo.compliance_types to Compliance
+    -- Requirements; carry the old codes over to their equivalents.
+    UPDATE dbo.permits
+    SET permit_type = CASE permit_type
+      WHEN 'ENV-CLR' THEN 'ECC'
+      WHEN 'FIRE-SF' THEN 'FSIC'
+      WHEN 'LGU-PRM' THEN 'MAYORS_PERMIT'
+    END
+    WHERE permit_type IN ('ENV-CLR', 'FIRE-SF', 'LGU-PRM');
   `);
 }
 
@@ -279,6 +292,7 @@ async function getCertificatePath(id) {
 }
 
 module.exports = {
+  listPermitTypes,
   ensureSchema,
   effectiveStatus,
   EXPIRING_WINDOW_DAYS,

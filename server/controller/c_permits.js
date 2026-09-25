@@ -5,7 +5,7 @@ const Proponent = require("../models/Proponent");
 const Workflow = require("../models/ApplicationWorkflow");
 const User = require("../models/User");
 const Contract = require("../models/Contract");
-const ComplianceType = require("../models/ComplianceType");
+const ComplianceRequirement = require("../models/ComplianceRequirement");
 const AuditLog = require("../models/AuditLog");
 const { diffChanges } = require("../lib/auditDiff");
 const { renderPermitCertificate } = require("../lib/permitCertificate");
@@ -35,7 +35,7 @@ async function generateAndAttachCertificate(permit) {
       Proponent.getProponentById(permit.proponent_id),
       permit.application_id ? Workflow.getApplicationById(permit.application_id) : Promise.resolve(null),
       approverId ? User.getUserById(approverId) : Promise.resolve(null),
-      ComplianceType.getByCode(permit.permit_type),
+      ComplianceRequirement.getRequirementByCode(permit.permit_type),
     ]);
     const pdfBuffer = await renderPermitCertificate({
       permit,
@@ -55,6 +55,16 @@ async function generateAndAttachCertificate(permit) {
     console.error("Generate permit certificate error:", error);
   }
 }
+
+exports.types = async (req, res) => {
+  try {
+    const rows = await Permit.listPermitTypes();
+    return res.json({ success: true, data: rows });
+  } catch (error) {
+    console.error("List permit types error:", error);
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
+  }
+};
 
 exports.list = async (req, res) => {
   try {

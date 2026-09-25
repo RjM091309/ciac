@@ -11,7 +11,7 @@ import { EmptyState } from '../ui/EmptyState';
 import { useSessionStorageCachedResource } from '../../hooks/useSessionStorageCachedResource';
 import { useControlPanelAccess } from '../../context/ControlPanelAccessContext';
 
-const MENU_KEY = 'settings:requirement-categories';
+const MENU_KEY = 'applications:requirements';
 
 type RequirementCategoryRow = {
   id: number;
@@ -28,7 +28,9 @@ function api(path: string) {
   return path;
 }
 
-export function RequirementCategoriesManagement() {
+/** Opened from the Requirement Categories button on the Requirements page.
+ * `onChanged` runs after any save so that page can refresh its category tree. */
+export function RequirementCategoriesManagement({ onChanged }: { onChanged?: () => void } = {}) {
   const { fullAccess, crudPermissions } = useControlPanelAccess();
   const perm = crudPermissions[MENU_KEY] || { can_add: false, can_edit: false, can_delete: false };
   const canAdd = fullAccess || perm.can_add;
@@ -179,6 +181,7 @@ export function RequirementCategoriesManagement() {
       setIsCreateOpen(false);
       setError(null);
       await refresh({ showLoading: false });
+      onChanged?.();
       toast.success(editing ? 'Category updated successfully' : 'Category created successfully');
     } catch (e: any) {
       const message = e?.message || 'Save failed';
@@ -201,6 +204,7 @@ export function RequirementCategoriesManagement() {
       if (!res.ok) throw new Error(json?.message || 'Deactivate failed');
       setError(null);
       await refresh({ showLoading: false });
+      onChanged?.();
       toast.success('Category deactivated successfully');
       setConfirmDeactivateId(null);
     } catch (e: any) {
@@ -224,6 +228,7 @@ export function RequirementCategoriesManagement() {
       if (!res.ok) throw new Error(json?.message || 'Reactivate failed');
       setError(null);
       await refresh({ showLoading: false });
+      onChanged?.();
       toast.success('Category reactivated successfully');
     } catch (e: any) {
       const message = e?.message || 'Reactivate failed';

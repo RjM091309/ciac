@@ -36,8 +36,7 @@ module.exports = function pageRouter(app) {
   app.use("/api/notifications", require("./r_notifications"));
   app.use("/api/requirements", require("./r_requirements"));
   app.use("/api/requirement-categories", require("./r_requirement_categories"));
-  app.use("/api/inspection-types", require("./r_inspection_types"));
-  app.use("/api/compliance-types", require("./r_compliance_types"));
+  app.use("/api/compliance-requirements", require("./r_compliance_requirements"));
   app.use("/api/application-types", require("./r_application_types"));
   app.use("/api/account-officers", require("./r_account_officers"));
   app.use("/api/departments", require("./r_departments"));

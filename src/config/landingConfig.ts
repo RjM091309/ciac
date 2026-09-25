@@ -260,46 +260,6 @@ export const LANDING_CONFIG: Record<AppView, LandingConfig> = {
       ],
     },
   },
-  'settings:requirement-categories': {
-    title: 'Requirement Categories',
-    description: 'Organize requirements into categories to support filtering and templates.',
-    badge: 'Configuration',
-    icon: FolderTree,
-    isCrud: true,
-    stats: [
-      { label: 'Categories', value: '—' },
-      { label: 'Active Categories', value: '—' },
-      { label: 'Updated Recently', value: '—', hint: 'Last 30 days' },
-    ],
-    table: {
-      columns: ['Code', 'Name', 'Description', 'Status'],
-      rows: [
-        ['LEGAL', 'Legal', 'Company formation and corporate documents.', 'Active'],
-        ['FIN', 'Financial', 'Tax clearance and financial permits.', 'Active'],
-        ['TECH', 'Technical', 'Technical certifications and inspections.', 'Active'],
-      ],
-    },
-  },
-  'settings:inspection-types': {
-    title: 'Inspection Types',
-    description: 'Configure inspection types used during document verification and compliance checks.',
-    badge: 'Configuration',
-    icon: FileCheck,
-    isCrud: true,
-    stats: [
-      { label: 'Inspection Types', value: '—' },
-      { label: 'Active Types', value: '—' },
-      { label: 'Pending Updates', value: '—' },
-    ],
-    table: {
-      columns: ['Type', 'Description', 'Applies To', 'Status'],
-      rows: [
-        ['ENV', 'Environmental assessment', 'CDC/CIAC permits', 'Active'],
-        ['FIRE', 'Fire safety inspection', 'Occupancy / Fire Safety', 'Active'],
-        ['SAN', 'Sanitary compliance', 'Sanitary permits', 'Inactive'],
-      ],
-    },
-  },
   'settings:application-types': {
     title: 'Application Types',
     description: 'Define the lease application types locators and staff can select when filing.',
@@ -382,26 +342,6 @@ export const LANDING_CONFIG: Record<AppView, LandingConfig> = {
     table: {
       columns: ['Name', 'Status'],
       rows: [['—', '—']],
-    },
-  },
-  'settings:compliance-types': {
-    title: 'Compliance Types',
-    description: 'Define compliance categories for verification and monitoring workflows.',
-    badge: 'Configuration',
-    icon: ShieldCheck,
-    isCrud: true,
-    stats: [
-      { label: 'Compliance Types', value: '—' },
-      { label: 'Active Types', value: '—' },
-      { label: 'Obsolete Types', value: '—' },
-    ],
-    table: {
-      columns: ['Type', 'Description', 'Applies To', 'Status'],
-      rows: [
-        ['BIR', 'BIR tax compliance', 'Tax-related documents', 'Active'],
-        ['DTI', 'DTI/Trade compliance', 'Registration documents', 'Active'],
-        ['SEC', 'SEC corporate compliance', 'Corporate documents', 'Active'],
-      ],
     },
   },
   'settings:audit-log': {

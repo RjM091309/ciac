@@ -8,13 +8,24 @@ import { DataTableControls } from '../ui/DataTableControls';
 import { Skeleton, TableSkeleton } from '../ui/Skeleton';
 import { EmptyState } from '../ui/EmptyState';
 import { useControlPanelAccess } from '../../context/ControlPanelAccessContext';
+import { AppSelect } from '../ui/AppSelect';
 
-const MENU_KEY = 'settings:inspection-types';
+const MENU_KEY = 'compliance:inspections';
 
-type InspectionTypeRow = {
+/** The three tabs of the locator compliance checklist (legacy BRIDGE screen). */
+const CATEGORIES = [
+  { value: 'COMPLIANCE', label: 'Compliance' },
+  { value: 'PERMITS', label: 'Applicable Permits and Clearances' },
+  { value: 'PERFORMANCE', label: 'Performance Commitment' },
+];
+const CATEGORY_LABEL: Record<string, string> = Object.fromEntries(CATEGORIES.map((c) => [c.value, c.label]));
+
+type RequirementRow = {
   id: number;
   code: string;
   name: string;
+  category: string;
+  sort_order: number;
   description: string | null;
   created_by: number | null;
   updated_by: number | null;
@@ -27,7 +38,11 @@ function api(path: string) {
   return path;
 }
 
-export function InspectionTypesManagement() {
+/** The Compliance Requirements tab of Compliance & Inspection: maintains the
+ * requirements listed under each of the Compliance / Permits and Clearances /
+ * Performance Commitment tabs of a locator. `onChanged` runs after any save so
+ * the page can refresh what depends on the list. */
+export function ComplianceRequirementsManagement({ onChanged }: { onChanged?: () => void } = {}) {
   const { fullAccess, crudPermissions } = useControlPanelAccess();
   const perm = crudPermissions[MENU_KEY] || { can_add: false, can_edit: false, can_delete: false };
   const canAdd = fullAccess || perm.can_add;
@@ -36,40 +51,40 @@ export function InspectionTypesManagement() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [items, setItems] = useState<InspectionTypeRow[]>([]);
-  const [editing, setEditing] = useState<InspectionTypeRow | null>(null);
+  const [items, setItems] = useState<RequirementRow[]>([]);
+  const [editing, setEditing] = useState<RequirementRow | null>(null);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [confirmDeactivateId, setConfirmDeactivateId] = useState<number | null>(null);
   const [confirmReactivateId, setConfirmReactivateId] = useState<number | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState('');
   const [pageSize, setPageSize] = useState(20);
   const [page, setPage] = useState(1);
 
   const [form, setForm] = useState({
     code: '',
     name: '',
+    category: 'COMPLIANCE',
+    sort_order: '',
     description: '',
   });
 
-  const stats = useMemo(() => {
-    const active = items.filter((i) => i.is_active === 1).length;
-    const inactive = items.filter((i) => i.is_active === 0).length;
-    return { active, inactive, total: items.length };
-  }, [items]);
 
   const filteredItems = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
-    if (!q) return items;
-    return items.filter((i) => {
+    const inCategory = categoryFilter ? items.filter((i) => i.category === categoryFilter) : items;
+    if (!q) return inCategory;
+    return inCategory.filter((i) => {
       const statusStr = i.is_active === 1 ? 'active' : 'inactive';
       return (
         (i.code || '').toLowerCase().includes(q) ||
         (i.name || '').toLowerCase().includes(q) ||
         (i.description || '').toLowerCase().includes(q) ||
+        (CATEGORY_LABEL[i.category] || '').toLowerCase().includes(q) ||
         statusStr.includes(q)
       );
     });
-  }, [items, searchQuery]);
+  }, [items, searchQuery, categoryFilter]);
   const canSubmit = useMemo(() => {
     const code = form.code.trim();
     const name = form.name.trim();
@@ -82,12 +97,13 @@ export function InspectionTypesManagement() {
       return hasAnyInput;
     }
 
-    const originalCode = (editing.code || '').trim();
-    const originalName = (editing.name || '').trim();
-    const originalDescription = (editing.description || '').trim();
-
-    return code !== originalCode || name !== originalName || description !== originalDescription;
-  }, [editing, form.code, form.description, form.name]);
+    return (
+      name !== (editing.name || '').trim() ||
+      description !== (editing.description || '').trim() ||
+      form.category !== editing.category ||
+      form.sort_order.trim() !== String(editing.sort_order ?? '')
+    );
+  }, [editing, form.code, form.description, form.name, form.category, form.sort_order]);
 
   const totalPages = useMemo(() => {
     return Math.max(1, Math.ceil(filteredItems.length / Math.max(1, pageSize)));
@@ -119,9 +135,9 @@ export function InspectionTypesManagement() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(api('/api/inspection-types'), { credentials: 'include' });
+      const res = await fetch(api('/api/compliance-requirements'), { credentials: 'include' });
       const json = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(json?.message || 'Failed to load inspection types');
+      if (!res.ok) throw new Error(json?.message || 'Failed to load compliance requirements');
       setItems(
         (json.data || []).map((item: any) => ({
           ...item,
@@ -143,7 +159,7 @@ export function InspectionTypesManagement() {
 
   useEffect(() => {
     setPage(1);
-  }, [searchQuery, pageSize]);
+  }, [searchQuery, pageSize, categoryFilter]);
 
   useEffect(() => {
     if (page > totalPages) setPage(totalPages);
@@ -151,16 +167,18 @@ export function InspectionTypesManagement() {
 
   function openCreate() {
     setEditing(null);
-    setForm({ code: '', name: '', description: '' });
+    setForm({ code: '', name: '', category: categoryFilter || 'COMPLIANCE', sort_order: '', description: '' });
     setIsCreateOpen(true);
   }
 
-  function openEdit(item: InspectionTypeRow) {
+  function openEdit(item: RequirementRow) {
     setIsCreateOpen(true);
     setEditing(item);
     setForm({
       code: item.code || '',
       name: item.name || '',
+      category: item.category || 'COMPLIANCE',
+      sort_order: String(item.sort_order ?? ''),
       description: item.description || '',
     });
   }
@@ -172,12 +190,16 @@ export function InspectionTypesManagement() {
       const payload: any = {
         code: form.code.trim(),
         name: form.name.trim(),
+        category: form.category,
+        sort_order: form.sort_order.trim() ? Number(form.sort_order) : 0,
         description: form.description.trim() || null,
       };
-      if (!payload.code) throw new Error('Code is required');
+      // The code is fixed once created: saved locator checklist values refer to it.
+      if (editing) delete payload.code;
+      if (!editing && !payload.code) throw new Error('Code is required');
       if (!payload.name) throw new Error('Name is required');
 
-      const res = await fetch(api(editing ? `/api/inspection-types/${editing.id}` : '/api/inspection-types'), {
+      const res = await fetch(api(editing ? `/api/compliance-requirements/${editing.id}` : '/api/compliance-requirements'), {
         method: editing ? 'PUT' : 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -188,7 +210,8 @@ export function InspectionTypesManagement() {
 
       setIsCreateOpen(false);
       await loadAll();
-      toast.success(editing ? 'Inspection type updated successfully' : 'Inspection type created successfully');
+      onChanged?.();
+      toast.success(editing ? 'Requirement updated successfully' : 'Requirement created successfully');
     } catch (e: any) {
       const message = e?.message || 'Save failed';
       setError(message);
@@ -202,14 +225,15 @@ export function InspectionTypesManagement() {
     setSaving(true);
     setError(null);
     try {
-      const res = await fetch(api(`/api/inspection-types/${id}/deactivate`), {
+      const res = await fetch(api(`/api/compliance-requirements/${id}/deactivate`), {
         method: 'PATCH',
         credentials: 'include',
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json?.message || 'Deactivate failed');
       await loadAll();
-      toast.success('Inspection type deactivated successfully');
+      onChanged?.();
+      toast.success('Requirement deactivated successfully');
       setConfirmDeactivateId(null);
     } catch (e: any) {
       setError(e?.message || 'Deactivate failed');
@@ -223,14 +247,15 @@ export function InspectionTypesManagement() {
     setSaving(true);
     setError(null);
     try {
-      const res = await fetch(api(`/api/inspection-types/${id}/reactivate`), {
+      const res = await fetch(api(`/api/compliance-requirements/${id}/reactivate`), {
         method: 'PATCH',
         credentials: 'include',
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json?.message || 'Reactivate failed');
       await loadAll();
-      toast.success('Inspection type reactivated successfully');
+      onChanged?.();
+      toast.success('Requirement reactivated successfully');
     } catch (e: any) {
       setError(e?.message || 'Reactivate failed');
       toast.error(e?.message || 'Reactivate failed');
@@ -306,16 +331,11 @@ export function InspectionTypesManagement() {
 
   return (
     <div className="space-y-4 sm:space-y-5">
-      <div className="grid grid-cols-3 gap-2 sm:gap-4 mt-3">
-        <StatCard label="Active Types" value={String(stats.active)} />
-        <StatCard label="Total Types" value={String(stats.total)} />
-        <StatCard label="Deactivated" value={String(stats.inactive)} />
-      </div>
 
       <div className="glass-card p-3 sm:p-5 !border-transparent" style={{ backgroundColor: 'var(--surface)' }}>
         <div className="flex items-center justify-between mb-3 gap-2">
           <h3 className="text-sm font-bold tracking-tight" style={{ color: 'var(--text)' }}>
-            Inspection Types List
+            Compliance Requirements List
           </h3>
           {canAdd ? (
             <button
@@ -336,31 +356,31 @@ export function InspectionTypesManagement() {
 
         {loading ? (
           <div className="py-2">
-            <TableSkeleton columns={5} rows={5} />
+            <TableSkeleton columns={7} rows={5} />
           </div>
         ) : filteredItems.length === 0 ? (
           <EmptyState
-            title="No inspection types found"
+            title="No compliance requirements found"
             description={
-              searchQuery 
-                ? 'Try adjusting your search filters.' 
-                : 'There are no inspection types to show here yet. Create a new inspection type to get started.'
+              searchQuery || categoryFilter
+                ? 'Try adjusting your search filters.'
+                : 'There are no compliance requirements yet. Create one to get started.'
             }
             action={
-              !searchQuery && canAdd ? (
+              !searchQuery && !categoryFilter && canAdd ? (
                 <button
                   className="rounded-lg px-4 py-2 text-sm font-semibold shadow-sm transition-colors"
                   style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
                   onClick={openCreate}
                 >
-                  Create Inspection Type
+                  Create Requirement
                 </button>
               ) : undefined
             }
           />
         ) : (
           <div>
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-3">
+            <div className="flex flex-col sm:flex-row sm:items-center gap-2 mb-3">
               <div className="relative group w-full sm:w-72">
                 <Search
                   className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)] group-focus-within:text-[var(--text)] transition-colors pointer-events-none"
@@ -368,15 +388,24 @@ export function InspectionTypesManagement() {
                 />
                 <input
                   type="text"
-                  placeholder="Search inspection types..."
+                  placeholder="Search requirements..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   className="h-9 rounded-full pl-9 pr-3 text-xs w-full focus:outline-none focus:ring-1 focus:ring-[var(--border)] text-[var(--text)] placeholder:text-[var(--text-muted)] transition-all"
                   style={{ backgroundColor: 'color-mix(in oklab, var(--control-bg) 70%, transparent)' }}
                 />
               </div>
+              <div className="w-full sm:w-72">
+                <AppSelect
+                  compact
+                  placeholder="All categories"
+                  value={categoryFilter}
+                  onChange={setCategoryFilter}
+                  options={CATEGORIES}
+                />
+              </div>
             </div>
-            {/* Phones: one card per inspection type instead of a 5-column table */}
+            {/* Phones: one card per requirement instead of a 7-column table */}
             <div className="sm:hidden space-y-2">
               {pagedItems.map((item) => (
                 <div
@@ -392,7 +421,9 @@ export function InspectionTypesManagement() {
                       <div className="text-[13px] font-semibold leading-snug break-words" style={{ color: 'var(--text)' }}>
                         {item.name}
                       </div>
-                      <div className="mt-0.5 text-[10px] font-semibold uppercase tracking-wider text-secondary break-all">{item.code}</div>
+                      <div className="mt-0.5 text-[10px] font-semibold uppercase tracking-wider text-secondary break-all">
+                        {CATEGORY_LABEL[item.category] || item.category} · {item.code}
+                      </div>
                     </div>
                     <div className="shrink-0">{renderStatusBadge(item)}</div>
                   </div>
@@ -408,7 +439,7 @@ export function InspectionTypesManagement() {
             <table className="min-w-full text-left text-xs">
               <thead>
                 <tr>
-                  {['Code', 'Name', 'Description', 'Status', 'Actions'].map((col) => (
+                  {['Category', 'Order', 'Code', 'Name', 'Description', 'Status', 'Actions'].map((col) => (
                     <th
                       key={col}
                       className={cn(
@@ -425,6 +456,10 @@ export function InspectionTypesManagement() {
               <tbody>
                 {pagedItems.map((item) => (
                   <tr key={item.id} className="border-b last:border-b-0" style={{ borderColor: 'var(--border-subtle)' }}>
+                    <td className="px-3 py-2 font-semibold whitespace-nowrap" style={{ color: 'var(--text)' }}>
+                      {CATEGORY_LABEL[item.category] || item.category}
+                    </td>
+                    <td className="px-3 py-2 text-[11px] text-secondary tabular-nums">{item.sort_order}</td>
                     <td className="px-3 py-2 text-[11px]" style={{ color: 'var(--text)' }}>
                       {item.code}
                     </td>
@@ -464,26 +499,47 @@ export function InspectionTypesManagement() {
 
       <SidePanel
         open={isCreateOpen}
-        title={editing ? 'Edit Inspection Type' : 'New Inspection Type'}
-        subtitle="Inspection types master table"
+        title={editing ? 'Edit Compliance Requirement' : 'New Compliance Requirement'}
+        subtitle="Listed under a locator's compliance tabs in Compliance & Inspection"
         onClose={() => setIsCreateOpen(false)}
         onSave={save}
         saving={saving}
         saveDisabled={!canSubmit}
       >
         <div className="grid grid-cols-1 gap-3">
+          <Field label="Category">
+            <AppSelect
+              compact
+              isClearable={false}
+              value={form.category}
+              onChange={(v) => setForm((p) => ({ ...p, category: v || 'COMPLIANCE' }))}
+              options={CATEGORIES}
+            />
+          </Field>
           <Field label="Code">
             <input
               className="app-input"
               value={form.code}
               onChange={(e) => setForm((p) => ({ ...p, code: e.target.value }))}
+              disabled={Boolean(editing)}
+              placeholder="e.g. BUSINESS_PERMIT"
             />
+            {editing ? <p className="text-[10px] text-secondary">The code can't be changed once created.</p> : null}
           </Field>
           <Field label="Name">
             <input
               className="app-input"
               value={form.name}
               onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))}
+            />
+          </Field>
+          <Field label="Order">
+            <input
+              className="app-input"
+              inputMode="numeric"
+              value={form.sort_order}
+              onChange={(e) => setForm((p) => ({ ...p, sort_order: e.target.value.replace(/[^0-9]/g, '') }))}
+              placeholder="Lower numbers are listed first"
             />
           </Field>
           <Field label="Description">
@@ -498,8 +554,8 @@ export function InspectionTypesManagement() {
 
       <ConfirmModal
         open={confirmDeactivateId !== null}
-        title="Deactivate inspection type?"
-        description="This type will be marked inactive. You can re-activate later."
+        title="Deactivate requirement?"
+        description="It will no longer be listed on locators' compliance tabs. Values already recorded are kept and come back if you re-activate it."
         confirmText="Deactivate"
         danger
         loading={saving}
@@ -511,8 +567,8 @@ export function InspectionTypesManagement() {
 
       <ConfirmModal
         open={confirmReactivateId !== null}
-        title="Reactivate inspection type?"
-        description="This type will be marked active again."
+        title="Reactivate requirement?"
+        description="It will be listed on locators' compliance tabs again."
         confirmText="Reactivate"
         loading={saving}
         onCancel={() => setConfirmReactivateId(null)}
@@ -523,24 +579,6 @@ export function InspectionTypesManagement() {
           }
         }}
       />
-    </div>
-  );
-}
-
-function StatCard({ label, value }: { label: string; value: string }) {
-  return (
-    <div
-      className="rounded-xl px-2.5 sm:px-3 py-2.5 sm:py-3 flex flex-col justify-between gap-1 shadow-sm min-w-0"
-      style={{
-        backgroundColor: 'color-mix(in oklab, var(--surface) 94%, white 6%)',
-      }}
-    >
-      <span className="text-[9px] sm:text-[10px] font-semibold text-secondary uppercase tracking-wide sm:tracking-widest leading-tight">
-        {label}
-      </span>
-      <span className="text-lg font-bold leading-tight" style={{ color: 'var(--text)' }}>
-        {value}
-      </span>
     </div>
   );
 }

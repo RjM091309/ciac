@@ -22,7 +22,7 @@ exports.list = async (req, res) => {
     const rows = await Inspection.listInspections({
       status: req.query.status,
       result: req.query.result,
-      typeId: req.query.typeId,
+      typeCode: req.query.typeCode,
       inspectorId: req.query.inspectorId,
       proponentId: req.query.proponentId,
       search: req.query.search,
@@ -379,5 +379,74 @@ exports.deleteDocument = async (req, res) => {
     return res.json({ success: true });
   } catch (error) {
     return fail(res, error, "Delete inspection document");
+  }
+};
+
+exports.listLocatorCompliance = async (req, res) => {
+  try {
+    const data = await Inspection.listLocatorCompliance();
+    return res.json({ success: true, data });
+  } catch (error) {
+    return fail(res, error, "List locator compliance");
+  }
+};
+
+exports.listComplianceItems = async (req, res) => {
+  try {
+    const id = idParam(req, res, "id", "locator id");
+    if (id === null) return undefined;
+    const data = await Inspection.listComplianceItems(id);
+    return res.json({ success: true, data });
+  } catch (error) {
+    return fail(res, error, "List locator compliance items");
+  }
+};
+
+const CHECKLIST_FIELDS = [
+  "particular",
+  "commitment",
+  "actual",
+  "validity_from",
+  "validity_to",
+  "status",
+  "remarks",
+  "date_submitted",
+];
+
+exports.listLocatorActivity = async (req, res) => {
+  try {
+    const id = idParam(req, res, "id", "locator id");
+    if (id === null) return undefined;
+    const data = await Inspection.listLocatorActivity(id);
+    return res.json({ success: true, data });
+  } catch (error) {
+    return fail(res, error, "List locator compliance activity");
+  }
+};
+
+exports.saveComplianceItem = async (req, res) => {
+  try {
+    const id = idParam(req, res, "id", "locator id");
+    if (id === null) return undefined;
+    const beforeItems = await Inspection.listComplianceItems(id);
+    const before = beforeItems.find((i) => i.code === String(req.params.code)) || null;
+    const data = await Inspection.saveComplianceItem(id, req.params.code, req.body || {}, req.user?.id ?? null);
+    if (!data) return res.status(404).json({ success: false, message: "Locator not found" });
+    await AuditLog.record({
+      actorId: req.user?.id,
+      actorUsername: req.user?.username,
+      action: "LOCATOR_COMPLIANCE_UPDATED",
+      entityType: "proponent",
+      entityId: id,
+      details: {
+        item: data.name,
+        status: data.status,
+        changes: diffChanges(before, data, CHECKLIST_FIELDS),
+      },
+      req,
+    });
+    return res.json({ success: true, data });
+  } catch (error) {
+    return fail(res, error, "Save locator compliance item");
   }
 };

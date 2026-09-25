@@ -24,6 +24,7 @@ import { DatePicker, parseYmd, toYmd } from '../ui/DatePicker';
 import { EmptyState } from '../ui/EmptyState';
 import { TableSkeleton } from '../ui/Skeleton';
 import { useControlPanelAccess } from '../../context/ControlPanelAccessContext';
+import { ComplianceRequirementsManagement } from './ComplianceRequirements';
 
 const MENU_KEY = 'compliance:inspections';
 
@@ -48,12 +49,21 @@ type InspectionRow = {
   application_id: number | null;
   proponent_id: number;
   proponent_name: string | null;
+  /** The locator's Ref No and latest application type, as shown on
+   * Registered Locator. */
+  proponent_ref_no: string | null;
+  proponent_business_type: string | null;
   inspection_type_id: number | null;
   inspection_type_name: string | null;
   inspection_type_code: string | null;
+  /** Category of the Compliance Requirement inspected; null for older
+   * inspections that still carry a retired inspection type. */
+  inspection_category: string | null;
   title: string;
   scheduled_date: string | null;
   conducted_date: string | null;
+  validity_from: string | null;
+  validity_to: string | null;
   assigned_inspector_id: number | null;
   inspector_name: string | null;
   inspector_username: string | null;
@@ -103,6 +113,20 @@ type ActivityRow = {
   created_at: string | null;
 };
 
+type ComplianceItem = {
+  code: string;
+  group: 'COMPLIANCE' | 'PERMITS' | 'PERFORMANCE';
+  name: string;
+  particular: string | null;
+  commitment: string | null;
+  actual: string | null;
+  validity_from: string | null;
+  validity_to: string | null;
+  status: string;
+  remarks: string | null;
+  date_submitted: string | null;
+};
+
 type DetailPayload = {
   inspection: InspectionRow & { summary: string | null; application_id: number | null; contract_id: number | null };
   findings: FindingRow[];
@@ -133,7 +157,8 @@ type Summary = {
 type Meta = {
   inspectors: { id: number; full_name: string | null; username: string }[];
   proponents: { id: number; business_name: string }[];
-  types: { id: number; code: string; name: string }[];
+  /** Active Compliance Requirements — what an inspection covers. */
+  types: { code: string; name: string; category: string }[];
 };
 
 function fmtDate(v: string | null | undefined) {
@@ -141,6 +166,30 @@ function fmtDate(v: string | null | undefined) {
   const d = new Date(v);
   if (Number.isNaN(d.getTime())) return '—';
   return d.toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' });
+}
+
+/** "Sep 25, 2026 – Sep 25, 2027", or null when neither date is set. */
+function fmtValidity(from: string | null | undefined, to: string | null | undefined) {
+  if (!from && !to) return null;
+  return `${fmtDate(from)} – ${fmtDate(to)}`;
+}
+
+/** Expired once the end date has passed; expiring within 30 days of it. */
+function validityState(to: string | null | undefined): 'expired' | 'expiring' | 'valid' | null {
+  if (!to) return null;
+  const end = new Date(to);
+  if (Number.isNaN(end.getTime())) return null;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const days = (end.getTime() - today.getTime()) / 86_400_000;
+  return days < 0 ? 'expired' : days <= 30 ? 'expiring' : 'valid';
+}
+
+const VALIDITY_COLOR = { expired: '#ef4444', expiring: '#f59e0b', valid: undefined } as const;
+
+/** A DATE the API sent ("2026-09-25T00:00:00.000Z") as YYYY-MM-DD. */
+function ymdOf(v: string | null | undefined) {
+  return toYmd(parseYmd(v));
 }
 
 function statusBadge(status: string) {
@@ -182,6 +231,169 @@ function statusProgress(status: string) {
   const percent = status === 'COMPLETED' ? 100 : status === 'IN_PROGRESS' ? 50 : status === 'CANCELLED' ? 0 : 0;
   const barColor = percent >= 100 ? '#10b981' : percent >= 50 ? '#3b82f6' : '#f59e0b';
   return { percent, barColor };
+}
+
+type LocatorComplianceRow = {
+  proponent_id: number;
+  proponent_name: string;
+  ref_no: string | null;
+  business_type: string | null;
+  inspections: number;
+  total: number;
+  complied: number;
+  submitted: number;
+  pending: number;
+  not_complied: number;
+  expired: number;
+  expiring: number;
+  status: 'IN_PROGRESS' | 'COMPLETED';
+  items: { code: string; name: string; category: string; status: string; validity_to: string | null }[];
+};
+
+const REQUIREMENT_STATUS_ICON: Record<string, typeof CalendarClock> = {
+  PENDING: CalendarClock,
+  SUBMITTED: ClipboardList,
+  COMPLIED: ShieldCheck,
+  NOT_COMPLIED: X,
+};
+
+const REQ_TOOLTIP_ROW_HEIGHT = 30;
+
+/** Hover breakdown for the Compliance count: each requirement of the locator
+ * and its status. Same popover as Assessment's compliance tooltip — portaled
+ * with `position: fixed` so the table's overflow wrapper can't clip it. */
+function RequirementsTooltip({
+  items,
+  children,
+}: {
+  items: LocatorComplianceRow['items'];
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState<{ top: number; left: number; openUp: boolean; arrowLeft: number } | null>(null);
+  const triggerRef = useRef<HTMLSpanElement>(null);
+  const width = TOOLTIP_WIDTH + 90;
+
+  const computePosition = () => {
+    const trigger = triggerRef.current;
+    if (!trigger) return;
+    const rect = trigger.getBoundingClientRect();
+    const tooltipHeight = items.length * REQ_TOOLTIP_ROW_HEIGHT + TOOLTIP_PADDING;
+    const spaceBelow = window.innerHeight - rect.bottom;
+    const openUp = spaceBelow < tooltipHeight + TOOLTIP_VIEWPORT_MARGIN && rect.top > tooltipHeight + TOOLTIP_VIEWPORT_MARGIN;
+    const left = Math.min(Math.max(TOOLTIP_VIEWPORT_MARGIN, rect.left), window.innerWidth - width - TOOLTIP_VIEWPORT_MARGIN);
+    const top = openUp ? rect.top - 10 : rect.bottom + 10;
+    const arrowLeft = Math.min(Math.max(rect.left + TOOLTIP_ARROW_OFFSET - left, 16), width - 16);
+    setPos({ top, left, openUp, arrowLeft });
+  };
+
+  useEffect(() => {
+    if (!open) return;
+    const close = () => setOpen(false);
+    window.addEventListener('scroll', close, true);
+    window.addEventListener('resize', close);
+    return () => {
+      window.removeEventListener('scroll', close, true);
+      window.removeEventListener('resize', close);
+    };
+  }, [open]);
+
+  if (items.length === 0) return <>{children}</>;
+
+  const glass = 'color-mix(in oklab, var(--surface) 82%, transparent)';
+  const hairline = '1px solid color-mix(in oklab, var(--border) 70%, transparent)';
+
+  return (
+    <>
+      <span
+        ref={triggerRef}
+        className="cursor-help border-b border-dotted"
+        style={{ borderColor: 'var(--text-muted)' }}
+        onMouseEnter={() => {
+          computePosition();
+          setOpen(true);
+        }}
+        onMouseLeave={() => setOpen(false)}
+      >
+        {children}
+      </span>
+      {createPortal(
+        <AnimatePresence>
+          {open && pos ? (
+            <motion.div
+              className="pointer-events-none fixed z-[150] overflow-hidden"
+              style={{
+                top: pos.openUp ? undefined : pos.top,
+                bottom: pos.openUp ? window.innerHeight - pos.top : undefined,
+                left: pos.left,
+                width,
+                transformOrigin: `${pos.arrowLeft}px ${pos.openUp ? '100%' : '0%'}`,
+                backgroundColor: glass,
+                backdropFilter: 'blur(20px) saturate(180%)',
+                WebkitBackdropFilter: 'blur(20px) saturate(180%)',
+                border: hairline,
+                boxShadow: '0 4px 12px rgba(0,0,0,.10), 0 1px 3px rgba(0,0,0,.08)',
+              }}
+              initial={{ opacity: 0, scale: 0.92 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.94 }}
+              transition={{ type: 'spring', stiffness: 420, damping: 32 }}
+            >
+              <span
+                className="absolute h-2.5 w-2.5 rotate-45"
+                style={{
+                  left: pos.arrowLeft - 5,
+                  top: pos.openUp ? undefined : -5,
+                  bottom: pos.openUp ? -5 : undefined,
+                  backgroundColor: glass,
+                  borderLeft: pos.openUp ? 'none' : hairline,
+                  borderTop: pos.openUp ? 'none' : hairline,
+                  borderRight: pos.openUp ? hairline : 'none',
+                  borderBottom: pos.openUp ? hairline : 'none',
+                }}
+              />
+              <div className="relative py-2">
+                {items.map((it, idx) => {
+                  const s = checklistBadge(it.status);
+                  const Icon = REQUIREMENT_STATUS_ICON[it.status] || CalendarClock;
+                  const vState = validityState(it.validity_to);
+                  return (
+                    <div
+                      key={it.code}
+                      className={cn('flex items-center gap-2 px-3', idx !== items.length - 1 && 'border-b')}
+                      style={{
+                        height: REQ_TOOLTIP_ROW_HEIGHT,
+                        borderColor: 'color-mix(in oklab, var(--border) 45%, transparent)',
+                      }}
+                    >
+                      <span
+                        className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full"
+                        style={{ backgroundColor: s.bg, color: s.color }}
+                      >
+                        <Icon size={11} strokeWidth={2.5} />
+                      </span>
+                      <span className="min-w-0 flex-1 truncate text-[11px] font-medium" style={{ color: 'var(--text)' }}>
+                        {it.name}
+                      </span>
+                      {vState === 'expired' || vState === 'expiring' ? (
+                        <span className="shrink-0 text-[9px] font-bold uppercase" style={{ color: VALIDITY_COLOR[vState] }}>
+                          {vState === 'expired' ? 'Expired' : 'Expiring'}
+                        </span>
+                      ) : null}
+                      <span className="shrink-0 text-[9px] font-bold uppercase tracking-wide" style={{ color: s.color }}>
+                        {CHECKLIST_STATUS_LABELS[it.status] || it.status}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </motion.div>
+          ) : null}
+        </AnimatePresence>,
+        document.body
+      )}
+    </>
+  );
 }
 
 const TOOLTIP_WIDTH = 250;
@@ -403,34 +615,39 @@ export function ComplianceInspections({
     canDelete: fullAccess || perm.can_delete,
   };
 
-  const [tab, setTab] = useState<'inspections' | 'monitor'>('inspections');
+  const [tab, setTab] = useState<'inspections' | 'monitor' | 'requirements'>('inspections');
   const [rows, setRows] = useState<InspectionRow[]>([]);
+  const [locators, setLocators] = useState<LocatorComplianceRow[]>([]);
   const [summary, setSummary] = useState<Summary | null>(null);
   const [meta, setMeta] = useState<Meta>({ inspectors: [], proponents: [], types: [] });
   const [loading, setLoading] = useState(true);
 
   const [statusFilter, setStatusFilter] = useState('');
-  const [typeFilter, setTypeFilter] = useState('');
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
 
   const [selectedId, setSelectedId] = useState<number | null>(null);
-  const [creating, setCreating] = useState(false);
-  const [selectedProponent, setSelectedProponent] = useState<{ id: number; name: string } | null>(null);
+  // New Inspection modal: `proponentId` pre-selects the locator when it's
+  // opened from that locator's drawer.
+  const [creating, setCreating] = useState<{
+    proponentId?: number;
+    /** Types that already have an inspection there, left out of the picker. */
+    usedTypeCodes?: string[];
+  } | null>(null);
+  // Inspections drawer: every inspection of one locator.
+  const [drawer, setDrawer] = useState<{ proponentId: number; title: string; subtitle: string } | null>(null);
 
   const loadList = useCallback(async () => {
-    const params = new URLSearchParams();
-    if (statusFilter) params.set('status', statusFilter);
-    if (typeFilter) params.set('typeId', typeFilter);
-    if (search.trim()) params.set('search', search.trim());
-    const [listJson, summaryJson] = await Promise.all([
-      apiFetch(`/api/inspections?${params.toString()}`),
+    const [locatorJson, listJson, summaryJson] = await Promise.all([
+      apiFetch('/api/inspections/locators/compliance'),
+      apiFetch('/api/inspections'),
       apiFetch('/api/inspections/summary'),
     ]);
+    setLocators(locatorJson.data || []);
     setRows(listJson.data || []);
     setSummary(summaryJson.data || null);
-  }, [statusFilter, typeFilter, search]);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -453,7 +670,7 @@ export function ComplianceInspections({
 
   useEffect(() => {
     setPage(1);
-  }, [statusFilter, typeFilter, search]);
+  }, [statusFilter, search]);
 
   // Deep-link from a notification's "View" button (?applicationId=...): find
   // the inspection tied to that application (an inspection's own id, not the
@@ -482,7 +699,36 @@ export function ComplianceInspections({
     navigate(`/compliance/inspections${cleaned ? `?${cleaned}` : ''}`, { replace: true });
   }, [locationSearch, navigate, rows, loading]);
 
-  const pg = usePagination(rows, pageSize, page);
+  // One row per registered locator, measured against the active Compliance
+  // Requirements (File Maintenance). Its checklist and inspections live in
+  // the drawer. Pagination counts locators.
+  const filteredLocators = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return locators.filter((l) => {
+      if (statusFilter && l.status !== statusFilter) return false;
+      if (!q) return true;
+      return [l.proponent_name, l.ref_no, l.business_type].some((v) => (v || '').toLowerCase().includes(q));
+    });
+  }, [locators, search, statusFilter]);
+  const tiles = useMemo(
+    () => ({
+      locators: locators.length,
+      completed: locators.filter((l) => l.status === 'COMPLETED').length,
+      inProgress: locators.filter((l) => l.status === 'IN_PROGRESS').length,
+      notComplied: locators.reduce((n, l) => n + l.not_complied, 0),
+      expiring: locators.reduce((n, l) => n + l.expiring, 0),
+      expired: locators.reduce((n, l) => n + l.expired, 0),
+    }),
+    [locators]
+  );
+  const openLocator = (l: LocatorComplianceRow) =>
+    setDrawer({
+      proponentId: l.proponent_id,
+      title: l.proponent_name,
+      subtitle: [l.ref_no ? `Ref No ${l.ref_no}` : null, l.business_type].filter(Boolean).join(' · ') || 'Locator compliance',
+    });
+
+  const pg = usePagination(filteredLocators, pageSize, page);
 
   const refresh = useCallback(async () => {
     try {
@@ -495,19 +741,20 @@ export function ComplianceInspections({
   return (
     <div className="flex flex-col gap-4">
       <div className="grid grid-cols-3 lg:grid-cols-6 gap-2">
-        <StatTile icon={ClipboardCheck} label="Total" value={summary?.total ?? '—'} />
-        <StatTile icon={CalendarClock} label="Scheduled" value={summary?.by_status?.SCHEDULED ?? '—'} tone="#f59e0b" />
-        <StatTile icon={ClipboardList} label="In Progress" value={summary?.by_status?.IN_PROGRESS ?? '—'} tone="#3b82f6" />
-        <StatTile icon={ShieldCheck} label="Completed" value={summary?.by_status?.COMPLETED ?? '—'} tone="#10b981" />
-        <StatTile icon={FileText} label="Open Findings" value={summary?.open_findings ?? '—'} tone="#f59e0b" />
-        <StatTile icon={AlertTriangle} label="Overdue Actions" value={summary?.overdue_actions ?? '—'} tone="#ef4444" />
+        <StatTile icon={ClipboardCheck} label="Locators" value={loading ? '—' : tiles.locators} />
+        <StatTile icon={ShieldCheck} label="Completed" value={loading ? '—' : tiles.completed} tone="#10b981" />
+        <StatTile icon={ClipboardList} label="In Progress" value={loading ? '—' : tiles.inProgress} tone="#3b82f6" />
+        <StatTile icon={X} label="Not Complied" value={loading ? '—' : tiles.notComplied} tone="#ef4444" />
+        <StatTile icon={CalendarClock} label="Expiring Soon" value={loading ? '—' : tiles.expiring} tone="#f59e0b" />
+        <StatTile icon={AlertTriangle} label="Expired" value={loading ? '—' : tiles.expired} tone="#ef4444" />
       </div>
 
       <div className="flex items-center gap-1 border-b" style={{ borderColor: 'var(--border)' }}>
         {(
           [
-            ['inspections', 'Inspections'],
+            ['inspections', 'Locators'],
             ['monitor', 'Compliance Monitor'],
+            ['requirements', 'Compliance Requirements'],
           ] as const
         ).map(([k, label]) => (
           <button
@@ -518,9 +765,9 @@ export function ComplianceInspections({
               tab === k ? 'border-[var(--text)] text-[var(--text)]' : 'border-transparent text-secondary hover:text-[var(--text)]'
             )}
           >
-            {k === 'monitor' ? (
+            {k === 'monitor' || k === 'requirements' ? (
               <>
-                <span className="sm:hidden">Monitor</span>
+                <span className="sm:hidden">{k === 'monitor' ? 'Monitor' : 'Requirements'}</span>
                 <span className="hidden sm:inline">{label}</span>
               </>
             ) : (
@@ -533,7 +780,7 @@ export function ComplianceInspections({
             <button
               className="rounded-lg px-3 py-1.5 text-[12px] font-semibold mb-1 whitespace-nowrap"
               style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
-              onClick={() => setCreating(true)}
+              onClick={() => setCreating({})}
             >
               <Plus size={13} className="inline mr-1" />
               <span className="sm:hidden">New</span>
@@ -543,125 +790,100 @@ export function ComplianceInspections({
         </div>
       </div>
 
-      {tab === 'monitor' ? (
+      {tab === 'requirements' ? (
+        <ComplianceRequirementsManagement
+          onChanged={() => {
+            // Locator totals and the New Inspection requirement list both
+            // come from this list.
+            refresh();
+            apiFetch('/api/inspections/meta')
+              .then((j) => setMeta(j.data || { inspectors: [], proponents: [], types: [] }))
+              .catch(() => undefined);
+          }}
+        />
+      ) : tab === 'monitor' ? (
         <MonitorTab
           summary={summary}
           loading={loading}
-          onOpenProponent={(pid, name) => setSelectedProponent({ id: pid, name })}
+          onOpenProponent={(pid, name) =>
+            setDrawer({ proponentId: pid, title: name, subtitle: 'All inspections for this locator' })
+          }
         />
       ) : (
         <>
-          <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
-            <div className="relative group w-full sm:w-64">
-              <Search
-                size={14}
-                className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)] group-focus-within:text-[var(--text)] transition-colors pointer-events-none"
-              />
-              <input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search inspection / locator…"
-                className="h-9 rounded-full pl-9 pr-3 text-xs w-full focus:outline-none focus:ring-1 focus:ring-[var(--border)] text-[var(--text)] placeholder:text-[var(--text-muted)] transition-all"
-                style={{ backgroundColor: 'color-mix(in oklab, var(--control-bg) 70%, transparent)' }}
-              />
-            </div>
-            {/* Side by side on phones so the filters don't eat two full rows. */}
-            <div className="grid grid-cols-2 gap-2 sm:flex">
-              <div className="min-w-0 sm:w-44">
+          <div
+            className="rounded-xl border overflow-hidden shadow-sm"
+            style={{ borderColor: 'var(--border)', backgroundColor: 'var(--surface)' }}
+          >
+            {/* Search and filter sit inside the card, like Renewal Tracking. */}
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 px-3 pt-3 sm:px-4 sm:pt-4 pb-1">
+              <div className="relative group w-full sm:w-72">
+                <Search
+                  size={14}
+                  className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)] group-focus-within:text-[var(--text)] transition-colors pointer-events-none"
+                />
+                <input
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Search locator / ref no…"
+                  className="h-9 rounded-full pl-9 pr-3 text-xs w-full focus:outline-none focus:ring-1 focus:ring-[var(--border)] text-[var(--text)] placeholder:text-[var(--text-muted)] transition-all"
+                  style={{ backgroundColor: 'color-mix(in oklab, var(--control-bg) 70%, transparent)' }}
+                />
+              </div>
+              <div className="min-w-0 w-full sm:w-44">
                 <AppSelect
                   compact
                   placeholder="All statuses"
                   value={statusFilter}
                   onChange={setStatusFilter}
-                  options={STATUS_ORDER.map((s) => ({ value: s, label: STATUS_LABELS[s] }))}
-                />
-              </div>
-              <div className="min-w-0 sm:w-52">
-                <AppSelect
-                  compact
-                  placeholder="All types"
-                  value={typeFilter}
-                  onChange={setTypeFilter}
-                  options={meta.types.map((t) => ({ value: String(t.id), label: t.name }))}
+                  options={[
+                    { value: 'IN_PROGRESS', label: 'In Progress' },
+                    { value: 'COMPLETED', label: 'Completed' },
+                  ]}
                 />
               </div>
             </div>
-          </div>
-
-          <div
-            className="rounded-xl border overflow-hidden shadow-sm"
-            style={{ borderColor: 'var(--border)', backgroundColor: 'var(--surface)' }}
-          >
             {loading ? (
               <div className="p-4">
                 <TableSkeleton rows={6} />
               </div>
-            ) : rows.length === 0 ? (
+            ) : filteredLocators.length === 0 ? (
               <EmptyState
                 icon={<ClipboardCheck size={40} className="opacity-40" />}
-                title="No inspections"
-                description="Schedule an inspection to start tracking locator compliance."
+                title="No locators"
+                description={locators.length ? 'Try adjusting your search or filters.' : 'No registered locators yet.'}
               />
             ) : (
               <>
-              {/* Phones: stacked cards instead of a horizontally scrolling table */}
+              {/* Phones: one card per locator; tap to open its compliance. */}
               <div className="sm:hidden p-2 space-y-2">
-                {pg.pageItems.map((r) => (
+                {pg.pageItems.map((l) => (
                   <button
-                    key={r.id}
+                    key={l.proponent_id}
                     type="button"
                     className="w-full text-left rounded-xl p-3 cursor-pointer active:bg-[var(--selected-bg)] transition-colors"
                     style={{
                       border: '1px solid var(--border-subtle)',
                       backgroundColor: 'color-mix(in oklab, var(--control-bg) 35%, transparent)',
                     }}
-                    onClick={() => setSelectedId(r.id)}
+                    onClick={() => openLocator(l)}
                   >
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0 flex-1">
                         <div className="text-[13px] font-semibold leading-snug break-words" style={{ color: 'var(--text)' }}>
-                          {r.title}
+                          {l.ref_no || '—'}
                         </div>
                         <div className="mt-0.5 text-[11px] text-secondary break-words">
-                          {r.proponent_name || '—'}
-                          {r.inspection_type_name || r.inspection_type_code
-                            ? ` · ${r.inspection_type_name || r.inspection_type_code}`
-                            : ''}
+                          {l.proponent_name}
+                          {l.business_type ? ` · ${l.business_type}` : ''}
                         </div>
                       </div>
-                      <div className="shrink-0 flex flex-col items-end gap-1">
-                        <Badge label={STATUS_LABELS[r.status] || r.status} styles={statusBadge(r.status)} />
-                        {r.result ? (
-                          <Badge label={RESULT_LABELS[r.result] || r.result} styles={resultBadge(r.result)} />
-                        ) : null}
-                      </div>
+                      <Badge label={LOCATOR_STATUS_LABELS[l.status]} styles={statusBadge(l.status)} />
                     </div>
-
-                    <div className="mt-2.5 grid grid-cols-3 gap-2 text-[11px]">
-                      <div className="min-w-0">
-                        <div className="text-[9px] uppercase tracking-wider text-secondary">Scheduled</div>
-                        <div className="truncate" style={{ color: 'var(--text)' }}>{fmtDate(r.scheduled_date)}</div>
-                      </div>
-                      <div className="min-w-0">
-                        <div className="text-[9px] uppercase tracking-wider text-secondary">Inspector</div>
-                        <div className="truncate" style={{ color: 'var(--text)' }}>
-                          {r.inspector_name || r.inspector_username || '—'}
-                        </div>
-                      </div>
-                      <div className="min-w-0 text-right">
-                        <div className="text-[9px] uppercase tracking-wider text-secondary">Findings</div>
-                        {r.open_findings > 0 ? (
-                          <div style={{ color: '#ef4444' }}>{r.open_findings} open</div>
-                        ) : (
-                          <div style={{ color: 'var(--text)' }}>{r.total_findings || 0}</div>
-                        )}
-                      </div>
+                    <div className="mt-2 text-[11px] text-secondary">
+                      {l.complied}/{l.total} complied
+                      {l.expired > 0 ? <span style={{ color: '#ef4444' }}> · {l.expired} expired</span> : null}
                     </div>
-                    {r.overdue_actions > 0 ? (
-                      <div className="mt-2 inline-flex items-center gap-1 text-[11px]" style={{ color: '#ef4444' }}>
-                        <AlertTriangle size={12} /> {r.overdue_actions} overdue action{r.overdue_actions === 1 ? '' : 's'}
-                      </div>
-                    ) : null}
                   </button>
                 ))}
               </div>
@@ -670,93 +892,47 @@ export function ComplianceInspections({
                 <table className="min-w-full text-left text-xs">
                   <thead>
                     <tr style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+                      <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary">Ref No.</th>
                       <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary">Locator</th>
-                      <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary">Inspection Type</th>
-                      <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary">Progress</th>
+                      <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary">Application Type</th>
+                      <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary">Compliance</th>
                       <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary">Status</th>
-                      <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary text-right">Actions</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {pg.pageItems.map((r) => {
-                      const { percent, barColor } = statusProgress(r.status);
-                      const typeName = r.inspection_type_name || r.inspection_type_code || '';
-                      return (
-                        <tr
-                          key={r.id}
-                          className="transition-colors cursor-pointer hover:bg-[var(--selected-bg)]"
-                          style={{ borderTop: '1px solid var(--border-subtle)' }}
-                          onClick={() => setSelectedId(r.id)}
-                        >
-                          <td className="px-3 py-2.5">
-                            {r.proponent_name ? (
-                              <button
-                                type="button"
-                                className="font-semibold hover:underline cursor-pointer"
-                                style={{ color: 'var(--text)' }}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setSelectedProponent({ id: r.proponent_id, name: r.proponent_name as string });
-                                }}
-                                title="View all inspections for this locator"
-                              >
-                                {r.proponent_name}
-                              </button>
-                            ) : (
-                              <div className="font-semibold" style={{ color: 'var(--text)' }}>
-                                —
-                              </div>
-                            )}
-                            <div className="mt-0.5 text-[11px] text-secondary">{r.title}</div>
-                          </td>
-                          <td className="px-3 py-2.5">
-                            {typeName ? (
-                              <span
-                                className="inline-flex items-center rounded-full border px-2.5 py-0.5 text-[11px] font-medium"
-                                style={typeBadgeStyle}
-                              >
-                                {typeName}
-                              </span>
-                            ) : (
-                              <span className="text-secondary">—</span>
-                            )}
-                          </td>
-                          <td className="px-3 py-2.5 min-w-[180px]">
-                            <InspectionProgressTooltip row={r}>
-                              <div className="flex items-center gap-2">
-                                <div className="h-2.5 rounded-full overflow-hidden w-[120px]" style={{ backgroundColor: 'var(--input-border)' }}>
-                                  <div className="h-full rounded-full transition-all" style={{ width: `${percent}%`, backgroundColor: barColor }} />
-                                </div>
-                                <span className="text-[11px] font-semibold">{percent}%</span>
-                              </div>
-                            </InspectionProgressTooltip>
-                          </td>
-                          <td className="px-3 py-2.5">
-                            <span
-                              className="inline-flex items-center rounded-full border px-2.5 py-0.5 text-[11px] font-semibold"
-                              style={{
-                                backgroundColor: statusBadge(r.status).bg,
-                                color: statusBadge(r.status).color,
-                                borderColor: statusBadge(r.status).border,
-                              }}
-                            >
-                              {STATUS_LABELS[r.status] || r.status}
+                    {pg.pageItems.map((l) => (
+                      <tr
+                        key={l.proponent_id}
+                        className="transition-colors cursor-pointer hover:bg-[var(--selected-bg)]"
+                        style={{ borderTop: '1px solid var(--border-subtle)' }}
+                        onClick={() => openLocator(l)}
+                      >
+                        <td className="px-3 py-2.5">
+                          <div className="font-semibold" style={{ color: 'var(--text)' }}>
+                            {l.ref_no || '—'}
+                          </div>
+                        </td>
+                        <td className="px-3 py-2.5 text-[11px] text-secondary">{l.proponent_name}</td>
+                        <td className="px-3 py-2.5 text-[11px] text-secondary">{l.business_type || '—'}</td>
+                        <td className="px-3 py-2.5 text-[11px] text-secondary">
+                          <RequirementsTooltip items={l.items}>
+                            {l.complied}/{l.total} complied
+                          </RequirementsTooltip>
+                          {l.expired > 0 ? (
+                            <span className="ml-2 font-semibold" style={{ color: '#ef4444' }}>
+                              {l.expired} expired
                             </span>
-                          </td>
-                          <td className="px-3 py-2.5 text-right" onClick={(e) => e.stopPropagation()}>
-                            <button
-                              className="inline-flex items-center justify-center rounded-lg border h-8 w-8 text-xs font-semibold"
-                              style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'var(--control-bg)' }}
-                              onClick={() => setSelectedId(r.id)}
-                              title="Open Inspection"
-                              aria-label="Open Inspection"
-                            >
-                              <Pencil size={14} />
-                            </button>
-                          </td>
-                        </tr>
-                      );
-                    })}
+                          ) : l.expiring > 0 ? (
+                            <span className="ml-2 font-semibold" style={{ color: '#f59e0b' }}>
+                              {l.expiring} expiring
+                            </span>
+                          ) : null}
+                        </td>
+                        <td className="px-3 py-2.5">
+                          <Badge label={LOCATOR_STATUS_LABELS[l.status]} styles={statusBadge(l.status)} />
+                        </td>
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
               </div>
@@ -766,7 +942,7 @@ export function ComplianceInspections({
               <DataTableControls
                 page={page}
                 totalPages={pg.totalPages}
-                totalItems={rows.length}
+                totalItems={filteredLocators.length}
                 showingFrom={pg.showingFrom}
                 showingTo={pg.showingTo}
                 visiblePageNumbers={pg.visiblePageNumbers}
@@ -782,15 +958,14 @@ export function ComplianceInspections({
       )}
 
       <AnimatePresence>
-        {selectedProponent != null ? (
+        {drawer != null ? (
           <LocatorInspectionsDrawer
-            proponentId={selectedProponent.id}
-            proponentName={selectedProponent.name}
-            onClose={() => setSelectedProponent(null)}
-            onOpenInspection={(id) => {
-              setSelectedProponent(null);
-              setSelectedId(id);
-            }}
+            proponentId={drawer.proponentId}
+            title={drawer.title}
+            subtitle={drawer.subtitle}
+            canEdit={perms.canEdit}
+            onChecklistSaved={refresh}
+            onClose={() => setDrawer(null)}
           />
         ) : null}
         {selectedId != null ? (
@@ -805,9 +980,11 @@ export function ComplianceInspections({
         {creating ? (
           <NewInspection
             meta={meta}
-            onClose={() => setCreating(false)}
+            defaultProponentId={creating.proponentId}
+            usedTypeCodes={creating.usedTypeCodes}
+            onClose={() => setCreating(null)}
             onCreated={async (id) => {
-              setCreating(false);
+              setCreating(null);
               await refresh();
               setSelectedId(id);
             }}
@@ -970,44 +1147,43 @@ function MonitorTab({
 
 function LocatorInspectionsDrawer({
   proponentId,
-  proponentName,
+  title,
+  subtitle,
+  canEdit,
+  onChecklistSaved,
   onClose,
-  onOpenInspection,
 }: {
   proponentId: number;
-  proponentName: string;
+  title: string;
+  subtitle: string;
+  canEdit: boolean;
+  onChecklistSaved: () => void;
   onClose: () => void;
-  onOpenInspection: (id: number) => void;
 }) {
-  const [rows, setRows] = useState<InspectionRow[]>([]);
-  const [loading, setLoading] = useState(true);
-
+  // The locator's compliance checklist, one tab per requirement category,
+  // plus an Activity tab of changes made to it.
+  const [tab, setTab] = useState<ComplianceItem['group'] | 'ACTIVITY'>('COMPLIANCE');
+  const [activityKey, setActivityKey] = useState(0);
+  const [checklist, setChecklist] = useState<ComplianceItem[]>([]);
+  const [checklistLoading, setChecklistLoading] = useState(true);
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
-    apiFetch(`/api/inspections?proponentId=${proponentId}`)
+    setChecklistLoading(true);
+    apiFetch(`/api/inspections/locators/${proponentId}/compliance`)
       .then((j) => {
-        if (!cancelled) setRows(j.data || []);
+        if (!cancelled) setChecklist(j.data || []);
       })
       .catch((err) => {
         if (!cancelled) toast.error((err as Error).message);
       })
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) setChecklistLoading(false);
       });
     return () => {
       cancelled = true;
     };
   }, [proponentId]);
 
-  const stats = useMemo(() => {
-    const total = rows.length;
-    const completed = rows.filter((r) => r.status === 'COMPLETED').length;
-    const failed = rows.filter((r) => r.result === 'FAILED').length;
-    const openFindings = rows.reduce((sum, r) => sum + (r.open_findings || 0), 0);
-    const overdueActions = rows.reduce((sum, r) => sum + (r.overdue_actions || 0), 0);
-    return { total, completed, failed, openFindings, overdueActions };
-  }, [rows]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-stretch justify-end">
@@ -1021,7 +1197,7 @@ function LocatorInspectionsDrawer({
         onClick={onClose}
       />
       <motion.div
-        className="relative z-10 h-full w-full max-w-2xl border-l shadow-2xl flex flex-col"
+        className="relative z-10 h-full w-full max-w-3xl border-l shadow-2xl flex flex-col"
         style={{ backgroundColor: 'var(--surface)', borderColor: 'var(--border)' }}
         initial={{ x: '100%' }}
         animate={{ x: 0 }}
@@ -1031,9 +1207,9 @@ function LocatorInspectionsDrawer({
         <div className="px-4 py-3 border-b flex items-start justify-between gap-3" style={{ borderColor: 'var(--border)' }}>
           <div className="min-w-0">
             <div className="text-sm font-bold truncate" style={{ color: 'var(--text)' }}>
-              {proponentName}
+              {title}
             </div>
-            <div className="text-[11px] text-secondary">All inspections for this locator</div>
+            <div className="text-[11px] text-secondary truncate">{subtitle}</div>
           </div>
           <button
             className="rounded-lg p-1 border shrink-0"
@@ -1044,69 +1220,156 @@ function LocatorInspectionsDrawer({
           </button>
         </div>
 
-        <div className="px-4 py-3 grid grid-cols-3 sm:grid-cols-5 gap-2 border-b" style={{ borderColor: 'var(--border)' }}>
-          <InfoCell label="Total" value={stats.total} />
-          <InfoCell label="Completed" value={stats.completed} />
-          <InfoCell label="Failed" value={stats.failed} />
-          <InfoCell label="Open Findings" value={stats.openFindings} />
-          <InfoCell label="Overdue Actions" value={stats.overdueActions} />
+        <div className="px-4 flex items-center gap-1 border-b overflow-x-auto" style={{ borderColor: 'var(--border)' }}>
+          {[
+            ...CHECKLIST_GROUPS.map((g) => {
+              const inGroup = checklist.filter((it) => it.group === g.key);
+              const complied = inGroup.filter((it) => it.status === 'COMPLIED').length;
+              return { key: g.key, label: g.label, count: checklistLoading ? '' : `${complied}/${inGroup.length}` };
+            }),
+            { key: 'ACTIVITY' as const, label: 'Activity', count: '' },
+          ].map((t) => (
+            <button
+              key={t.key}
+              type="button"
+              onClick={() => setTab(t.key)}
+              className={cn(
+                'px-2.5 py-2.5 text-[12px] font-semibold border-b-2 -mb-px whitespace-nowrap inline-flex items-center gap-1.5 transition-colors',
+                tab === t.key
+                  ? 'border-[var(--text)] text-[var(--text)]'
+                  : 'border-transparent text-secondary hover:text-[var(--text)]'
+              )}
+            >
+              {t.label}
+              {t.count ? <span className="text-[10px] font-bold opacity-60 tabular-nums">{t.count}</span> : null}
+            </button>
+          ))}
         </div>
 
         <div className="flex-1 overflow-y-auto p-4">
-          {loading ? (
-            <TableSkeleton rows={5} />
-          ) : rows.length === 0 ? (
-            <EmptyState
-              icon={<ClipboardCheck size={40} className="opacity-40" />}
-              title="No inspections"
-              description="This locator has no recorded inspections yet."
-            />
+          {tab === 'ACTIVITY' ? (
+            <LocatorActivity proponentId={proponentId} reloadKey={activityKey} />
+          ) : checklistLoading ? (
+            <TableSkeleton rows={6} />
           ) : (
-            <div className="flex flex-col gap-2">
-              {rows.map((r) => (
-                <button
-                  key={r.id}
-                  type="button"
-                  onClick={() => onOpenInspection(r.id)}
-                  className="w-full text-left rounded-xl border p-3 hover:bg-[var(--selected-bg)] transition-colors"
-                  style={{ borderColor: 'var(--border)' }}
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0 flex-1">
-                      <div className="text-[13px] font-semibold" style={{ color: 'var(--text)' }}>
-                        {r.title}
-                      </div>
-                      <div className="text-[11px] text-secondary mt-0.5">
-                        {r.inspection_type_name || r.inspection_type_code || 'Inspection'} · Scheduled{' '}
-                        {fmtDate(r.scheduled_date)}
-                      </div>
-                    </div>
-                    <div className="shrink-0 flex flex-col items-end gap-1">
-                      <Badge label={STATUS_LABELS[r.status] || r.status} styles={statusBadge(r.status)} />
-                      {r.result ? <Badge label={RESULT_LABELS[r.result] || r.result} styles={resultBadge(r.result)} /> : null}
-                    </div>
-                  </div>
-                  {r.open_findings > 0 || r.overdue_actions > 0 ? (
-                    <div className="mt-2 flex items-center gap-3 text-[11px]">
-                      {r.open_findings > 0 ? (
-                        <span style={{ color: '#ef4444' }}>
-                          {r.open_findings} open finding{r.open_findings === 1 ? '' : 's'}
-                        </span>
-                      ) : null}
-                      {r.overdue_actions > 0 ? (
-                        <span style={{ color: '#ef4444' }}>
-                          {r.overdue_actions} overdue action{r.overdue_actions === 1 ? '' : 's'}
-                        </span>
-                      ) : null}
-                    </div>
-                  ) : null}
-                </button>
-              ))}
-            </div>
+            <LocatorChecklist
+              proponentId={proponentId}
+              items={checklist}
+              group={tab}
+              canEdit={canEdit}
+              onSaved={(saved) => {
+                setChecklist((prev) => prev.map((it) => (it.code === saved.code ? saved : it)));
+                setActivityKey((k) => k + 1);
+                onChecklistSaved();
+              }}
+            />
           )}
         </div>
       </motion.div>
     </div>
+  );
+}
+
+type LocatorActivityRow = {
+  id: number;
+  created_at: string;
+  actor_name: string | null;
+  actor_username: string | null;
+  item: string | null;
+  status: string | null;
+  changes: { field: string; from?: string | null; to?: string | null }[];
+};
+
+const CHECKLIST_FIELD_LABELS: Record<string, string> = {
+  particular: 'Particular',
+  commitment: 'Commitment',
+  actual: 'Actual',
+  validity_from: 'Validity from',
+  validity_to: 'Validity to',
+  status: 'Status',
+  remarks: 'Remarks',
+  date_submitted: 'Date submitted',
+};
+
+function fmtChangeValue(field: string, v: string | null | undefined) {
+  if (v == null || v === '') return '—';
+  if (field === 'status') return CHECKLIST_STATUS_LABELS[v] || v;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return fmtDate(v);
+  return v;
+}
+
+function fmtDateTime(v: string | null | undefined) {
+  if (!v) return '—';
+  const d = new Date(v);
+  if (Number.isNaN(d.getTime())) return '—';
+  return d.toLocaleString('en-PH', { year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+}
+
+/** History of the locator's compliance checklist edits: who changed which
+ * requirement, when, and what changed. */
+function LocatorActivity({ proponentId, reloadKey }: { proponentId: number; reloadKey: number }) {
+  const [rows, setRows] = useState<LocatorActivityRow[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    apiFetch(`/api/inspections/locators/${proponentId}/activity`)
+      .then((j) => {
+        if (!cancelled) setRows(j.data || []);
+      })
+      .catch((err) => {
+        if (!cancelled) toast.error((err as Error).message);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [proponentId, reloadKey]);
+
+  if (loading) return <TableSkeleton rows={5} />;
+  if (rows.length === 0) {
+    return (
+      <EmptyState
+        icon={<CalendarClock size={40} className="opacity-40" />}
+        title="No activity"
+        description="Changes to this locator's compliance requirements are logged here."
+      />
+    );
+  }
+  return (
+    <ol className="flex flex-col gap-2">
+      {rows.map((a) => (
+        <li key={a.id} className="rounded-xl border px-3 py-2.5 text-[12px]" style={{ borderColor: 'var(--border)' }}>
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="font-semibold truncate" style={{ color: 'var(--text)' }}>
+                {a.item || 'Compliance requirement'}
+              </div>
+              <div className="text-[10px] text-secondary mt-0.5">
+                {a.actor_name || a.actor_username || 'System'} · {fmtDateTime(a.created_at)}
+              </div>
+            </div>
+            {a.status ? (
+              <Badge label={(CHECKLIST_STATUS_LABELS[a.status] || a.status).toUpperCase()} styles={checklistBadge(a.status)} />
+            ) : null}
+          </div>
+          {a.changes.length > 0 ? (
+            <ul className="mt-1.5 space-y-0.5 text-[11px] text-secondary">
+              {a.changes.map((c) => (
+                <li key={c.field}>
+                  <span className="font-medium" style={{ color: 'var(--text)' }}>
+                    {CHECKLIST_FIELD_LABELS[c.field] || c.field}:
+                  </span>{' '}
+                  {fmtChangeValue(c.field, c.from)} → {fmtChangeValue(c.field, c.to)}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </li>
+      ))}
+    </ol>
   );
 }
 
@@ -1271,14 +1534,130 @@ function OverviewTab({
   const [inspectorId, setInspectorId] = useState(i.assigned_inspector_id ? String(i.assigned_inspector_id) : '');
   const [result, setResult] = useState(i.result || 'PASSED');
   const [summary, setSummary] = useState(i.summary || '');
+  const [validityFrom, setValidityFrom] = useState(ymdOf(i.validity_from));
+  const [validityTo, setValidityTo] = useState(ymdOf(i.validity_to));
+  const validityInvalid = Boolean(validityFrom && validityTo && validityTo < validityFrom);
+  const validityChanged = validityFrom !== ymdOf(i.validity_from) || validityTo !== ymdOf(i.validity_to);
+  const vState = validityState(i.validity_to);
+  // The Compliance Requirement this inspection covers. Older inspections
+  // carry a retired inspection type instead and start blank here.
+  const isLegacyType = Boolean(i.inspection_type_code && !i.inspection_category);
+  const currentReq = isLegacyType ? '' : i.inspection_type_code || '';
+  const [requirement, setRequirement] = useState(currentReq);
 
   return (
     <div className="flex flex-col gap-4">
+      <div className="rounded-xl border p-3" style={{ borderColor: 'var(--border)' }}>
+        <div className="text-[11px] font-bold uppercase tracking-wide text-secondary mb-2">Requirement inspected</div>
+        {isLegacyType ? (
+          <p className="mb-2 text-[11px]" style={{ color: '#f59e0b' }}>
+            This inspection was created with the retired inspection type "{i.inspection_type_name || i.inspection_type_code}".
+            Choose the compliance requirement it covers.
+          </p>
+        ) : null}
+        <div className="flex flex-col sm:flex-row gap-2 sm:items-end">
+          <div className="flex-1">
+            <AppSelect
+              compact
+              placeholder="Select requirement…"
+              value={requirement}
+              onChange={setRequirement}
+              options={meta.types.map((t) => ({
+                value: t.code,
+                label: `${CHECKLIST_GROUP_LABEL[t.category] || t.category} · ${t.name}`,
+              }))}
+            />
+          </div>
+          <button
+            className="rounded-lg px-3 py-1.5 text-[12px] font-semibold disabled:opacity-50"
+            style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
+            disabled={busy || !perms.canEdit || !requirement || requirement === currentReq}
+            onClick={() =>
+              run(
+                () =>
+                  apiFetch(`/api/inspections/${i.id}`, {
+                    method: 'PUT',
+                    body: JSON.stringify({ inspection_type_code: requirement }),
+                  }),
+                'Requirement saved'
+              )
+            }
+          >
+            Save
+          </button>
+        </div>
+      </div>
+
       <div className="grid grid-cols-2 gap-2 text-[12px]">
         <InfoCell label="Status" value={STATUS_LABELS[i.status] || i.status} />
         <InfoCell label="Result" value={i.result ? RESULT_LABELS[i.result] || i.result : '—'} />
         <InfoCell label="Scheduled" value={fmtDate(i.scheduled_date)} />
         <InfoCell label="Conducted" value={fmtDate(i.conducted_date)} />
+        <div className="col-span-2">
+          <InfoCell
+            label="Validity"
+            value={
+              fmtValidity(i.validity_from, i.validity_to) ? (
+                <span style={{ color: VALIDITY_COLOR[vState || 'valid'] }}>
+                  {fmtValidity(i.validity_from, i.validity_to)}
+                  {vState === 'expired' ? ' · Expired' : vState === 'expiring' ? ' · Expiring soon' : ''}
+                </span>
+              ) : (
+                '—'
+              )
+            }
+          />
+        </div>
+      </div>
+
+      <div className="rounded-xl border p-3" style={{ borderColor: 'var(--border)' }}>
+        <div className="text-[11px] font-bold uppercase tracking-wide text-secondary mb-2">Validity</div>
+        <div className="flex flex-col sm:flex-row gap-2 sm:items-end">
+          <div className="flex-1 grid grid-cols-2 gap-2">
+            <Field label="From">
+              <DatePicker
+                mode="single"
+                bordered
+                fullWidth
+                placeholder="Start date"
+                value={parseYmd(validityFrom)}
+                onChange={(d: Date | null) => setValidityFrom(toYmd(d))}
+              />
+            </Field>
+            <Field label="To">
+              <DatePicker
+                mode="single"
+                bordered
+                fullWidth
+                placeholder="End date"
+                value={parseYmd(validityTo)}
+                onChange={(d: Date | null) => setValidityTo(toYmd(d))}
+              />
+            </Field>
+          </div>
+          <button
+            className="rounded-lg px-3 py-1.5 text-[12px] font-semibold disabled:opacity-50"
+            style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
+            disabled={busy || !perms.canEdit || !validityChanged || validityInvalid}
+            onClick={() =>
+              run(
+                () =>
+                  apiFetch(`/api/inspections/${i.id}`, {
+                    method: 'PUT',
+                    body: JSON.stringify({ validity_from: validityFrom || null, validity_to: validityTo || null }),
+                  }),
+                'Validity saved'
+              )
+            }
+          >
+            Save
+          </button>
+        </div>
+        {validityInvalid ? (
+          <p className="mt-1.5 text-[11px]" style={{ color: '#ef4444' }}>
+            The end date can't be before the start date.
+          </p>
+        ) : null}
       </div>
 
       <div className="rounded-xl border p-3" style={{ borderColor: 'var(--border)' }}>
@@ -1373,6 +1752,296 @@ function OverviewTab({
             Mark completed
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+const CHECKLIST_GROUPS = [
+  { key: 'COMPLIANCE', label: 'Compliance' },
+  { key: 'PERMITS', label: 'Permits & Clearances' },
+  { key: 'PERFORMANCE', label: 'Performance Commitment' },
+] as const;
+
+const CHECKLIST_GROUP_LABEL: Record<string, string> = {
+  COMPLIANCE: 'Compliance',
+  PERMITS: 'Permits & Clearances',
+  PERFORMANCE: 'Performance Commitment',
+};
+
+const LOCATOR_STATUS_LABELS: Record<LocatorComplianceRow['status'], string> = {
+  IN_PROGRESS: 'In Progress',
+  COMPLETED: 'Completed',
+};
+
+const CHECKLIST_STATUS_LABELS: Record<string, string> = {
+  PENDING: 'Pending',
+  SUBMITTED: 'Submitted',
+  COMPLIED: 'Complied',
+  NOT_COMPLIED: 'Not complied',
+};
+
+function checklistBadge(status: string) {
+  switch (status) {
+    case 'COMPLIED':
+      return { bg: 'rgba(16,185,129,.14)', color: '#10b981', border: 'rgba(16,185,129,.38)' };
+    case 'SUBMITTED':
+      return { bg: 'rgba(59,130,246,.14)', color: '#3b82f6', border: 'rgba(59,130,246,.38)' };
+    case 'NOT_COMPLIED':
+      return { bg: 'rgba(239,68,68,.14)', color: '#ef4444', border: 'rgba(239,68,68,.38)' };
+    default:
+      return { bg: 'rgba(148,163,184,.14)', color: '#94a3b8', border: 'rgba(148,163,184,.28)' };
+  }
+}
+
+/** One group of the locator's legacy BRIDGE compliance checklist: fixed
+ * requirements, each with Particular (or Commitment/Actual), Validity,
+ * Status, Remarks and Date Submitted. Rows read as a summary; Edit opens that
+ * one row's form in place. */
+function LocatorChecklist({
+  proponentId,
+  items,
+  group,
+  canEdit,
+  onSaved,
+}: {
+  proponentId: number;
+  items: ComplianceItem[];
+  group: ComplianceItem['group'];
+  canEdit: boolean;
+  onSaved: (item: ComplianceItem) => void;
+}) {
+  const [editing, setEditing] = useState<string | null>(null);
+  useEffect(() => setEditing(null), [group]);
+  const visible = items.filter((it) => it.group === group);
+
+  return (
+    <div className="flex flex-col gap-3">
+      <p className="text-[11px] text-secondary">
+        {group === 'PERFORMANCE'
+          ? 'Commitments the locator made, against what they actually delivered.'
+          : 'Required documents for this locator. Record what was submitted, how long it is valid, and whether it complies.'}
+      </p>
+
+      <div className="rounded-xl border overflow-hidden" style={{ borderColor: 'var(--border)' }}>
+        {visible.map((it, idx) => (
+          <div key={it.code} style={idx > 0 ? { borderTop: '1px solid var(--border)' } : undefined}>
+            {editing === it.code ? (
+              <ChecklistEditor
+                item={it}
+                proponentId={proponentId}
+                onSaved={(saved) => {
+                  onSaved(saved);
+                  setEditing(null);
+                }}
+                onCancel={() => setEditing(null)}
+              />
+            ) : (
+              <ChecklistRow item={it} canEdit={canEdit} onEdit={() => setEditing(it.code)} />
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ChecklistRow({ item, canEdit, onEdit }: { item: ComplianceItem; canEdit: boolean; onEdit: () => void }) {
+  const validity = fmtValidity(item.validity_from, item.validity_to);
+  const vState = validityState(item.validity_to);
+  const isPerformance = item.group === 'PERFORMANCE';
+  return (
+    <div className="flex flex-col sm:flex-row sm:items-start gap-2 sm:gap-3 px-3 py-3">
+      <div className="min-w-0 flex-1">
+        <div className="text-[13px] font-semibold" style={{ color: 'var(--text)' }}>
+          {item.name}
+        </div>
+        {isPerformance ? (
+          item.commitment || item.actual ? (
+            <div className="mt-0.5 text-[11px] text-secondary">
+              Commitment: <span style={{ color: 'var(--text)' }}>{item.commitment || '—'}</span> · Actual:{' '}
+              <span style={{ color: 'var(--text)' }}>{item.actual || '—'}</span>
+            </div>
+          ) : null
+        ) : item.group !== 'PERMITS' && item.particular ? (
+          <div className="mt-0.5 text-[11px] text-secondary line-clamp-2">{item.particular}</div>
+        ) : null}
+        {item.remarks ? (
+          <div className="mt-0.5 text-[11px] text-secondary italic line-clamp-2">Remarks: {item.remarks}</div>
+        ) : null}
+        <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px]">
+          <span style={{ color: validity ? VALIDITY_COLOR[vState || 'valid'] || 'var(--text-secondary)' : 'var(--text-secondary)' }}>
+            Validity: {validity || '—'}
+            {vState === 'expired' ? ' · Expired' : vState === 'expiring' ? ' · Expiring soon' : ''}
+          </span>
+          <span className="text-secondary">Submitted: {fmtDate(item.date_submitted)}</span>
+        </div>
+      </div>
+      <div className="flex items-center gap-1.5 shrink-0">
+        <Badge label={(CHECKLIST_STATUS_LABELS[item.status] || item.status).toUpperCase()} styles={checklistBadge(item.status)} />
+        {canEdit ? (
+          <button
+            type="button"
+            className="ml-1 inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11px] font-medium"
+            style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'var(--control-bg)', color: 'var(--text)' }}
+            onClick={onEdit}
+          >
+            <Pencil size={12} />
+            Edit
+          </button>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function ChecklistEditor({
+  item,
+  proponentId,
+  onSaved,
+  onCancel,
+}: {
+  item: ComplianceItem;
+  proponentId: number;
+  onSaved: (item: ComplianceItem) => void;
+  onCancel: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [form, setForm] = useState({
+    particular: item.particular || '',
+    commitment: item.commitment || '',
+    actual: item.actual || '',
+    validity_from: ymdOf(item.validity_from),
+    validity_to: ymdOf(item.validity_to),
+    status: item.status || 'PENDING',
+    remarks: item.remarks || '',
+    date_submitted: ymdOf(item.date_submitted),
+  });
+  const set = (patch: Partial<typeof form>) => setForm((f) => ({ ...f, ...patch }));
+  const validityInvalid = Boolean(form.validity_from && form.validity_to && form.validity_to < form.validity_from);
+  const isPerformance = item.group === 'PERFORMANCE';
+
+  const save = async () => {
+    setBusy(true);
+    try {
+      const json = await apiFetch(`/api/inspections/locators/${proponentId}/compliance/${item.code}`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          ...form,
+          validity_from: form.validity_from || null,
+          validity_to: form.validity_to || null,
+          date_submitted: form.date_submitted || null,
+        }),
+      });
+      toast.success(`${item.name} saved`);
+      onSaved(json.data);
+    } catch (err) {
+      toast.error((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="px-3 py-3 flex flex-col gap-2.5" style={{ backgroundColor: 'var(--selected-bg)' }}>
+      <div className="text-[13px] font-semibold" style={{ color: 'var(--text)' }}>
+        {item.name}
+      </div>
+
+      {isPerformance ? (
+        <div className="grid grid-cols-2 gap-2">
+          <Field label="Commitment">
+            <input className={inputCls} value={form.commitment} onChange={(e) => set({ commitment: e.target.value })} />
+          </Field>
+          <Field label="Actual">
+            <input className={inputCls} value={form.actual} onChange={(e) => set({ actual: e.target.value })} />
+          </Field>
+        </div>
+      ) : item.group === 'PERMITS' ? null : (
+        <Field label="Particular">
+          <textarea
+            className={cn(inputCls, 'min-h-[52px] resize-y')}
+            value={form.particular}
+            onChange={(e) => set({ particular: e.target.value })}
+            placeholder="e.g. policy / document no., coverage, issuing office"
+          />
+        </Field>
+      )}
+
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+        <Field label="Validity from">
+          <DatePicker
+            mode="single"
+            bordered
+            fullWidth
+            placeholder="Start"
+            value={parseYmd(form.validity_from)}
+            onChange={(d: Date | null) => set({ validity_from: toYmd(d) })}
+          />
+        </Field>
+        <Field label="Validity to">
+          <DatePicker
+            mode="single"
+            bordered
+            fullWidth
+            placeholder="End"
+            value={parseYmd(form.validity_to)}
+            onChange={(d: Date | null) => set({ validity_to: toYmd(d) })}
+          />
+        </Field>
+        <Field label="Status">
+          <AppSelect
+            compact
+            isClearable={false}
+            value={form.status}
+            onChange={(v) => set({ status: v || 'PENDING' })}
+            options={Object.entries(CHECKLIST_STATUS_LABELS).map(([value, label]) => ({ value, label }))}
+          />
+        </Field>
+        <Field label="Date submitted">
+          <DatePicker
+            mode="single"
+            bordered
+            fullWidth
+            placeholder="Select date"
+            value={parseYmd(form.date_submitted)}
+            onChange={(d: Date | null) => set({ date_submitted: toYmd(d) })}
+          />
+        </Field>
+      </div>
+      {validityInvalid ? (
+        <p className="-mt-1 text-[11px]" style={{ color: '#ef4444' }}>
+          The validity end date can't be before its start date.
+        </p>
+      ) : null}
+
+      <Field label="Remarks">
+        <textarea
+          className={cn(inputCls, 'min-h-[52px] resize-y')}
+          value={form.remarks}
+          onChange={(e) => set({ remarks: e.target.value })}
+        />
+      </Field>
+
+      <div className="flex justify-end gap-2">
+        <button
+          type="button"
+          className="rounded-lg border px-3 py-1.5 text-[12px] font-semibold"
+          style={{ borderColor: 'var(--border)', color: 'var(--text)' }}
+          onClick={onCancel}
+          disabled={busy}
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          className="rounded-lg px-3 py-1.5 text-[12px] font-semibold disabled:opacity-50"
+          style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
+          disabled={busy || validityInvalid}
+          onClick={save}
+        >
+          Save
+        </button>
       </div>
     </div>
   );
@@ -1810,21 +2479,31 @@ function ActivityTab({ data }: { data: DetailPayload }) {
 
 function NewInspection({
   meta,
+  defaultProponentId,
+  usedTypeCodes,
   onClose,
   onCreated,
 }: {
   meta: Meta;
+  defaultProponentId?: number;
+  usedTypeCodes?: string[];
   onClose: () => void;
   onCreated: (id: number) => void;
 }) {
   const [form, setForm] = useState({
-    proponent_id: '',
-    inspection_type_id: '',
+    proponent_id: defaultProponentId ? String(defaultProponentId) : '',
+    inspection_type_code: '',
     title: '',
     scheduled_date: '',
     assigned_inspector_id: '',
+    validity_from: '',
+    validity_to: '',
   });
   const [busy, setBusy] = useState(false);
+  const availableTypes = useMemo(() => {
+    const used = new Set(usedTypeCodes || []);
+    return meta.types.filter((t) => !used.has(t.code));
+  }, [meta.types, usedTypeCodes]);
 
   const submit = async () => {
     setBusy(true);
@@ -1833,9 +2512,11 @@ function NewInspection({
         method: 'POST',
         body: JSON.stringify({
           proponent_id: Number(form.proponent_id),
-          inspection_type_id: form.inspection_type_id ? Number(form.inspection_type_id) : null,
+          inspection_type_code: form.inspection_type_code || null,
           title: form.title.trim(),
           scheduled_date: form.scheduled_date || null,
+          validity_from: form.validity_from || null,
+          validity_to: form.validity_to || null,
           assigned_inspector_id: form.assigned_inspector_id ? Number(form.assigned_inspector_id) : null,
         }),
       });
@@ -1866,28 +2547,44 @@ function NewInspection({
         exit={{ opacity: 0, scale: 0.96 }}
       >
         <div className="flex items-center justify-between">
-          <div className="text-sm font-bold">New Inspection</div>
+          <div className="min-w-0">
+            <div className="text-sm font-bold">New Inspection</div>
+            {defaultProponentId ? (
+              <div className="text-[11px] text-secondary truncate">
+                {meta.proponents.find((p) => Number(p.id) === defaultProponentId)?.business_name || '—'}
+              </div>
+            ) : null}
+          </div>
           <button className="text-[var(--text-muted)]" onClick={onClose}>
             <X size={16} />
           </button>
         </div>
-        <Field label="Locator">
+        {/* Opened from a locator's drawer: the locator is already known. */}
+        {defaultProponentId ? null : (
+          <Field label="Locator">
+            <AppSelect
+              compact
+              placeholder="Select locator…"
+              value={form.proponent_id}
+              onChange={(v) => setForm((f) => ({ ...f, proponent_id: v }))}
+              options={meta.proponents.map((p) => ({ value: String(p.id), label: p.business_name }))}
+            />
+          </Field>
+        )}
+        <Field label="Requirement to inspect">
           <AppSelect
             compact
-            placeholder="Select locator…"
-            value={form.proponent_id}
-            onChange={(v) => setForm((f) => ({ ...f, proponent_id: v }))}
-            options={meta.proponents.map((p) => ({ value: String(p.id), label: p.business_name }))}
+            placeholder="Select requirement…"
+            value={form.inspection_type_code}
+            onChange={(v) => setForm((f) => ({ ...f, inspection_type_code: v }))}
+            options={availableTypes.map((t) => ({
+              value: t.code,
+              label: `${CHECKLIST_GROUP_LABEL[t.category] || t.category} · ${t.name}`,
+            }))}
           />
-        </Field>
-        <Field label="Inspection type">
-          <AppSelect
-            compact
-            placeholder="Select type…"
-            value={form.inspection_type_id}
-            onChange={(v) => setForm((f) => ({ ...f, inspection_type_id: v }))}
-            options={meta.types.map((t) => ({ value: String(t.id), label: t.name }))}
-          />
+          {availableTypes.length === 0 ? (
+            <p className="mt-1 text-[11px] text-secondary">Every requirement already has an inspection here.</p>
+          ) : null}
         </Field>
         <Field label="Title">
           <input
@@ -1917,6 +2614,33 @@ function NewInspection({
             />
           </Field>
         </div>
+        <div className="grid grid-cols-2 gap-2">
+          <Field label="Validity from (optional)">
+            <DatePicker
+              mode="single"
+              bordered
+              fullWidth
+              placeholder="Start date"
+              value={parseYmd(form.validity_from)}
+              onChange={(d: Date | null) => setForm((f) => ({ ...f, validity_from: toYmd(d) }))}
+            />
+          </Field>
+          <Field label="Validity to (optional)">
+            <DatePicker
+              mode="single"
+              bordered
+              fullWidth
+              placeholder="End date"
+              value={parseYmd(form.validity_to)}
+              onChange={(d: Date | null) => setForm((f) => ({ ...f, validity_to: toYmd(d) }))}
+            />
+          </Field>
+        </div>
+        {form.validity_from && form.validity_to && form.validity_to < form.validity_from ? (
+          <p className="-mt-1 text-[11px]" style={{ color: '#ef4444' }}>
+            The validity end date can't be before its start date.
+          </p>
+        ) : null}
         <div className="flex justify-end gap-2 pt-1">
           <button
             className="rounded-lg px-3 py-2 text-sm font-semibold border"

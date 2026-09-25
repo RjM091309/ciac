@@ -1,10 +1,10 @@
 const crypto = require("crypto");
 const { fmtDate, buildCertificateHtml, renderHtmlToPdf, buildQrDataUrl } = require("./certificateRenderer");
 
-// "CONTRACT" is the one permit type that isn't a Settings -> Compliance
+// "CONTRACT" is the one permit type that isn't a Compliance Requirement —
 // Types entry (see server/models/Permit.js) — everything else's display
 // name/title is driven by the configured compliance type's own name
-// (typeName, passed in by the caller via ComplianceType.getByCode) so a
+// (typeName, passed in by the caller via ComplianceRequirement.getRequirementByCode) so a
 // newly added type just works without a code change here.
 const RESERVED_TYPE_LABELS = { CONTRACT: "Lease Contract" };
 

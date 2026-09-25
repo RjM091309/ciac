@@ -10,6 +10,7 @@ const MENU_KEY = "compliance:permits";
 const READ_MENU_KEYS = [MENU_KEY, "compliance:expiry"];
 
 router.get("/", requireAnyMenuAccess(READ_MENU_KEYS, "view"), controller.list);
+router.get("/types", requireAnyMenuAccess(READ_MENU_KEYS, "view"), controller.types);
 router.get("/:id/certificate", requireAnyMenuAccess(READ_MENU_KEYS, "view"), controller.downloadCertificate);
 router.get("/:id/contract-certificate", requireAnyMenuAccess(READ_MENU_KEYS, "view"), controller.downloadContractCertificate);
 router.get("/:id", requireAnyMenuAccess(READ_MENU_KEYS, "view"), controller.getById);

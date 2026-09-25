@@ -26,13 +26,10 @@ const LocatorUsersManagement = lazy(() => import('./components/settings/LocatorU
 const ControlPanelManagement = lazy(() => import('./components/settings/ControlPanelManagement').then((m) => ({ default: m.ControlPanelManagement })));
 const ProponentsManagement = lazy(() => import('./components/proponent/ProponentsManagement').then((m) => ({ default: m.ProponentsManagement })));
 const RequirementsManagement = lazy(() => import('./components/applications/Requirements').then((m) => ({ default: m.RequirementsManagement })));
-const RequirementCategoriesManagement = lazy(() => import('./components/applications/RequirementCategories').then((m) => ({ default: m.RequirementCategoriesManagement })));
 const ApplicationsWorkflow = lazy(() => import('./components/applications/ApplicationsWorkflow').then((m) => ({ default: m.ApplicationsWorkflow })));
 const AssessmentEvaluation = lazy(() => import('./components/assessment/AssessmentEvaluation').then((m) => ({ default: m.AssessmentEvaluation })));
 const ApprovalIssuance = lazy(() => import('./components/approval/ApprovalIssuance').then((m) => ({ default: m.ApprovalIssuance })));
 const ComplianceInspections = lazy(() => import('./components/compliance/ComplianceInspections').then((m) => ({ default: m.ComplianceInspections })));
-const InspectionTypesManagement = lazy(() => import('./components/FileMaintenance/InspectionTypes').then((m) => ({ default: m.InspectionTypesManagement })));
-const ComplianceTypesManagement = lazy(() => import('./components/FileMaintenance/ComplianceTypes').then((m) => ({ default: m.ComplianceTypesManagement })));
 const ApplicationTypesManagement = lazy(() => import('./components/FileMaintenance/ApplicationTypes').then((m) => ({ default: m.ApplicationTypesManagement })));
 const AccountOfficersManagement = lazy(() => import('./components/FileMaintenance/AccountOfficers').then((m) => ({ default: m.AccountOfficersManagement })));
 const TypeOfContractManagement = lazy(() => import('./components/FileMaintenance/TypeOfContract').then((m) => ({ default: m.TypeOfContractManagement })));
@@ -90,9 +87,6 @@ const VIEW_TO_PATH: Record<AppView, string> = {
   'settings:users': '/settings/users',
   'settings:locator-users': '/applications/locator-users',
   'settings:proponents': '/applications/proponents',
-  'settings:requirement-categories': '/settings/requirement-categories',
-  'settings:inspection-types': '/settings/inspection-types',
-  'settings:compliance-types': '/settings/compliance-types',
   'settings:application-types': '/settings/application-types',
   'settings:account-officers': '/settings/account-officers',
   'settings:type-of-contract': '/settings/type-of-contract',
@@ -650,12 +644,6 @@ export default function App() {
                 <ReportsAnalytics navigate={navigate} />
               ) : view === 'settings:proponents' ? (
                 <ProponentsManagement locationSearch={locationSearch} navigate={navigate} currentUserRoleName={user?.roleName} />
-              ) : view === 'settings:requirement-categories' ? (
-                <RequirementCategoriesManagement />
-              ) : view === 'settings:inspection-types' ? (
-                <InspectionTypesManagement />
-              ) : view === 'settings:compliance-types' ? (
-                <ComplianceTypesManagement />
               ) : view === 'settings:application-types' ? (
                 <ApplicationTypesManagement />
               ) : view === 'settings:account-officers' ? (
@@ -897,63 +885,6 @@ const LANDING_CONFIG: Record<AppView, LandingConfig> = {
       rows: [
         ['LOC-2026-00001', 'SkyPort Logistics Inc.', 'Clark Freeport Zone', 'Warehouse Lease', 'Mar 10, 2024', 'Mar 10, 2027', '3Y-0M-0D', 'J. Puyat'],
         ['LOC-2026-00002', 'GreenFuel Terminals Corp.', 'Clark Civil Aviation Complex', 'Direct Lease', 'Mar 09, 2024', 'Mar 09, 2029', '5Y-0M-0D', 'G. Cruz'],
-      ],
-    },
-  },
-  'settings:requirement-categories': {
-    title: 'Requirement Categories',
-    description: 'Manage requirement categories used in checklists and document grouping.',
-    badge: 'Locator',
-    icon: FileCheck,
-    stats: [
-      { label: 'Total Categories', value: '—' },
-      { label: 'Active', value: '—' },
-      { label: 'Deactivated', value: '—' },
-    ],
-    table: {
-      columns: ['Category Name', 'Description', 'Status', 'Last Updated'],
-      rows: [
-        ['Legal', 'Incorporation and legal identity docs', 'Active', 'Mar 19, 2026'],
-        ['Financial', 'Tax filings and financial statements', 'Active', 'Mar 18, 2026'],
-        ['Technical', 'Engineering plans and permits', 'Inactive', 'Mar 15, 2026'],
-      ],
-    },
-  },
-  'settings:inspection-types': {
-    title: 'Inspection Types',
-    description: 'Manage inspection types for file maintenance.',
-    badge: 'File Maintenance',
-    icon: FileCheck,
-    stats: [
-      { label: 'Total Types', value: '—' },
-      { label: 'Active', value: '—' },
-      { label: 'Deactivated', value: '—' },
-    ],
-    table: {
-      columns: ['Code', 'Name', 'Description', 'Status'],
-      rows: [
-        ['PRE', 'Pre-operation', 'Pre-operation inspection', 'Active'],
-        ['POST', 'Post-operation', 'Post-operation inspection', 'Active'],
-        ['RND', 'Random', 'Random spot check', 'Inactive'],
-      ],
-    },
-  },
-  'settings:compliance-types': {
-    title: 'Compliance Types',
-    description: 'Manage compliance types for file maintenance.',
-    badge: 'File Maintenance',
-    icon: FileCheck,
-    stats: [
-      { label: 'Total Types', value: '—' },
-      { label: 'Active', value: '—' },
-      { label: 'Deactivated', value: '—' },
-    ],
-    table: {
-      columns: ['Code', 'Name', 'Description', 'Status'],
-      rows: [
-        ['ENV', 'Environmental', 'Environmental compliance requirement', 'Active'],
-        ['FIRE', 'Fire Safety', 'Fire safety compliance requirement', 'Active'],
-        ['SAN', 'Sanitary', 'Sanitary compliance requirement', 'Inactive'],
       ],
     },
   },

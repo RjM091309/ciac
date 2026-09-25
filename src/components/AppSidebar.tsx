@@ -366,14 +366,11 @@ export function AppSidebar({
     canView('settings:audit-log');
   const showFileMaintenance =
     canView('applications:requirements') ||
-    canView('settings:inspection-types') ||
-    canView('settings:compliance-types') ||
     canView('settings:application-types') ||
     canView('settings:account-officers') ||
     canView('settings:type-of-contract') ||
     canView('settings:building') ||
-    canView('settings:land-use') ||
-    canView('settings:requirement-categories');
+    canView('settings:land-use');
   const showSystemGroup = showSystemSettings || showFileMaintenance;
 
   // Officer/Locator-style restricted roles (previewed or real) get a flat
@@ -409,9 +406,6 @@ export function AppSidebar({
 
   const fileMaintenanceItems: SidebarLeaf[] = [
     canView('applications:requirements') && { key: 'applications:requirements', label: 'Requirements', active: view === 'applications:requirements', onClick: () => onViewChange('applications:requirements') },
-    canView('settings:requirement-categories') && { key: 'settings:requirement-categories', label: 'Requirement Categories', active: view === 'settings:requirement-categories', onClick: () => onViewChange('settings:requirement-categories') },
-    canView('settings:inspection-types') && { key: 'settings:inspection-types', label: 'Inspection Types', active: view === 'settings:inspection-types', onClick: () => onViewChange('settings:inspection-types') },
-    canView('settings:compliance-types') && { key: 'settings:compliance-types', label: 'Compliance Types', active: view === 'settings:compliance-types', onClick: () => onViewChange('settings:compliance-types') },
     canView('settings:application-types') && { key: 'settings:application-types', label: 'Application Types', active: view === 'settings:application-types', onClick: () => onViewChange('settings:application-types') },
     canView('settings:account-officers') && { key: 'settings:account-officers', label: 'Account Officers', active: view === 'settings:account-officers', onClick: () => onViewChange('settings:account-officers') },
     canView('settings:type-of-contract') && { key: 'settings:type-of-contract', label: 'Type of Contract', active: view === 'settings:type-of-contract', onClick: () => onViewChange('settings:type-of-contract') },
