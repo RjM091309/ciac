@@ -162,7 +162,12 @@ export default function App() {
     // device — calling the backend directly would make the cookie cross-site
     // (and "localhost" would point at the phone itself).
     if (env.DEV) return '';
-    return (env.VITE_BACKEND_URL as string) || 'http://localhost:3100';
+    // Production: nginx serves dist/ and proxies /api on the same origin, so
+    // same-origin '' is right. VITE_BACKEND_URL is only the dev proxy target
+    // (vite.config.ts) and must not leak into a build — building with the dev
+    // .env would point the client's login check at the dev server. Set
+    // VITE_API_ORIGIN only if the API really lives on another origin.
+    return String(env.VITE_API_ORIGIN || '').replace(/\/+$/, '');
   }, []);
 
   const [locationState, setLocationState] = useState<{ pathname: string; search: string }>(() => ({
