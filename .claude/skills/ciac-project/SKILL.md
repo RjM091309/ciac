@@ -20,14 +20,14 @@ src/                    Frontend (Vite root)
   App.tsx               Custom router (VIEW_TO_PATH), lazy-loaded pages, auth state
   layout/AppLayout.tsx  Staff shell (AppSidebar/AppHeader); AppView type
   components/
-    applications/       ApplicationsWorkflow (filing), Requirements, RequirementCategories
+    applications/       ApplicationsWorkflow (filing), Requirements (+ Requirement Categories drawer)
     assessment/         AssessmentEvaluation (/assessment)
     approval/           ApprovalIssuance (/approval)
     compliance/         PermitsManagement (permits, expiry, renewal), ComplianceInspections
     proponent/          Locator portal pages + ProponentsManagement (staff locator list)
     dashboard/          RoleDashboard, OfficerDashboard, ProponentDashboard, PreviewDashboard, AttentionCard
     reports/            ReportsAnalytics
-    FileMaintenance/    lookup tables (Application/Compliance/Inspection types, Account Officers, Building, Land Use, Type of Contract, Departments)
+    FileMaintenance/    lookup tables (Application Types, Account Officers, Building, Land Use, Type of Contract, Departments)
     settings/           UsersManagement, LocatorUsersManagement, RolesPanel, ControlPanelManagement, AuditLog
   config/landingConfig.ts  per-view dashboard copy/stats registry
   context/ControlPanelAccessContext.tsx  per-role menu permissions on the client
@@ -52,8 +52,8 @@ docs/                   SYSTEM-GUIDE.md, PROCESS-MODULES.md (last updated 2026-0
 - Auth & users: `/api/auth`, `/api/users`, `/api/roles`, `/api/control-panel`
 - Workflow: `/api/applications`, `/api/assessments`, `/api/approvals`, `/api/documents`
 - Locators: `/api/proponents` (staff CRUD + `/me/*` locator self-service portal)
-- Permits & compliance: `/api/permits`, `/api/inspections`
-- Lookups (File Maintenance): `/api/requirements`, `/api/requirement-categories`, `/api/application-types`, `/api/compliance-types`, `/api/inspection-types`, `/api/account-officers`, `/api/departments`, `/api/type-of-contract`, `/api/building`, `/api/land-use`
+- Permits & compliance: `/api/permits` (+ `/types`), `/api/inspections` (+ `/locators/*` compliance checklist), `/api/compliance-requirements`
+- Lookups (File Maintenance): `/api/requirements`, `/api/requirement-categories`, `/api/application-types`, `/api/account-officers`, `/api/departments`, `/api/type-of-contract`, `/api/building`, `/api/land-use`
 - Misc: `/api/dashboard`, `/api/reports`, `/api/search`, `/api/notifications` (includes an SSE `/stream`), `/api/quick-tasks`, `/api/audit-logs` (admin only)
 - Contracts are saved through `/api/approvals/:applicationId/contract` (the old `/api/contracts` route was removed; `models/Contract.js` stays).
 
@@ -65,7 +65,7 @@ docs/                   SYSTEM-GUIDE.md, PROCESS-MODULES.md (last updated 2026-0
 - Rate limits on login/forgot/reset. CSRF: `m_csrf.js` rejects mutating `/api` requests whose `Origin` isn't in the CORS allowlist.
 - Admin protection: only an admin may grant the admin role or change an account that holds it (edit, password reset, TOTP reset, suspend, revoke) — enforced in `requireUserMenuAccess` and in `c_account_officers.js`. Non-admins can't change their own role. Changing a user's role bumps `token_version`, which signs them out, because the role is stored in the JWT. There is no built-in fallback login: if the DB is down, nobody can sign in.
 - Roles are **not hardcoded** except `admin` (bypasses every menu check) and `proponent` (the Locator portal). Everything else is Control Panel per-role permissions, checked live per request by `requireMenuAccess(menuKey, action)`, `requireAnyMenuAccess`, `requireApplicationsAccess`, `requireUserMenuAccess` (`server/middleware/m_auth.js`). No saved permission row → denied.
-- Menu keys: `applications:renewals`, `applications:requirements`, `assessment:queue`, `approval:queue`, `compliance:permits`, `compliance:inspections`, and `settings:*` (`users`, `locator-users`, `proponents`, `control-panel`, `audit-log`, `account-officers`, `application-types`, `compliance-types`, `inspection-types`, `requirement-categories`, `building`, `land-use`, `type-of-contract`). Check `server/models/ControlPanelPermission.js` / `src/components/AppSidebar.tsx` for the current full list.
+- Menu keys: `applications:renewals`, `applications:requirements`, `assessment:queue`, `approval:queue`, `compliance:permits`, `compliance:inspections`, and `settings:*` (`users`, `locator-users`, `proponents`, `control-panel`, `audit-log`, `account-officers`, `application-types`, `building`, `land-use`, `type-of-contract`). Check `server/models/ControlPanelPermission.js` / `src/components/AppSidebar.tsx` for the current full list.
 - Assessment level is a **user** attribute, not a role: `users.assessment_level` = 1 → Level 1 Manager, otherwise Level 2 Officer (`getUserLevel`/`isManager` in `server/models/AssessmentEvaluation.js`; admin counts as Manager).
 
 ## Ports & proxy
@@ -146,11 +146,15 @@ Backend (`server/.env`): `PORT`, `NODE_ENV`, `JWT_SECRET`, `FRONTEND_URL` (/`FRO
 - `PATCH /api/applications/:id/status` is an admin-only escape hatch. It skips the document check and Approval routing, so it's not a substitute for the real flow.
 
 **Stage 5 — Permits, expiry & renewal** (`PermitsManagement.tsx`, `compliance:permits`, `server/models/Permit.js`).
-- Issuing a contract auto-creates or syncs a permit of reserved type `CONTRACT`. Other permit types come from Compliance Types (File Maintenance).
+- Issuing a contract auto-creates or syncs a permit of reserved type `CONTRACT`. Other permit types are the active `PERMITS` Compliance Requirements (`GET /api/permits/types`).
 - Effective status is derived: `REVOKED` if revoked, otherwise from `expiry_date`: `EXPIRED` (past), `EXPIRING` (within `EXPIRING_WINDOW_DAYS` = 365), else `VALID`. The UI adds "this month / next 90 days / overdue" filters, and dashboards show them through `AttentionCard`.
 - Renewal: a renewal application (`is_renewal=1`, optional `renewed_from_permit_id`) links back to the expiring permit. The permit row shows "Renewal filed: <application_no>", linking to `/applications/renewals?applicationId=…`.
 
-**Compliance & Inspections** (`ComplianceInspections.tsx`, `/api/inspections`, `compliance:inspections`): schedule and assign inspections, set status and result, record findings, corrective actions, and documents, with a per-locator inspection drawer.
+**Compliance & Inspections** (`ComplianceInspections.tsx`, `/api/inspections`, `compliance:inspections`). The page is modelled on the legacy BRIDGE compliance screen.
+- Compliance Requirements (`dbo.compliance_requirements`, `/api/compliance-requirements`) are one list in three categories: `COMPLIANCE`, `PERMITS` and `PERFORMANCE`. It replaces the old Inspection Types and Compliance Types. It is managed from its own tab under the same `compliance:inspections` permission. A requirement's code is fixed once created.
+- Each locator has a checklist in `dbo.locator_compliance_items`, one row per requirement. Unsaved items count as Pending. The locator is "Completed" only once every active requirement is Complied. Checklist edits are audit-logged, and the drawer's Activity tab reads them back.
+- An inspection covers a requirement (`inspection_type_code`), and older inspections keep their legacy type label. Inspections also record findings, corrective actions and documents.
+- Requirement Categories are managed from the Requirements page under `applications:requirements`.
 
 ## Notes / gotchas
 

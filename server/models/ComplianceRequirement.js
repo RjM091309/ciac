@@ -1,5 +1,12 @@
 const { selectData, insertData, updateData, updateSchema } = require("../config/database");
 
+// Tags a validation/business-rule rejection with an HTTP status so the
+// controller reports it as a client error (400/409) instead of a 500 — same
+// pattern as businessError() in AssessmentEvaluation.js.
+function clientError(message, status = 400) {
+  return Object.assign(new Error(message), { status });
+}
+
 function toInt(v) {
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
@@ -27,10 +34,21 @@ const SEED_REQUIREMENTS = [
   ["EMPLOYMENT_COMMITMENT", "PERFORMANCE", "Employment Commitment"],
 ];
 
-let schemaReady = false;
+// Once per process, and shared by concurrent first callers: two requests
+// racing through a boolean flag on a fresh install would both see an empty
+// table and both seed it, the second failing on the unique code index.
+let schemaReady = null;
+function ensureSchema() {
+  if (!schemaReady) {
+    schemaReady = createSchema().catch((error) => {
+      schemaReady = null; // retry on the next call if the DDL failed
+      throw error;
+    });
+  }
+  return schemaReady;
+}
 
-async function ensureSchema() {
-  if (schemaReady) return;
+async function createSchema() {
   await updateSchema(`
     IF OBJECT_ID('dbo.compliance_requirements', 'U') IS NULL
     BEGIN
@@ -69,7 +87,6 @@ async function ensureSchema() {
       VALUES ('MAYORS_PERMIT', 'Mayor''s / Business Permit', 'PERMITS', 125,
               'Valid Mayor''s Permit and Business Permit for the current year', 1, SYSUTCDATETIME());
   `);
-  schemaReady = true;
 }
 
 function mapRow(row) {
@@ -126,7 +143,7 @@ async function getActiveRequirementByCode(code) {
 
 function normalizeCategory(v) {
   const c = String(v ?? "").trim().toUpperCase();
-  if (!CATEGORIES.includes(c)) throw new Error("category must be COMPLIANCE, PERMITS or PERFORMANCE");
+  if (!CATEGORIES.includes(c)) throw clientError("category must be COMPLIANCE, PERMITS or PERFORMANCE");
   return c;
 }
 
@@ -134,7 +151,7 @@ async function createRequirement({ code, name, category, sort_order, description
   await ensureSchema();
   const cleanCode = String(code).trim().toUpperCase().replace(/\s+/g, "_").slice(0, 40);
   const dup = await selectData(`SELECT TOP (1) id FROM dbo.compliance_requirements WHERE code = @param0`, [cleanCode]);
-  if (dup?.length) throw new Error(`Code ${cleanCode} is already used`);
+  if (dup?.length) throw clientError(`Code ${cleanCode} is already used`, 409);
   const result = await insertData(
     `
     INSERT INTO dbo.compliance_requirements

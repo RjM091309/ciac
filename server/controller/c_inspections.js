@@ -5,7 +5,7 @@ const { publicErrorMessage } = require("../lib/httpError");
 
 function fail(res, error, label) {
   console.error(`${label} error:`, error);
-  return res.status(500).json({ success: false, message: publicErrorMessage(error) });
+  return res.status(error.status || 500).json({ success: false, message: publicErrorMessage(error) });
 }
 
 function idParam(req, res, key = "id", label = "id") {

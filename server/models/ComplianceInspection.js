@@ -8,6 +8,13 @@ const {
 const Notification = require("./Notification");
 const ComplianceRequirement = require("./ComplianceRequirement");
 
+// Tags a validation/business-rule rejection with an HTTP status so the
+// controller reports it as a client error (400/409) instead of a 500 — same
+// pattern as businessError() in AssessmentEvaluation.js.
+function clientError(message, status = 400) {
+  return Object.assign(new Error(message), { status });
+}
+
 function toInt(v) {
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
@@ -25,10 +32,20 @@ function pick(value, allowed, fallback = null) {
   return allowed.includes(v) ? v : fallback;
 }
 
-let schemaReady = false;
+// Once per process, shared by concurrent first callers (the one-time
+// checklist carry-over below must not run twice at once).
+let schemaReady = null;
+function ensureSchema() {
+  if (!schemaReady) {
+    schemaReady = createSchema().catch((error) => {
+      schemaReady = null; // retry on the next call if the DDL failed
+      throw error;
+    });
+  }
+  return schemaReady;
+}
 
-async function ensureSchema() {
-  if (schemaReady) return;
+async function createSchema() {
   await updateSchema(`
     IF OBJECT_ID('dbo.inspections', 'U') IS NULL
     BEGIN
@@ -181,7 +198,6 @@ async function ensureSchema() {
   `);
   await ensureLegacyTypesTable();
   await ComplianceRequirement.ensureSchema();
-  schemaReady = true;
 }
 
 /**
@@ -477,7 +493,7 @@ async function saveComplianceItem(proponentId, code, payload, actorId) {
   const exists = await selectData(`SELECT TOP (1) id FROM dbo.proponents WHERE id = @param0`, [pid]);
   if (!exists?.length) return null;
   const item = await ComplianceRequirement.getActiveRequirementByCode(code);
-  if (!item) throw new Error("Unknown or inactive compliance requirement");
+  if (!item) throw clientError("Unknown or inactive compliance requirement");
   const { from, to } = readValidity(payload);
   const text = (v, max) => (v == null ? null : String(v).trim().slice(0, max) || null);
   await updateData(
@@ -506,7 +522,7 @@ async function saveComplianceItem(proponentId, code, payload, actorId) {
       to,
       pick(payload?.status, CHECKLIST_STATUSES, "PENDING"),
       text(payload?.remarks, 2000),
-      payload?.date_submitted || null,
+      readDate(payload?.date_submitted, "Date submitted"),
       toInt(actorId),
     ]
   );
@@ -629,11 +645,24 @@ async function getMeta() {
   return { inspectors, proponents, types };
 }
 
+/** A YYYY-MM-DD date from the client, or null when blank. Anything else is
+ * rejected here rather than reaching SQL Server as a conversion error. */
+function readDate(value, label) {
+  if (value === undefined || value === null || value === "") return null;
+  const v = String(value).trim().slice(0, 10);
+  const d = new Date(`${v}T00:00:00Z`);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(v) || Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== v) {
+    throw clientError(`${label} must be a valid date (YYYY-MM-DD)`);
+  }
+  return v;
+}
+
 /** Validity dates from a payload; `to` may not be before `from`. */
 function readValidity(payload, existing) {
-  const from = payload?.validity_from !== undefined ? payload.validity_from || null : existing?.validity_from ?? null;
-  const to = payload?.validity_to !== undefined ? payload.validity_to || null : existing?.validity_to ?? null;
-  if (from && to && new Date(to) < new Date(from)) throw new Error("Validity end date cannot be before its start date");
+  const from =
+    payload?.validity_from !== undefined ? readDate(payload.validity_from, "Validity start") : existing?.validity_from ?? null;
+  const to = payload?.validity_to !== undefined ? readDate(payload.validity_to, "Validity end") : existing?.validity_to ?? null;
+  if (from && to && new Date(to) < new Date(from)) throw clientError("Validity end date cannot be before its start date");
   return { from, to };
 }
 
@@ -641,16 +670,16 @@ async function createInspection(payload, actorId) {
   await ensureSchema();
   const validity = readValidity(payload);
   const proponentId = toInt(payload?.proponent_id);
-  if (!proponentId) throw new Error("proponent_id is required");
+  if (!proponentId) throw clientError("proponent_id is required");
   const title = String(payload?.title ?? "").trim();
-  if (!title) throw new Error("title is required");
+  if (!title) throw clientError("title is required");
 
   // What's inspected: an active Compliance Requirement, by code.
   const typeId = null;
   let typeCode = payload?.inspection_type_code ? String(payload.inspection_type_code).trim() : null;
   if (typeCode) {
     const req = await ComplianceRequirement.getActiveRequirementByCode(typeCode);
-    if (!req) throw new Error("Choose an active compliance requirement");
+    if (!req) throw clientError("Choose an active compliance requirement");
     typeCode = req.code;
   }
 
@@ -699,7 +728,7 @@ async function updateInspection(id, payload, actorId) {
   };
   if (payload?.title !== undefined) {
     const t = String(payload.title ?? "").trim();
-    if (!t) throw new Error("title cannot be empty");
+    if (!t) throw clientError("title cannot be empty");
     push("title = ?", t.slice(0, 255));
   }
   if (payload?.scheduled_date !== undefined) push("scheduled_date = ?", payload.scheduled_date || null);
@@ -714,7 +743,7 @@ async function updateInspection(id, payload, actorId) {
   if (payload?.inspection_type_code !== undefined) {
     const code = payload.inspection_type_code ? String(payload.inspection_type_code).trim() : null;
     if (code && !(await ComplianceRequirement.getActiveRequirementByCode(code))) {
-      throw new Error("Choose an active compliance requirement");
+      throw clientError("Choose an active compliance requirement");
     }
     push("inspection_type_id = ?", null);
     push("inspection_type_code = ?", code);
@@ -734,7 +763,7 @@ async function assignInspector(id, { inspectorId, actorId }) {
   const existing = await getInspectionById(id);
   if (!existing) return null;
   const insId = toInt(inspectorId);
-  if (!insId) throw new Error("inspectorId is required");
+  if (!insId) throw clientError("inspectorId is required");
   await updateData(
     `
     UPDATE dbo.inspections
@@ -761,7 +790,7 @@ async function setStatus(id, { status, actorId }) {
   const existing = await getInspectionById(id);
   if (!existing) return null;
   const next = pick(status, STATUSES);
-  if (!next) throw new Error("Invalid status");
+  if (!next) throw clientError("Invalid status");
   const setConducted = next === "IN_PROGRESS" && !existing.conducted_date;
   await updateData(
     `
@@ -782,7 +811,7 @@ async function setResult(id, { result, summary, actorId }) {
   const existing = await getInspectionById(id);
   if (!existing) return null;
   const rs = pick(result, RESULTS);
-  if (!rs) throw new Error("Invalid result");
+  if (!rs) throw clientError("Invalid result");
   await updateData(
     `
     UPDATE dbo.inspections
@@ -814,7 +843,7 @@ async function addFinding(inspectionId, payload, actorId) {
   const existing = await getInspectionById(inspectionId);
   if (!existing) return null;
   const description = String(payload?.description ?? "").trim();
-  if (!description) throw new Error("description is required");
+  if (!description) throw clientError("description is required");
   const result = await insertData(
     `
     INSERT INTO dbo.inspection_findings
@@ -849,7 +878,7 @@ async function updateFinding(id, payload, actorId) {
   if (payload?.severity !== undefined) push("severity = ?", pick(payload.severity, FINDING_SEVERITIES));
   if (payload?.description !== undefined) {
     const d = String(payload.description ?? "").trim();
-    if (!d) throw new Error("description cannot be empty");
+    if (!d) throw clientError("description cannot be empty");
     push("description = ?", d.slice(0, 2000));
   }
   if (payload?.recommendation !== undefined)
@@ -886,7 +915,7 @@ async function addCorrectiveAction(inspectionId, payload, actorId) {
   const existing = await getInspectionById(inspectionId);
   if (!existing) return null;
   const actionRequired = String(payload?.action_required ?? "").trim();
-  if (!actionRequired) throw new Error("action_required is required");
+  if (!actionRequired) throw clientError("action_required is required");
   const result = await insertData(
     `
     INSERT INTO dbo.inspection_corrective_actions
@@ -921,7 +950,7 @@ async function updateCorrectiveAction(id, payload, actorId) {
   };
   if (payload?.action_required !== undefined) {
     const a = String(payload.action_required ?? "").trim();
-    if (!a) throw new Error("action_required cannot be empty");
+    if (!a) throw clientError("action_required cannot be empty");
     push("action_required = ?", a.slice(0, 2000));
   }
   if (payload?.responsible_party !== undefined)
@@ -958,8 +987,8 @@ async function addDocument(inspectionId, payload, actorId) {
   if (!existing) return null;
   const fileName = String(payload?.file_name ?? "").trim();
   const storagePath = String(payload?.storage_path ?? "").trim();
-  if (!fileName) throw new Error("file_name is required");
-  if (!storagePath) throw new Error("storage_path is required");
+  if (!fileName) throw clientError("file_name is required");
+  if (!storagePath) throw clientError("storage_path is required");
   const result = await insertData(
     `
     INSERT INTO dbo.inspection_documents

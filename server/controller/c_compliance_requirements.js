@@ -1,5 +1,6 @@
 const ComplianceRequirement = require("../models/ComplianceRequirement");
 const AuditLog = require("../models/AuditLog");
+const { publicErrorMessage } = require("../lib/httpError");
 
 function audit(req, action, entityId, details) {
   return AuditLog.record({
@@ -15,7 +16,7 @@ function audit(req, action, entityId, details) {
 
 function fail(res, error, label) {
   console.error(`${label} error:`, error);
-  return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+  return res.status(error.status || 500).json({ success: false, message: publicErrorMessage(error) });
 }
 
 function idOf(req, res) {
