@@ -201,6 +201,7 @@ const SidebarSection = ({
   collapsed,
   isOpen,
   onToggle,
+  onDirectSelect,
   singleItemIsGroup = true,
 }: {
   icon: any;
@@ -210,6 +211,10 @@ const SidebarSection = ({
   collapsed?: boolean;
   isOpen: boolean;
   onToggle: () => void;
+  /** Called when a row that ISN'T inside a dropdown is clicked (single-item
+   * or flat mode), so any open dropdown closes like it would for other
+   * top-level items. */
+  onDirectSelect?: () => void;
   /** Set false for an umbrella group whose items are genuinely different
    * pages (System Settings: Users/Locator Accounts/Control Panel/Audit Log;
    * File Maintenance: Requirement Categories/Inspection Types/...). When a
@@ -232,7 +237,18 @@ const SidebarSection = ({
   // where a full-access role sees the clean group name ("Permit & Contract").
   if (items.length === 1 && singleItemIsGroup) {
     const only = items[0];
-    return <SidebarItem icon={icon} label={label} active={only.active} onClick={only.onClick} collapsed={collapsed} />;
+    return (
+      <SidebarItem
+        icon={icon}
+        label={label}
+        active={only.active}
+        onClick={() => {
+          onDirectSelect?.();
+          only.onClick();
+        }}
+        collapsed={collapsed}
+      />
+    );
   }
 
   if (flat) {
@@ -244,7 +260,10 @@ const SidebarSection = ({
             icon={DotIcon}
             label={item.label}
             active={item.active}
-            onClick={item.onClick}
+            onClick={() => {
+              onDirectSelect?.();
+              item.onClick();
+            }}
             collapsed={collapsed}
           />
         ))}
@@ -287,22 +306,33 @@ export function AppSidebar({
   accountActions?: { onOpenSettings: () => void; onChangePassword: () => void };
 }) {
   const isDrawer = variant === 'drawer';
-  // The sheet remounts each time it opens, so start with the current page's System group expanded.
-  const [openDropdownId, setOpenDropdownId] = useState<string | null>(() => {
-    if (variant !== 'sheet') return null;
-    if (['settings:users', 'settings:locator-users', 'settings:control-panel', 'settings:audit-log'].includes(view)) {
-      return 'system-settings';
-    }
-    // settings:proponents lives under Applications, not File Maintenance.
-    return view.startsWith('settings:') && view !== 'settings:proponents' ? 'file-maintenance' : null;
-  });
+  // Dropdown state has two parts:
+  // - the dropdown holding the current page stays open (unless the user
+  //   collapses it by clicking its header), so peeking into another dropdown
+  //   doesn't hide where you are;
+  // - at most one other dropdown can be open for browsing. It closes when a
+  //   different dropdown is opened, a top-level item is clicked, or the page
+  //   changes (e.g. a sub-item is picked), at which point the new page's
+  //   dropdown becomes the "current" one.
+  const [browseDropdownId, setBrowseDropdownId] = useState<string | null>(null);
+  const [activeDropdownCollapsed, setActiveDropdownCollapsed] = useState(false);
+  const [prevView, setPrevView] = useState(view);
+  if (prevView !== view) {
+    // Reset during render (not in an effect) so the old dropdown never flashes open.
+    setPrevView(view);
+    setBrowseDropdownId(null);
+    setActiveDropdownCollapsed(false);
+  }
   const { ready, fullAccess, sidebarPermissions } = useControlPanelAccess();
   // Sheet only: every module is listed (the sheet covers the bottom nav), except
   // Dashboard when it's already the bottom nav's center Home button.
   const { showHome } = useBottomNavTabs('admin', permissionOverride);
 
-  const toggleDropdown = (id: string) => {
-    setOpenDropdownId((prev) => (prev === id ? null : id));
+  const closeDropdowns = () => setBrowseDropdownId(null);
+  // Clicking a top-level (non-dropdown) item closes the dropdown being browsed.
+  const withClose = (fn: () => void) => () => {
+    closeDropdowns();
+    fn();
   };
 
   // Fail-closed: while permissions are loading (or failed to load), show
@@ -388,6 +418,24 @@ export function AppSidebar({
     canView('settings:land-use') && { key: 'settings:land-use', label: 'Land Use', active: view === 'settings:land-use', onClick: () => onViewChange('settings:land-use') },
   ].filter(Boolean) as SidebarLeaf[];
 
+  const dropdownItems: Record<string, SidebarLeaf[]> = {
+    'compliance-inspection': complianceInspectionItems,
+    permits: permitsItems,
+    'system-settings': systemSettingsItems,
+    'file-maintenance': fileMaintenanceItems,
+  };
+  const activeDropdownId =
+    Object.keys(dropdownItems).find((id) => dropdownItems[id].some((item) => item.active)) ?? null;
+  const isDropdownOpen = (id: string) =>
+    id === activeDropdownId ? !activeDropdownCollapsed : id === browseDropdownId;
+  const toggleDropdown = (id: string) => {
+    if (id === activeDropdownId) {
+      setActiveDropdownCollapsed((c) => !c);
+    } else {
+      setBrowseDropdownId((prev) => (prev === id ? null : id));
+    }
+  };
+
   if (variant === 'sheet') {
     const notHidden = (item: SidebarLeaf) => !(showHome && item.key === 'dashboard');
     // Same full labels as the desktop sidebar, so the two menus read the same.
@@ -437,7 +485,7 @@ export function AppSidebar({
           <SheetSection title="System">
             <SheetRowGroup>
               {systemGroups.map((g) => {
-                const open = openDropdownId === g.id;
+                const open = isDropdownOpen(g.id);
                 return (
                   <React.Fragment key={g.id}>
                     <SheetRow icon={g.icon} label={g.label} expandable expanded={open} onClick={() => toggleDropdown(g.id)} />
@@ -488,7 +536,7 @@ export function AppSidebar({
                 icon={LayoutDashboard}
                 label="Dashboard"
                 active={view === 'dashboard'}
-                onClick={() => onViewChange('dashboard')}
+                onClick={withClose(() => onViewChange('dashboard'))}
                 collapsed={collapsed}
               />
             </div>
@@ -504,7 +552,7 @@ export function AppSidebar({
                   icon={item.icon || FileCheck}
                   label={item.label}
                   active={item.active}
-                  onClick={item.onClick}
+                  onClick={withClose(item.onClick)}
                   collapsed={collapsed}
                 />
               ))}
@@ -521,8 +569,9 @@ export function AppSidebar({
                 items={complianceInspectionItems}
                 flat={flat}
                 collapsed={collapsed}
-                isOpen={openDropdownId === 'compliance-inspection'}
+                isOpen={isDropdownOpen('compliance-inspection')}
                 onToggle={() => toggleDropdown('compliance-inspection')}
+                onDirectSelect={closeDropdowns}
               />
               <SidebarSection
                 icon={ShieldCheck}
@@ -530,8 +579,9 @@ export function AppSidebar({
                 items={permitsItems}
                 flat={flat}
                 collapsed={collapsed}
-                isOpen={openDropdownId === 'permits'}
+                isOpen={isDropdownOpen('permits')}
                 onToggle={() => toggleDropdown('permits')}
+                onDirectSelect={closeDropdowns}
               />
             </div>
           </SidebarGroup>
@@ -544,7 +594,7 @@ export function AppSidebar({
                 icon={BarChart3}
                 label="Reports & Analytics"
                 active={view === 'reports:analytics'}
-                onClick={() => onViewChange('reports:analytics')}
+                onClick={withClose(() => onViewChange('reports:analytics'))}
                 collapsed={collapsed}
               />
             </div>
@@ -560,8 +610,9 @@ export function AppSidebar({
                 items={systemSettingsItems}
                 flat={flat}
                 collapsed={collapsed}
-                isOpen={openDropdownId === 'system-settings'}
+                isOpen={isDropdownOpen('system-settings')}
                 onToggle={() => toggleDropdown('system-settings')}
+                onDirectSelect={closeDropdowns}
                 singleItemIsGroup={false}
               />
               <SidebarSection
@@ -570,8 +621,9 @@ export function AppSidebar({
                 items={fileMaintenanceItems}
                 flat={flat}
                 collapsed={collapsed}
-                isOpen={openDropdownId === 'file-maintenance'}
+                isOpen={isDropdownOpen('file-maintenance')}
                 onToggle={() => toggleDropdown('file-maintenance')}
+                onDirectSelect={closeDropdowns}
                 singleItemIsGroup={false}
               />
             </div>
@@ -581,8 +633,8 @@ export function AppSidebar({
           {isDrawer && accountActions && (
           <SidebarGroup title="Account" collapsed={collapsed}>
             <div className="flex flex-col gap-1.5">
-              <SidebarItem icon={Settings} label="Settings" onClick={accountActions.onOpenSettings} collapsed={collapsed} />
-              <SidebarItem icon={KeyRound} label="Change Password" onClick={accountActions.onChangePassword} collapsed={collapsed} />
+              <SidebarItem icon={Settings} label="Settings" onClick={withClose(accountActions.onOpenSettings)} collapsed={collapsed} />
+              <SidebarItem icon={KeyRound} label="Change Password" onClick={withClose(accountActions.onChangePassword)} collapsed={collapsed} />
             </div>
           </SidebarGroup>
           )}
