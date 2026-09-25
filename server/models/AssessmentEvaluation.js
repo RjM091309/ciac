@@ -916,7 +916,7 @@ async function submitRecommendation(applicationId, { recommendation, summary, ap
   } catch (error) {
     console.error("submitRecommendation: application status update failed:", error);
     warnings.push(
-      `The recommendation was saved, but the application's status could not be updated to ${targetStatus} (${error.message || "unknown error"}). An admin needs to fix this.`
+      `The recommendation was saved, but the application's status could not be updated to ${targetStatus}. An admin needs to fix this.`
     );
   }
 
@@ -932,7 +932,7 @@ async function submitRecommendation(applicationId, { recommendation, summary, ap
     } catch (error) {
       console.error("submitRecommendation: auto-start approval failed:", error);
       warnings.push(
-        `The recommendation was saved, but approval could not be started (${error.message || "unknown error"}). An admin needs to start it manually.`
+        `The recommendation was saved, but approval could not be started. An admin needs to start it manually.`
       );
     }
   }

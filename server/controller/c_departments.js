@@ -1,5 +1,6 @@
 const Department = require("../models/Department");
 const AuditLog = require("../models/AuditLog");
+const { publicErrorMessage } = require("../lib/httpError");
 
 function audit(req, action, entityId, details) {
   return AuditLog.record({
@@ -18,7 +19,7 @@ function fail(res, label, error) {
   const duplicate = /unique|duplicate/i.test(error?.message || "");
   return res.status(duplicate ? 409 : 500).json({
     success: false,
-    message: duplicate ? "A department with that code already exists." : error.message || "Internal server error",
+    message: duplicate ? "A department with that code already exists." : publicErrorMessage(error),
   });
 }
 

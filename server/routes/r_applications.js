@@ -3,6 +3,7 @@ const router = express.Router();
 const controller = require("../controller/c_applications");
 const { requireApplicationsAccess, requireMenuAccess, requireRole } = require("../middleware/m_auth");
 const { upload } = require("../middleware/m_upload");
+const { verifyUploadedFile } = require("../lib/uploadCheck");
 
 // Staff-only: full listing.
 router.get("/", requireApplicationsAccess(), controller.list);
@@ -50,7 +51,7 @@ router.patch("/:id/submit", requireApplicationsAccess({ allowProponent: true }),
 // DRAFT-only (see Workflow.deleteDraftApplication).
 router.patch("/:id", requireApplicationsAccess(), controller.updateDraft);
 router.delete("/:id", requireApplicationsAccess(), controller.remove);
-router.post("/documents", requireApplicationsAccess({ allowProponent: true }), upload.single("file"), controller.createDocument);
+router.post("/documents", requireApplicationsAccess({ allowProponent: true }), upload.single("file"), verifyUploadedFile, controller.createDocument);
 router.get("/documents/:id/file", requireApplicationsAccess({ allowProponent: true }), controller.downloadDocument);
 
 module.exports = router;

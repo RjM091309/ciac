@@ -4,13 +4,14 @@ const { diffChanges } = require("../lib/auditDiff");
 const User = require("../models/User");
 const { validatePasswordStrength, generateTempPassword } = require("../lib/password");
 const { sendTempPasswordEmail } = require("./c_users");
+const { publicErrorMessage } = require("../lib/httpError");
 
 function fail(res, label, error) {
   console.error(`${label} error:`, error);
   const duplicate = /unique|duplicate/i.test(error?.message || "");
   return res.status(duplicate ? 409 : 500).json({
     success: false,
-    message: duplicate ? "That username or email is already in use." : error.message || "Internal server error",
+    message: duplicate ? "That username or email is already in use." : publicErrorMessage(error),
   });
 }
 

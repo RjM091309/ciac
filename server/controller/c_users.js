@@ -11,6 +11,7 @@ const { updateData } = require("../config/database");
 const { validatePasswordStrength, generateTempPassword } = require("../lib/password");
 const { sendMail } = require("../lib/mailer");
 const { diffChanges } = require("../lib/auditDiff");
+const { publicErrorMessage } = require("../lib/httpError");
 
 /** Translates a raw MSSQL unique-constraint violation (error 2627/2601) on
  * dbo.users into a friendly message plus which field it belongs to, so the
@@ -91,7 +92,7 @@ exports.list = async (req, res) => {
     return res.json({ success: true, data: rows });
   } catch (error) {
     console.error("List users error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };
 
@@ -111,7 +112,7 @@ exports.checkAvailability = async (req, res) => {
     return res.json({ success: true, available });
   } catch (error) {
     console.error("Check availability error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };
 
@@ -138,7 +139,7 @@ exports.getById = async (req, res) => {
     });
   } catch (error) {
     console.error("Get user error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };
 
@@ -265,7 +266,7 @@ exports.create = async (req, res) => {
     if (duplicate) {
       return res.status(409).json({ success: false, message: duplicate.message, field: duplicate.field });
     }
-    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };
 
@@ -429,7 +430,7 @@ exports.createLocatorWithApplication = async (req, res) => {
     if (duplicate) {
       return res.status(409).json({ success: false, message: duplicate.message, field: duplicate.field });
     }
-    return res.status(error.status || 500).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(error.status || 500).json({ success: false, message: publicErrorMessage(error) });
   }
 };
 
@@ -534,7 +535,7 @@ exports.update = async (req, res) => {
     if (duplicate) {
       return res.status(409).json({ success: false, message: duplicate.message, field: duplicate.field });
     }
-    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };
 
@@ -557,7 +558,7 @@ exports.deactivate = async (req, res) => {
     return res.json({ success: true, data: row });
   } catch (error) {
     console.error("Deactivate user error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };
 
@@ -580,7 +581,7 @@ exports.reactivate = async (req, res) => {
     return res.json({ success: true, data: row });
   } catch (error) {
     console.error("Reactivate user error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };
 
@@ -604,7 +605,7 @@ exports.suspend = async (req, res) => {
     return res.json({ success: true, data: row });
   } catch (error) {
     console.error("Suspend user error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };
 
@@ -627,7 +628,7 @@ exports.unsuspend = async (req, res) => {
     return res.json({ success: true, data: row });
   } catch (error) {
     console.error("Unsuspend user error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };
 
@@ -652,7 +653,7 @@ exports.revokeSessions = async (req, res) => {
     return res.json({ success: true, data: row });
   } catch (error) {
     console.error("Revoke sessions error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };
 
@@ -709,7 +710,7 @@ exports.resetPassword = async (req, res) => {
     });
   } catch (error) {
     console.error("Reset password error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };
 
@@ -763,7 +764,7 @@ exports.approve = async (req, res) => {
     return res.json({ success: true, data: updated });
   } catch (error) {
     console.error("Approve user error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };
 
@@ -801,7 +802,7 @@ exports.reject = async (req, res) => {
     return res.json({ success: true, data: updated });
   } catch (error) {
     console.error("Reject user error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };
 
@@ -846,7 +847,7 @@ exports.changeMyPassword = async (req, res) => {
     return res.json({ success: true, message: "Password updated." });
   } catch (error) {
     console.error("Change own password error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };
 
@@ -875,6 +876,6 @@ exports.resetTotp = async (req, res) => {
     return res.json({ success: true, data: { enabled: false } });
   } catch (error) {
     console.error("Reset TOTP error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };

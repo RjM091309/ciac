@@ -1,4 +1,5 @@
 const QuickTask = require("../models/QuickTask");
+const { publicErrorMessage } = require("../lib/httpError");
 
 exports.list = async (req, res) => {
   try {
@@ -6,7 +7,7 @@ exports.list = async (req, res) => {
     return res.json({ success: true, data: rows });
   } catch (error) {
     console.error("List quick tasks error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };
 
@@ -18,7 +19,7 @@ exports.create = async (req, res) => {
     return res.status(201).json({ success: true, data: row });
   } catch (error) {
     console.error("Create quick task error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };
 
@@ -31,7 +32,7 @@ exports.setDone = async (req, res) => {
     return res.json({ success: true, data: row });
   } catch (error) {
     console.error("Update quick task error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };
 
@@ -43,6 +44,6 @@ exports.remove = async (req, res) => {
     return res.json({ success: true });
   } catch (error) {
     console.error("Delete quick task error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };

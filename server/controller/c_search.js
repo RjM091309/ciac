@@ -2,6 +2,7 @@ const Role = require("../models/Role");
 const ControlPanelPermission = require("../models/ControlPanelPermission");
 const Assessment = require("../models/AssessmentEvaluation");
 const { BUCKET_MENU_KEYS, searchApplications } = require("../models/Search");
+const { publicErrorMessage } = require("../lib/httpError");
 
 /** Which buckets (queue) the requesting role may see through search — same
  * Control Panel sidebar permission each queue's own screen already checks,
@@ -94,6 +95,6 @@ exports.search = async (req, res) => {
     return res.json({ success: true, data });
   } catch (error) {
     console.error("Search error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };

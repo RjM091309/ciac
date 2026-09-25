@@ -6,7 +6,8 @@ const Proponent = require("../models/Proponent");
 const Role = require("../models/Role");
 const ControlPanelPermission = require("../models/ControlPanelPermission");
 const Assessment = require("../models/AssessmentEvaluation");
-const { resolveStoredPath } = require("../lib/fileStorage");
+const { resolveStoredPath, contentDisposition } = require("../lib/fileStorage");
+const { publicErrorMessage } = require("../lib/httpError");
 
 const APPLICATION_ACCESS_MENU_KEYS = ["applications:new", "applications:renewals", "assessment:queue", "approval:queue"];
 
@@ -77,12 +78,12 @@ exports.download = async (req, res) => {
     // res.download() always sets Content-Disposition: attachment, so that
     // path needs its own inline header + res.sendFile() instead.
     if (req.query.view === "1") {
-      res.setHeader("Content-Disposition", `inline; filename="${downloadName.replace(/"/g, "")}"`);
+      res.setHeader("Content-Disposition", contentDisposition("inline", downloadName));
       return res.sendFile(abs);
     }
     return res.download(abs, downloadName);
   } catch (error) {
     console.error("Document download error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };

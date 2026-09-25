@@ -2,6 +2,7 @@ const ControlPanelPermission = require("../models/ControlPanelPermission");
 const Role = require("../models/Role");
 const AuditLog = require("../models/AuditLog");
 const { publishToUsers } = require("../lib/notificationStream");
+const { publicErrorMessage } = require("../lib/httpError");
 
 function parseRoleId(v) {
   const id = Number(v);
@@ -31,7 +32,7 @@ exports.getSidebarPermissions = async (req, res) => {
     return res.json({ success: true, data: rows });
   } catch (error) {
     console.error("Get sidebar permissions error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };
 
@@ -59,7 +60,7 @@ exports.setSidebarPermissions = async (req, res) => {
     return res.json({ success: true });
   } catch (error) {
     console.error("Set sidebar permissions error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };
 
@@ -72,7 +73,7 @@ exports.getMenuCrudPermissions = async (req, res) => {
     return res.json({ success: true, data: rows });
   } catch (error) {
     console.error("Get menu CRUD permissions error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };
 
@@ -100,7 +101,7 @@ exports.setMenuCrudPermissions = async (req, res) => {
     return res.json({ success: true });
   } catch (error) {
     console.error("Set menu CRUD permissions error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };
 
@@ -123,7 +124,7 @@ exports.getMySidebarPermissions = async (req, res) => {
     return res.json({ success: true, fullAccess: false, data: rows });
   } catch (error) {
     console.error("Get my sidebar permissions error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };
 
@@ -139,7 +140,7 @@ exports.getMyMenuCrudPermissions = async (req, res) => {
     return res.json({ success: true, fullAccess: false, data: rows });
   } catch (error) {
     console.error("Get my menu CRUD permissions error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };
 
@@ -151,7 +152,7 @@ exports.getDashboardWidgetPermissions = async (req, res) => {
     return res.json({ success: true, data: rows });
   } catch (error) {
     console.error("Get dashboard widget permissions error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };
 
@@ -178,7 +179,7 @@ exports.setDashboardWidgetPermissions = async (req, res) => {
     return res.json({ success: true });
   } catch (error) {
     console.error("Set dashboard widget permissions error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };
 
@@ -194,6 +195,6 @@ exports.getMyDashboardWidgetPermissions = async (req, res) => {
     return res.json({ success: true, fullAccess: false, data: rows });
   } catch (error) {
     console.error("Get my dashboard widget permissions error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };

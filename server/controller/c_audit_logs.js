@@ -1,4 +1,5 @@
 const AuditLog = require("../models/AuditLog");
+const { publicErrorMessage } = require("../lib/httpError");
 
 const FILTER_KEYS = ["q", "qActions", "user", "action", "category", "entityType", "entityId", "session", "from", "to"];
 // qActions is a comma-separated list of action codes, so it gets more room.
@@ -28,7 +29,7 @@ exports.list = async (req, res) => {
     return res.json({ success: true, data: rows, total, page: pageNum, pageSize: size });
   } catch (error) {
     console.error("List audit logs error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };
 
@@ -57,7 +58,7 @@ exports.exportRows = async (req, res) => {
     return res.json({ success: true, data: rows, total, limit });
   } catch (error) {
     console.error("Export audit logs error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };
 
@@ -68,6 +69,6 @@ exports.listActions = async (req, res) => {
     return res.json({ success: true, data: actions, categories });
   } catch (error) {
     console.error("List audit log actions error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };

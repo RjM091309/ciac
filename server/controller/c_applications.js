@@ -1,3 +1,4 @@
+const fs = require("fs");
 const Workflow = require("../models/ApplicationWorkflow");
 const Proponent = require("../models/Proponent");
 const Role = require("../models/Role");
@@ -9,6 +10,8 @@ const AuditLog = require("../models/AuditLog");
 const { diffChanges } = require("../lib/auditDiff");
 const { generateTempPassword } = require("../lib/password");
 const { sendTempPasswordEmail } = require("./c_users");
+const { publicErrorMessage } = require("../lib/httpError");
+const { resolveStoredPath } = require("../lib/fileStorage");
 
 /** A locator account created via Locator Accounts with a business profile
  * starts PENDING (see c_users.js's exports.create) — no login access, no
@@ -101,7 +104,7 @@ exports.list = async (req, res) => {
     return res.json({ success: true, data: rows });
   } catch (error) {
     console.error("List applications error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };
 
@@ -115,7 +118,7 @@ exports.getById = async (req, res) => {
     return res.json({ success: true, data: application });
   } catch (error) {
     console.error("Get application error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };
 
@@ -191,7 +194,7 @@ exports.create = async (req, res) => {
     });
   } catch (error) {
     console.error("Create application error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };
 
@@ -227,7 +230,7 @@ exports.updateStatus = async (req, res) => {
     return res.json({ success: true, data: row });
   } catch (error) {
     console.error("Update application status error:", error);
-    return res.status(400).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(400).json({ success: false, message: publicErrorMessage(error) });
   }
 };
 
@@ -267,7 +270,7 @@ exports.submit = async (req, res) => {
     });
   } catch (error) {
     console.error("Submit application error:", error);
-    return res.status(400).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(400).json({ success: false, message: publicErrorMessage(error) });
   }
 };
 
@@ -308,7 +311,7 @@ exports.updateDraft = async (req, res) => {
     return res.json({ success: true, data: row });
   } catch (error) {
     console.error("Update draft application error:", error);
-    return res.status(400).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(400).json({ success: false, message: publicErrorMessage(error) });
   }
 };
 
@@ -345,7 +348,7 @@ exports.remove = async (req, res) => {
     return res.json({ success: true });
   } catch (error) {
     console.error("Delete application error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };
 
@@ -360,7 +363,7 @@ exports.listRequirements = async (req, res) => {
     return res.json({ success: true, data: rows });
   } catch (error) {
     console.error("List application requirements error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };
 
@@ -405,7 +408,7 @@ exports.updateRequirementStatus = async (req, res) => {
     return res.json({ success: true, data: row });
   } catch (error) {
     console.error("Update application requirement status error:", error);
-    return res.status(error.status || 500).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(error.status || 500).json({ success: false, message: publicErrorMessage(error) });
   }
 };
 
@@ -431,7 +434,7 @@ exports.listRequirementComments = async (req, res) => {
     return res.json({ success: true, data: rows });
   } catch (error) {
     console.error("List requirement comments error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };
 
@@ -457,7 +460,7 @@ exports.addRequirementComment = async (req, res) => {
     return res.status(201).json({ success: true, data: rows });
   } catch (error) {
     console.error("Add requirement comment error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };
 
@@ -478,7 +481,7 @@ exports.acknowledgeRequirement = async (req, res) => {
     return res.json({ success: true, data: updated });
   } catch (error) {
     console.error("Acknowledge requirement error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };
 
@@ -493,7 +496,7 @@ exports.listDocuments = async (req, res) => {
     return res.json({ success: true, data: rows });
   } catch (error) {
     console.error("List documents error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };
 
@@ -535,7 +538,7 @@ exports.createDocument = async (req, res) => {
     return res.status(201).json({ success: true, data: row });
   } catch (error) {
     console.error("Create document error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };
 
@@ -560,10 +563,17 @@ exports.downloadDocument = async (req, res) => {
       entityId: document.application_id,
       details: { application_no: application?.application_no, file_name: downloadName },
     });
-    return res.download(document.storage_path, downloadName);
+    // Portal uploads store a path relative to STORAGE_ROOT, staff uploads an
+    // absolute one; resolveStoredPath handles both (and refuses anything
+    // outside the storage root).
+    const abs = resolveStoredPath(document.storage_path);
+    if (!abs || !fs.existsSync(abs)) {
+      return res.status(404).json({ success: false, message: "File is no longer available." });
+    }
+    return res.download(abs, downloadName);
   } catch (error) {
     console.error("Download document error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };
 
@@ -578,6 +588,6 @@ exports.listStatusHistory = async (req, res) => {
     return res.json({ success: true, data: rows });
   } catch (error) {
     console.error("List status history error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };

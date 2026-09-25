@@ -8,6 +8,7 @@ const Contract = require("../models/Contract");
 const AccountOfficer = require("../models/AccountOfficer");
 const TypeOfContract = require("../models/TypeOfContract");
 const LandUse = require("../models/LandUse");
+const { publicErrorMessage } = require("../lib/httpError");
 
 /** "", null, undefined -> null; otherwise the id as a number (NaN passes through and is rejected below). */
 function toNullableId(value) {
@@ -32,7 +33,7 @@ exports.list = async (req, res) => {
     return res.json({ success: true, data: rows });
   } catch (error) {
     console.error("List proponents error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };
 
@@ -45,7 +46,7 @@ exports.listForLocatorList = async (req, res) => {
     return res.json({ success: true, data: rows });
   } catch (error) {
     console.error("List locators error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };
 
@@ -69,7 +70,7 @@ exports.listAccountOfficerOptions = async (req, res) => {
     });
   } catch (error) {
     console.error("List account officer options error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };
 
@@ -85,7 +86,7 @@ exports.listTypeOfContractOptions = async (req, res) => {
     });
   } catch (error) {
     console.error("List type of contract options error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };
 
@@ -97,7 +98,7 @@ exports.listLandUseOptions = async (req, res) => {
     return res.json({ success: true, data: rows.map((r) => ({ id: r.id, name: r.name, is_active: r.is_active })) });
   } catch (error) {
     console.error("List land use options error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };
 
@@ -119,7 +120,7 @@ exports.getMine = async (req, res) => {
     });
   } catch (error) {
     console.error("Get my proponent error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };
 
@@ -132,7 +133,7 @@ exports.getMySetupStatus = async (req, res) => {
     return res.json({ success: true, setupComplete: Boolean(existing) });
   } catch (error) {
     console.error("Get proponent setup status error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };
 
@@ -185,7 +186,7 @@ exports.setupMine = async (req, res) => {
     return res.status(201).json({ success: true, data: row });
   } catch (error) {
     console.error("Setup my proponent profile error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };
 
@@ -261,7 +262,7 @@ exports.updateMine = async (req, res) => {
     return res.status(202).json({ success: true, data: request });
   } catch (error) {
     console.error("Submit proponent change request error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };
 
@@ -274,7 +275,7 @@ exports.listChangeRequests = async (req, res) => {
     return res.json({ success: true, data: rows });
   } catch (error) {
     console.error("List change requests error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };
 
@@ -339,7 +340,7 @@ exports.approveChangeRequest = async (req, res) => {
     return res.json({ success: true, data: reviewed });
   } catch (error) {
     console.error("Approve change request error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };
 
@@ -397,7 +398,7 @@ exports.rejectChangeRequest = async (req, res) => {
     return res.json({ success: true, data: reviewed });
   } catch (error) {
     console.error("Reject change request error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };
 
@@ -412,7 +413,7 @@ exports.getById = async (req, res) => {
     return res.json({ success: true, data: row });
   } catch (error) {
     console.error("Get proponent error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };
 
@@ -531,7 +532,7 @@ exports.create = async (req, res) => {
     return res.status(201).json({ success: true, data: row });
   } catch (error) {
     console.error("Create proponent error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };
 
@@ -563,7 +564,7 @@ function sectionHandler(label, action, run) {
       console.error(`Save ${label} error:`, error);
       // Amount fields that aren't numbers are the caller's mistake, not a server fault.
       const status = /must be a number/.test(error?.message || "") ? 400 : 500;
-      return res.status(status).json({ success: false, message: error.message || "Internal server error" });
+      return res.status(status).json({ success: false, message: publicErrorMessage(error) });
     }
   };
 }
@@ -753,7 +754,7 @@ exports.update = async (req, res) => {
     return res.json({ success: true, data: refreshed || row });
   } catch (error) {
     console.error("Update proponent error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };
 
@@ -778,7 +779,7 @@ exports.deactivate = async (req, res) => {
     return res.json({ success: true, data: row });
   } catch (error) {
     console.error("Deactivate proponent error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };
 
@@ -803,7 +804,7 @@ exports.reactivate = async (req, res) => {
     return res.json({ success: true, data: row });
   } catch (error) {
     console.error("Reactivate proponent error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };
 

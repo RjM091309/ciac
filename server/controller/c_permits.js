@@ -10,6 +10,7 @@ const AuditLog = require("../models/AuditLog");
 const { diffChanges } = require("../lib/auditDiff");
 const { renderPermitCertificate } = require("../lib/permitCertificate");
 const { STORAGE_ROOT, relativeStoragePath, resolveStoredPath } = require("../lib/fileStorage");
+const { publicErrorMessage } = require("../lib/httpError");
 
 /** Title-cases a stored role name ("ASSESSMENT OFFICER" -> "Assessment
  * Officer") for the certificate's signature block — roles are stored
@@ -61,7 +62,7 @@ exports.list = async (req, res) => {
     return res.json({ success: true, data: rows });
   } catch (error) {
     console.error("List permits error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };
 
@@ -74,7 +75,7 @@ exports.getById = async (req, res) => {
     return res.json({ success: true, data: row });
   } catch (error) {
     console.error("Get permit error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };
 
@@ -103,7 +104,7 @@ exports.create = async (req, res) => {
     return res.status(201).json({ success: true, data: row });
   } catch (error) {
     console.error("Create permit error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };
 
@@ -130,7 +131,7 @@ exports.update = async (req, res) => {
     return res.json({ success: true, data: row });
   } catch (error) {
     console.error("Update permit error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };
 
@@ -152,7 +153,7 @@ exports.deactivate = async (req, res) => {
     return res.json({ success: true, data: row });
   } catch (error) {
     console.error("Deactivate permit error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };
 
@@ -186,7 +187,7 @@ exports.downloadCertificate = async (req, res) => {
     return res.download(absPath, filename);
   } catch (error) {
     console.error("Download permit certificate error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };
 
@@ -230,6 +231,6 @@ exports.downloadContractCertificate = async (req, res) => {
     return res.download(absPath, filename);
   } catch (error) {
     console.error("Download contract certificate (via permit) error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };

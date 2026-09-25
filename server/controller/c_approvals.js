@@ -4,6 +4,7 @@ const Contract = require("../models/Contract");
 const Assessment = require("../models/AssessmentEvaluation");
 const AuditLog = require("../models/AuditLog");
 const { resolveStoredPath } = require("../lib/fileStorage");
+const { publicErrorMessage } = require("../lib/httpError");
 
 function fail(res, error, label) {
   console.error(`${label} error:`, error);
@@ -12,7 +13,7 @@ function fail(res, error, label) {
   // the throw site — everything else defaults to 500 so a genuine crash
   // still shows up as one in logs/monitoring instead of being masked as a
   // routine validation failure.
-  return res.status(error.status || 500).json({ success: false, message: error.message || "Internal server error" });
+  return res.status(error.status || 500).json({ success: false, message: publicErrorMessage(error) });
 }
 
 function appIdParam(req, res) {

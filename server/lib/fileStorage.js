@@ -2,6 +2,8 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 const multer = require("multer");
+const { publicErrorMessage } = require("./httpError");
+const { verifyUploadedFile } = require("./uploadCheck");
 
 // Root directory for uploaded documents. Override with STORAGE_DIR in .env.
 const STORAGE_ROOT = process.env.STORAGE_DIR
@@ -33,7 +35,7 @@ const storage = multer.diskStorage({
     }
   },
   filename(req, file, cb) {
-    const ext = ALLOWED[file.mimetype] || path.extname(file.originalname || "").toLowerCase() || "";
+    const ext = ALLOWED[file.mimetype] || "";
     const unique = `${Date.now()}-${crypto.randomBytes(6).toString("hex")}${ext}`;
     cb(null, unique);
   },
@@ -53,13 +55,13 @@ const uploadDocument = multer({
 /** Multer error -> clean 400 JSON; anything else -> next(err). */
 function handleUpload(req, res, next) {
   uploadDocument(req, res, (err) => {
-    if (!err) return next();
+    if (!err) return verifyUploadedFile(req, res, next);
     if (err instanceof multer.MulterError) {
       const message =
         err.code === "LIMIT_FILE_SIZE" ? "File is too large (max 10 MB)." : `Upload error: ${err.message}`;
       return res.status(400).json({ success: false, message });
     }
-    return res.status(400).json({ success: false, message: err.message || "Upload failed." });
+    return res.status(400).json({ success: false, message: publicErrorMessage(err, "Upload failed.") });
   });
 }
 
@@ -76,8 +78,21 @@ function relativeStoragePath(absPath) {
   return path.relative(STORAGE_ROOT, absPath).split(path.sep).join("/");
 }
 
+/** Content-Disposition value for `name`. Node rejects a header holding
+ * non-Latin-1 characters (a locator's "Ñiño Permit.pdf" or an emoji), so the
+ * plain filename gets an ASCII stand-in and the real name goes in the
+ * RFC 5987 filename* parameter, which browsers prefer when present. */
+function contentDisposition(type, name) {
+  const clean = String(name || "file").replace(/[\r\n"\\]/g, "").trim() || "file";
+  const ascii = clean.replace(/[^\x20-\x7e]/g, "_");
+  if (ascii === clean) return `${type}; filename="${clean}"`;
+  const encoded = encodeURIComponent(clean).replace(/['()*]/g, (c) => "%" + c.charCodeAt(0).toString(16).toUpperCase());
+  return `${type}; filename="${ascii}"; filename*=UTF-8''${encoded}`;
+}
+
 module.exports = {
   STORAGE_ROOT,
+  contentDisposition,
   MAX_FILE_BYTES,
   handleUpload,
   resolveStoredPath,

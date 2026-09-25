@@ -1,6 +1,7 @@
 const fs = require("fs");
 const path = require("path");
 const multer = require("multer");
+const { EXTENSIONS } = require("../lib/uploadCheck");
 
 // Actual documentary-requirement uploads (BRM-04): files land on disk under
 // server/uploads/documents with a generated name; the original name and
@@ -22,7 +23,9 @@ const ALLOWED_MIME = new Set([
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, UPLOAD_ROOT),
   filename: (req, file, cb) => {
-    const ext = path.extname(file.originalname || "").slice(0, 20);
+    // Extension from the declared (and later verified) type, never from the
+    // uploader's filename — the original name is kept in the documents row.
+    const ext = EXTENSIONS[file.mimetype] || "";
     const unique = `${Date.now()}-${Math.round(Math.random() * 1e9)}${ext}`;
     cb(null, unique);
   },

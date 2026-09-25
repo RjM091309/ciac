@@ -1,12 +1,13 @@
 const Assessment = require("../models/AssessmentEvaluation");
 const Workflow = require("../models/ApplicationWorkflow");
 const AuditLog = require("../models/AuditLog");
+const { publicErrorMessage } = require("../lib/httpError");
 
 function fail(res, error, label) {
   console.error(`${label} error:`, error);
   // Deliberate business-rule rejections tag their own Error with
   // .status = 400 at the throw site — everything else defaults to 500.
-  return res.status(error.status || 500).json({ success: false, message: error.message || "Internal server error" });
+  return res.status(error.status || 500).json({ success: false, message: publicErrorMessage(error) });
 }
 
 function appIdParam(req, res) {

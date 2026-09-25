@@ -6,6 +6,7 @@ const Assessment = require("../models/AssessmentEvaluation");
 const Contract = require("../models/Contract");
 const Permit = require("../models/Permit");
 const ActivityLog = require("../models/ActivityLog");
+const { publicErrorMessage } = require("../lib/httpError");
 
 /** The admin previewing "what Officer/Proponent sees" is still an admin —
  * fullAccess in ControlPanelAccessContext would otherwise ignore whatever
@@ -357,7 +358,7 @@ exports.getMyDashboard = async (req, res) => {
     });
   } catch (error) {
     console.error("Get my dashboard error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };
 
@@ -441,7 +442,7 @@ exports.getPreview = async (req, res) => {
     });
   } catch (error) {
     console.error("Get dashboard preview error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };
 
@@ -474,6 +475,6 @@ exports.getProponentPreviewDetail = async (req, res) => {
     });
   } catch (error) {
     console.error("Get proponent preview detail error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };

@@ -1,6 +1,7 @@
 const Role = require("../models/Role");
 const ControlPanelPermission = require("../models/ControlPanelPermission");
 const AuditLog = require("../models/AuditLog");
+const { publicErrorMessage } = require("../lib/httpError");
 
 // Fixed roles — locked against rename/retire from the UI. Two different
 // reasons land a name on this list:
@@ -62,7 +63,7 @@ exports.list = async (req, res) => {
     });
   } catch (error) {
     console.error("List roles error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };
 
@@ -99,7 +100,7 @@ exports.create = async (req, res) => {
     return res.status(201).json({ success: true, data: row });
   } catch (error) {
     console.error("Create role error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };
 
@@ -159,7 +160,7 @@ exports.update = async (req, res) => {
     return res.json({ success: true, data: row });
   } catch (error) {
     console.error("Update role error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };
 
@@ -189,7 +190,7 @@ exports.deactivate = async (req, res) => {
     return res.json({ success: true, data: row });
   } catch (error) {
     console.error("Deactivate role error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };
 
@@ -211,6 +212,6 @@ exports.reactivate = async (req, res) => {
     return res.json({ success: true, data: row });
   } catch (error) {
     console.error("Reactivate role error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };

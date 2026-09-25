@@ -5,6 +5,7 @@ const Permit = require("../models/Permit");
 const ActivityLog = require("../models/ActivityLog");
 const AuditLog = require("../models/AuditLog");
 const { relativeStoragePath, resolveStoredPath } = require("../lib/fileStorage");
+const { publicErrorMessage } = require("../lib/httpError");
 
 // All handlers below assume requireProponentSelf (req.proponent) has run, and
 // the per-application ones assume requireOwnApplication (req.application) has run.
@@ -15,7 +16,7 @@ exports.listMyApplications = async (req, res) => {
     return res.json({ success: true, data: applications });
   } catch (error) {
     console.error("List my applications error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };
 
@@ -29,7 +30,7 @@ exports.getMyApplicationRequirements = async (req, res) => {
     return res.json({ success: true, data: rows });
   } catch (error) {
     console.error("Get my application requirements error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };
 
@@ -39,7 +40,7 @@ exports.getMyApplicationDocuments = async (req, res) => {
     return res.json({ success: true, data: rows });
   } catch (error) {
     console.error("Get my application documents error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };
 
@@ -98,7 +99,7 @@ exports.uploadMyApplicationDocument = async (req, res) => {
     if (req.file?.path) {
       fs.unlink(req.file.path, () => {});
     }
-    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };
 
@@ -108,7 +109,7 @@ exports.getMyApplicationStatusHistory = async (req, res) => {
     return res.json({ success: true, data: rows });
   } catch (error) {
     console.error("Get my application status history error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };
 
@@ -118,7 +119,7 @@ exports.getMyApplicationContract = async (req, res) => {
     return res.json({ success: true, data: contract || null });
   } catch (error) {
     console.error("Get my application contract error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };
 
@@ -128,7 +129,7 @@ exports.getMyApplicationPermits = async (req, res) => {
     return res.json({ success: true, data: rows });
   } catch (error) {
     console.error("Get my application permits error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };
 
@@ -140,7 +141,7 @@ exports.listMyContracts = async (req, res) => {
     return res.json({ success: true, data: rows });
   } catch (error) {
     console.error("List my contracts error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };
 
@@ -177,7 +178,7 @@ exports.downloadMyContractCertificate = async (req, res) => {
     return res.download(absPath, filename);
   } catch (error) {
     console.error("Download my contract certificate error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };
 
@@ -187,7 +188,7 @@ exports.listMyPermits = async (req, res) => {
     return res.json({ success: true, data: rows });
   } catch (error) {
     console.error("List my permits error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };
 
@@ -222,7 +223,7 @@ exports.downloadMyPermitCertificate = async (req, res) => {
     return res.download(absPath, filename);
   } catch (error) {
     console.error("Download my permit certificate error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };
 
@@ -234,6 +235,6 @@ exports.getMyActivity = async (req, res) => {
     return res.json({ success: true, data: rows });
   } catch (error) {
     console.error("Get my activity error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };

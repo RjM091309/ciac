@@ -1,9 +1,10 @@
 const Report = require("../models/Report");
 const AuditLog = require("../models/AuditLog");
+const { publicErrorMessage } = require("../lib/httpError");
 
 function fail(res, error, label) {
   console.error(`${label} error:`, error);
-  return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+  return res.status(500).json({ success: false, message: publicErrorMessage(error) });
 }
 
 function filtersFromQuery(req) {

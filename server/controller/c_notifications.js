@@ -1,5 +1,6 @@
 const Notification = require("../models/Notification");
 const { subscribeUser, writeEvent } = require("../lib/notificationStream");
+const { publicErrorMessage } = require("../lib/httpError");
 
 exports.listMine = async (req, res) => {
   try {
@@ -9,7 +10,7 @@ exports.listMine = async (req, res) => {
     return res.json({ success: true, data: rows });
   } catch (error) {
     console.error("List notifications error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };
 
@@ -24,7 +25,7 @@ exports.markRead = async (req, res) => {
     return res.json({ success: true });
   } catch (error) {
     console.error("Mark notification read error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };
 
@@ -34,7 +35,7 @@ exports.markAllRead = async (req, res) => {
     return res.json({ success: true });
   } catch (error) {
     console.error("Mark all notifications read error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };
 
@@ -49,7 +50,7 @@ exports.remove = async (req, res) => {
     return res.json({ success: true });
   } catch (error) {
     console.error("Delete notification error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };
 
@@ -59,7 +60,7 @@ exports.clearAll = async (req, res) => {
     return res.json({ success: true });
   } catch (error) {
     console.error("Clear all notifications error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };
 

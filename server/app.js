@@ -17,6 +17,7 @@ require("dotenv").config({ path: path.join(__dirname, ".env"), override: true })
 
 const { attachUserFromJwt } = require("./middleware/m_auth");
 const { csrfGuard } = require("./middleware/m_csrf");
+const { publicErrorMessage } = require("./lib/httpError");
 const { initializeDatabase } = require("./config/database");
 const Role = require("./models/Role");
 const User = require("./models/User");
@@ -121,7 +122,9 @@ app.use((err, req, res, next) => {
   if (!err) return next();
   if (req.path.startsWith("/api/")) {
     const status = err.name === "MulterError" || /unsupported file type/i.test(err.message || "") ? 400 : 500;
-    return res.status(status).json({ success: false, message: err.message || "Upload failed" });
+    // Multer's own messages ("File too large") are meant for the user.
+    const message = err.name === "MulterError" ? err.message : publicErrorMessage(err, "Upload failed");
+    return res.status(status).json({ success: false, message });
   }
   return next(err);
 });
