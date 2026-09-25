@@ -104,17 +104,14 @@ async function loginViaDatabase(username, password, totpCode, newPassword) {
   }
 
   const id = row.id ?? row.user_id ?? 0;
-  // Known this early because the row query above already joins roles — used
-  // to exempt admin from the failed-attempt lockout below. The IP-based rate
-  // limit on /api/auth/login (r_auth.js) still throttles brute-forcing this
-  // account either way, so this isn't a bare/unprotected exemption.
-  const isAdminRow = String(row.role_name || row.role || "").toLowerCase() === "admin";
+  // Every account, admin included, is subject to the failed-attempt lockout —
+  // admin is the most valuable account to guess, so it gets no exemption.
 
   // Locked out from repeated failed attempts — reject before touching the
   // password at all, so a locked account never leaks whether the *current*
   // guess would have been right.
   const lockedUntil = row.locked_until ? new Date(row.locked_until) : null;
-  if (!isAdminRow && lockedUntil && lockedUntil.getTime() > Date.now()) {
+  if (lockedUntil && lockedUntil.getTime() > Date.now()) {
     const minutesLeft = Math.max(1, Math.ceil((lockedUntil.getTime() - Date.now()) / 60000));
     return {
       success: false,
@@ -140,9 +137,6 @@ async function loginViaDatabase(username, password, totpCode, newPassword) {
   }
   const matches = await bcrypt.compare(pass, stored);
   if (!matches) {
-    if (isAdminRow) {
-      return { success: false, reason: "wrong_password", userId: id, message: "Username and Password incorrect!" };
-    }
     const { maxAttempts, lockoutMinutes } = getLockoutConfig();
     await User.registerFailedLogin(id, maxAttempts, lockoutMinutes);
     const attemptsSoFar = Number(row.failed_login_attempts || 0) + 1;
@@ -213,18 +207,16 @@ async function loginViaDatabase(username, password, totpCode, newPassword) {
         // A wrong code counts toward the same lockout as a wrong password —
         // otherwise someone who already has the password could keep guessing
         // 6-digit codes, limited only by the per-IP rate limit.
-        if (!isAdmin) {
-          const { maxAttempts, lockoutMinutes } = getLockoutConfig();
-          await User.registerFailedLogin(id, maxAttempts, lockoutMinutes);
-          if (Number(row.failed_login_attempts || 0) + 1 >= maxAttempts) {
-            return {
-              success: false,
-              locked: true,
-              reason: "invalid_mfa_code",
-              userId: id,
-              message: `Too many failed attempts. Your account is locked for ${lockoutMinutes} minutes.`,
-            };
-          }
+        const { maxAttempts, lockoutMinutes } = getLockoutConfig();
+        await User.registerFailedLogin(id, maxAttempts, lockoutMinutes);
+        if (Number(row.failed_login_attempts || 0) + 1 >= maxAttempts) {
+          return {
+            success: false,
+            locked: true,
+            reason: "invalid_mfa_code",
+            userId: id,
+            message: `Too many failed attempts. Your account is locked for ${lockoutMinutes} minutes.`,
+          };
         }
         return { success: false, mfaRequired: true, reason: "invalid_mfa_code", userId: id, message: "Invalid authenticator code. Try again." };
       }
@@ -349,6 +341,7 @@ async function resetPasswordWithToken(token, newPassword) {
 }
 
 module.exports = {
+  getLockoutConfig,
   login,
   requestPasswordReset,
   resetPasswordWithToken,

@@ -1,10 +1,11 @@
-const bcrypt = require("bcryptjs");
 const User = require("../models/User");
 const AuditLog = require("../models/AuditLog");
 const { sendMail } = require("../lib/mailer");
 const { diffChanges } = require("../lib/auditDiff");
 const { decryptSecret, encryptSecret, newSecret, buildEnrollment, verifyToken } = require("../lib/totp");
 const { saveAvatar, resolveAvatar, avatarContentType, deleteAvatar } = require("../lib/avatarStorage");
+const { publicErrorMessage } = require("../lib/httpError");
+const { guardedCheck, checkPassword } = require("../lib/reauth");
 
 // My Profile — the signed-in user's own account (staff only on the frontend;
 // Locators keep "Settings" → My Business Profile). Every route here acts on
@@ -28,7 +29,7 @@ function fail(res, status, message, field) {
 
 function serverError(res, label, error) {
   console.error(`${label} error:`, error);
-  return res.status(500).json({ success: false, message: error.message || "Internal server error" });
+  return res.status(500).json({ success: false, message: publicErrorMessage(error) });
 }
 
 function toProfileResponse(profile, extra = {}) {
@@ -125,10 +126,8 @@ exports.update = async (req, res) => {
       // taking the account — make whoever is at the keyboard prove it's them.
       const currentPassword = String(req.body?.currentPassword ?? "");
       if (!currentPassword) return fail(res, 400, "Enter your current password to change your email.", "currentPassword");
-      const storedHash = await User.getPasswordHashById(userId);
-      if (!storedHash || !(await bcrypt.compare(currentPassword, storedHash))) {
-        return fail(res, 400, "Current password is incorrect.", "currentPassword");
-      }
+      const check = await checkPassword(req, currentPassword);
+      if (!check.ok) return fail(res, check.status, check.message, "currentPassword");
       if (!(await User.isFieldAvailable("email", email, userId))) return fail(res, 409, "That email is already in use.", "email");
     }
     if (phone && phone !== before.phone && !(await User.isFieldAvailable("phone", phone, userId))) {
@@ -282,8 +281,22 @@ exports.startTotpSetup = async (req, res) => {
     const enabled = record.totp_enabled === 1 && !!record.totp_secret;
     // Moving to a new phone: prove the current one first, so a session left
     // open on a shared computer can't be used to swap in someone else's phone.
-    if (enabled && !(await verifyCurrentCode(record, codeOf(req)))) {
-      return fail(res, 400, "Enter the current 6-digit code from your authenticator app.", "code");
+    if (enabled) {
+      const code = codeOf(req);
+      if (!code) return fail(res, 400, "Enter the current 6-digit code from your authenticator app.", "code");
+      const check = await guardedCheck(req, () => verifyCurrentCode(record, code), "That code didn't match. Enter the current 6-digit code.");
+      if (!check.ok) return fail(res, check.status, check.message, "code");
+    }
+    // Turning it on for the first time: same risk the other way — whoever
+    // enrolls the authenticator decides who can sign in from then on, so an
+    // unattended session mustn't be enough. Ask for the password instead.
+    if (!enabled) {
+      const currentPassword = String(req.body?.currentPassword ?? "");
+      if (!currentPassword) {
+        return fail(res, 400, "Enter your current password to set up two-factor authentication.", "currentPassword");
+      }
+      const check = await checkPassword(req, currentPassword);
+      if (!check.ok) return fail(res, check.status, check.message, "currentPassword");
     }
     const profile = await User.getOwnProfile(req.user.id);
     const secret = newSecret();
@@ -344,9 +357,10 @@ exports.disableTotp = async (req, res) => {
     const record = await User.getTotpRecord(req.user.id);
     if (!record) return fail(res, 404, "Account not found");
     if (!(record.totp_enabled === 1 && record.totp_secret)) return res.json({ success: true, data: { totp_enabled: 0 } });
-    if (!(await verifyCurrentCode(record, codeOf(req)))) {
-      return fail(res, 400, "Enter the current 6-digit code from your authenticator app.", "code");
-    }
+    const code = codeOf(req);
+    if (!code) return fail(res, 400, "Enter the current 6-digit code from your authenticator app.", "code");
+    const check = await guardedCheck(req, () => verifyCurrentCode(record, code), "That code didn't match. Enter the current 6-digit code.");
+    if (!check.ok) return fail(res, check.status, check.message, "code");
     await User.disableTotp(req.user.id);
     await AuditLog.record({
       actorId: req.user.id,

@@ -1,4 +1,3 @@
-const bcrypt = require("bcryptjs");
 const User = require("../models/User");
 const AuditLog = require("../models/AuditLog");
 const Proponent = require("../models/Proponent");
@@ -12,6 +11,7 @@ const { validatePasswordStrength, generateTempPassword } = require("../lib/passw
 const { sendMail } = require("../lib/mailer");
 const { diffChanges } = require("../lib/auditDiff");
 const { publicErrorMessage } = require("../lib/httpError");
+const { checkPassword } = require("../lib/reauth");
 
 /** Translates a raw MSSQL unique-constraint violation (error 2627/2601) on
  * dbo.users into a friendly message plus which field it belongs to, so the
@@ -822,10 +822,9 @@ exports.changeMyPassword = async (req, res) => {
     if (!storedHash || !storedHash.startsWith("$2")) {
       return res.status(400).json({ success: false, message: "Account password is using an unsupported format. Ask admin to reset your password." });
     }
-    const matches = await bcrypt.compare(String(currentPassword), storedHash);
-    if (!matches) {
-      return res.status(400).json({ success: false, message: "Current password is incorrect." });
-    }
+    // Shares the sign-in lockout, so an open session can't guess the password.
+    const check = await checkPassword(req, currentPassword);
+    if (!check.ok) return res.status(check.status).json({ success: false, message: check.message });
 
     const strengthError = validatePasswordStrength(newPassword);
     if (strengthError) return res.status(400).json({ success: false, message: strengthError });

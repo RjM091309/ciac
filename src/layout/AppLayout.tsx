@@ -332,11 +332,7 @@ export function AppLayout({
         <ChangePasswordModal open={changePasswordOpen} onClose={() => setChangePasswordOpen(false)} />
 
         {hasProfilePanel ? (
-          <MyProfilePanel
-            open={profileOpen}
-            onClose={() => setProfileOpen(false)}
-            onChangePassword={() => setChangePasswordOpen(true)}
-          />
+          <MyProfilePanel open={profileOpen} onClose={() => setProfileOpen(false)} />
         ) : null}
       </div>
     </ControlPanelAccessProvider>

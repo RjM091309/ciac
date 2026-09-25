@@ -62,7 +62,9 @@ async function attachUserFromJwt(req, res, next) {
 
 function isAuthenticated(req, res, next) {
   if (req.user) return next();
-  if (req.path.startsWith("/api/")) {
+  // originalUrl, not path: inside a mounted router (app.use("/api/users", …))
+  // req.path has lost the "/api" prefix, which turned API 401s into redirects.
+  if (req.originalUrl.startsWith("/api/")) {
     return res.status(401).json({ success: false, message: "Authentication required" });
   }
   const frontend = process.env.FRONTEND_URL;

@@ -24,7 +24,19 @@ const totpLimiter = rateLimit({
 });
 
 router.get("/", profileController.get);
-router.put("/", profileController.update);
+// Password/code re-checks here share the sign-in lockout (lib/reauth.js);
+// this per-IP cap is the same as login's. Only failed requests count, so
+// ordinary edits never hit it.
+const reauthLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 20,
+  skipSuccessfulRequests: true,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, message: "Too many attempts. Please try again later." },
+});
+
+router.put("/", reauthLimiter, profileController.update);
 
 router.get("/avatar", profileController.getAvatar);
 router.post("/avatar", handleAvatarUpload, profileController.uploadAvatar);

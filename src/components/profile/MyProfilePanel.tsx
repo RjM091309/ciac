@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Copy, KeyRound, Pencil, ShieldCheck, ShieldOff, Smartphone } from 'lucide-react';
+import { Copy, Pencil, ShieldCheck, ShieldOff, Smartphone } from 'lucide-react';
 import { toast } from 'sonner';
 import { SidePanel } from '../ui/SidePanel';
 import { UserAvatar } from '../ui/UserAvatar';
@@ -279,25 +279,31 @@ function IdentityHeader({ profile }: { profile: MyProfile }) {
 type TotpStep =
   | { kind: 'idle' }
   | { kind: 'verify'; intent: 'move' | 'disable' }
+  | { kind: 'password' }
   | { kind: 'enroll'; enrollment: Enrollment; replacing: boolean };
 
 function TwoFactorCard({ profile }: { profile: MyProfile }) {
   const enabled = profile.totp_enabled === 1;
   const [step, setStep] = useState<TotpStep>({ kind: 'idle' });
   const [code, setCode] = useState('');
+  const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
 
   function reset() {
     setStep({ kind: 'idle' });
     setCode('');
+    setPassword('');
   }
 
-  async function start(currentCode?: string) {
+  // Moving to a new phone proves the current one with a code; turning 2FA on
+  // for the first time proves the account with the password instead.
+  async function start(proof: { code: string } | { currentPassword: string }) {
     setBusy(true);
     try {
-      const json = await postJson('/api/profile/totp/setup', currentCode ? { code: currentCode } : {});
+      const json = await postJson('/api/profile/totp/setup', proof);
       setStep({ kind: 'enroll', enrollment: json.data.enrollment, replacing: Boolean(json.data.replacing) });
       setCode('');
+      setPassword('');
     } catch (err: any) {
       toast.error(err?.message || 'Could not start setup.');
     } finally {
@@ -327,7 +333,7 @@ function TwoFactorCard({ profile }: { profile: MyProfile }) {
 
   async function submitVerify() {
     if (step.kind !== 'verify') return;
-    if (step.intent === 'move') return start(code);
+    if (step.intent === 'move') return start({ code });
     setBusy(true);
     try {
       await postJson('/api/profile/totp/disable', { code });
@@ -386,9 +392,9 @@ function TwoFactorCard({ profile }: { profile: MyProfile }) {
               ) : null}
             </>
           ) : (
-            <SmallButton tone="primary" onClick={() => start()} disabled={busy}>
+            <SmallButton tone="primary" onClick={() => setStep({ kind: 'password' })} disabled={busy}>
               <ShieldCheck size={13} />
-              {busy ? 'Starting…' : profile.is_admin ? 'Turn on' : 'Set up now'}
+              {profile.is_admin ? 'Turn on' : 'Set up now'}
             </SmallButton>
           )}
           {enabled && !profile.is_admin ? (
@@ -415,6 +421,35 @@ function TwoFactorCard({ profile }: { profile: MyProfile }) {
             <CodeInput value={code} onChange={setCode} autoFocus />
             <SmallButton type="submit" tone={step.intent === 'disable' ? 'danger' : 'primary'} disabled={busy || code.length !== 6}>
               {busy ? 'Checking…' : step.intent === 'move' ? 'Continue' : 'Turn off'}
+            </SmallButton>
+            <SmallButton onClick={reset} disabled={busy}>
+              Cancel
+            </SmallButton>
+          </div>
+        </form>
+      ) : null}
+
+      {step.kind === 'password' ? (
+        <form
+          className="mt-3 space-y-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (password) void start({ currentPassword: password });
+          }}
+        >
+          <p className="text-[11px] text-secondary">First, enter your current password.</p>
+          <div className="flex items-center gap-2">
+            <input
+              type="password"
+              className="app-input min-w-0 flex-1"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              autoComplete="current-password"
+              aria-label="Current password"
+              autoFocus
+            />
+            <SmallButton type="submit" tone="primary" disabled={busy || !password}>
+              {busy ? 'Checking…' : 'Continue'}
             </SmallButton>
             <SmallButton onClick={reset} disabled={busy}>
               Cancel
@@ -479,15 +514,8 @@ function TwoFactorCard({ profile }: { profile: MyProfile }) {
 
 type Form = { full_name: string; email: string; phone: string; currentPassword: string };
 
-export function MyProfilePanel({
-  open,
-  onClose,
-  onChangePassword,
-}: {
-  open: boolean;
-  onClose: () => void;
-  onChangePassword: () => void;
-}) {
+// Change Password isn't repeated here — it's already in the account menu.
+export function MyProfilePanel({ open, onClose }: { open: boolean; onClose: () => void }) {
   const profile = useMyProfile(open);
   const [form, setForm] = useState<Form>({ full_name: '', email: '', phone: '', currentPassword: '' });
   const [errors, setErrors] = useState<Partial<Record<keyof Form, string>>>({});
@@ -653,22 +681,6 @@ export function MyProfilePanel({
             <SectionTitle>Security</SectionTitle>
             <div className="space-y-3">
               <TwoFactorCard profile={profile} />
-              <Card>
-                <div className="flex items-center justify-between gap-3">
-                  <div className="flex items-start gap-2.5 min-w-0">
-                    <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full" style={{ backgroundColor: 'rgba(245,158,11,0.16)', color: '#f59e0b' }}>
-                      <KeyRound size={14} />
-                    </span>
-                    <div className="min-w-0">
-                      <div className="text-[13px] font-semibold" style={{ color: 'var(--text)' }}>
-                        Password
-                      </div>
-                      <p className="text-[11px] text-secondary mt-0.5">Change the password you sign in with.</p>
-                    </div>
-                  </div>
-                  <SmallButton onClick={onChangePassword}>Change</SmallButton>
-                </div>
-              </Card>
             </div>
           </section>
         </div>

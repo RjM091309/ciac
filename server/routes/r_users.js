@@ -1,4 +1,5 @@
 const express = require("express");
+const { rateLimit } = require("express-rate-limit");
 const router = express.Router();
 const usersController = require("../controller/c_users");
 const { requireAnyMenuAccess, requireUserMenuAccess, isAuthenticated } = require("../middleware/m_auth");
@@ -14,7 +15,17 @@ const USER_MENU_KEYS = ["settings:users", "settings:locator-users"];
 // Self-service — any signed-in user changing their own password, regardless
 // of role or Control Panel permissions (not gated by USER_MENU_KEYS, which
 // only covers admin management of *other* users' accounts).
-router.patch("/me/password", isAuthenticated, usersController.changeMyPassword);
+// Current-password check shares the sign-in lockout (lib/reauth.js); this
+// per-IP cap matches login's.
+const changePasswordLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 20,
+  skipSuccessfulRequests: true,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, message: "Too many attempts. Please try again later." },
+});
+router.patch("/me/password", isAuthenticated, changePasswordLimiter, usersController.changeMyPassword);
 
 router.get("/", requireAnyMenuAccess(USER_MENU_KEYS, "view"), usersController.list);
 // Live "already taken" check while a create/edit form is filled in —
