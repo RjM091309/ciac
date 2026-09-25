@@ -1,4 +1,4 @@
-const { selectData, insertData, updateData, updateSchema, runInTransaction } = require("../config/database");
+const { selectData, insertData, updateData, updateSchema } = require("../config/database");
 // Cross-model require so deactivating a category can cascade down to the
 // requirements filed under it (see deactivateRequirementCategory below).
 const Requirement = require("./Requirement");
@@ -39,20 +39,10 @@ async function createSchema() {
       CREATE INDEX IX_requirement_categories_name ON dbo.requirement_categories(name);
     END
 
-    -- No rows for a category here = it applies to every application type
-    -- (same "unrestricted default" convention as requirement_application_types).
-    -- Any row(s) present restrict it to just those types, so newly-created
-    -- categories sort immediately under the type they were created for
-    -- instead of waiting for a requirement to link them.
-    IF OBJECT_ID('dbo.requirement_category_application_types', 'U') IS NULL
-    BEGIN
-      CREATE TABLE dbo.requirement_category_application_types (
-        category_id INT NOT NULL,
-        application_type NVARCHAR(50) NOT NULL,
-        CONSTRAINT PK_req_cat_app_types PRIMARY KEY (category_id, application_type),
-        CONSTRAINT FK_req_cat_app_types_category FOREIGN KEY (category_id) REFERENCES dbo.requirement_categories(id)
-      );
-    END
+    -- A category's application types are derived from the requirements
+    -- filed under it (requirement_application_types); the old
+    -- requirement_category_application_types table is dropped at startup
+    -- by config/legacyTables.js.
 
     -- Set when this row was deactivated automatically because an application
     -- type it's wired to was deactivated (and this was its last active
@@ -75,20 +65,24 @@ function mapRow(rc) {
     updated_at: rc.updated_at ?? null,
     is_active: rc.is_active,
     deactivated_via_cascade: rc.deactivated_via_cascade ?? 0,
-    // Populated by the caller from a second query — empty array means
-    // "applies to every application type".
+    // Populated by the caller from a second query — the types its
+    // requirements are tagged to (read-only, derived).
     application_types: [],
   };
 }
 
-/** Attaches each row's linked application_types in one extra query instead
- * of N+1 — mutates and returns the same array for convenience. */
+/** Attaches each row's application_types — every type any requirement in the
+ * category is tagged to — in one extra query instead of N+1. Mutates and
+ * returns the same array for convenience. */
 async function attachApplicationTypes(rows) {
   if (!rows.length) return rows;
   const ids = rows.map((r) => r.id);
   const placeholders = ids.map((_, i) => `@param${i}`).join(", ");
   const linkRows = await selectData(
-    `SELECT category_id, application_type FROM dbo.requirement_category_application_types WHERE category_id IN (${placeholders})`,
+    `SELECT DISTINCT r.category_id, rat.application_type
+     FROM dbo.requirements r
+     INNER JOIN dbo.requirement_application_types rat ON rat.requirement_id = r.id
+     WHERE r.category_id IN (${placeholders})`,
     ids
   );
   const byCategory = new Map();
@@ -101,21 +95,6 @@ async function attachApplicationTypes(rows) {
     r.application_types = byCategory.get(r.id) || [];
   });
   return rows;
-}
-
-async function setApplicationTypes(categoryId, applicationTypes) {
-  const types = Array.isArray(applicationTypes)
-    ? [...new Set(applicationTypes.map((t) => String(t).trim().toUpperCase()).filter(Boolean))]
-    : [];
-  await runInTransaction(async (tx) => {
-    await tx.query(`DELETE FROM dbo.requirement_category_application_types WHERE category_id = @param0`, [categoryId]);
-    for (const type of types) {
-      await tx.query(
-        `INSERT INTO dbo.requirement_category_application_types (category_id, application_type) VALUES (@param0, @param1)`,
-        [categoryId, type]
-      );
-    }
-  });
 }
 
 async function listRequirementCategories() {
@@ -163,7 +142,7 @@ async function getRequirementCategoryById(id) {
   return mapped;
 }
 
-async function createRequirementCategory({ name, description, created_by, is_active = 1, application_types }) {
+async function createRequirementCategory({ name, description, created_by, is_active = 1 }) {
   await ensureSchema();
   const createdBy = toInt(created_by);
   const active = is_active ? 1 : 0;
@@ -179,11 +158,10 @@ async function createRequirementCategory({ name, description, created_by, is_act
   );
 
   const id = result?.recordset?.[0]?.id;
-  if (application_types !== undefined && application_types !== null) await setApplicationTypes(id, application_types);
   return getRequirementCategoryById(id);
 }
 
-async function updateRequirementCategory(id, { name, description, is_active, application_types, updated_by }) {
+async function updateRequirementCategory(id, { name, description, is_active, updated_by }) {
   await ensureSchema();
   const sets = [];
   const params = [];
@@ -209,8 +187,6 @@ async function updateRequirementCategory(id, { name, description, is_active, app
     params.push(id);
     await updateData(query, params);
   }
-
-  if (application_types !== undefined && application_types !== null) await setApplicationTypes(id, application_types);
 
   return getRequirementCategoryById(id);
 }

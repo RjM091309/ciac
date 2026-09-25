@@ -169,7 +169,7 @@ export function RequirementsManagement() {
   const [editingCategory, setEditingCategory] = useState<CategoryRow | null>(null);
   const [isCategoryPanelOpen, setIsCategoryPanelOpen] = useState(false);
   const [confirmDeactivateCategoryId, setConfirmDeactivateCategoryId] = useState<number | null>(null);
-  const [categoryForm, setCategoryForm] = useState({ name: '', description: '', application_types: [] as string[] });
+  const [categoryForm, setCategoryForm] = useState({ name: '', description: '' });
 
   const categoryOptions = useMemo(
     () => categories.map((c) => ({ value: String(c.id), label: c.name })),
@@ -248,11 +248,9 @@ export function RequirementsManagement() {
 
   // Built together so a Type's badge always matches exactly what its
   // expanded category list shows (same membership rule, computed once).
-  // A category counts under a type if EITHER it's explicitly tagged to that
-  // type (the new wiring, lets a freshly-created empty category sort in
-  // immediately) OR it already has requirements filed under that type (the
-  // legacy signal — keeps pre-existing categories, none of which have ever
-  // been manually tagged yet, from vanishing out of every type's tree).
+  // A category counts under a type if any of its requirements (active or
+  // not — the server derives category.application_types from all of them)
+  // is tagged to that type, or it has active items under that type.
   // Inactive types/categories stay IN the tree (faded, see JSX below) rather
   // than disappearing, so a deactivate is easy to spot and undo right there.
   const { typePanelOptions, categoryOptionsByType } = useMemo(() => {
@@ -731,33 +729,14 @@ export function RequirementsManagement() {
 
   function openCreateCategory() {
     setEditingCategory(null);
-    // Wire in the type currently being browsed so the new category sorts
-    // under it immediately instead of landing unsorted.
-    setCategoryForm({
-      name: '',
-      description: '',
-      application_types: selectedTypeCode && selectedTypeCode !== '__all__' ? [selectedTypeCode] : [],
-    });
+    setCategoryForm({ name: '', description: '' });
     setIsCategoryPanelOpen(true);
   }
 
   function openEditCategory(row: CategoryRow) {
     setEditingCategory(row);
-    setCategoryForm({
-      name: row.name || '',
-      description: row.description || '',
-      application_types: [...(row.application_types || [])],
-    });
+    setCategoryForm({ name: row.name || '', description: row.description || '' });
     setIsCategoryPanelOpen(true);
-  }
-
-  function toggleCategoryApplicationType(code: string) {
-    setCategoryForm((p) => ({
-      ...p,
-      application_types: p.application_types.includes(code)
-        ? p.application_types.filter((c) => c !== code)
-        : [...p.application_types, code],
-    }));
   }
 
   async function saveCategory() {
@@ -767,7 +746,6 @@ export function RequirementsManagement() {
       const payload: any = {
         name: categoryForm.name.trim(),
         description: categoryForm.description.trim() || null,
-        application_types: categoryForm.application_types,
       };
       if (!payload.name) throw new Error('Category name is required');
 
@@ -852,12 +830,9 @@ export function RequirementsManagement() {
     if (!name) return false;
     if (!editingCategory) return true;
     const description = categoryForm.description.trim();
-    const originalTypes = [...(editingCategory.application_types || [])].sort().join(',');
-    const currentTypes = [...categoryForm.application_types].sort().join(',');
     return (
       name !== (editingCategory.name || '').trim() ||
-      description !== (editingCategory.description || '').trim() ||
-      currentTypes !== originalTypes
+      description !== (editingCategory.description || '').trim()
     );
   }, [editingCategory, categoryForm]);
 
@@ -908,21 +883,20 @@ export function RequirementsManagement() {
 
       <div className="flex items-center justify-end gap-2">
         <button
-          className="rounded-lg border px-3 py-2 text-sm font-semibold inline-flex items-center gap-1.5 shadow-sm cursor-pointer"
-          style={{ borderColor: 'var(--border)', backgroundColor: 'var(--surface)', color: 'var(--text)' }}
+          className="inline-flex items-center justify-center gap-1.5 rounded-lg border px-3 py-1.5 text-[11px] font-semibold cursor-pointer whitespace-nowrap"
+          style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'var(--control-bg)', color: 'var(--text)' }}
           onClick={() => setIsCategoriesOpen(true)}
         >
-          <FolderOpen size={15} />
+          <FolderOpen size={13} />
           Requirement Categories
         </button>
         {canAdd ? (
           <button
-            className="rounded-lg px-3 py-2 text-sm font-semibold inline-flex items-center gap-1.5 shadow-sm cursor-pointer"
+            className="shrink-0 whitespace-nowrap inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-semibold shadow-sm cursor-pointer"
             style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
             onClick={openCreate}
           >
-            <Plus size={15} />
-            New Requirement
+            + New Requirement
           </button>
         ) : null}
       </div>
@@ -1600,27 +1574,9 @@ export function RequirementsManagement() {
               onChange={(e) => setCategoryForm((p) => ({ ...p, description: e.target.value }))}
             />
           </Field>
-          <Field label="Application Types">
-            {activeApplicationTypes.length === 0 ? (
-              <p className="text-[11px] text-secondary">No active application types configured yet.</p>
-            ) : (
-              <>
-                <p className="text-[11px] text-secondary mb-2">
-                  Leave all unchecked to sort this category under every application type.
-                </p>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  {activeApplicationTypes.map((t) => (
-                    <CheckToggle
-                      key={t.code}
-                      label={t.name}
-                      checked={categoryForm.application_types.includes(t.code)}
-                      onChange={() => toggleCategoryApplicationType(t.code)}
-                    />
-                  ))}
-                </div>
-              </>
-            )}
-          </Field>
+          <p className="text-[11px] text-secondary">
+            A category appears under an application type once it has a requirement tagged to that type.
+          </p>
         </div>
       </SidePanel>
 

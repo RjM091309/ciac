@@ -184,9 +184,9 @@ async function updateApplicationType(id, { code, name, description, is_active, u
 }
 
 // Deactivating a type always succeeds now — instead of blocking it while
-// categories are still wired to it, it cascades down: a category loses this
-// type, and if this was the LAST active type it had, the category itself
-// gets cascade-deactivated too (which itself cascades further to its
+// categories are still wired to it (through their requirements' types), it
+// cascades down: if this was the LAST active type a category served, the
+// category itself gets cascade-deactivated too (which itself cascades further to its
 // requirements — see RequirementCategory.deactivateRequirementCategory). A
 // category still tagged to another active type is left alone.
 async function deactivateApplicationType(id, updated_by) {
@@ -206,17 +206,35 @@ async function deactivateApplicationType(id, updated_by) {
     [id, updatedBy]
   );
 
+  // A category's types are the types its requirements are tagged to. It's
+  // orphaned when it has a requirement for this type and no active
+  // requirement that still serves some other active type — an untagged
+  // (applies-to-every-type) requirement counts as serving one.
   const orphanedCategories = await selectData(
     `
     SELECT rc.id
     FROM dbo.requirement_categories rc
-    INNER JOIN dbo.requirement_category_application_types rcat ON rcat.category_id = rc.id AND rcat.application_type = @param0
     WHERE rc.is_active = 1
+      AND EXISTS (
+        SELECT 1
+        FROM dbo.requirements r
+        INNER JOIN dbo.requirement_application_types rat ON rat.requirement_id = r.id
+        WHERE r.category_id = rc.id AND rat.application_type = @param0
+      )
       AND NOT EXISTS (
         SELECT 1
-        FROM dbo.requirement_category_application_types rcat2
-        INNER JOIN dbo.application_types at2 ON at2.code = rcat2.application_type
-        WHERE rcat2.category_id = rc.id AND rcat2.application_type <> @param0 AND at2.is_active = 1
+        FROM dbo.requirements r2
+        WHERE r2.category_id = rc.id
+          AND r2.is_active = 1
+          AND (
+            NOT EXISTS (SELECT 1 FROM dbo.requirement_application_types rat2 WHERE rat2.requirement_id = r2.id)
+            OR EXISTS (
+              SELECT 1
+              FROM dbo.requirement_application_types rat3
+              INNER JOIN dbo.application_types at3 ON at3.code = rat3.application_type
+              WHERE rat3.requirement_id = r2.id AND rat3.application_type <> @param0 AND at3.is_active = 1
+            )
+          )
       )
     `,
     [current.code]
@@ -252,8 +270,13 @@ async function reactivateApplicationType(id, updated_by) {
     `
     SELECT rc.id
     FROM dbo.requirement_categories rc
-    INNER JOIN dbo.requirement_category_application_types rcat ON rcat.category_id = rc.id AND rcat.application_type = @param0
     WHERE rc.is_active = 0 AND rc.deactivated_via_cascade = 1
+      AND EXISTS (
+        SELECT 1
+        FROM dbo.requirements r
+        INNER JOIN dbo.requirement_application_types rat ON rat.requirement_id = r.id
+        WHERE r.category_id = rc.id AND rat.application_type = @param0
+      )
     `,
     [current.code]
   );

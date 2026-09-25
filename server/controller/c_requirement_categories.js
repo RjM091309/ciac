@@ -41,7 +41,7 @@ exports.getById = async (req, res) => {
 
 exports.create = async (req, res) => {
   try {
-    const { name, description, is_active, application_types } = req.body || {};
+    const { name, description, is_active } = req.body || {};
     if (!name || !String(name).trim()) {
       return res.status(400).json({ success: false, message: "name is required" });
     }
@@ -51,7 +51,6 @@ exports.create = async (req, res) => {
       description: description ?? null,
       created_by: req.user?.id ?? null,
       is_active,
-      application_types,
     });
 
     await audit(req, "REQUIREMENT_CATEGORY_CREATED", row?.id, { name: row?.name });
@@ -67,12 +66,11 @@ exports.update = async (req, res) => {
     const id = Number(req.params.id);
     if (!Number.isFinite(id)) return res.status(400).json({ success: false, message: "Invalid id" });
 
-    const { name, description, is_active, application_types } = req.body || {};
+    const { name, description, is_active } = req.body || {};
     const row = await RequirementCategory.updateRequirementCategory(id, {
       name: name !== undefined ? String(name).trim() : undefined,
       description,
       is_active,
-      application_types,
       updated_by: req.user?.id ?? null,
     });
     if (!row) return res.status(404).json({ success: false, message: "Requirement category not found" });
