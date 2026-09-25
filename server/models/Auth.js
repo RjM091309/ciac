@@ -12,14 +12,6 @@ function getJwtSecret() {
   return secret;
 }
 
-function getDemoAdminCreds() {
-  return {
-    username: process.env.CIAC_ADMIN_USERNAME || "admin",
-    password: process.env.CIAC_ADMIN_PASSWORD || "admin123",
-    passwordHash: process.env.CIAC_ADMIN_PASSWORD_HASH || "",
-  };
-}
-
 function normalizeString(v) {
   return String(v ?? "").trim();
 }
@@ -293,28 +285,15 @@ function issueSessionToken(user, tokenVersion, sessionId) {
 }
 
 async function login(username, password, totpCode, newPassword) {
-  // Prefer DB if configured; fallback to demo creds
   try {
     return await loginViaDatabase(username, password, totpCode, newPassword);
   } catch (err) {
-    // Only fallback if DB isn't configured; otherwise surface the real issue.
-    const msg = err && typeof err === "object" && "message" in err ? String(err.message) : "";
-    if (msg && !msg.toLowerCase().includes("database is not configured") && !msg.toLowerCase().includes("db env not set")) {
-      return { success: false, reason: "server_error", message: msg || "Login failed" };
-    }
-
-    const { username: adminUser, password: adminPass, passwordHash: adminPassHash } = getDemoAdminCreds();
-    if (normalizeString(username) !== normalizeString(adminUser)) {
-      return { success: false, reason: "unknown_user", message: "Username and Password incorrect!" };
-    }
-    const stored = String(adminPassHash || "");
-    const hashForCompare = stored.startsWith("$2") ? stored : await bcrypt.hash(String(adminPass), 10);
-    const matches = await bcrypt.compare(String(password), hashForCompare);
-    if (!matches) return { success: false, reason: "wrong_password", message: "Username and Password incorrect!" };
-
-    const user = { id: 1, username: adminUser, role: "admin" };
-    const token = jwt.sign(user, getJwtSecret(), { expiresIn: SESSION_IDLE_TIMEOUT_SECONDS });
-    return { success: true, message: "Login successful", user, token };
+    // No built-in fallback account: when the database is missing or
+    // misconfigured, nobody signs in (there used to be an admin/admin123
+    // demo login here, which would have been a live admin backdoor on any
+    // server that booted without its DB settings).
+    console.error("Login failed:", err);
+    return { success: false, reason: "server_error", message: "Sign-in is unavailable right now. Please try again later." };
   }
 }
 

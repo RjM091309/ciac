@@ -495,6 +495,14 @@ async function setUserStatus(id, status, note = null) {
   return getUserById(id);
 }
 
+async function userHasRoleId(userId, roleId) {
+  const rows = await selectData(`SELECT TOP (1) 1 AS x FROM user_roles WHERE user_id = @param0 AND role_id = @param1`, [
+    userId,
+    roleId,
+  ]);
+  return rows.length > 0;
+}
+
 async function setUserPrimaryRole(userId, roleId) {
   // user_roles has composite PK (user_id, role_id). A user may have multiple roles.
   // Our UI currently picks a single role. Per request: prefer UPDATE (no delete).
@@ -560,8 +568,14 @@ async function updateUser(id, { username, email, phone, full_name, password, is_
   // outlives the reset that was meant to shut it down.
   if (passwordChanged) await bumpTokenVersion(id);
 
+  // The role is baked into the session JWT (and re-issued as-is on refresh),
+  // so a role change must end the user's sessions like a password reset does
+  // — otherwise a demoted user keeps the old role's access until they sign out.
   const roleId = toInt(role_id);
-  if (roleId) await setUserPrimaryRole(id, roleId);
+  if (roleId && !(await userHasRoleId(id, roleId))) {
+    await setUserPrimaryRole(id, roleId);
+    await bumpTokenVersion(id);
+  }
 
   return await getUserById(id);
 }

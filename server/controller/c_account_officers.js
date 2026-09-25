@@ -2,6 +2,7 @@ const AccountOfficer = require("../models/AccountOfficer");
 const AuditLog = require("../models/AuditLog");
 const { diffChanges } = require("../lib/auditDiff");
 const User = require("../models/User");
+const Role = require("../models/Role");
 const { validatePasswordStrength, generateTempPassword } = require("../lib/password");
 const { sendTempPasswordEmail } = require("./c_users");
 const { publicErrorMessage } = require("../lib/httpError");
@@ -13,6 +14,17 @@ function fail(res, label, error) {
     success: false,
     message: duplicate ? "That username or email is already in use." : publicErrorMessage(error),
   });
+}
+
+/** An account officer who also holds the admin role is an admin account:
+ * only an admin may change its email/username or (de)activate it, or a
+ * File Maintenance user could redirect its email and take it over through
+ * "forgot password". Sends the 403 itself and returns false on denial. */
+async function ensureNotAdminTarget(req, res, id) {
+  if (String(req.user?.role || "").toLowerCase() === "admin") return true;
+  if (!(await Role.userHasRoleName(id, "admin"))) return true;
+  res.status(403).json({ success: false, message: "Only an administrator can change an administrator account." });
+  return false;
 }
 
 function audit(req, action, id, details) {
@@ -99,6 +111,7 @@ exports.update = async (req, res) => {
   try {
     const id = Number(req.params.id);
     if (!Number.isFinite(id)) return res.status(400).json({ success: false, message: "Invalid id" });
+    if (!(await ensureNotAdminTarget(req, res, id))) return undefined;
     const { username, email, phone, full_name, department_id } = req.body || {};
     if (email !== undefined && !String(email || "").trim()) {
       return res.status(400).json({ success: false, message: "email is required" });
@@ -130,6 +143,7 @@ exports.deactivate = async (req, res) => {
   try {
     const id = Number(req.params.id);
     if (!Number.isFinite(id)) return res.status(400).json({ success: false, message: "Invalid id" });
+    if (!(await ensureNotAdminTarget(req, res, id))) return undefined;
     const row = await AccountOfficer.deactivateAccountOfficer(id);
     if (!row) return res.status(404).json({ success: false, message: "Account officer not found" });
     await audit(req, "USER_DEACTIVATED", id, { username: row?.username });
@@ -143,6 +157,7 @@ exports.reactivate = async (req, res) => {
   try {
     const id = Number(req.params.id);
     if (!Number.isFinite(id)) return res.status(400).json({ success: false, message: "Invalid id" });
+    if (!(await ensureNotAdminTarget(req, res, id))) return undefined;
     const row = await AccountOfficer.reactivateAccountOfficer(id);
     if (!row) return res.status(404).json({ success: false, message: "Account officer not found" });
     await audit(req, "USER_REACTIVATED", id, { username: row?.username });

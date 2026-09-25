@@ -218,18 +218,43 @@ function requireUserMenuAccess(action = "view") {
     if (role === "admin") return next();
 
     try {
-      let isLocatorTarget = false;
       const targetId = Number(req.params.id);
-      if (Number.isFinite(targetId) && targetId > 0) {
-        isLocatorTarget = await Role.userHasRoleName(targetId, "proponent");
-      } else if (req.body?.role_id) {
-        const targetRole = await Role.getRoleById(Number(req.body.role_id));
-        isLocatorTarget = String(targetRole?.name || "").trim().toLowerCase() === "proponent";
+      const hasTarget = Number.isFinite(targetId) && targetId > 0;
+      const newRoleId = Number(req.body?.role_id);
+      const newRole = Number.isFinite(newRoleId) && newRoleId > 0 ? await Role.getRoleById(newRoleId) : null;
+      const newRoleName = String(newRole?.name || "").trim().toLowerCase();
+
+      // The admin role bypasses every Control Panel check, so only an admin
+      // may grant it or touch an admin account — otherwise anyone allowed to
+      // manage users (even just Locator Accounts) could promote an account,
+      // set its password, and sign in as an admin.
+      if (action !== "view") {
+        if (newRoleName === "admin") {
+          return res.status(403).json({ success: false, message: "Only an administrator can grant the admin role." });
+        }
+        if (hasTarget && (await Role.userHasRoleName(targetId, "admin"))) {
+          return res.status(403).json({ success: false, message: "Only an administrator can change an administrator account." });
+        }
+        if (hasTarget && targetId === Number(req.user.id) && newRole && !(await Role.userHasRoleName(targetId, newRole.name))) {
+          return res.status(403).json({ success: false, message: "You can't change your own role." });
+        }
       }
-      const menuKey = isLocatorTarget ? "settings:locator-users" : "settings:users";
-      const allowed = await checkMenuAllowed(role, menuKey, action);
-      if (!allowed) {
-        return res.status(403).json({ success: false, message: "Forbidden" });
+
+      // Both the account's current kind and the kind it's being changed to
+      // must be manageable — turning a locator into a staff user needs
+      // User Management, not just Locator Accounts.
+      const menuKeys = new Set();
+      if (hasTarget) {
+        const isLocator = await Role.userHasRoleName(targetId, "proponent");
+        menuKeys.add(isLocator ? "settings:locator-users" : "settings:users");
+      }
+      if (newRole) menuKeys.add(newRoleName === "proponent" ? "settings:locator-users" : "settings:users");
+      if (!menuKeys.size) menuKeys.add("settings:users");
+
+      for (const menuKey of menuKeys) {
+        if (!(await checkMenuAllowed(role, menuKey, action))) {
+          return res.status(403).json({ success: false, message: "Forbidden" });
+        }
       }
       return next();
     } catch (error) {
