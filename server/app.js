@@ -32,6 +32,7 @@ const Building = require("./models/Building");
 const LandUse = require("./models/LandUse");
 const Contract = require("./models/Contract");
 const UserSession = require("./models/UserSession");
+const { dropUnusedLegacyTables } = require("./config/legacyTables");
 
 const app = express();
 
@@ -155,6 +156,7 @@ initializeDatabase()
       ["investment", () => Investment.ensureSchema()],
       ["building", () => Building.ensureSchema()],
       ["land use", () => LandUse.ensureSchema()],
+      ["drop unused legacy tables", () => dropUnusedLegacyTables()], // see config/legacyTables.js
     ];
     for (const [name, run] of steps) {
       try {
