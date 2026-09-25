@@ -57,7 +57,7 @@ async function createSchema() {
         CONSTRAINT UX_proponent_financial_terms_proponent_type UNIQUE (proponent_id, term_type)
       );
 
-      CREATE INDEX IX_proponent_financial_terms_proponent ON dbo.proponent_financial_terms(proponent_id);
+      -- No separate proponent_id index: the unique constraint above leads with it.
     END
   `);
   await carryOverLegacyColumns();

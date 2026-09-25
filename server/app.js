@@ -33,7 +33,7 @@ const LandUse = require("./models/LandUse");
 const Contract = require("./models/Contract");
 const UserSession = require("./models/UserSession");
 const { dropUnusedLegacyTables } = require("./config/legacyTables");
-const { ensureIndexes } = require("./config/indexes");
+const { ensureIndexes, dropRedundantIndexes } = require("./config/indexes");
 
 const app = express();
 
@@ -159,6 +159,7 @@ initializeDatabase()
       ["land use", () => LandUse.ensureSchema()],
       ["drop unused legacy tables", () => dropUnusedLegacyTables()], // see config/legacyTables.js
       ["indexes", () => ensureIndexes()], // see config/indexes.js
+      ["redundant indexes", () => dropRedundantIndexes()], // see config/indexes.js
     ];
     for (const [name, run] of steps) {
       try {
