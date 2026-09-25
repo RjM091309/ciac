@@ -15,6 +15,8 @@ const UNUSED_TABLES = [
   "role_sidebar_permissions", // replaced by role_sidebar_menu_permissions
   "assessment_findings", // Findings tab removed; per-document remarks replaced it
   "requirement_category_application_types", // category types now derived from requirement_application_types
+  "assessments", // never used; Assessment module uses application_assessments
+  "approval_issuances", // Issuance tab removed; the contract is the issued document
 ];
 
 async function dropUnusedLegacyTables() {

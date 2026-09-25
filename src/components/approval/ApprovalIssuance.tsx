@@ -59,7 +59,7 @@ type ApprovalRow = {
   days_in_approval: number | null;
   total_steps: number;
   approved_steps: number;
-  issuance_count: number;
+  issued_count: number;
 };
 
 type StepRow = {
@@ -345,7 +345,7 @@ export function ApprovalIssuance({
         <StatTile label="Awaiting Start" value={summary?.awaiting_start ?? '—'} tone="#94a3b8" />
         <StatTile label="In Progress" value={summary?.in_progress ?? '—'} tone="#3b82f6" />
         <StatTile label="Approved" value={summary?.approved ?? '—'} tone="#10b981" />
-        <StatTile label="Issued Docs" value={summary?.issued ?? '—'} tone="#0ea5e9" />
+        <StatTile label="Contracts Issued" value={summary?.issued ?? '—'} tone="#0ea5e9" />
         <StatTile label="Avg Days" value={summary?.avg_days_to_decide ?? '—'} tone="#f59e0b" />
       </div>
 
@@ -430,7 +430,7 @@ export function ApprovalIssuance({
                   <div className="mt-2.5 flex items-center justify-between text-[11px]">
                     <div>
                       <span className="text-[9px] uppercase tracking-wider text-secondary">Issued </span>
-                      <span style={{ color: 'var(--text)' }}>{r.issuance_count || '—'}</span>
+                      <span style={{ color: 'var(--text)' }}>{r.issued_count ? 'Contract' : '—'}</span>
                     </div>
                     <div>
                       <span className="text-[9px] uppercase tracking-wider text-secondary">Days </span>
@@ -491,7 +491,7 @@ export function ApprovalIssuance({
                     <td className="px-3 py-2.5 text-right text-[11px] text-secondary">
                       {r.total_steps ? (r.approved_steps ? 'Decided' : 'Pending') : '—'}
                     </td>
-                    <td className="px-3 py-2.5 text-right text-[11px] text-secondary tabular-nums">{r.issuance_count || '—'}</td>
+                    <td className="px-3 py-2.5 text-right text-[11px] text-secondary tabular-nums">{r.issued_count ? 'Contract' : '—'}</td>
                     <td className="px-3 py-2.5 text-right text-[11px] tabular-nums">
                       {r.days_in_approval == null ? (
                         <span className="text-secondary">—</span>

@@ -215,55 +215,7 @@ exports.endorseStep = async (req, res) => {
   }
 };
 
-/* -------------------------------- Issuance ------------------------------- */
-
-exports.addIssuance = async (req, res) => {
-  try {
-    const id = appIdParam(req, res);
-    if (id === null) return undefined;
-    if (!(await ensureApprovalAccess(req, res, id))) return undefined;
-    if (!String(req.body?.title ?? "").trim()) {
-      return res.status(400).json({ success: false, message: "title is required" });
-    }
-    const row = await Approval.addIssuance(id, req.body || {}, req.user?.id ?? null);
-    if (!row) return res.status(404).json({ success: false, message: "Application not found" });
-    await AuditLog.record({
-      actorId: req.user?.id,
-      actorUsername: req.user?.username,
-      action: "ISSUANCE_ADDED",
-      entityType: "application",
-      entityId: id,
-      details: { title: row?.title, doc_type: row?.doc_type, reference_no: row?.reference_no },
-      req,
-    });
-    return res.status(201).json({ success: true, data: row });
-  } catch (error) {
-    return fail(res, error, "Add issuance");
-  }
-};
-
-exports.deleteIssuance = async (req, res) => {
-  try {
-    const id = idParam(req, res);
-    if (id === null) return undefined;
-    const before = await Approval.getIssuanceById(id);
-    if (!(await ensureApprovalAccess(req, res, before?.application_id))) return undefined;
-    const ok = await Approval.deleteIssuance(id, req.user?.id ?? null);
-    if (!ok) return res.status(404).json({ success: false, message: "Issuance not found" });
-    await AuditLog.record({
-      actorId: req.user?.id,
-      actorUsername: req.user?.username,
-      action: "ISSUANCE_DELETED",
-      entityType: "application",
-      entityId: before?.application_id,
-      details: { title: before?.title, doc_type: before?.doc_type },
-      req,
-    });
-    return res.json({ success: true });
-  } catch (error) {
-    return fail(res, error, "Delete issuance");
-  }
-};
+/* -------------------------------- Contract ------------------------------- */
 
 exports.saveContract = async (req, res) => {
   try {

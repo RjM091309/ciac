@@ -77,8 +77,6 @@ const APPROVAL_STATUSES = ["PENDING", "IN_PROGRESS", "APPROVED", "DISAPPROVED", 
 const STEP_DECISIONS = ["PENDING", "APPROVED", "DISAPPROVED", "RETURNED", "SKIPPED"];
 /** Actions an approver can take on the level currently sitting with them. */
 const STEP_ACTIONS = ["APPROVE", "DISAPPROVE", "RETURN", "ENDORSE"];
-const ISSUANCE_TYPES = ["APPROVAL_ORDER", "NOTICE_OF_AWARD", "CONTRACT", "PERMIT", "OTHER"];
-
 function pick(value, allowed, fallback = null) {
   const v = String(value ?? "").trim().toUpperCase();
   return allowed.includes(v) ? v : fallback;
@@ -137,24 +135,6 @@ async function ensureSchemaImpl() {
         created_at DATETIME2(3) NOT NULL CONSTRAINT DF_approval_steps_created_at DEFAULT (SYSUTCDATETIME())
       );
       CREATE INDEX IX_approval_steps_approval_id ON dbo.approval_steps(approval_id);
-    END;
-
-    IF OBJECT_ID('dbo.approval_issuances', 'U') IS NULL
-    BEGIN
-      CREATE TABLE dbo.approval_issuances (
-        id INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
-        approval_id INT NOT NULL,
-        application_id INT NOT NULL,
-        doc_type NVARCHAR(30) NOT NULL CONSTRAINT DF_approval_issuances_doc_type DEFAULT ('APPROVAL_ORDER'),
-        reference_no NVARCHAR(120) NULL,
-        title NVARCHAR(200) NOT NULL,
-        issued_date DATETIME2(3) NULL,
-        document_id INT NULL,
-        notes NVARCHAR(2000) NULL,
-        created_by INT NULL,
-        created_at DATETIME2(3) NOT NULL CONSTRAINT DF_approval_issuances_created_at DEFAULT (SYSUTCDATETIME())
-      );
-      CREATE INDEX IX_approval_issuances_approval_id ON dbo.approval_issuances(approval_id);
     END;
 
     IF OBJECT_ID('dbo.approval_activity', 'U') IS NULL
@@ -250,7 +230,7 @@ const LIST_SELECT = `
       ELSE DATEDIFF(DAY, ap.started_at, SYSUTCDATETIME()) END AS days_in_approval,
     (SELECT COUNT(1) FROM dbo.approval_steps s WHERE s.approval_id = ap.id) AS total_steps,
     (SELECT COUNT(1) FROM dbo.approval_steps s WHERE s.approval_id = ap.id AND s.decision = 'APPROVED') AS approved_steps,
-    (SELECT COUNT(1) FROM dbo.approval_issuances i WHERE i.approval_id = ap.id) AS issuance_count,
+    (SELECT COUNT(1) FROM dbo.contracts c WHERE c.application_id = a.id) AS issued_count,
     cur.assigned_to AS current_assigned_to,
     cu.full_name AS current_assignee_name,
     cu.username AS current_assignee_username,
@@ -321,8 +301,8 @@ async function getSummary({ assigneeId } = {}) {
   const issuedRows = await selectData(
     `
     SELECT COUNT(1) AS total
-    FROM dbo.approval_issuances i
-    INNER JOIN dbo.application_approvals ap ON ap.id = i.approval_id
+    FROM dbo.contracts c
+    INNER JOIN dbo.application_approvals ap ON ap.application_id = c.application_id
     LEFT JOIN dbo.application_assessments asm ON asm.application_id = ap.application_id
     WHERE 1 = 1 ${asgFilter}
     `,
@@ -423,17 +403,6 @@ async function getApprovalDetail(applicationId) {
         [approvalId]
       )
     : [];
-  const issuances = approvalId
-    ? await selectData(
-        `SELECT i.*, d.original_file_name, d.file_name, u.full_name AS created_by_name, u.username AS created_by_username
-         FROM dbo.approval_issuances i
-         LEFT JOIN dbo.documents d ON d.id = i.document_id
-         LEFT JOIN dbo.users u ON u.id = i.created_by
-         WHERE i.approval_id = @param0
-         ORDER BY i.id DESC`,
-        [approvalId]
-      )
-    : [];
   const activity = approvalId
     ? await selectData(
         `SELECT act.*, u.full_name AS actor_name, u.username AS actor_username
@@ -465,7 +434,6 @@ async function getApprovalDetail(applicationId) {
     approval: header,
     steps,
     current_step: currentStep,
-    issuances,
     activity,
     status_history: statusHistory,
     contract,
@@ -801,57 +769,6 @@ async function reopenApproval(applicationId, actorId) {
   return getApprovalDetail(applicationId);
 }
 
-/* --------------------------------- Issuance -------------------------------- */
-
-async function addIssuance(applicationId, payload, actorId) {
-  const approval = await getOrCreateApproval(applicationId, actorId);
-  if (!approval) return null;
-  const title = String(payload?.title ?? "").trim();
-  if (!title) throw new Error("title is required");
-
-  const result = await insertData(
-    `INSERT INTO dbo.approval_issuances
-       (approval_id, application_id, doc_type, reference_no, title, issued_date, document_id, notes, created_by, created_at)
-     OUTPUT INSERTED.id
-     VALUES (@param0, @param1, @param2, @param3, @param4, @param5, @param6, @param7, @param8, SYSUTCDATETIME())`,
-    [
-      approval.id,
-      toInt(applicationId),
-      pick(payload?.doc_type, ISSUANCE_TYPES, "APPROVAL_ORDER"),
-      payload?.reference_no ? String(payload.reference_no).slice(0, 120) : null,
-      title.slice(0, 200),
-      payload?.issued_date || null,
-      toInt(payload?.document_id),
-      payload?.notes ? String(payload.notes).slice(0, 2000) : null,
-      toInt(actorId),
-    ]
-  );
-  await logActivity(approval.id, "ISSUANCE_ADDED", title.slice(0, 200), actorId);
-  const app = await getApplicationRow(applicationId);
-  await notify({
-    applicationId,
-    actorId,
-    subject: `Document issued: ${app?.application_no || ""}`.trim(),
-    body: `${title} was issued for application ${app?.application_no || ""}.`,
-  });
-  const rows = await selectData(`SELECT * FROM dbo.approval_issuances WHERE id = @param0`, [result?.recordset?.[0]?.id]);
-  return rows?.[0] || null;
-}
-
-async function getIssuanceById(id) {
-  const rows = await selectData(`SELECT * FROM dbo.approval_issuances WHERE id = @param0`, [toInt(id)]);
-  return rows?.[0] || null;
-}
-
-async function deleteIssuance(id, actorId) {
-  await ensureSchema();
-  const existing = await getIssuanceById(id);
-  if (!existing) return false;
-  await updateData(`DELETE FROM dbo.approval_issuances WHERE id = @param0`, [toInt(id)]);
-  await logActivity(existing.approval_id, "ISSUANCE_DELETED", `Issuance #${id}`, actorId);
-  return true;
-}
-
 async function previewContractNo(applicationId) {
   const app = await getApplicationRow(applicationId);
   if (!app) return null;
@@ -900,7 +817,6 @@ module.exports = {
   APPROVAL_STATUSES,
   STEP_ACTIONS,
   STEP_DECISIONS,
-  ISSUANCE_TYPES,
   listApprovals,
   getSummary,
   getApprovalAssigneeId,
@@ -911,9 +827,6 @@ module.exports = {
   endorseStep,
   actOnStep,
   reopenApproval,
-  addIssuance,
-  deleteIssuance,
-  getIssuanceById,
   saveContract,
   previewContractNo,
   CHARGE_TYPES: Assessment.CHARGE_TYPES,

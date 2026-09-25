@@ -21,9 +21,7 @@ router.post("/:applicationId/charges", requireMenuAccess(MENU_KEY, "add"), contr
 router.patch("/charges/:id", requireMenuAccess(MENU_KEY, "edit"), controller.updateCharge);
 router.delete("/charges/:id", requireMenuAccess(MENU_KEY, "delete"), controller.deleteCharge);
 
-// Issuance + contract
-router.post("/:applicationId/issuances", requireMenuAccess(MENU_KEY, "add"), controller.addIssuance);
-router.delete("/issuances/:id", requireMenuAccess(MENU_KEY, "delete"), controller.deleteIssuance);
+// Contract
 router.put("/:applicationId/contract", requireMenuAccess(MENU_KEY, "edit"), controller.saveContract);
 router.get("/contracts/:id/certificate", requireMenuAccess(MENU_KEY, "view"), controller.downloadContractCertificate);
 router.get("/:applicationId/contract/next-number", requireMenuAccess(MENU_KEY, "view"), controller.previewContractNo);

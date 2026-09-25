@@ -138,8 +138,6 @@ const ACTION_LABELS: Record<string, string> = {
   APPROVAL_STEP_DECIDED: 'Approval level decided',
   APPROVAL_STEP_ENDORSED: 'Approval level endorsed',
   APPROVAL_STEP_ASSIGNED: 'Approval level assigned',
-  ISSUANCE_ADDED: 'Document issued',
-  ISSUANCE_DELETED: 'Issued document removed',
   APPROVAL_CHARGE_ADDED: 'Charge added',
   APPROVAL_CHARGE_UPDATED: 'Charge updated',
   APPROVAL_CHARGE_DELETED: 'Charge removed',
@@ -687,10 +685,6 @@ function describeActivity(row: AuditLogRow): string {
       return `Endorsed ${String(d.application_no ?? '')} to ${String(d.office ?? '')}`;
     case 'APPROVAL_STEP_ASSIGNED':
       return `Assigned an approval level for ${String(d.application_no ?? '')}`;
-    case 'ISSUANCE_ADDED':
-      return `Issued "${String(d.title ?? '')}"${d.reference_no ? ` (${String(d.reference_no)})` : ''}`;
-    case 'ISSUANCE_DELETED':
-      return `Removed issued document "${String(d.title ?? '')}"`;
     case 'APPROVAL_CHARGE_ADDED':
       return `Added charge "${String(d.description ?? '')}"${d.amount ? ` (₱${String(d.amount)})` : ''}`;
     case 'APPROVAL_CHARGE_UPDATED':
