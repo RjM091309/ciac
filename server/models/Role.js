@@ -164,6 +164,18 @@ async function createSchema() {
       INSERT INTO dbo.roles (name, description, is_active)
       VALUES ('ACCOUNT OFFICER', 'For renewal process', 1);
   `);
+
+  // Staff roles every environment starts with, so a fresh database offers them
+  // in the Role dropdown without being created by hand. Same case-insensitive match.
+  await updateSchema(`
+    IF NOT EXISTS (SELECT 1 FROM dbo.roles WHERE LOWER(name) = 'assessment officer')
+      INSERT INTO dbo.roles (name, description, is_active)
+      VALUES ('ASSESSMENT OFFICER', 'Handles application evaluation and requirement verification', 1);
+
+    IF NOT EXISTS (SELECT 1 FROM dbo.roles WHERE LOWER(name) = 'viewer')
+      INSERT INTO dbo.roles (name, description, is_active)
+      VALUES ('VIEWER', 'For viewing only', 1);
+  `);
 }
 
 module.exports = {
