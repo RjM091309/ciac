@@ -84,11 +84,11 @@ async function createSchema() {
 
       IF COL_LENGTH('dbo.contracts', 'updated_at') IS NULL
         ALTER TABLE dbo.contracts ADD updated_at DATETIME2(3) NULL;
-
-      IF COL_LENGTH('dbo.contracts', 'certificate_path') IS NULL
-        ALTER TABLE dbo.contracts ADD certificate_path NVARCHAR(1000) NULL;
-
     END;
+
+    -- Outside the IF/ELSE so a freshly created table gets it too.
+    IF COL_LENGTH('dbo.contracts', 'certificate_path') IS NULL
+      ALTER TABLE dbo.contracts ADD certificate_path NVARCHAR(1000) NULL;
   `);
   await ensureContractTypeLink();
 }

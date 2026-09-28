@@ -90,12 +90,11 @@ async function createSchema() {
       CREATE INDEX IX_permits_proponent_id ON dbo.permits(proponent_id);
       CREATE INDEX IX_permits_application_id ON dbo.permits(application_id);
       CREATE INDEX IX_permits_expiry_date ON dbo.permits(expiry_date);
-    END
-    ELSE
-    BEGIN
-      IF COL_LENGTH('dbo.permits', 'certificate_path') IS NULL
-        ALTER TABLE dbo.permits ADD certificate_path NVARCHAR(1000) NULL;
     END;
+
+    -- Outside the IF so a freshly created table gets it too.
+    IF COL_LENGTH('dbo.permits', 'certificate_path') IS NULL
+      ALTER TABLE dbo.permits ADD certificate_path NVARCHAR(1000) NULL;
 
     -- Permit types moved from dbo.compliance_types to Compliance
     -- Requirements; carry the old codes over to their equivalents.
