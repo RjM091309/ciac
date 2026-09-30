@@ -26,7 +26,6 @@ export type AppView =
   | 'settings:locator-users'
   | 'settings:proponents'
   | 'settings:application-types'
-  | 'settings:account-officers'
   | 'settings:type-of-contract'
   | 'settings:building'
   | 'settings:land-use'

@@ -367,7 +367,6 @@ export function AppSidebar({
   const showFileMaintenance =
     canView('applications:requirements') ||
     canView('settings:application-types') ||
-    canView('settings:account-officers') ||
     canView('settings:type-of-contract') ||
     canView('settings:building') ||
     canView('settings:land-use');
@@ -407,7 +406,6 @@ export function AppSidebar({
   const fileMaintenanceItems: SidebarLeaf[] = [
     canView('applications:requirements') && { key: 'applications:requirements', label: 'Requirements', active: view === 'applications:requirements', onClick: () => onViewChange('applications:requirements') },
     canView('settings:application-types') && { key: 'settings:application-types', label: 'Application Types', active: view === 'settings:application-types', onClick: () => onViewChange('settings:application-types') },
-    canView('settings:account-officers') && { key: 'settings:account-officers', label: 'Account Officers', active: view === 'settings:account-officers', onClick: () => onViewChange('settings:account-officers') },
     canView('settings:type-of-contract') && { key: 'settings:type-of-contract', label: 'Type of Contract', active: view === 'settings:type-of-contract', onClick: () => onViewChange('settings:type-of-contract') },
     canView('settings:building') && { key: 'settings:building', label: 'Building', active: view === 'settings:building', onClick: () => onViewChange('settings:building') },
     canView('settings:land-use') && { key: 'settings:land-use', label: 'Land Use', active: view === 'settings:land-use', onClick: () => onViewChange('settings:land-use') },

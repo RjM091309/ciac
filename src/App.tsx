@@ -31,7 +31,6 @@ const AssessmentEvaluation = lazy(() => import('./components/assessment/Assessme
 const ApprovalIssuance = lazy(() => import('./components/approval/ApprovalIssuance').then((m) => ({ default: m.ApprovalIssuance })));
 const ComplianceInspections = lazy(() => import('./components/compliance/ComplianceInspections').then((m) => ({ default: m.ComplianceInspections })));
 const ApplicationTypesManagement = lazy(() => import('./components/FileMaintenance/ApplicationTypes').then((m) => ({ default: m.ApplicationTypesManagement })));
-const AccountOfficersManagement = lazy(() => import('./components/FileMaintenance/AccountOfficers').then((m) => ({ default: m.AccountOfficersManagement })));
 const TypeOfContractManagement = lazy(() => import('./components/FileMaintenance/TypeOfContract').then((m) => ({ default: m.TypeOfContractManagement })));
 const BuildingManagement = lazy(() => import('./components/FileMaintenance/Building').then((m) => ({ default: m.BuildingManagement })));
 const LandUseManagement = lazy(() => import('./components/FileMaintenance/LandUse').then((m) => ({ default: m.LandUseManagement })));
@@ -88,7 +87,6 @@ const VIEW_TO_PATH: Record<AppView, string> = {
   'settings:locator-users': '/applications/locator-users',
   'settings:proponents': '/applications/proponents',
   'settings:application-types': '/settings/application-types',
-  'settings:account-officers': '/settings/account-officers',
   'settings:type-of-contract': '/settings/type-of-contract',
   'settings:building': '/settings/building',
   'settings:land-use': '/settings/land-use',
@@ -651,8 +649,6 @@ export default function App() {
                 <ProponentsManagement locationSearch={locationSearch} navigate={navigate} currentUserRoleName={user?.roleName} />
               ) : view === 'settings:application-types' ? (
                 <ApplicationTypesManagement />
-              ) : view === 'settings:account-officers' ? (
-                <AccountOfficersManagement />
               ) : view === 'settings:type-of-contract' ? (
                 <TypeOfContractManagement />
               ) : view === 'settings:building' ? (
@@ -910,21 +906,6 @@ const LANDING_CONFIG: Record<AppView, LandingConfig> = {
         ['WAREHOUSE_LEASE', 'Warehouse Lease', 'Warehouse lease', 'Active'],
         ['SUBLEASE', 'Sublease', 'Sublease', 'Active'],
       ],
-    },
-  },
-  'settings:account-officers': {
-    title: 'Account Officers',
-    description: 'Manage account officers and their departments for file maintenance.',
-    badge: 'File Maintenance',
-    icon: Users,
-    stats: [
-      { label: 'Total Officers', value: '—' },
-      { label: 'Active', value: '—' },
-      { label: 'Deactivated', value: '—' },
-    ],
-    table: {
-      columns: ['Name', 'Department', 'Locators', 'Status'],
-      rows: [['—', '—', '—', '—']],
     },
   },
   'settings:type-of-contract': {

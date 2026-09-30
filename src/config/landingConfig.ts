@@ -280,22 +280,6 @@ export const LANDING_CONFIG: Record<AppView, LandingConfig> = {
       ],
     },
   },
-  'settings:account-officers': {
-    title: 'Account Officers',
-    description: 'Maintain the account officers assigned to locators, and the departments they belong to.',
-    badge: 'Configuration',
-    icon: Users,
-    isCrud: true,
-    stats: [
-      { label: 'Account Officers', value: '—' },
-      { label: 'Active', value: '—' },
-      { label: 'Deactivated', value: '—' },
-    ],
-    table: {
-      columns: ['Name', 'Department', 'Locators', 'Status'],
-      rows: [['—', '—', '—', '—']],
-    },
-  },
   'settings:type-of-contract': {
     title: 'Type of Contract',
     description: 'Maintain the types of contract a locator can be issued (lease, sublease, memorandum of agreement, ...).',
