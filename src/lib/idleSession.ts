@@ -26,7 +26,11 @@ const TAB_ID_KEY = 'ciac:tabId';
 
 const ACTIVITY_EVENTS = ['mousedown', 'mousemove', 'keydown', 'wheel', 'scroll', 'touchstart'] as const;
 
-export type SignOutReason = 'idle' | 'ended';
+export type SignOutReason = 'idle' | 'ended' | 'replaced';
+
+// Fired by AppHeader when the notification stream reports that a newer
+// sign-in of this account replaced this session (one session per account).
+export const SESSION_ENDED_EVENT = 'ciac:session:ended';
 
 function readSharedActivity(): number {
   try {
@@ -71,7 +75,8 @@ function getTabId(): string {
  *    session unless the same tab comes back (a reload) within a short grace
  *    period, which this hook's first refresh on load does.
  * `onSignedOut('ended')` fires when the server session turns out to be gone
- * (closed from another tab, revoked, or expired).
+ * (closed from another tab, revoked, or expired), and `'replaced'` when the
+ * account signed in somewhere else (one session per account).
  */
 export function useIdleSession(opts: {
   enabled: boolean;
@@ -110,7 +115,10 @@ export function useIdleSession(opts: {
       refreshing = true;
       try {
         const res = await fetch(`${base}/api/auth/refresh${tabQuery}`, { method: 'POST', credentials: 'include' });
-        if (res.status === 401) return signOut('ended');
+        if (res.status === 401) {
+          const json = await res.json().catch(() => ({} as any));
+          return signOut(json?.reason === 'replaced' ? 'replaced' : 'ended');
+        }
         if (res.ok) lastRefresh = Date.now();
       } catch {
         // network blip — retried on the next tick
@@ -123,7 +131,7 @@ export function useIdleSession(opts: {
       try {
         const res = await fetch(`${base}/api/auth/check`, { credentials: 'include' });
         const json = await res.json().catch(() => ({} as any));
-        if (res.ok && json && json.authenticated === false) signOut('ended');
+        if (res.ok && json && json.authenticated === false) signOut(json.reason === 'replaced' ? 'replaced' : 'ended');
       } catch {
         // network blip — the next refresh will find out
       }
@@ -187,7 +195,15 @@ export function useIdleSession(opts: {
       pendingChecks.add(id);
     };
 
+    // Confirmed with the server rather than trusted outright: a sign-in from
+    // another tab of this same browser also ends the old session, but this
+    // page then shares the new cookie and should stay signed in.
+    const onSessionEnded = () => {
+      if (!signedOut) void checkStillSignedIn();
+    };
+
     ACTIVITY_EVENTS.forEach((type) => window.addEventListener(type, onActivity, { passive: true, capture: true }));
+    window.addEventListener(SESSION_ENDED_EVENT, onSessionEnded);
     document.addEventListener('visibilitychange', onVisibility);
     window.addEventListener('pagehide', onPageHide);
     window.addEventListener('pageshow', onPageShow);
@@ -200,6 +216,7 @@ export function useIdleSession(opts: {
 
     return () => {
       ACTIVITY_EVENTS.forEach((type) => window.removeEventListener(type, onActivity, { capture: true }));
+      window.removeEventListener(SESSION_ENDED_EVENT, onSessionEnded);
       document.removeEventListener('visibilitychange', onVisibility);
       window.removeEventListener('pagehide', onPageHide);
       window.removeEventListener('pageshow', onPageShow);

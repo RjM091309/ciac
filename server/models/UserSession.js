@@ -131,14 +131,50 @@ async function extend(id, expiresAt) {
  * Deliberately ignores 'expired'/'revoked': those are already enforced by the
  * JWT's own expiry and token_version, and trusting sweep() here would let a
  * failed extend() write kick out a session that's still in use. */
-async function isClosedByUser(id) {
-  if (!id) return false;
+async function closedReason(id) {
+  if (!id) return null;
   await ensureSchema();
   const rows = await selectData(
-    `SELECT TOP (1) 1 AS closed FROM dbo.user_sessions WHERE id = @param0 AND end_reason IN ('logout', 'tab_closed')`,
+    `SELECT TOP (1) end_reason FROM dbo.user_sessions WHERE id = @param0 AND end_reason IN ('logout', 'tab_closed', 'replaced')`,
     [id]
   );
-  return Boolean(rows?.length);
+  return rows?.[0]?.end_reason || null;
+}
+
+async function isClosedByUser(id) {
+  return Boolean(await closedReason(id));
+}
+
+/** One session per account: a new sign-in closes every other open session
+ * of the same user ('replaced'), so m_auth.js rejects their tokens from the
+ * next request on. Returns the closed session ids. */
+async function endOtherSessions(userId, keepId) {
+  if (!userId) return [];
+  try {
+    await ensureSchema();
+    const rows = await selectData(
+      `
+      UPDATE dbo.user_sessions
+      SET ended_at = SYSUTCDATETIME(), end_reason = 'replaced'
+      OUTPUT inserted.id
+      WHERE user_id = @param0 AND id <> @param1 AND ended_at IS NULL AND expires_at > SYSUTCDATETIME()
+      `,
+      [userId, keepId || ""]
+    );
+    const ids = (rows || []).map((r) => r.id);
+    for (const id of ids) {
+      lastTouched.delete(id);
+      const pending = pendingTabCloses.get(id);
+      if (pending) {
+        clearTimeout(pending.timer);
+        pendingTabCloses.delete(id);
+      }
+    }
+    return ids;
+  } catch (error) {
+    console.error("End other sessions failed:", error);
+    return [];
+  }
 }
 
 // Closing any tab signs the whole session out (every tab). The frontend can't
@@ -287,6 +323,8 @@ module.exports = {
   extend,
   end,
   isClosedByUser,
+  closedReason,
+  endOtherSessions,
   scheduleTabClose,
   cancelTabClose,
   sweep,

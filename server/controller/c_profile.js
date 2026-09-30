@@ -351,9 +351,6 @@ exports.cancelTotpSetup = async (req, res) => {
 
 exports.disableTotp = async (req, res) => {
   try {
-    if (!isAdminRole(req.user.role)) {
-      return fail(res, 403, "Two-factor authentication is required for your role and can't be turned off.");
-    }
     const record = await User.getTotpRecord(req.user.id);
     if (!record) return fail(res, 404, "Account not found");
     if (!(record.totp_enabled === 1 && record.totp_secret)) return res.json({ success: true, data: { totp_enabled: 0 } });
@@ -361,7 +358,7 @@ exports.disableTotp = async (req, res) => {
     if (!code) return fail(res, 400, "Enter the current 6-digit code from your authenticator app.", "code");
     const check = await guardedCheck(req, () => verifyCurrentCode(record, code), "That code didn't match. Enter the current 6-digit code.");
     if (!check.ok) return fail(res, check.status, check.message, "code");
-    await User.disableTotp(req.user.id);
+    await User.disableTotp(req.user.id, { optOut: true });
     await AuditLog.record({
       actorId: req.user.id,
       actorUsername: req.user.username,

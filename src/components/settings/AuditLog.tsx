@@ -67,6 +67,7 @@ const ACTION_LABELS: Record<string, string> = {
   LOGOUT: 'Logged out',
   SESSION_EXPIRED: 'Session expired',
   SESSION_REVOKED: 'Session ended',
+  SESSION_REPLACED: 'Signed out elsewhere',
   USER_CREATED: 'User created',
   USER_UPDATED: 'User updated',
   USER_PASSWORD_RESET: 'Password reset',
@@ -512,6 +513,10 @@ function describeActivity(row: AuditLogRow): string {
         ? 'the account was deactivated or suspended'
         : 'of a password reset or "sign out of all devices"';
       return `Session ended because ${cause}${duration ? ` (after ${duration})` : ''}`;
+    }
+    case 'SESSION_REPLACED': {
+      const n = Number(d.replaced_sessions) || 1;
+      return `This sign-in signed out ${n === 1 ? 'the account\'s other open session' : `${n} other open sessions`} (one session per account)`;
     }
     case 'USER_CREATED': {
       const parts = [`Created account "${d.username ?? user}"`];

@@ -182,7 +182,6 @@ async function loginViaDatabase(username, password, totpCode, newPassword) {
   }
 
   const effectiveRole = row.role_name || row.role || "user";
-  const isAdmin = String(effectiveRole).toLowerCase() === "admin";
 
   // An admin-triggered reset (User.adminResetPassword) sets this so the
   // emailed temp password can't just be reused indefinitely — the user must
@@ -205,9 +204,10 @@ async function loginViaDatabase(username, password, totpCode, newPassword) {
   }
 
   // --- Two-factor (Google Authenticator / TOTP) ---
-  // Non-admin users must have an authenticator; they self-enroll on login (the QR
-  // is only issued once the password checks out). Admins are exempt from forced
-  // enrollment, but an authenticator they chose to set up is still enforced.
+  // Every account, admin included, must have an authenticator; they self-enroll
+  // on login (the QR is only issued once the password checks out). The one way
+  // out is turning it off in My Profile (totp_opt_out), which stops the forced
+  // enrollment until they turn it back on or an admin resets it.
   if ("totp_secret" in row) {
     const code = String(totpCode ?? "").replace(/\D/g, "");
     const enabled = Number(row.totp_enabled) === 1 && !!row.totp_secret;
@@ -240,7 +240,7 @@ async function loginViaDatabase(username, password, totpCode, newPassword) {
         }
         return { success: false, mfaRequired: true, reason: "invalid_mfa_code", userId: id, message: "Invalid authenticator code. Try again." };
       }
-    } else if (!isAdmin) {
+    } else if (Number(row.totp_opt_out) !== 1) {
       // First-time enrollment. Reuse any pending secret so a re-submit doesn't
       // invalidate a QR the user already scanned; mint one otherwise.
       let secret = null;

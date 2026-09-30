@@ -361,9 +361,7 @@ function TwoFactorCard({ profile }: { profile: MyProfile }) {
             <p className="text-[11px] text-secondary mt-0.5">
               {enabled
                 ? 'A 6-digit code from your authenticator app is required at every sign-in.'
-                : profile.is_admin
-                  ? 'Optional for administrators. Turn it on to require a code from your phone at sign-in.'
-                  : "Required for your role. You'll be asked to set it up at your next sign-in, or set it up now."}
+                : 'Turned off. Turn it on to require a code from your phone at sign-in.'}
             </p>
           </div>
         </div>
@@ -384,22 +382,17 @@ function TwoFactorCard({ profile }: { profile: MyProfile }) {
                 <Smartphone size={13} />
                 Move to a new phone
               </SmallButton>
-              {profile.is_admin ? (
-                <SmallButton tone="danger" onClick={() => setStep({ kind: 'verify', intent: 'disable' })}>
-                  <ShieldOff size={13} />
-                  Turn off
-                </SmallButton>
-              ) : null}
+              <SmallButton tone="danger" onClick={() => setStep({ kind: 'verify', intent: 'disable' })}>
+                <ShieldOff size={13} />
+                Turn off
+              </SmallButton>
             </>
           ) : (
             <SmallButton tone="primary" onClick={() => setStep({ kind: 'password' })} disabled={busy}>
               <ShieldCheck size={13} />
-              {profile.is_admin ? 'Turn on' : 'Set up now'}
+              Turn on
             </SmallButton>
           )}
-          {enabled && !profile.is_admin ? (
-            <p className="w-full text-[10px] text-secondary">Two-factor can't be turned off for your role.</p>
-          ) : null}
         </div>
       ) : null}
 

@@ -42,6 +42,7 @@ import {
 import { NOTIFICATIONS_REFRESH_EVENT, requestNotificationsRefresh } from '../lib/notificationRefresh';
 import { requestPermissionsRefresh } from '../lib/permissionsRefresh';
 import { roleDisplayName } from '../lib/roleDisplay';
+import { SESSION_ENDED_EVENT } from '../lib/idleSession';
 import { useMyProfile } from '../lib/myProfile';
 import { UserAvatar } from './ui/UserAvatar';
 import { toast } from 'sonner';
@@ -370,13 +371,21 @@ export function AppHeader({
     const onPermissions = () => {
       requestPermissionsRefresh();
     };
+    // A newer sign-in of this account replaced this session — useIdleSession
+    // confirms with the server and signs this page out.
+    const onSessionEnded = () => {
+      source.close();
+      window.dispatchEvent(new CustomEvent(SESSION_ENDED_EVENT));
+    };
     source.addEventListener('notification', onNotification);
     source.addEventListener('connected', onNotification);
     source.addEventListener('permissions', onPermissions);
+    source.addEventListener('session-ended', onSessionEnded);
     return () => {
       source.removeEventListener('notification', onNotification);
       source.removeEventListener('connected', onNotification);
       source.removeEventListener('permissions', onPermissions);
+      source.removeEventListener('session-ended', onSessionEnded);
       source.close();
     };
   }, []);

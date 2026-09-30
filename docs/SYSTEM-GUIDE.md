@@ -57,7 +57,8 @@ separate decision._
 - `POST /api/auth/login` — username + password, plus a `token` field once a 6-digit code is
   required. Responses: `enrollmentRequired` (returns a QR to self-enroll) · `mfaRequired`
   (authenticator active, code missing/wrong) · `success` (sets the JWT httpOnly cookie).
-- TOTP 2FA is **mandatory for non-admin roles**; admins are password-only unless they opt in.
+- TOTP 2FA is **required for every account, admin included**. A user may turn it off in My Profile, which stops the forced enrollment until they turn it back on.
+- **One session per account:** signing in ends any other open session of the same account; that page is signed out with a message saying why.
 - Admin can reset a lost authenticator: `POST /api/users/:id/totp/reset`.
 - Middleware: `attachUserFromJwt` runs globally, `isAuthenticated` guards protected routes.
 - Code: `server/models/Auth.js`, `server/lib/totp.js`, `server/routes/r_auth.js`,

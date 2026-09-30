@@ -233,6 +233,13 @@ async function createSchema() {
     IF COL_LENGTH('dbo.users', 'totp_pending_secret') IS NULL
       ALTER TABLE dbo.users ADD totp_pending_secret NVARCHAR(512) NULL;
   `);
+  // Set when the user turns two-factor off in My Profile, so sign-in stops
+  // forcing them to enroll again. Cleared whenever an authenticator is
+  // (re)enabled or an admin resets it.
+  await updateSchema(`
+    IF COL_LENGTH('dbo.users', 'totp_opt_out') IS NULL
+      ALTER TABLE dbo.users ADD totp_opt_out BIT NOT NULL CONSTRAINT DF_users_totp_opt_out DEFAULT (0);
+  `);
 
   // user_roles
   await updateSchema(`
@@ -681,7 +688,7 @@ async function enableTotp(userId) {
   await updateData(
     `
     UPDATE users
-    SET totp_enabled = 1, updated_at = GETDATE()
+    SET totp_enabled = 1, totp_opt_out = 0, updated_at = GETDATE()
     WHERE id = @param0 AND totp_secret IS NOT NULL
     `,
     [userId]
@@ -689,14 +696,17 @@ async function enableTotp(userId) {
   return getTotpRecord(userId);
 }
 
-async function disableTotp(userId) {
+/** Clears the authenticator. `optOut` (the user turning it off in My
+ * Profile) also stops sign-in from asking them to enroll again; an admin
+ * reset leaves it false, so the user re-enrolls at their next sign-in. */
+async function disableTotp(userId, { optOut = false } = {}) {
   await updateData(
     `
     UPDATE users
-    SET totp_secret = NULL, totp_pending_secret = NULL, totp_enabled = 0, updated_at = GETDATE()
+    SET totp_secret = NULL, totp_pending_secret = NULL, totp_enabled = 0, totp_opt_out = @param1, updated_at = GETDATE()
     WHERE id = @param0
     `,
-    [userId]
+    [userId, optOut ? 1 : 0]
   );
   return getTotpRecord(userId);
 }
@@ -766,7 +776,7 @@ async function activatePendingTotp(userId) {
   await updateData(
     `
     UPDATE users
-    SET totp_secret = totp_pending_secret, totp_pending_secret = NULL, totp_enabled = 1, updated_at = GETDATE()
+    SET totp_secret = totp_pending_secret, totp_pending_secret = NULL, totp_enabled = 1, totp_opt_out = 0, updated_at = GETDATE()
     WHERE id = @param0 AND totp_pending_secret IS NOT NULL
     `,
     [userId]

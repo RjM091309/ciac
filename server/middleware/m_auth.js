@@ -39,12 +39,13 @@ async function attachUserFromJwt(req, res, next) {
 
     try {
       const check = await User.getSessionCheck(decoded.id);
-      // A token outlives its session when the user signed out or closed
-      // their last tab (UserSession.isClosedByUser) — reject it too.
-      if (
-        (check && (!check.isActive || check.tokenVersion !== Number(decoded.tv || 0))) ||
-        (await UserSession.isClosedByUser(decoded.sid))
-      ) {
+      // A token outlives its session when the user signed out, closed their
+      // last tab, or signed in somewhere else (UserSession.closedReason) —
+      // reject it too. 'replaced' is passed on so the page can say why.
+      const revoked = check && (!check.isActive || check.tokenVersion !== Number(decoded.tv || 0));
+      const closed = revoked ? null : await UserSession.closedReason(decoded.sid);
+      if (revoked || closed) {
+        if (closed === "replaced") req.sessionEndedReason = "replaced";
         req.user = undefined;
         res.locals.user = undefined;
         res.clearCookie("jwt");

@@ -407,7 +407,9 @@ export default function App() {
       logout(
         reason === 'idle'
           ? 'You were signed out after 15 minutes of inactivity.'
-          : 'Your session has ended. Please sign in again.'
+          : reason === 'replaced'
+            ? 'You were signed out because your account signed in on another device or browser.'
+            : 'Your session has ended. Please sign in again.'
       ),
   });
 

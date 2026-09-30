@@ -3,6 +3,7 @@ const AuditLog = require("../models/AuditLog");
 const ActivityLog = require("../models/ActivityLog");
 const UserSession = require("../models/UserSession");
 const { sendMail } = require("../lib/mailer");
+const { endSessionStreams } = require("../lib/notificationStream");
 const { escapeHtml } = require("../lib/html");
 
 // How far back the audit log looks when counting repeat failed sign-ins.
@@ -92,6 +93,22 @@ exports.login = async (req, res) => {
         ipAddress: AuditLog.normalizeIp(req.ip),
         userAgent: req.get("user-agent"),
       });
+      // One session per account: this sign-in signs out any other open one,
+      // and its open pages are told right away over the notification stream.
+      const replaced = await UserSession.endOtherSessions(result.user?.id, result.session.id);
+      if (replaced.length) {
+        endSessionStreams(result.user?.id, replaced);
+        await AuditLog.record({
+          actorId: result.user?.id,
+          actorUsername: result.user?.username,
+          action: "SESSION_REPLACED",
+          entityType: "user",
+          entityId: result.user?.id,
+          sessionId: result.session.id,
+          details: { replaced_sessions: replaced.length },
+          req,
+        });
+      }
     }
     // Security trail (append-only, admin-facing).
     await AuditLog.record({
@@ -145,7 +162,7 @@ exports.logout = async (req, res) => {
  * token_version/is_active check in m_auth.js has already run, so a revoked
  * session can't be refreshed. */
 exports.refresh = async (req, res) => {
-  if (!req.user) return res.status(401).json({ success: false, message: "Session expired" });
+  if (!req.user) return res.status(401).json({ success: false, message: "Session expired", reason: req.sessionEndedReason });
   // ?tab= is sent by a page that just loaded: if that tab reported closing a
   // moment ago, it was a reload — keep the session (UserSession.js).
   UserSession.cancelTabClose(req.user.sid, typeof req.query.tab === "string" ? req.query.tab : null);
@@ -174,7 +191,7 @@ exports.tabClosed = (req, res) => {
 
 exports.checkAuth = async (req, res) => {
   if (req.user) return res.json({ success: true, authenticated: true, user: req.user });
-  return res.json({ success: true, authenticated: false });
+  return res.json({ success: true, authenticated: false, reason: req.sessionEndedReason });
 };
 
 // --- Self-service "forgot password" (emailed reset link) ---

@@ -81,7 +81,7 @@ exports.stream = async (req, res) => {
 
   res.write("retry: 5000\n\n");
 
-  const unsubscribe = subscribeUser(userId, res);
+  const unsubscribe = subscribeUser(userId, res, req.user?.sid);
   writeEvent(res, "connected", { ok: true, user_id: userId });
 
   const heartbeat = setInterval(() => {
