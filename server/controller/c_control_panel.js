@@ -3,6 +3,7 @@ const Role = require("../models/Role");
 const AuditLog = require("../models/AuditLog");
 const { publishToUsers } = require("../lib/notificationStream");
 const { publicErrorMessage } = require("../lib/httpError");
+const DashboardWidgets = require("../lib/dashboardWidgets");
 
 function parseRoleId(v) {
   const id = Number(v);
@@ -142,6 +143,13 @@ exports.getMyMenuCrudPermissions = async (req, res) => {
     console.error("Get my menu CRUD permissions error:", error);
     return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
+};
+
+// Which staff-dashboard widgets exist and which menus each one needs — the
+// Control Panel evaluates this against the role's (possibly unsaved) menu
+// access so a role is only ever offered toggles for widgets it may have.
+exports.getDashboardWidgetCatalog = async (req, res) => {
+  return res.json({ success: true, data: DashboardWidgets.catalog() });
 };
 
 exports.getDashboardWidgetPermissions = async (req, res) => {

@@ -195,6 +195,8 @@ async function resolveApplicationRecipients(application, actorId, eventType) {
       INNER JOIN dbo.role_sidebar_menu_permissions p ON p.role_id = r.id
       WHERE u.is_active = 1
         AND LOWER(LTRIM(RTRIM(r.name))) <> 'admin'
+        -- The Locator role never holds a staff menu (ControlPanelPermission.js).
+        AND LOWER(LTRIM(RTRIM(r.name))) <> 'proponent'
         AND p.is_enabled = 1
         AND p.menu_key IN (${placeholders})
         AND (

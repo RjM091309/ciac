@@ -11,7 +11,7 @@ type Navigate = (to: string, opts?: { replace?: boolean }) => void;
 
 type PreviewState =
   | { status: 'loading' }
-  | { status: 'officer'; data: OfficerDashboardData; widgetOverrides: Record<string, boolean> }
+  | { status: 'officer'; data: OfficerDashboardData }
   | { status: 'proponent'; data: ProponentDashboardData; widgetOverrides: Record<string, boolean> }
   | { status: 'error' };
 
@@ -41,7 +41,9 @@ export function PreviewDashboard({ role, navigate }: { role: PreviewRole; naviga
         if (cancelled) return;
         const widgetOverrides = toWidgetOverrides(json?.widgetPermissions);
         if (json?.role === 'officer') {
-          setState({ status: 'officer', data: json.data, widgetOverrides });
+          // The staff dashboard's visibility is resolved server-side for the
+          // previewed role (data.widgets), so no override is needed here.
+          setState({ status: 'officer', data: json.data });
         } else if (json?.role === 'proponent') {
           setState({ status: 'proponent', data: json.data, widgetOverrides });
         } else {
@@ -64,7 +66,7 @@ export function PreviewDashboard({ role, navigate }: { role: PreviewRole; naviga
     );
   }
 
-  if (state.status === 'officer') return <OfficerDashboard data={state.data} widgetOverrides={state.widgetOverrides} navigate={navigate} />;
+  if (state.status === 'officer') return <OfficerDashboard data={state.data} navigate={navigate} />;
   if (state.status === 'proponent') return <ProponentDashboard data={state.data} widgetOverrides={state.widgetOverrides} navigate={navigate} />;
 
   return (

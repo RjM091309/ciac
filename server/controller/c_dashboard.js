@@ -3,9 +3,11 @@ const Proponent = require("../models/Proponent");
 const Role = require("../models/Role");
 const ControlPanelPermission = require("../models/ControlPanelPermission");
 const Assessment = require("../models/AssessmentEvaluation");
+const Approval = require("../models/ApprovalIssuance");
 const Contract = require("../models/Contract");
 const Permit = require("../models/Permit");
 const ActivityLog = require("../models/ActivityLog");
+const DashboardWidgets = require("../lib/dashboardWidgets");
 const { publicErrorMessage } = require("../lib/httpError");
 
 /** The admin previewing "what Officer/Proponent sees" is still an admin —
@@ -33,18 +35,20 @@ function upper(v) {
 
 // Shared status breakdown used by every dashboard view (admin/officer/
 // proponent) so "pending / approved / rejected / returned" means the same
-// thing everywhere (DBM-03) — the officer/proponent views used to only
-// distinguish total/pending/approved, with no separate "returned" count.
+// thing everywhere (DBM-03). DISAPPROVED is a final decision (Assessment or
+// Approval said no), so it's its own count — it used to fall into "pending"
+// as a leftover.
 function summarize(applications) {
   const total = applications.length;
   const draft = applications.filter((a) => upper(a.status) === "DRAFT").length;
   const approved = applications.filter((a) => upper(a.status) === "APPROVED").length;
+  const disapproved = applications.filter((a) => upper(a.status) === "DISAPPROVED").length;
   const rejected = applications.filter((a) => upper(a.status) === "REJECTED").length;
   const returned = applications.filter((a) => upper(a.status) === "RETURNED").length;
-  const pending = total - draft - approved - rejected - returned;
+  const pending = total - draft - approved - disapproved - rejected - returned;
   const requirementsTotal = applications.reduce((sum, a) => sum + Number(a.requirements_total || 0), 0);
   const requirementsVerified = applications.reduce((sum, a) => sum + Number(a.requirements_verified || 0), 0);
-  return { total, draft, pending, approved, rejected, returned, requirementsTotal, requirementsVerified };
+  return { total, draft, pending, approved, disapproved, rejected, returned, requirementsTotal, requirementsVerified };
 }
 
 function periodKey(date, unit) {
@@ -104,6 +108,17 @@ function bucketByPeriod(applications, unit, count) {
   return buckets.map(({ key, ...rest }) => rest);
 }
 
+/** Every reporting period the Application Pipeline chart can switch to. */
+function buildTrends(applications) {
+  return {
+    daily: bucketByPeriod(applications, "day", 14).map((b, i, arr) => ({ ...b, label: i === arr.length - 1 ? "Today" : b.label })),
+    weekly: bucketByPeriod(applications, "week", 8),
+    monthly: bucketByPeriod(applications, "month", 6),
+    quarterly: bucketByPeriod(applications, "quarter", 4),
+    yearly: bucketByPeriod(applications, "year", 3),
+  };
+}
+
 // System-wide overview for the admin dashboard: real counts instead of mock data.
 function summarizeAdmin(applications, proponents) {
   const totalApplications = applications.length;
@@ -130,13 +145,7 @@ function summarizeAdmin(applications, proponents) {
     },
     statusBreakdown,
     requirements: { total: statusBreakdown.requirementsTotal, verified: statusBreakdown.requirementsVerified },
-    trends: {
-      daily: bucketByPeriod(applications, "day", 14).map((b, i, arr) => ({ ...b, label: i === arr.length - 1 ? "Today" : b.label })),
-      weekly: bucketByPeriod(applications, "week", 8),
-      monthly: bucketByPeriod(applications, "month", 6),
-      quarterly: bucketByPeriod(applications, "quarter", 4),
-      yearly: bucketByPeriod(applications, "year", 3),
-    },
+    trends: buildTrends(applications),
     // Kept for older callers of this endpoint's monthly-only shape.
     monthlyTrend: bucketByPeriod(applications, "month", 6),
   };
@@ -145,7 +154,7 @@ function summarizeAdmin(applications, proponents) {
 /** Real "needs attention" list — replaces the old hardcoded Quick Tasks
  * sample data (DBM-06). Oldest-first so the longest-waiting items surface.
  * `statuses`/`isRenewal` let a caller scope this to one queue's shape (e.g.
- * only FOR_APPROVAL renewals for the Account Officer) instead of the default
+ * only FOR_APPROVAL items for the Account Officer) instead of the default
  * pre-assessment mix. */
 function attentionQueue(
   applications,
@@ -181,9 +190,14 @@ function daysUntil(dateStr) {
 /** Permits/contracts already expired or expiring within the window, for the
  * Account Officer's "Needs Your Attention" widget — renewal isn't just about
  * new applications waiting in the queue, it's also about what's about to
- * lapse. Expired-first, then soonest-to-expire. */
-async function buildExpiryAttentionItems(limit) {
-  const [permits, contracts] = await Promise.all([Permit.listAll(), Contract.listAll()]);
+ * lapse. Expired-first, then soonest-to-expire.
+ *
+ * For a staff role: permits only when it can open the Permits page
+ * (`includePermits`), and contracts only for applications in its own queue
+ * (`applicationIds`) — never another officer's records. Defaults (admin):
+ * everything. */
+async function buildExpiryAttentionItems(limit, { includePermits = true, applicationIds = null } = {}) {
+  const [permits, contracts] = await Promise.all([includePermits ? Permit.listAll() : [], Contract.listAll()]);
 
   const permitItems = permits
     .filter((p) => p.effective_status === "EXPIRING" || p.effective_status === "EXPIRED")
@@ -203,10 +217,12 @@ async function buildExpiryAttentionItems(limit) {
         status: p.effective_status,
         is_expired: p.effective_status === "EXPIRED",
         days_waiting: days === null ? 0 : Math.abs(days),
+        link: `/compliance/permits?permitId=${p.id}`,
       };
     });
 
   const contractItems = contracts
+    .filter((c) => !applicationIds || applicationIds.has(Number(c.application_id)))
     .map((c) => ({ ...c, _days: daysUntil(c.effective_end) }))
     .filter((c) => c._days !== null && c._days <= EXPIRY_ATTENTION_WINDOW_DAYS)
     .map((c) => ({
@@ -217,6 +233,7 @@ async function buildExpiryAttentionItems(limit) {
       status: c._days < 0 ? "EXPIRED" : "EXPIRING",
       is_expired: c._days < 0,
       days_waiting: Math.abs(c._days),
+      link: `/approval?applicationId=${c.application_id}`,
     }));
 
   return [...permitItems, ...contractItems]
@@ -224,62 +241,161 @@ async function buildExpiryAttentionItems(limit) {
     .slice(0, limit);
 }
 
-/** Whether `sidebarPermissions` (a role's Control Panel sidebar rows) grants
- * a given menu — same enabled-flag check used throughout this codebase for
- * permission-driven (not hardcoded-role-name) decisions. */
-function hasMenu(sidebarPermissions, menuKey) {
-  return sidebarPermissions.some(
-    (p) => p.menu_key === menuKey && (Number(p.is_enabled) === 1 || p.is_enabled === true)
-  );
+/** Which queue (if any) a staff role works, from its Control Panel menu
+ * access — never its name, so renamed and custom roles behave the same.
+ * Approval wins when a role has both, same as before. */
+function queueKind(menus) {
+  if (menus.has("approval:queue")) return "approval";
+  if (menus.has("assessment:queue")) return "assessment";
+  return null;
 }
 
-/** Scopes a whole applications list (table + stats, not just the attention
- * widget) to what each queue role actually works with — renewals only for
- * the Account Officer's Approval Queue, new applications only for the
- * Assessment Officer's Assessment Queue. Without this, the admin's preview
- * switcher showed the exact same system-wide list/stats no matter which
- * role was selected, since only the attention widget was being scoped. Any
- * other role (no queue-specific menu) keeps seeing everything, unscoped. */
-function scopeApplicationsForRole(applications, sidebarPermissions, assignedIds = null) {
-  if (hasMenu(sidebarPermissions, "approval:queue")) {
-    return applications.filter((a) => Boolean(Number(a.is_renewal)));
-  }
-  if (hasMenu(sidebarPermissions, "assessment:queue")) {
-    // A Level 2 Assessment Officer's dashboard is just their own
-    // assignments (assignedIds; null in the admin's identity-less preview).
-    if (assignedIds) return applications.filter((a) => assignedIds.has(Number(a.id)));
-    return applications.filter((a) => !Boolean(Number(a.is_renewal)));
-  }
-  return applications;
+/** Where a dashboard row should open for this role: the queue page it works
+ * in (a DRAFT is in neither queue), else the Applications page for that row's type if the role can open
+ * it, else nowhere (the row isn't clickable rather than leading to a page
+ * the role would be refused). */
+function rowLinker(queue, menus) {
+  return (applicationId, isRenewal, status) => {
+    const isDraft = upper(status) === "DRAFT";
+    if (queue === "approval" && !isDraft) return `/approval?applicationId=${applicationId}`;
+    if (queue === "assessment" && !isDraft) return `/assessment?applicationId=${applicationId}`;
+    const menu = isRenewal ? "applications:renewals" : "applications:new";
+    return menus.has(menu) ? `/applications/${isRenewal ? "renewals" : "new"}?applicationId=${applicationId}` : null;
+  };
 }
 
-/** Scopes the "Needs Your Attention" widget to the shape each queue role
- * actually cares about: the Account Officer's Approval Queue only ever acts
- * on renewals waiting for approval; the Assessment Officer's Assessment
- * Queue only ever acts on new applications still pre-assessment. Driven by
- * Control Panel menu access (approval:queue / assessment:queue), not a
- * hardcoded role name, so this keeps working if either role is renamed and
- * applies the same way to the admin's dashboard-preview switcher. Falls back
- * to the caller's own default attention list for any other role shape. */
-async function buildRoleAttention(sidebarPermissions, fallbackApplications, assignedIds = null) {
-  if (hasMenu(sidebarPermissions, "approval:queue")) {
-    const [all, expiryItems] = await Promise.all([
-      Workflow.listAllApplicationsWithProgress(),
-      buildExpiryAttentionItems(6),
-    ]);
-    const remaining = Math.max(0, 6 - expiryItems.length);
-    const appItems = attentionQueue(all, { statuses: ["FOR_APPROVAL"], isRenewal: true, limit: remaining });
-    return [...expiryItems, ...appItems];
-  }
-  if (hasMenu(sidebarPermissions, "assessment:queue")) {
-    if (assignedIds) {
-      // Level 2: everything assigned to them that's still in motion.
-      return attentionQueue(fallbackApplications, { statuses: ["SUBMITTED", "RESUBMITTED", "RETURNED"] });
+function daysSince(value) {
+  if (!value) return 0;
+  const t = new Date(value).getTime();
+  return Number.isNaN(t) ? 0 : Math.max(0, Math.round((Date.now() - t) / (1000 * 60 * 60 * 24)));
+}
+
+/** The stat-card values each card needs — only visible cards' values are sent. */
+const STAT_FIELDS = {
+  "dashboard:stats:total": ["total"],
+  "dashboard:stats:pending": ["pending"],
+  "dashboard:stats:approved": ["approved"],
+  "dashboard:stats:disapproved": ["disapproved"],
+  "dashboard:stats:rejected": ["rejected"],
+  "dashboard:stats:returned": ["returned"],
+  "dashboard:stats:requirements": ["requirementsTotal", "requirementsVerified"],
+};
+
+/**
+ * The dashboard every non-admin staff role shares (Account Officer,
+ * Assessment Officer, Viewer, or any custom role), scoped by the queue the
+ * role works:
+ *   - Approval   -> this officer's Approval queue (assigned to them or
+ *                   unassigned — the same rule as the queue itself);
+ *   - Assessment -> a Level 2 Officer's own assignments, else (Level 1
+ *                   Manager) new applications;
+ *   - neither    -> every application (a read-only overview role).
+ * Only widgets the role is eligible for AND has on (lib/dashboardWidgets.js)
+ * are computed and sent — a hidden widget's data never leaves the server.
+ *
+ * `user` is null for the admin's identity-less preview: the Approval preview
+ * then shows the whole Approval queue, and the Assessment preview a Level 1
+ * Manager's view.
+ */
+async function buildStaffDashboard({ user, sidebarPermissions, widgetPermissions }) {
+  const menus = DashboardWidgets.enabledMenus(sidebarPermissions);
+  const widgets = DashboardWidgets.resolveVisibility(sidebarPermissions, widgetPermissions);
+  const queue = queueKind(menus);
+  const linkFor = rowLinker(queue, menus);
+  // Nothing to show (e.g. a role with no menu access yet) — skip every query.
+  if (!Object.values(widgets).some(Boolean)) return { view: "overview", widgets };
+
+  let isManager = !user;
+  let scopeIds = null;
+  if (queue === "approval") {
+    scopeIds = await Approval.listApplicationIdsInQueue(user?.id ?? null);
+  } else if (queue === "assessment" && user) {
+    if (await Assessment.isScopedLevel2(user.id, sidebarPermissions)) {
+      scopeIds = await Assessment.listApplicationIdsAssignedTo(user.id);
+    } else {
+      isManager = true;
     }
-    const all = await Workflow.listAllApplicationsWithProgress();
-    return attentionQueue(all, { statuses: ["SUBMITTED", "RESUBMITTED"], isRenewal: false });
   }
-  return attentionQueue(fallbackApplications);
+
+  const allApplications = await Workflow.listAllApplicationsWithProgress();
+  const applications = allApplications.filter((a) => {
+    if (scopeIds) return scopeIds.has(Number(a.id));
+    // Level 1 Managers keep the new-applications-only list they had
+    // before; renewals waiting on them still show in Needs Attention.
+    if (queue === "assessment") return !Number(a.is_renewal);
+    return true;
+  });
+  // An overview role sees everything, so its aggregates need no id filter.
+  const scopedIds = queue ? applications.map((a) => a.id) : null;
+  const summary = summarize(applications);
+
+  // Drives the dashboard's heading/wording, e.g. a read-only overview role
+  // never sees "assigned to you".
+  const view =
+    queue === "approval" ? "approval" : queue === "assessment" ? (isManager ? "assessment-manager" : "assessment-officer") : "overview";
+  const data = { view, widgets };
+
+  if (widgets["dashboard:stats"]) {
+    const stats = {};
+    for (const [key, fields] of Object.entries(STAT_FIELDS)) {
+      if (widgets[key]) fields.forEach((f) => { stats[f] = summary[f]; });
+    }
+    data.stats = stats;
+  }
+
+  if (widgets["dashboard:status-chart"]) {
+    const { pending, approved, disapproved, rejected, returned } = summary;
+    data.statusBreakdown = { pending, approved, disapproved, rejected, returned };
+  }
+
+  if (widgets["dashboard:pipeline"]) data.trends = buildTrends(applications);
+
+  const [turnaround, categoryCompletion] = await Promise.all([
+    widgets["dashboard:performance"] ? Workflow.getApplicationTurnaroundStats(scopedIds) : null,
+    widgets["dashboard:requirements"] ? Workflow.getRequirementCompletionByCategory(scopedIds) : null,
+  ]);
+  if (turnaround) data.turnaround = turnaround;
+  if (categoryCompletion) {
+    data.categoryCompletion = categoryCompletion;
+    data.canOpenRequirements = menus.has("applications:requirements");
+  }
+
+  if (widgets["dashboard:table"]) {
+    data.applications = applications.map((a) => ({ ...a, link: linkFor(a.id, Boolean(Number(a.is_renewal)), a.status) }));
+  }
+
+  if (widgets["dashboard:attention"]) {
+    const withLinks = (items) => items.map((i) => ({ ...i, link: linkFor(i.application_id, i.is_renewal, i.status) }));
+    if (queue === "approval") {
+      const expiryItems = await buildExpiryAttentionItems(6, {
+        includePermits: menus.has("compliance:permits"),
+        applicationIds: scopeIds,
+      });
+      const remaining = Math.max(0, 6 - expiryItems.length);
+      data.attention = [
+        ...expiryItems,
+        ...withLinks(attentionQueue(applications, { statuses: ["FOR_APPROVAL"], limit: remaining })),
+      ];
+    } else if (queue === "assessment" && !isManager) {
+      data.attention = withLinks(attentionQueue(applications, { statuses: ["SUBMITTED", "RESUBMITTED", "RETURNED"] }));
+    } else if (queue === "assessment") {
+      const rows = await Assessment.listManagerAttention();
+      data.attention = rows
+        .map((r) => ({
+          application_id: r.application_id,
+          application_no: r.application_no,
+          proponent_name: r.proponent_name,
+          status: r.stage === "FOR_RECOMMENDATION" ? "AWAITING RECOMMENDATION" : "NEEDS ASSIGNMENT",
+          is_renewal: Boolean(Number(r.is_renewal)),
+          days_waiting: daysSince(r.waiting_since),
+          link: `/assessment?applicationId=${r.application_id}`,
+        }))
+        .sort((a, b) => b.days_waiting - a.days_waiting)
+        .slice(0, 6);
+    }
+  }
+
+  return data;
 }
 
 exports.getMyDashboard = async (req, res) => {
@@ -319,9 +435,8 @@ exports.getMyDashboard = async (req, res) => {
         Workflow.getApplicationTurnaroundStats(),
         buildExpiryAttentionItems(6),
       ]);
-      // Same merge buildRoleAttention() does for the Approval Queue role —
-      // admin's "Needs Attention" was application-only and never surfaced
-      // permits/contracts about to expire, unlike every other role's.
+      // Same merge the Approval-queue staff dashboard does — admin's "Needs
+      // Attention" also surfaces permits/contracts about to expire.
       const remaining = Math.max(0, 6 - expiryItems.length);
       return res.json({
         success: true,
@@ -335,27 +450,18 @@ exports.getMyDashboard = async (req, res) => {
       });
     }
 
-    // Every other role — Officer, Account Officer, Assessment Officer, or
-    // any future custom staff role — shares the same scoped "my assigned
-    // applications" dashboard, scoped by Control Panel queue access
-    // (approval:queue -> renewals, assessment:queue -> new applications)
-    // via scopeApplicationsForRole, same as the admin's preview switcher.
-    // Not listApplicationsForOfficer's current_officer_id assignment — that
-    // column is never actually set anywhere in this codebase, so it always
-    // returned an empty "Assigned to Me" for every real staff account.
+    // Every other role — Account Officer, Assessment Officer, Viewer, or any
+    // future custom staff role — shares one dashboard, scoped and trimmed by
+    // its Control Panel permissions (see buildStaffDashboard).
     const roleId = await Role.getActiveRoleIdByName(role);
-    const sidebarPermissions = roleId ? await ControlPanelPermission.getSidebarPermissions(roleId) : [];
-    const allApplications = await Workflow.listAllApplicationsWithProgress();
-    const assignedIds = (await Assessment.isScopedLevel2(req.user.id, sidebarPermissions))
-      ? await Assessment.listApplicationIdsAssignedTo(req.user.id)
-      : null;
-    const applications = scopeApplicationsForRole(allApplications, sidebarPermissions, assignedIds);
-    const attention = await buildRoleAttention(sidebarPermissions, applications, assignedIds);
-    return res.json({
-      success: true,
-      role: "officer",
-      data: { applications, stats: summarize(applications), attention },
-    });
+    const [sidebarPermissions, widgetPermissions] = roleId
+      ? await Promise.all([
+          ControlPanelPermission.getSidebarPermissions(roleId),
+          ControlPanelPermission.getDashboardWidgetPermissions(roleId),
+        ])
+      : [[], []];
+    const data = await buildStaffDashboard({ user: req.user, sidebarPermissions, widgetPermissions });
+    return res.json({ success: true, role: "officer", data });
   } catch (error) {
     console.error("Get my dashboard error:", error);
     return res.status(500).json({ success: false, message: publicErrorMessage(error) });
@@ -402,11 +508,10 @@ exports.getPreview = async (req, res) => {
       });
     }
 
-    // Any other value is a role ID — Officer, Account Officer, Assessment
-    // Officer, or any future custom staff role, all sharing the same
-    // officer-style application-management dashboard; only widget/sidebar
-    // visibility differs, driven by that exact role's own Control Panel
-    // permissions. ID rather than name: these roles (unlike the 3 fixed
+    // Any other value is a role ID — Account Officer, Assessment Officer,
+    // Viewer, or any future custom staff role, all sharing the same staff
+    // dashboard; what differs is driven by that exact role's own Control
+    // Panel permissions. ID rather than name: these roles (unlike the fixed
     // system ones) CAN be renamed, so a name in the URL could go stale
     // mid-session, and an ID skips the extra name -> id lookup entirely
     // since Control Panel permissions are already keyed by role_id.
@@ -418,28 +523,12 @@ exports.getPreview = async (req, res) => {
     if (!role || !role.is_active) {
       return res.status(400).json({ success: false, message: "Unknown preview role" });
     }
-    const [allApplications, widgetPermissions, sidebarPermissions] = await Promise.all([
-      Workflow.listAllApplicationsWithProgress(),
+    const [widgetPermissions, sidebarPermissions] = await Promise.all([
       ControlPanelPermission.getDashboardWidgetPermissions(roleId),
       ControlPanelPermission.getSidebarPermissions(roleId),
     ]);
-    // Scope the whole preview (table + stats), not just the attention
-    // widget — otherwise every role preview showed the identical
-    // system-wide list regardless of which one was selected.
-    const applications = scopeApplicationsForRole(allApplications, sidebarPermissions);
-    // buildRoleAttention does its own system-wide fetch for the queue-scoped
-    // branches (needed since `applications` here is already renewal/new-only
-    // — the attention widget for approval:queue also needs expiring
-    // permits/contracts, which aren't application rows at all); the
-    // already-scoped `applications` is only used as the plain fallback.
-    const attention = await buildRoleAttention(sidebarPermissions, applications);
-    return res.json({
-      success: true,
-      role: "officer",
-      widgetPermissions,
-      sidebarPermissions,
-      data: { applications, stats: summarize(applications), attention },
-    });
+    const data = await buildStaffDashboard({ user: null, sidebarPermissions, widgetPermissions });
+    return res.json({ success: true, role: "officer", widgetPermissions, sidebarPermissions, data });
   } catch (error) {
     console.error("Get dashboard preview error:", error);
     return res.status(500).json({ success: false, message: publicErrorMessage(error) });

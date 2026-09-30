@@ -266,6 +266,31 @@
   transition-property: background-color, color;
 }
 
+/* Balanced reflow row (see src/lib/balancedColumns.ts): children wrap into
+   --bal-cols-* columns per breakpoint and every row's cards grow to fill it,
+   so a row of however many visible widgets never leaves an empty gap — a
+   leftover last card stretches across the rest of its row instead. */
+.balanced-row {
+  --bal-gap: 0.75rem;
+  --bal-cols: var(--bal-cols-base, 1);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--bal-gap);
+}
+@media (min-width: 640px) {
+  .balanced-row { --bal-gap: 1rem; --bal-cols: var(--bal-cols-sm, var(--bal-cols-base, 1)); }
+}
+@media (min-width: 1024px) {
+  .balanced-row { --bal-cols: var(--bal-cols-lg, var(--bal-cols-sm, var(--bal-cols-base, 1))); }
+}
+@media (min-width: 1280px) {
+  .balanced-row { --bal-cols: var(--bal-cols-xl, var(--bal-cols-lg, var(--bal-cols-sm, var(--bal-cols-base, 1)))); }
+}
+.balanced-row > * {
+  flex: 1 1 calc((100% - (var(--bal-cols) - 1) * var(--bal-gap)) / var(--bal-cols));
+  min-width: 0;
+}
+
 /* Tablet landscape only (touch devices). Excludes desktop pointers. */
 @media (hover: none) and (pointer: coarse) and (orientation: landscape) and (min-width: 768px) and (max-width: 1366px) {
   .touch-landscape-dashboard-grid {

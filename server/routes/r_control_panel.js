@@ -8,6 +8,7 @@ router.get("/sidebar-menu/:roleId", requireRole("admin"), controlPanelController
 router.put("/sidebar-menu/:roleId", requireRole("admin"), controlPanelController.setSidebarPermissions);
 router.get("/menu-crud/:roleId", requireRole("admin"), controlPanelController.getMenuCrudPermissions);
 router.put("/menu-crud/:roleId", requireRole("admin"), controlPanelController.setMenuCrudPermissions);
+router.get("/dashboard-widget-catalog", requireRole("admin"), controlPanelController.getDashboardWidgetCatalog);
 router.get("/dashboard-widgets/:roleId", requireRole("admin"), controlPanelController.getDashboardWidgetPermissions);
 router.put("/dashboard-widgets/:roleId", requireRole("admin"), controlPanelController.setDashboardWidgetPermissions);
 

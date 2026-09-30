@@ -408,8 +408,11 @@ async function listUsersWithMenu(menuKey) {
     FROM dbo.users u
     INNER JOIN dbo.user_roles ur ON ur.user_id = u.id
     INNER JOIN dbo.roles r ON r.id = ur.role_id
+    -- The Locator role never holds a staff menu (ControlPanelPermission.js),
+    -- even if a stale row says otherwise.
     LEFT JOIN dbo.role_sidebar_menu_permissions p
       ON p.role_id = r.id AND p.menu_key = @param0 AND p.is_enabled = 1
+      AND LOWER(LTRIM(RTRIM(r.name))) <> 'proponent'
     WHERE u.is_active = 1
       AND (LOWER(LTRIM(RTRIM(r.name))) = 'admin' OR p.role_id IS NOT NULL)
     ORDER BY u.full_name
@@ -474,6 +477,30 @@ async function getLevel2OnlyUserId(user) {
   if (!roleId) return null;
   const rows = await ControlPanelPermission.getSidebarPermissions(roleId);
   return (await isScopedLevel2(user?.id, rows)) ? toInt(user?.id) : null;
+}
+
+/** What's waiting on a Level 1 Manager, for their dashboard's Needs
+ * Attention widget: officer reviews awaiting their recommendation, and
+ * submitted applications nobody has been assigned to yet. Same queue base
+ * as listAssessments, so every item here is also in their Assessment queue. */
+async function listManagerAttention() {
+  await ensureSchema();
+  return selectData(`
+    SELECT
+      a.id AS application_id,
+      a.application_no,
+      p.business_name AS proponent_name,
+      a.is_renewal,
+      ISNULL(asm.stage, 'UNASSIGNED') AS stage,
+      CASE WHEN asm.stage = 'FOR_RECOMMENDATION'
+        THEN ISNULL(asm.officer_recommended_at, asm.updated_at)
+        ELSE ISNULL(a.submitted_at, a.created_at) END AS waiting_since
+    FROM dbo.applications a
+    LEFT JOIN dbo.proponents p ON p.id = a.proponent_id
+    LEFT JOIN dbo.application_assessments asm ON asm.application_id = a.id
+    WHERE asm.stage = 'FOR_RECOMMENDATION'
+       OR (ISNULL(asm.stage, 'UNASSIGNED') = 'UNASSIGNED' AND a.status IN ('SUBMITTED', 'RESUBMITTED'))
+  `);
 }
 
 async function listApplicationIdsAssignedTo(userId) {
@@ -950,6 +977,7 @@ module.exports = {
   isScopedLevel2,
   getLevel2OnlyUserId,
   listApplicationIdsAssignedTo,
+  listManagerAttention,
   getAssignedEvaluatorId,
   getApplicationIdForCharge,
   getApplicationIdForRequirement,

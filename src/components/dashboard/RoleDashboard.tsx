@@ -3,6 +3,7 @@ import { Loader2 } from 'lucide-react';
 import { Dashboard, type AdminDashboardData } from './Dashboard';
 import { OfficerDashboard, type OfficerDashboardData } from './OfficerDashboard';
 import { ProponentDashboard, type ProponentDashboardData } from './ProponentDashboard';
+import { PERMISSIONS_REFRESH_EVENT } from '../../lib/permissionsRefresh';
 
 type Navigate = (to: string, opts?: { replace?: boolean }) => void;
 
@@ -44,7 +45,14 @@ export function RoleDashboard({ navigate }: { navigate: Navigate }) {
   useEffect(() => {
     load();
     const id = window.setInterval(load, POLL_INTERVAL_MS);
-    return () => window.clearInterval(id);
+    // The staff dashboard's widgets are decided server-side, so an admin's
+    // Control Panel save (pushed live as a "permissions" event) re-fetches
+    // right away instead of waiting for the next poll.
+    window.addEventListener(PERMISSIONS_REFRESH_EVENT, load);
+    return () => {
+      window.clearInterval(id);
+      window.removeEventListener(PERMISSIONS_REFRESH_EVENT, load);
+    };
   }, [load]);
 
   if (state.status === 'loading') {

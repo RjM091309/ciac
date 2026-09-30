@@ -34,6 +34,7 @@ export type ProponentDashboardData = {
     pending: number;
     approved: number;
     rejected?: number;
+    disapproved?: number;
     returned?: number;
     requirementsTotal: number;
     requirementsVerified: number;
@@ -166,7 +167,9 @@ export function ProponentDashboard({
           <StatCard label="Drafts" value={stats.draft ?? 0} icon={FileClock} onClick={navigate ? () => navigate('/me/applications') : undefined} />
           <StatCard label="Pending" value={stats.pending} icon={Inbox} onClick={navigate ? () => navigate('/me/applications') : undefined} />
           <StatCard label="Approved" value={stats.approved} icon={FileCheck} onClick={navigate ? () => navigate('/me/applications') : undefined} />
-          <StatCard label="Rejected" value={stats.rejected ?? 0} icon={XCircle} onClick={navigate ? () => navigate('/me/applications') : undefined} />
+          {/* Disapproved is counted separately server-side (it isn't pending);
+              to a Locator both outcomes read as "not approved". */}
+          <StatCard label="Rejected" value={(stats.rejected ?? 0) + (stats.disapproved ?? 0)} icon={XCircle} onClick={navigate ? () => navigate('/me/applications') : undefined} />
           <StatCard label="Returned" value={stats.returned ?? 0} icon={RotateCcw} onClick={navigate ? () => navigate('/me/applications') : undefined} />
           <StatCard
             label="Requirements Verified"

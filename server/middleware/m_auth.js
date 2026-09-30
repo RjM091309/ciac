@@ -100,6 +100,8 @@ function requireRole(...allowedRoles) {
  * Menu CRUD permissions. 'admin' always bypasses (it's exempt from Control
  * Panel restrictions, matching the UI which excludes it from the manageable
  * role list). Any role with no saved permission row is denied (fail-closed).
+ * The Locator ('proponent') role is always denied: it's external users, and
+ * no staff menu may ever be granted to it (see ControlPanelPermission.js).
  */
 function requireMenuAccess(menuKey, action = "view") {
   return async function menuAccessGuard(req, res, next) {
@@ -108,6 +110,7 @@ function requireMenuAccess(menuKey, action = "view") {
     }
     const role = String(req.user.role || "").toLowerCase();
     if (role === "admin") return next();
+    if (role === "proponent") return res.status(403).json({ success: false, message: "Forbidden" });
 
     try {
       const roleId = await Role.getActiveRoleIdByName(req.user.role);
@@ -131,6 +134,7 @@ function requireMenuAccess(menuKey, action = "view") {
 
 async function checkMenuAllowed(role, menuKey, action) {
   if (role === "admin") return true;
+  if (role === "proponent") return false;
   const roleId = await Role.getActiveRoleIdByName(role);
   if (!roleId) return false;
   return action === "view"

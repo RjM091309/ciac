@@ -278,6 +278,27 @@ async function listApprovals({ status, search, assigneeId } = {}) {
   return selectData(sql, params);
 }
 
+/** Ids of the applications in one Account Officer's Approval queue — the
+ * same "assigned to me, or unassigned" rule as listApprovals, so the
+ * dashboard and the queue always agree. null `assigneeId` = every
+ * application in the queue (the admin's identity-less preview). */
+async function listApplicationIdsInQueue(assigneeId = null) {
+  await ensureSchema();
+  const asgId = toInt(assigneeId);
+  const asgFilter = asgId ? `AND (${ASSIGNEE_EXPR} = @param0 OR ${ASSIGNEE_EXPR} IS NULL)` : "";
+  const rows = await selectData(
+    `
+    SELECT a.id AS application_id
+    FROM dbo.applications a
+    LEFT JOIN dbo.application_approvals ap ON ap.application_id = a.id
+    LEFT JOIN dbo.application_assessments asm ON asm.application_id = a.id
+    WHERE (ap.id IS NOT NULL OR a.status = 'FOR_APPROVAL') ${asgFilter}
+    `,
+    asgId ? [asgId] : []
+  );
+  return new Set(rows.map((r) => toInt(r.application_id)));
+}
+
 async function getSummary({ assigneeId } = {}) {
   await ensureSchema();
   const asgId = toInt(assigneeId);
@@ -818,6 +839,7 @@ module.exports = {
   STEP_ACTIONS,
   STEP_DECISIONS,
   listApprovals,
+  listApplicationIdsInQueue,
   getSummary,
   getApprovalAssigneeId,
   getApplicationIdForStep,

@@ -1,10 +1,23 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, ClipboardList, FileCheck, FileText, Inbox, RotateCcw, XCircle } from 'lucide-react';
+import { Ban, ClipboardList, FileCheck, FileText, Inbox, LayoutDashboard, ListChecks, RotateCcw, XCircle } from 'lucide-react';
 import { EmptyState } from '../ui/EmptyState';
 import { getStatusBadgeStyles } from './statusBadge';
-import { useControlPanelAccess } from '../../context/ControlPanelAccessContext';
 import { cn } from '../../lib/utils';
+import { balancedRowStyle } from '../../lib/balancedColumns';
 import { DataTableControls } from '../ui/DataTableControls';
+import {
+  AttentionCard,
+  PerformanceCard,
+  PipelineChartCard,
+  QuickTasksCard,
+  RequirementsOverviewCard,
+  StatusBreakdownCard,
+  type AttentionItem,
+  type CategoryCompletion,
+  type StatusBreakdown,
+  type Trends,
+  type Turnaround,
+} from './widgets';
 
 type DashboardApplicationRow = {
   id: number;
@@ -17,56 +30,84 @@ type DashboardApplicationRow = {
   created_at: string;
   requirements_total: number;
   requirements_verified: number;
-};
-
-type AttentionItem = {
-  // Absent/'application' = a queued application (the original shape); 'permit'
-  // /'contract' are expiring/expired compliance records for the Account
-  // Officer's widget — application_id is then that record's own id (permit)
-  // or the application it belongs to (contract), used for the key and, for
-  // contracts, navigation.
-  kind?: 'application' | 'permit' | 'contract';
-  application_id: number;
-  /** The permit's own id (kind === 'permit' only) — for deep-linking to and
-   * highlighting the specific row on the Permits page, distinct from
-   * application_id above which a CONTRACT-type permit also carries but
-   * refers to a different record. */
-  permit_id?: number;
-  application_no: string;
-  proponent_name: string | null;
-  status: string;
-  is_renewal?: boolean;
-  is_expired?: boolean;
-  days_waiting: number;
+  /** Where this row opens for the viewer's role; null = not clickable. */
+  link?: string | null;
 };
 
 type Navigate = (to: string, opts?: { replace?: boolean }) => void;
 
+/** What the staff dashboard is for this role (server-decided from its
+ * Control Panel menu access and, for Assessment, the user's level). */
+type DashboardView = 'approval' | 'assessment-officer' | 'assessment-manager' | 'overview';
+
+/** Shape of GET /api/dashboard/me for every non-admin staff role. Only the
+ * widgets this role may have and has on come back (`widgets` says which);
+ * everything else is absent, never just hidden. */
 export type OfficerDashboardData = {
-  applications: DashboardApplicationRow[];
-  stats: {
+  view?: DashboardView;
+  widgets?: Record<string, boolean>;
+  applications?: DashboardApplicationRow[];
+  stats?: Partial<{
     total: number;
     pending: number;
     approved: number;
-    rejected?: number;
-    returned?: number;
+    disapproved: number;
+    rejected: number;
+    returned: number;
     requirementsTotal: number;
     requirementsVerified: number;
-  };
+  }>;
   attention?: AttentionItem[];
+  statusBreakdown?: StatusBreakdown;
+  trends?: Trends;
+  turnaround?: Turnaround;
+  categoryCompletion?: CategoryCompletion[];
+  canOpenRequirements?: boolean;
+};
+
+const VIEW_COPY: Record<
+  DashboardView,
+  { title: string; description: string; table: string; tableEmpty: string; attention: string; totalLabel: string }
+> = {
+  approval: {
+    title: 'My Approval Queue',
+    description: 'Applications routed to you for approval, and permits or contracts nearing expiry.',
+    table: 'In My Approval Queue',
+    tableEmpty: 'Nothing is in your approval queue right now.',
+    attention: 'Approvals waiting on you, plus permits and contracts nearing expiry',
+    totalLabel: 'In My Queue',
+  },
+  'assessment-officer': {
+    title: 'My Assigned Applications',
+    description: 'Applications assigned to you for evaluation.',
+    table: 'Assigned to Me',
+    tableEmpty: "You don't have any applications assigned right now.",
+    attention: 'Your assignments that still need work',
+    totalLabel: 'Total Assigned',
+  },
+  'assessment-manager': {
+    title: 'Assessment Overview',
+    description: "New applications in assessment, and what's waiting on your decision.",
+    table: 'New Applications',
+    tableEmpty: 'No new applications yet.',
+    attention: 'Reviews awaiting your recommendation, and applications to assign',
+    totalLabel: 'Total Applications',
+  },
+  overview: {
+    title: 'Applications Overview',
+    description: 'A read-only summary of applications across the system.',
+    table: 'All Applications',
+    tableEmpty: 'No applications yet.',
+    attention: '',
+    totalLabel: 'Total Applications',
+  },
 };
 
 function StatCard({ label, value, icon: Icon }: { label: string; value: string | number; icon: any }) {
   return (
-    <div
-      className="glass-card p-3.5 flex flex-col gap-2 !border-transparent"
-      style={{ backgroundColor: 'var(--surface)' }}
-    >
-      <div className="flex items-center gap-2">
-        <div
-          className="p-1.5 rounded-lg border shrink-0"
-          style={{ backgroundColor: 'var(--control-bg)', borderColor: 'var(--border-subtle)' }}
-        >
+    <div className="glass-card p-3.5 flex flex-col gap-2 !border-transparent" style={{ backgroundColor: 'var(--surface)' }}>
+      <div className="flex items-center gap-2 min-w-0">
+        <div className="p-1.5 rounded-lg border shrink-0" style={{ backgroundColor: 'var(--control-bg)', borderColor: 'var(--border-subtle)' }}>
           <Icon size={16} style={{ color: 'var(--text)' }} />
         </div>
         <span className="text-[11px] font-medium text-secondary leading-tight line-clamp-2 sm:truncate">{label}</span>
@@ -85,29 +126,74 @@ function formatDate(value: string | null) {
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
-export function OfficerDashboard({
-  data,
-  widgetOverrides,
-  navigate,
-}: {
-  data: OfficerDashboardData | null;
-  /** Set only by PreviewDashboard: the real Officer role's saved widget
-   * visibility, since the admin viewing this preview is exempt from Control
-   * Panel restrictions and would otherwise always see everything. */
-  widgetOverrides?: Record<string, boolean>;
-  navigate?: Navigate;
-}) {
+export function OfficerDashboard({ data, navigate }: { data: OfficerDashboardData | null; navigate?: Navigate }) {
+  const view: DashboardView = data?.view ?? 'overview';
+  const copy = VIEW_COPY[view];
+  const show = (key: string) => Boolean(data?.widgets?.[key]);
   const applications = data?.applications ?? [];
-  const stats = data?.stats ?? { total: 0, pending: 0, approved: 0, rejected: 0, returned: 0, requirementsTotal: 0, requirementsVerified: 0 };
-  const attention = data?.attention ?? [];
-  const { canShowWidget: canShowWidgetForMe } = useControlPanelAccess();
-  const canShowWidget = (key: string) => (widgetOverrides ? widgetOverrides[key] ?? true : canShowWidgetForMe(key));
+  const stats = data?.stats ?? {};
+
+  const statCards = [
+    { key: 'dashboard:stats:total', label: copy.totalLabel, value: stats.total ?? 0, icon: FileText },
+    { key: 'dashboard:stats:pending', label: 'Pending', value: stats.pending ?? 0, icon: Inbox },
+    { key: 'dashboard:stats:approved', label: 'Approved', value: stats.approved ?? 0, icon: FileCheck },
+    { key: 'dashboard:stats:disapproved', label: 'Disapproved', value: stats.disapproved ?? 0, icon: Ban },
+    { key: 'dashboard:stats:rejected', label: 'Rejected', value: stats.rejected ?? 0, icon: XCircle },
+    { key: 'dashboard:stats:returned', label: 'Returned', value: stats.returned ?? 0, icon: RotateCcw },
+    {
+      key: 'dashboard:stats:requirements',
+      label: 'Requirements Verified',
+      value: `${stats.requirementsVerified ?? 0}/${stats.requirementsTotal ?? 0}`,
+      icon: ListChecks,
+    },
+  ].filter((c) => show('dashboard:stats') && show(c.key));
+
+  // Needs Attention and Quick Tasks sit side by side on wide screens;
+  // insights reflow to however many are on (balanced rows — no lone cards,
+  // no empty gaps). Without Needs Attention, Quick Tasks joins the insights
+  // row instead of stretching alone across a full-width row.
+  const showAttention = show('dashboard:attention');
+  const workCards: React.ReactNode[] = [];
+  const insightCards: React.ReactNode[] = [];
+  if (showAttention) {
+    workCards.push(
+      <AttentionCard key="attention" items={data?.attention ?? []} navigate={navigate} title="Needs Your Attention" description={copy.attention} />
+    );
+  }
+  if (showAttention && show('dashboard:quick-tasks')) workCards.push(<QuickTasksCard key="tasks" />);
+
+  if (show('dashboard:status-chart') && data?.statusBreakdown) {
+    insightCards.push(
+      <StatusBreakdownCard
+        key="status"
+        breakdown={data.statusBreakdown}
+        description={view === 'overview' ? 'Every application, by current status' : 'Applications on this dashboard, by status'}
+      />
+    );
+  }
+  if (show('dashboard:pipeline')) insightCards.push(<PipelineChartCard key="pipeline" trends={data?.trends} />);
+  if (show('dashboard:performance')) insightCards.push(<PerformanceCard key="performance" turnaround={data?.turnaround ?? null} />);
+  if (show('dashboard:requirements')) {
+    insightCards.push(
+      <RequirementsOverviewCard
+        key="requirements"
+        categoryCompletion={data?.categoryCompletion ?? []}
+        // Only link to the Requirements catalog when the role can open it.
+        navigate={data?.canOpenRequirements ? navigate : undefined}
+      />
+    );
+  }
+
+  if (!showAttention && show('dashboard:quick-tasks')) insightCards.push(<QuickTasksCard key="tasks" />);
+
+  const showTable = show('dashboard:table');
+  const nothingVisible = !statCards.length && !workCards.length && !insightCards.length && !showTable;
 
   const [tablePage, setTablePage] = useState(1);
   const [tablePageSize, setTablePageSize] = useState(10);
   const tableTotalPages = useMemo(
     () => Math.max(1, Math.ceil(applications.length / Math.max(1, tablePageSize))),
-    [applications.length, tablePageSize],
+    [applications.length, tablePageSize]
   );
   const tableSafePage = Math.min(Math.max(1, tablePage), tableTotalPages);
   const pagedApplications = useMemo(() => {
@@ -126,6 +212,8 @@ export function OfficerDashboard({
     setTablePage(1);
   }, [applications.length, tablePageSize]);
 
+  const openRow = (app: DashboardApplicationRow) => (navigate && app.link ? () => navigate(app.link as string) : undefined);
+
   return (
     <div className="space-y-4 sm:space-y-5">
       <div
@@ -138,259 +226,196 @@ export function OfficerDashboard({
         <div className="pointer-events-none absolute -top-32 -right-32 h-80 w-80 rounded-full bg-blue-600/30 blur-[100px]" />
         <div className="relative flex items-center gap-3">
           <div className="p-2.5 rounded-xl border shrink-0" style={{ backgroundColor: 'var(--control-bg)', borderColor: 'var(--border-subtle)' }}>
-            <ClipboardList size={22} style={{ color: 'var(--text)' }} />
+            {view === 'overview' ? (
+              <LayoutDashboard size={22} style={{ color: 'var(--text)' }} />
+            ) : (
+              <ClipboardList size={22} style={{ color: 'var(--text)' }} />
+            )}
           </div>
           <div className="min-w-0">
             <h3 className="text-lg sm:text-xl font-bold tracking-tight" style={{ color: 'var(--text)' }}>
-              My Assigned Applications
+              {copy.title}
             </h3>
-            <p className="text-xs text-secondary">Applications currently routed to you for action.</p>
+            <p className="text-xs text-secondary">{copy.description}</p>
           </div>
         </div>
       </div>
 
-      {canShowWidget('dashboard:stats') && (
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4">
-          <StatCard label="Total Assigned" value={stats.total} icon={FileText} />
-          <StatCard label="Pending" value={stats.pending} icon={Inbox} />
-          <StatCard label="Approved" value={stats.approved} icon={FileCheck} />
-          <StatCard label="Rejected" value={stats.rejected ?? 0} icon={XCircle} />
-          <StatCard label="Returned" value={stats.returned ?? 0} icon={RotateCcw} />
-          <StatCard
-            label="Requirements Verified"
-            value={`${stats.requirementsVerified}/${stats.requirementsTotal}`}
-            icon={FileCheck}
-          />
-        </div>
-      )}
-
-      {canShowWidget('dashboard:attention') && (
-        <div className="glass-card p-4 sm:p-5 !border-transparent" style={{ backgroundColor: 'var(--surface)' }}>
-          <div className="flex items-center gap-2 mb-3">
-            <AlertTriangle size={15} className="text-amber-500" />
-            <h4 className="text-sm font-bold" style={{ color: 'var(--text)' }}>
-              Needs Your Attention
-            </h4>
-          </div>
-          {attention.length === 0 ? (
-            <EmptyState
-              icon={<AlertTriangle size={32} className="opacity-40" />}
-              title="Nothing needs attention"
-              description="Nothing is currently waiting on you."
-            />
-          ) : (
-          // Fits ~5 rows without a scrollbar; more than that scrolls with the
-          // same invisible-until-hover scrollbar as the sidebar
-          // ("sidebar-scroll") instead of growing the whole card.
-          <div className="sidebar-scroll space-y-1.5 h-[280px] overflow-y-auto pr-0.5">
-            {attention.map((item) => {
-              const attentionTarget =
-                item.kind === 'permit'
-                  ? `/compliance/permits?permitId=${item.permit_id ?? item.application_id}`
-                  : item.kind === 'contract'
-                    ? `/approval?applicationId=${item.application_id}`
-                    : `/applications/${item.is_renewal ? 'renewals' : 'new'}?applicationId=${item.application_id}`;
-              return (
-              <div
-                key={`${item.kind || 'application'}-${item.application_id}`}
-                role={navigate ? 'button' : undefined}
-                tabIndex={navigate ? 0 : undefined}
-                onClick={navigate ? () => navigate(attentionTarget) : undefined}
-                onKeyDown={
-                  navigate
-                    ? (e) => {
-                        if (e.key === 'Enter' || e.key === ' ') {
-                          e.preventDefault();
-                          navigate(attentionTarget);
-                        }
-                      }
-                    : undefined
-                }
-                className={cn(
-                  'flex flex-col items-start gap-1 rounded-lg border px-3 py-2 text-[11px] transition-colors',
-                  'sm:flex-row sm:items-center sm:justify-between sm:gap-3',
-                  navigate && 'cursor-pointer hover:bg-[var(--surface-hover)] active:brightness-95'
-                )}
-                style={{ borderColor: 'var(--border-subtle)' }}
-              >
-                <span className="font-semibold min-w-0 max-w-full truncate" style={{ color: 'var(--text)' }}>
-                  {item.application_no} — {item.proponent_name || 'Unknown'}
-                </span>
-                <span className="shrink-0 text-secondary">
-                  {item.kind === 'permit' || item.kind === 'contract'
-                    ? item.is_expired
-                      ? `${item.status} · expired ${item.days_waiting}d ago`
-                      : `${item.status} · expires in ${item.days_waiting}d`
-                    : `${item.status} · waiting ${item.days_waiting}d`}
-                </span>
-              </div>
-              );
-            })}
-          </div>
-          )}
-        </div>
-      )}
-
-      {canShowWidget('dashboard:table') && (
-      <div className="rounded-2xl p-0 sm:p-5 sm:border sm:border-transparent sm:shadow-[0_1px_2px_0_rgb(0_0_0_/_0.05)] sm:bg-[var(--surface)]">
-        <h4 className="text-sm font-bold mb-3" style={{ color: 'var(--text)' }}>
-          Assigned to Me
-        </h4>
-
-        {applications.length === 0 ? (
+      {nothingVisible ? (
+        <div className="glass-card p-4 sm:p-6 !border-transparent" style={{ backgroundColor: 'var(--surface)' }}>
           <EmptyState
-            title="No applications assigned"
-            description="You don't have any applications routed to you right now."
+            icon={<LayoutDashboard size={32} className="opacity-40" />}
+            title="No dashboard widgets"
+            description="None are turned on for your role. An administrator can enable them in Control Panel."
           />
-        ) : (
-          <>
-            {/* Mobile: card list — a <table> forces horizontal scrolling on narrow screens. */}
-            <div className="sm:hidden space-y-2.5">
-              {pagedApplications.map((app) => {
-                const badge = getStatusBadgeStyles(app.status);
-                const total = Number(app.requirements_total || 0);
-                const verified = Number(app.requirements_verified || 0);
-                const pct = total > 0 ? Math.round((verified / total) * 100) : 0;
-                return (
-                  <div
-                    key={app.id}
-                    role={navigate ? 'button' : undefined}
-                    tabIndex={navigate ? 0 : undefined}
-                    onClick={
-                      navigate
-                        ? () => navigate(`/applications/${Number(app.is_renewal) ? 'renewals' : 'new'}?applicationId=${app.id}`)
-                        : undefined
-                    }
-                    className={cn('rounded-xl border p-3', navigate && 'cursor-pointer active:brightness-95')}
-                    style={{
-                      borderColor: 'var(--border-subtle)',
-                      backgroundColor: 'var(--surface)',
-                      boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
-                    }}
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-[12px] font-semibold truncate" style={{ color: 'var(--text)' }}>
-                        {app.application_no}
-                      </span>
-                      <span
-                        className="shrink-0 inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold border"
-                        style={{ backgroundColor: badge.bg, color: badge.color, borderColor: badge.border }}
-                      >
-                        {app.status}
-                      </span>
-                    </div>
-                    <p className="mt-1 text-[11px] font-medium truncate" style={{ color: 'var(--text)' }}>
-                      {app.proponent_name || '—'}
-                    </p>
-                    <div className="mt-1 flex items-center justify-between gap-2 text-[11px] text-secondary">
-                      <span>{Number(app.is_renewal) ? 'Renewal' : 'New'}</span>
-                      <span>{formatDate(app.submitted_at || app.created_at)}</span>
-                    </div>
-                    <div className="mt-2 flex items-center gap-2">
-                      <div
-                        className="h-1.5 flex-1 rounded-full overflow-hidden"
-                        style={{ backgroundColor: 'var(--control-bg)' }}
-                      >
-                        <div
-                          className="h-full rounded-full"
-                          style={{ width: `${pct}%`, backgroundColor: 'var(--text)' }}
-                        />
-                      </div>
-                      <span className="shrink-0 text-[10px] text-secondary">{verified}/{total} reqs</span>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+        </div>
+      ) : null}
 
-            {/* Tablet/desktop: table. */}
-            <div className="hidden sm:block overflow-x-auto">
-            <table className="min-w-full text-left text-xs">
-              <thead>
-                <tr>
-                  {['Application No.', 'Locator', 'Type', 'Status', 'Requirements', 'Submitted'].map((col) => (
-                    <th
-                      key={col}
-                      className="px-3 py-2 font-semibold text-[10px] uppercase tracking-widest text-secondary border-b"
-                      style={{ borderColor: 'var(--border-subtle)' }}
-                    >
-                      {col}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
+      {/* A stat row with every card off doesn't render at all. */}
+      {statCards.length > 0 ? (
+        <div className="balanced-row" style={balancedRowStyle(statCards.length, { base: 2, sm: 4, xl: 7 })}>
+          {statCards.map((c) => (
+            <StatCard key={c.key} label={c.label} value={c.value} icon={c.icon} />
+          ))}
+        </div>
+      ) : null}
+
+      {workCards.length > 0 ? (
+        <div className="balanced-row" style={balancedRowStyle(workCards.length, { base: 1, lg: 2 })}>
+          {workCards}
+        </div>
+      ) : null}
+
+      {insightCards.length > 0 ? (
+        <div className="balanced-row" style={balancedRowStyle(insightCards.length, { base: 1, sm: 2, xl: 3 })}>
+          {insightCards}
+        </div>
+      ) : null}
+
+      {showTable && (
+        <div className="rounded-2xl p-0 sm:p-5 sm:border sm:border-transparent sm:shadow-[0_1px_2px_0_rgb(0_0_0_/_0.05)] sm:bg-[var(--surface)]">
+          <h4 className="text-sm font-bold mb-3" style={{ color: 'var(--text)' }}>
+            {copy.table}
+          </h4>
+
+          {applications.length === 0 ? (
+            <EmptyState title="No applications" description={copy.tableEmpty} />
+          ) : (
+            <>
+              {/* Mobile: card list — a <table> forces horizontal scrolling on narrow screens. */}
+              <div className="sm:hidden space-y-2.5">
                 {pagedApplications.map((app) => {
                   const badge = getStatusBadgeStyles(app.status);
                   const total = Number(app.requirements_total || 0);
                   const verified = Number(app.requirements_verified || 0);
                   const pct = total > 0 ? Math.round((verified / total) * 100) : 0;
+                  const onOpen = openRow(app);
                   return (
-                    <tr
+                    <div
                       key={app.id}
-                      onClick={
-                        navigate
-                          ? () => navigate(`/applications/${Number(app.is_renewal) ? 'renewals' : 'new'}?applicationId=${app.id}`)
+                      role={onOpen ? 'button' : undefined}
+                      tabIndex={onOpen ? 0 : undefined}
+                      onClick={onOpen}
+                      onKeyDown={
+                        onOpen
+                          ? (e) => {
+                              if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault();
+                                onOpen();
+                              }
+                            }
                           : undefined
                       }
-                      className={cn(
-                        'border-b last:border-b-0 transition-colors',
-                        navigate && 'cursor-pointer hover:bg-[var(--surface-hover)]'
-                      )}
-                      style={{ borderColor: 'var(--border-subtle)' }}
+                      className={cn('rounded-xl border p-3', onOpen && 'cursor-pointer active:brightness-95')}
+                      style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'var(--surface)', boxShadow: '0 2px 8px rgba(0,0,0,0.08)' }}
                     >
-                      <td className="px-3 py-2 text-[11px] font-semibold" style={{ color: 'var(--text)' }}>
-                        {app.application_no}
-                      </td>
-                      <td className="px-3 py-2 text-[11px] text-secondary">{app.proponent_name || '—'}</td>
-                      <td className="px-3 py-2 text-[11px] text-secondary">
-                        {Number(app.is_renewal) ? 'Renewal' : 'New'}
-                      </td>
-                      <td className="px-3 py-2 text-[11px]">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[12px] font-semibold truncate" style={{ color: 'var(--text)' }}>
+                          {app.application_no}
+                        </span>
                         <span
-                          className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold border"
+                          className="shrink-0 inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold border"
                           style={{ backgroundColor: badge.bg, color: badge.color, borderColor: badge.border }}
                         >
                           {app.status}
                         </span>
-                      </td>
-                      <td className="px-3 py-2 text-[11px] text-secondary w-40">
-                        <div className="flex items-center gap-2">
-                          <div
-                            className="h-1.5 flex-1 rounded-full overflow-hidden"
-                            style={{ backgroundColor: 'var(--control-bg)' }}
-                          >
-                            <div
-                              className="h-full rounded-full"
-                              style={{ width: `${pct}%`, backgroundColor: 'var(--text)' }}
-                            />
-                          </div>
-                          <span className="shrink-0 text-[10px]">{verified}/{total}</span>
+                      </div>
+                      <p className="mt-1 text-[11px] font-medium truncate" style={{ color: 'var(--text)' }}>
+                        {app.proponent_name || '—'}
+                      </p>
+                      <div className="mt-1 flex items-center justify-between gap-2 text-[11px] text-secondary">
+                        <span>{Number(app.is_renewal) ? 'Renewal' : 'New'}</span>
+                        <span>{formatDate(app.submitted_at || app.created_at)}</span>
+                      </div>
+                      <div className="mt-2 flex items-center gap-2">
+                        <div className="h-1.5 flex-1 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--control-bg)' }}>
+                          <div className="h-full rounded-full" style={{ width: `${pct}%`, backgroundColor: 'var(--text)' }} />
                         </div>
-                      </td>
-                      <td className="px-3 py-2 text-[11px] text-secondary">{formatDate(app.submitted_at || app.created_at)}</td>
-                    </tr>
+                        <span className="shrink-0 text-[10px] text-secondary">
+                          {verified}/{total} reqs
+                        </span>
+                      </div>
+                    </div>
                   );
                 })}
-              </tbody>
-            </table>
-            </div>
+              </div>
 
-            <DataTableControls
-              page={tableSafePage}
-              totalPages={tableTotalPages}
-              totalItems={applications.length}
-              showingFrom={tableShowingFrom}
-              showingTo={tableShowingTo}
-              visiblePageNumbers={tableVisiblePageNumbers}
-              pageSize={tablePageSize}
-              pageSizeOptions={[10, 20, 50, 100]}
-              onPageSizeChange={(value) => setTablePageSize(value)}
-              onPageChange={(p) => setTablePage(p)}
-            />
-          </>
-        )}
-      </div>
+              {/* Tablet/desktop: table. */}
+              <div className="hidden sm:block overflow-x-auto">
+                <table className="min-w-full text-left text-xs">
+                  <thead>
+                    <tr>
+                      {['Application No.', 'Locator', 'Type', 'Status', 'Requirements', 'Submitted'].map((col) => (
+                        <th
+                          key={col}
+                          className="px-3 py-2 font-semibold text-[10px] uppercase tracking-widest text-secondary border-b whitespace-nowrap"
+                          style={{ borderColor: 'var(--border-subtle)' }}
+                        >
+                          {col}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {pagedApplications.map((app) => {
+                      const badge = getStatusBadgeStyles(app.status);
+                      const total = Number(app.requirements_total || 0);
+                      const verified = Number(app.requirements_verified || 0);
+                      const pct = total > 0 ? Math.round((verified / total) * 100) : 0;
+                      const onOpen = openRow(app);
+                      return (
+                        <tr
+                          key={app.id}
+                          onClick={onOpen}
+                          className={cn('border-b last:border-b-0 transition-colors', onOpen && 'cursor-pointer hover:bg-[var(--surface-hover)]')}
+                          style={{ borderColor: 'var(--border-subtle)' }}
+                        >
+                          <td className="px-3 py-2 text-[11px] font-semibold whitespace-nowrap" style={{ color: 'var(--text)' }}>
+                            {app.application_no}
+                          </td>
+                          <td className="px-3 py-2 text-[11px] text-secondary">{app.proponent_name || '—'}</td>
+                          <td className="px-3 py-2 text-[11px] text-secondary">{Number(app.is_renewal) ? 'Renewal' : 'New'}</td>
+                          <td className="px-3 py-2 text-[11px]">
+                            <span
+                              className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold border whitespace-nowrap"
+                              style={{ backgroundColor: badge.bg, color: badge.color, borderColor: badge.border }}
+                            >
+                              {app.status}
+                            </span>
+                          </td>
+                          <td className="px-3 py-2 text-[11px] text-secondary w-40">
+                            <div className="flex items-center gap-2">
+                              <div className="h-1.5 flex-1 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--control-bg)' }}>
+                                <div className="h-full rounded-full" style={{ width: `${pct}%`, backgroundColor: 'var(--text)' }} />
+                              </div>
+                              <span className="shrink-0 text-[10px]">
+                                {verified}/{total}
+                              </span>
+                            </div>
+                          </td>
+                          <td className="px-3 py-2 text-[11px] text-secondary whitespace-nowrap">{formatDate(app.submitted_at || app.created_at)}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              <DataTableControls
+                page={tableSafePage}
+                totalPages={tableTotalPages}
+                totalItems={applications.length}
+                showingFrom={tableShowingFrom}
+                showingTo={tableShowingTo}
+                visiblePageNumbers={tableVisiblePageNumbers}
+                pageSize={tablePageSize}
+                pageSizeOptions={[10, 20, 50, 100]}
+                onPageSizeChange={(value) => setTablePageSize(value)}
+                onPageChange={(p) => setTablePage(p)}
+              />
+            </>
+          )}
+        </div>
       )}
     </div>
   );

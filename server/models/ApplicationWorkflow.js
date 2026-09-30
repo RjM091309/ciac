@@ -80,8 +80,11 @@ async function getApprovalQueueStaffEmails() {
     FROM dbo.users u
     INNER JOIN dbo.user_roles ur ON ur.user_id = u.id
     INNER JOIN dbo.roles r ON r.id = ur.role_id
+    -- The Locator role never holds a staff menu (ControlPanelPermission.js),
+    -- even if a stale row says otherwise.
     LEFT JOIN dbo.role_sidebar_menu_permissions p
       ON p.role_id = r.id AND p.menu_key = 'approval:queue' AND p.is_enabled = 1
+      AND LOWER(LTRIM(RTRIM(r.name))) <> 'proponent'
     WHERE u.is_active = 1
       AND u.email IS NOT NULL AND u.email <> ''
       AND (LOWER(LTRIM(RTRIM(r.name))) = 'admin' OR p.role_id IS NOT NULL)
@@ -605,9 +608,19 @@ async function listAllApplicationsWithProgress() {
   return rows;
 }
 
-/** System-wide requirement completion grouped by requirement category, for the
- * admin dashboard's "Requirements Overview" widget. */
-async function getRequirementCompletionByCategory() {
+/** `applicationIds` (optional) as a SQL IN-list body. Only integers ever make
+ * it into the string, so it's safe to inline — a parameter per id would hit
+ * MSSQL's 2,100-parameter cap on a large scoped dashboard. */
+function applicationIdFilter(column, applicationIds) {
+  if (applicationIds == null) return "";
+  const ids = [...new Set([...applicationIds].map(Number).filter((n) => Number.isInteger(n) && n > 0))];
+  return ids.length ? `AND ${column} IN (${ids.join(",")})` : "AND 1 = 0";
+}
+
+/** Requirement completion grouped by requirement category, for the
+ * dashboards' "Requirements Overview" widget. System-wide unless
+ * `applicationIds` scopes it to one role's applications. */
+async function getRequirementCompletionByCategory(applicationIds = null) {
   await ensureSchema();
   const rows = await selectData(`
     SELECT
@@ -617,6 +630,7 @@ async function getRequirementCompletionByCategory() {
     FROM dbo.application_requirements ar
     INNER JOIN dbo.requirements r ON r.id = ar.requirement_id
     LEFT JOIN dbo.requirement_categories rc ON rc.id = r.category_id
+    WHERE 1 = 1 ${applicationIdFilter("ar.application_id", applicationIds)}
     GROUP BY ISNULL(rc.name, 'Uncategorized')
     ORDER BY total DESC
   `);
@@ -1699,11 +1713,16 @@ async function createDocument({
   return document;
 }
 
+// Statuses that end an application — a DISAPPROVED application is decided,
+// not still open.
+const FINAL_STATUSES_SQL = "'APPROVED', 'REJECTED', 'DISAPPROVED'";
+
 /** End-to-end turnaround: SUBMITTED (or RESUBMITTED, whichever came last
- * before the terminal decision) -> APPROVED/REJECTED, in days. Also reports
- * how many open applications are still in flight and how long the oldest
- * one has been waiting, for the dashboard's processing-performance widget. */
-async function getApplicationTurnaroundStats() {
+ * before the terminal decision) -> APPROVED/REJECTED/DISAPPROVED, in days.
+ * Also reports how many open applications are still in flight and how long
+ * the oldest one has been waiting, for the dashboard's processing-performance
+ * widget. `applicationIds` (optional) scopes it to one role's applications. */
+async function getApplicationTurnaroundStats(applicationIds = null) {
   await ensureSchema();
   const completedRows = await selectData(`
     SELECT
@@ -1714,8 +1733,8 @@ async function getApplicationTurnaroundStats() {
       ROW_NUMBER() OVER (PARTITION BY h.application_id ORDER BY h.id DESC) AS rn_desc
     FROM dbo.application_status_history h
     WHERE h.application_id IN (
-      SELECT application_id FROM dbo.application_status_history WHERE to_status IN ('APPROVED', 'REJECTED')
-    )
+      SELECT application_id FROM dbo.application_status_history WHERE to_status IN (${FINAL_STATUSES_SQL})
+    ) ${applicationIdFilter("h.application_id", applicationIds)}
   `);
 
   const byApp = new Map();
@@ -1739,7 +1758,7 @@ async function getApplicationTurnaroundStats() {
   const openRows = await selectData(`
     SELECT id, created_at
     FROM dbo.applications
-    WHERE status NOT IN ('DRAFT', 'APPROVED', 'REJECTED')
+    WHERE status NOT IN ('DRAFT', ${FINAL_STATUSES_SQL}) ${applicationIdFilter("id", applicationIds)}
   `);
   const now = Date.now();
   const openAges = openRows

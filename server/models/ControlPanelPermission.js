@@ -1,5 +1,7 @@
 const { selectData, updateSchema, runInTransaction } = require("../config/database");
 const cache = require("../config/cache");
+const Role = require("./Role");
+const { sanitizeWidgetRows } = require("../lib/dashboardWidgets");
 
 // Every guarded request reads its role's permissions (m_auth.js), so each
 // role's three permission lists are cached and dropped whenever Control Panel
@@ -8,6 +10,18 @@ const cacheKey = (kind, roleId) => `cpp:${kind}:${Number(roleId)}`;
 async function cachedRows(kind, roleId, load) {
   const rows = await cache.remember(cacheKey(kind, roleId), load);
   return rows.map((row) => ({ ...row }));
+}
+
+// The Locator (proponent) role is external users. It only ever gets its own
+// portal menu (ProponentSidebar) — never a staff menu or Add/Edit/Delete
+// right, even if a row for one exists or is sent in a save. Enforced here, at
+// read and write time, so every permission check (m_auth.js guards, search,
+// dashboard scoping) is covered, not just the Control Panel UI.
+const LOCATOR_MENU_KEYS = new Set(["dashboard", "me:applications", "me:contracts-permits", "me:profile", "me:activity"]);
+
+async function isLocatorRole(roleId) {
+  const locatorRoleId = await Role.getActiveRoleIdByName("proponent");
+  return Boolean(locatorRoleId) && Number(locatorRoleId) === Number(roleId);
 }
 
 // Once per process: the DDL below is idempotent but not free, and
@@ -76,7 +90,7 @@ async function createSchema() {
 
 async function getSidebarPermissions(roleId) {
   await ensureSchema();
-  return cachedRows("sidebar", roleId, () =>
+  const rows = await cachedRows("sidebar", roleId, () =>
     selectData(
       `
         SELECT role_id, menu_key, is_enabled
@@ -87,10 +101,14 @@ async function getSidebarPermissions(roleId) {
       [roleId]
     )
   );
+  return (await isLocatorRole(roleId)) ? rows.filter((r) => LOCATOR_MENU_KEYS.has(String(r.menu_key))) : rows;
 }
 
 async function setSidebarPermissions(roleId, permissions) {
   await ensureSchema();
+  if (await isLocatorRole(roleId)) {
+    permissions = permissions.filter((row) => LOCATOR_MENU_KEYS.has(String(row?.menu_key)));
+  }
   // Delete + re-insert must be atomic: if any row fails to insert mid-loop,
   // a non-transactional version would leave the role with zero (or partial)
   // sidebar permissions until an admin retries the save.
@@ -115,6 +133,7 @@ async function setSidebarPermissions(roleId, permissions) {
 
 async function getMenuCrudPermissions(roleId) {
   await ensureSchema();
+  if (await isLocatorRole(roleId)) return [];
   return cachedRows("crud", roleId, () =>
     selectData(
       `
@@ -130,6 +149,7 @@ async function getMenuCrudPermissions(roleId) {
 
 async function setMenuCrudPermissions(roleId, permissions) {
   await ensureSchema();
+  if (await isLocatorRole(roleId)) permissions = [];
   await runInTransaction(async (tx) => {
     await tx.query(
       `DELETE FROM role_menu_crud_permissions WHERE role_id = @param0`,
@@ -174,7 +194,12 @@ async function listRoleIdsWithMenu(menuKey) {
     `SELECT role_id FROM role_sidebar_menu_permissions WHERE menu_key = @param0 AND is_enabled = 1`,
     [menuKey]
   );
-  return new Set(rows.map((r) => Number(r.role_id)));
+  const ids = new Set(rows.map((r) => Number(r.role_id)));
+  if (!LOCATOR_MENU_KEYS.has(menuKey)) {
+    const locatorRoleId = await Role.getActiveRoleIdByName("proponent");
+    if (locatorRoleId) ids.delete(Number(locatorRoleId));
+  }
+  return ids;
 }
 
 async function getDashboardWidgetPermissions(roleId) {
@@ -194,6 +219,7 @@ async function getDashboardWidgetPermissions(roleId) {
 
 async function setDashboardWidgetPermissions(roleId, permissions) {
   await ensureSchema();
+  permissions = sanitizeWidgetRows(permissions);
   await runInTransaction(async (tx) => {
     await tx.query(`DELETE FROM role_dashboard_widget_permissions WHERE role_id = @param0`, [roleId]);
     for (const row of permissions) {
