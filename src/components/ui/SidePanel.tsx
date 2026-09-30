@@ -12,6 +12,8 @@ type SidePanelProps = {
   /** Small print shown in the footer, to the left of Cancel/Save (e.g. a
    * "derived automatically" disclaimer) instead of taking up body space. */
   footerNote?: React.ReactNode;
+  /** Extra header content shown just left of the Close button (e.g. a status badge). */
+  headerExtra?: React.ReactNode;
   onClose: () => void;
   onSave: () => void | Promise<void>;
   children: React.ReactNode;
@@ -26,6 +28,7 @@ export function SidePanel({
   saveLabel = 'Save',
   widthClassName = 'max-w-[44rem]',
   footerNote,
+  headerExtra,
   onClose,
   onSave,
   children,
@@ -63,6 +66,8 @@ export function SidePanel({
                   </div>
                   {subtitle ? <div className="text-xs text-secondary mt-0.5">{subtitle}</div> : null}
                 </div>
+                <div className="flex items-center gap-2 shrink-0">
+                {headerExtra}
                 <button
                   className={`rounded-lg px-2 py-1 text-xs border ${
                     saving ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
@@ -73,6 +78,7 @@ export function SidePanel({
                 >
                   Close
                 </button>
+                </div>
               </div>
 
               {/* Thin scrollbar tucked into the panel's right padding (-mr-3), with

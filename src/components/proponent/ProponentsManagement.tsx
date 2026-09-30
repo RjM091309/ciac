@@ -273,6 +273,19 @@ function fmtDate(value?: string | null) {
   return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
 }
 
+type LeaseStatus = 'active' | 'expired';
+
+/** Lease status from the contract's End Term: Active through that day
+ * (inclusive), Expired after. null = no contract/End Term yet. Shared by the
+ * list's status filter and the panel header badge. */
+function leaseStatus(endTerm?: string | null): LeaseStatus | null {
+  if (!endTerm) return null;
+  const end = new Date(endTerm);
+  if (Number.isNaN(end.getTime())) return null;
+  end.setHours(23, 59, 59, 999);
+  return end.getTime() >= Date.now() ? 'active' : 'expired';
+}
+
 // Live thousand-separator formatting for currency-amount inputs (Capital
 // Stock, Advance Lease Payment/Security Deposit/Performance Security,
 // property schedule Rate/MGL) — strips everything but digits and a single
@@ -399,6 +412,7 @@ export function ProponentsManagement({
   const [confirmDeactivateId, setConfirmDeactivateId] = useState<number | null>(null);
   const [confirmReactivateId, setConfirmReactivateId] = useState<number | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [termFilter, setTermFilter] = useState<'all' | LeaseStatus>('all');
   const [pageSize, setPageSize] = useState(50);
   const [page, setPage] = useState(1);
   const [highlightedProponentId, setHighlightedProponentId] = useState<number | null>(null);
@@ -649,10 +663,22 @@ export function ProponentsManagement({
     form.user_id,
   ]);
 
+  const termCounts = useMemo(() => {
+    let active = 0;
+    let expired = 0;
+    for (const p of rows) {
+      const st = leaseStatus(p.end_term);
+      if (st === 'active') active += 1;
+      else if (st === 'expired') expired += 1;
+    }
+    return { all: rows.length, active, expired };
+  }, [rows]);
+
   const filteredRows = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
-    if (!q) return rows;
-    return rows.filter((p) => {
+    const byTerm = termFilter === 'all' ? rows : rows.filter((p) => leaseStatus(p.end_term) === termFilter);
+    if (!q) return byTerm;
+    return byTerm.filter((p) => {
       const statusStr = p.is_active === 1 ? 'active' : 'inactive';
       return (
         (p.ref_no || '').toLowerCase().includes(q) ||
@@ -665,7 +691,7 @@ export function ProponentsManagement({
         statusStr.includes(q)
       );
     });
-  }, [rows, searchQuery]);
+  }, [rows, searchQuery, termFilter]);
 
   const totalPages = useMemo(() => {
     return Math.max(1, Math.ceil(filteredRows.length / Math.max(1, pageSize)));
@@ -695,7 +721,7 @@ export function ProponentsManagement({
 
   useEffect(() => {
     setPage(1);
-  }, [searchQuery, pageSize]);
+  }, [searchQuery, pageSize, termFilter]);
 
   useEffect(() => {
     if (page > totalPages) setPage(totalPages);
@@ -1102,7 +1128,8 @@ export function ProponentsManagement({
         {/* Search + New Locator share one row on every size. Locators normally
             arrive via an approved application; "New Locator" is the manual
             registration path (flagged is_manual_registration server-side). */}
-        <div className="flex items-center justify-between gap-2 mb-3">
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+          <div className="flex flex-wrap items-center gap-2 flex-1 min-w-0">
           <div className="relative group flex-1 min-w-0 sm:flex-none sm:w-72">
             <Search
               className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)] group-focus-within:text-[var(--text)] transition-colors pointer-events-none"
@@ -1118,6 +1145,22 @@ export function ProponentsManagement({
                 backgroundColor: 'color-mix(in oklab, var(--control-bg) 70%, transparent)',
               }}
             />
+          </div>
+          {/* Lease status filter (End Term based) — same "All statuses"
+              dropdown the Approval & Compliance lists use beside their search. */}
+          <div className="w-40 shrink-0 sm:w-48">
+            <AppSelect
+              compact
+              isClearable
+              placeholder={`All statuses (${termCounts.all})`}
+              value={termFilter === 'all' ? '' : termFilter}
+              onChange={(value) => setTermFilter(value === 'active' || value === 'expired' ? value : 'all')}
+              options={[
+                { value: 'active', label: 'Active', detail: String(termCounts.active) },
+                { value: 'expired', label: 'Expired', detail: String(termCounts.expired) },
+              ]}
+            />
+          </div>
           </div>
           <button
             className="shrink-0 h-9 rounded-lg px-3 text-xs sm:text-sm font-semibold inline-flex items-center gap-1.5 shadow-sm cursor-pointer whitespace-nowrap"
@@ -1276,6 +1319,27 @@ export function ProponentsManagement({
         saving={saving}
         saveDisabled={!canSubmit}
         saveLabel={editing ? 'Update' : 'Save'}
+        headerExtra={(() => {
+          // Lease status from the contract terms: Active through End Term
+          // (inclusive), Expired after. No badge until a contract exists.
+          const status = leaseStatus(editing?.end_term);
+          if (!status) return null;
+          const active = status === 'active';
+          return (
+            <span
+              className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold border"
+              style={
+                active
+                  ? { color: '#059669', backgroundColor: 'rgba(16,185,129,.12)', borderColor: 'rgba(16,185,129,.35)' }
+                  : { color: '#dc2626', backgroundColor: 'rgba(239,68,68,.12)', borderColor: 'rgba(239,68,68,.35)' }
+              }
+              title={`End term: ${fmtDate(editing?.end_term)}`}
+            >
+              <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: active ? '#10b981' : '#ef4444' }} />
+              {active ? 'Active' : 'Expired'}
+            </span>
+          );
+        })()}
         footerNote={
           editing ? (
             <>
