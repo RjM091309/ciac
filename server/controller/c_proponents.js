@@ -8,6 +8,12 @@ const Contract = require("../models/Contract");
 const AccountOfficer = require("../models/AccountOfficer");
 const TypeOfContract = require("../models/TypeOfContract");
 const LandUse = require("../models/LandUse");
+const ApplicationType = require("../models/ApplicationType");
+const Workflow = require("../models/ApplicationWorkflow");
+const ProponentDocument = require("../models/ProponentDocument");
+const fs = require("fs");
+const path = require("path");
+const { resolveStoredPath, relativeStoragePath, contentDisposition } = require("../lib/fileStorage");
 const { publicErrorMessage } = require("../lib/httpError");
 
 /** "", null, undefined -> null; otherwise the id as a number (NaN passes through and is rejected below). */
@@ -101,6 +107,43 @@ exports.listLandUseOptions = async (req, res) => {
     return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };
+
+// Industry dropdown on the locator form — the Application Types catalog
+// (Industry is normally the latest filed application's type).
+exports.listIndustryOptions = async (req, res) => {
+  try {
+    const rows = await ApplicationType.listApplicationTypes();
+    return res.json({
+      success: true,
+      data: rows.map((r) => ({ id: r.id, code: r.code, name: r.name, is_active: r.is_active })),
+    });
+  } catch (error) {
+    console.error("List industry options error:", error);
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
+  }
+};
+
+// Validates contract_type_id / industry_code from a create/update body.
+// Returns { error } or { contractTypeId, industryCode } (undefined = not sent).
+async function readClassification(body) {
+  const rawType = body?.contract_type_id;
+  const rawIndustry = body?.industry_code;
+  const contractTypeId =
+    rawType === undefined ? undefined : rawType === null || rawType === "" ? null : Number(rawType);
+  if (contractTypeId !== undefined && contractTypeId !== null) {
+    const known = (await TypeOfContract.listTypeOfContracts()).find((t) => t.id === contractTypeId);
+    if (!known) return { error: "Unknown type of contract" };
+  }
+  const industryCode =
+    rawIndustry === undefined ? undefined : String(rawIndustry || "").trim() || null;
+  if (industryCode) {
+    const known = (await ApplicationType.listApplicationTypes()).find(
+      (t) => String(t.code).toUpperCase() === industryCode.toUpperCase()
+    );
+    if (!known) return { error: "Unknown industry" };
+  }
+  return { contractTypeId, industryCode };
+}
 
 // Proponent self-service: returns the caller's own linked profile plus any
 // pending change request and recent request history.
@@ -417,6 +460,150 @@ exports.getById = async (req, res) => {
   }
 };
 
+// Documents tab on the Locator Information panel: application requirement
+// documents (with the Assessment Officer's status) plus files uploaded
+// directly onto the locator (manual registrations have no application).
+exports.getDocuments = async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ success: false, message: "Invalid id" });
+    const [requirements, uploads] = await Promise.all([
+      Workflow.listRequirementDocumentsByProponent(id),
+      ProponentDocument.listByProponent(id),
+    ]);
+    return res.json({ success: true, data: { requirements, uploads } });
+  } catch (error) {
+    console.error("Get proponent documents error:", error);
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
+  }
+};
+
+exports.listDocumentRequirementOptions = async (req, res) => {
+  try {
+    const rows = await ProponentDocument.listRequirementOptions();
+    return res.json({ success: true, data: rows });
+  } catch (error) {
+    console.error("List document requirement options error:", error);
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
+  }
+};
+
+exports.uploadDocument = async (req, res) => {
+  const discardFile = () => {
+    if (req.file?.path) fs.unlink(req.file.path, () => {});
+  };
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) {
+      discardFile();
+      return res.status(400).json({ success: false, message: "Invalid id" });
+    }
+    if (!req.file) return res.status(400).json({ success: false, message: "A file is required" });
+    const proponent = await Proponent.getProponentById(id);
+    if (!proponent) {
+      discardFile();
+      return res.status(404).json({ success: false, message: "Proponent not found" });
+    }
+    const requirementId = Number(req.body?.requirement_id) || null;
+    const documentName = String(req.body?.document_name || "").trim() || null;
+    if (!requirementId && !documentName) {
+      discardFile();
+      return res.status(400).json({ success: false, message: "Select a document type or enter a document name." });
+    }
+
+    const row = await ProponentDocument.create({
+      proponent_id: id,
+      requirement_id: requirementId,
+      document_name: documentName,
+      file_name: req.file.filename,
+      original_file_name: req.file.originalname,
+      storage_path: relativeStoragePath(req.file.path),
+      content_type: req.file.mimetype,
+      file_size_bytes: req.file.size,
+      created_by: req.user?.id ?? null,
+    });
+    await AuditLog.record({
+      actorId: req.user?.id,
+      actorUsername: req.user?.username,
+      action: "PROPONENT_DOCUMENT_UPLOADED",
+      entityType: "proponent",
+      entityId: id,
+      details: { document_id: row?.id, document_name: row?.document_name, file_name: req.file.originalname },
+      req,
+    });
+    return res.status(201).json({ success: true, data: row });
+  } catch (error) {
+    discardFile();
+    console.error("Upload proponent document error:", error);
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
+  }
+};
+
+async function loadProponentDocument(req, res) {
+  const id = Number(req.params.id);
+  const docId = Number(req.params.docId);
+  if (!Number.isFinite(id) || !Number.isFinite(docId)) {
+    res.status(400).json({ success: false, message: "Invalid id" });
+    return null;
+  }
+  const doc = await ProponentDocument.getById(docId);
+  if (!doc || Number(doc.proponent_id) !== id) {
+    res.status(404).json({ success: false, message: "Document not found" });
+    return null;
+  }
+  return doc;
+}
+
+exports.downloadDocument = async (req, res) => {
+  try {
+    const doc = await loadProponentDocument(req, res);
+    if (!doc) return;
+    const abs = resolveStoredPath(doc.storage_path);
+    if (!abs || !fs.existsSync(abs)) {
+      return res.status(404).json({ success: false, message: "File is no longer available." });
+    }
+    const downloadName = doc.original_file_name || doc.file_name || path.basename(abs);
+    AuditLog.recordFileAccess(req, {
+      kind: "DOCUMENT",
+      entityType: "proponent",
+      entityId: doc.proponent_id,
+      details: { proponent_document_id: doc.id, file_name: downloadName },
+    });
+    if (doc.content_type) res.type(doc.content_type);
+    if (req.query.view === "1") {
+      res.setHeader("Content-Disposition", contentDisposition("inline", downloadName));
+      return res.sendFile(abs);
+    }
+    return res.download(abs, downloadName);
+  } catch (error) {
+    console.error("Download proponent document error:", error);
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
+  }
+};
+
+exports.deleteDocument = async (req, res) => {
+  try {
+    const doc = await loadProponentDocument(req, res);
+    if (!doc) return;
+    await ProponentDocument.remove(doc.id);
+    const abs = resolveStoredPath(doc.storage_path);
+    if (abs) fs.unlink(abs, () => {});
+    await AuditLog.record({
+      actorId: req.user?.id,
+      actorUsername: req.user?.username,
+      action: "PROPONENT_DOCUMENT_DELETED",
+      entityType: "proponent",
+      entityId: doc.proponent_id,
+      details: { document_id: doc.id, document_name: doc.document_name, file_name: doc.original_file_name },
+      req,
+    });
+    return res.json({ success: true });
+  } catch (error) {
+    console.error("Delete proponent document error:", error);
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
+  }
+};
+
 exports.create = async (req, res) => {
   try {
     const {
@@ -472,6 +659,9 @@ exports.create = async (req, res) => {
     const lookupError = await unknownLookup(landUseId, () => LandUse.listLandUses(), "land use");
     if (lookupError) return res.status(400).json({ success: false, message: lookupError });
 
+    const classification = await readClassification(req.body);
+    if (classification.error) return res.status(400).json({ success: false, message: classification.error });
+
     const row = await Proponent.createProponent({
       user_id,
       business_name,
@@ -519,7 +709,18 @@ exports.create = async (req, res) => {
       signatories,
       created_by: req.user?.id ?? null,
       is_active,
+      // POST / is only called from the Registered Locator page's New Locator
+      // modal — every locator created here is a manual registration.
+      is_manual_registration: true,
     });
+    // A new locator has no contract/application yet, so Type of Contract and
+    // Industry go straight to the manual fallback columns.
+    if (row?.id) {
+      await Proponent.setManualClassification(row.id, {
+        contract_type_id: classification.contractTypeId,
+        industry_code: classification.industryCode,
+      });
+    }
     await AuditLog.record({
       actorId: req.user?.id,
       actorUsername: req.user?.username,
@@ -733,8 +934,16 @@ exports.update = async (req, res) => {
     // Type of Contract lives on the proponent's current contract, not the
     // proponent record — a no-op if there's no contract yet (same as
     // Start/End/Lease Term, it only ever describes one that already exists).
+    // No contract yet (e.g. a manual registration) -> the proponent's own
+    // fallback column instead of a silent no-op.
     if (contract_type_id !== undefined) {
-      await Contract.setContractTypeForProponent(id, typeId, req.user?.id ?? null);
+      const onContract = await Contract.setContractTypeForProponent(id, typeId, req.user?.id ?? null);
+      if (!onContract) await Proponent.setManualClassification(id, { contract_type_id: typeId });
+    }
+    if (req.body?.industry_code !== undefined) {
+      const classification = await readClassification({ industry_code: req.body.industry_code });
+      if (classification.error) return res.status(400).json({ success: false, message: classification.error });
+      await Proponent.setManualClassification(id, { industry_code: classification.industryCode });
     }
     const refreshed = await Proponent.getProponentById(id);
 

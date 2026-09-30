@@ -1576,6 +1576,55 @@ async function addCustomRequirementToApplication({ applicationId, name, descript
   return getApplicationRequirementById(newRowId);
 }
 
+/** Every requirement across all of one locator's (non-draft) applications,
+ * with its Assessment status and latest uploaded document — the read-only
+ * "Documents" tab on the Locator Information panel. Status/remarks are the
+ * same application_requirements columns the Assessment Officer sets. */
+async function listRequirementDocumentsByProponent(proponentId) {
+  await ensureSchema();
+  const rows = await selectData(
+    `
+    SELECT
+      ar.id,
+      ar.application_id,
+      ar.requirement_id,
+      ar.status,
+      ar.remarks,
+      ar.updated_at,
+      r.code AS requirement_code,
+      r.name AS requirement_name,
+      r.is_mandatory,
+      a.application_no,
+      a.application_type,
+      a.is_renewal,
+      a.status AS application_status,
+      a.created_at AS application_created_at,
+      u.full_name AS reviewed_by_name,
+      d.id AS document_id,
+      d.original_file_name,
+      d.file_name,
+      d.created_at AS uploaded_at,
+      d.version AS document_version
+    FROM dbo.application_requirements ar
+    INNER JOIN dbo.applications a ON a.id = ar.application_id
+    INNER JOIN dbo.requirements r ON r.id = ar.requirement_id
+    LEFT JOIN dbo.users u ON u.id = ar.updated_by
+    OUTER APPLY (
+      SELECT TOP (1) x.id, x.original_file_name, x.file_name, x.created_at,
+        (SELECT COUNT(1) FROM dbo.documents c
+         WHERE c.application_id = ar.application_id AND c.requirement_id = ar.requirement_id) AS version
+      FROM dbo.documents x
+      WHERE x.application_id = ar.application_id AND x.requirement_id = ar.requirement_id
+      ORDER BY x.id DESC
+    ) d
+    WHERE a.proponent_id = @param0 AND a.status <> 'DRAFT'
+    ORDER BY a.id DESC, ar.id ASC
+    `,
+    [proponentId]
+  );
+  return rows;
+}
+
 async function listDocumentsByApplication(applicationId) {
   await ensureSchema();
   const rows = await selectData(
@@ -1824,6 +1873,7 @@ module.exports = {
   acknowledgeRequirement,
   addCustomRequirementToApplication,
   listDocumentsByApplication,
+  listRequirementDocumentsByProponent,
   getDocumentById,
   createDocument,
   listApplicationStatusHistory,

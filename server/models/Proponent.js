@@ -242,6 +242,24 @@ async function createSchema() {
       CREATE INDEX IX_proponent_properties_proponent_id ON dbo.proponent_properties(proponent_id);
     END
   `);
+  // Walk-in/legacy locators registered by hand from the Registered Locator
+  // page ("New Locator"). They have no approved application behind them, so
+  // this flag is what keeps them in listProponents({ approvedOnly }).
+  await updateSchema(`
+    IF COL_LENGTH('dbo.proponents', 'is_manual_registration') IS NULL
+      ALTER TABLE dbo.proponents ADD is_manual_registration BIT NOT NULL
+        CONSTRAINT DF_proponents_is_manual_registration DEFAULT (0);
+  `);
+  // Manual fallbacks for Type of Contract / Industry. Normally both are
+  // derived (current contract's type, latest application's type); a manually
+  // registered locator has neither, so the value set on the form lands here.
+  // The derived value always wins once a contract/application exists.
+  await updateSchema(`
+    IF COL_LENGTH('dbo.proponents', 'contract_type_id') IS NULL
+      ALTER TABLE dbo.proponents ADD contract_type_id INT NULL;
+    IF COL_LENGTH('dbo.proponents', 'industry_code') IS NULL
+      ALTER TABLE dbo.proponents ADD industry_code NVARCHAR(50) NULL;
+  `);
   await ensureLookupLinks();
   await migrateLegacyPlaintextTin();
   await backfillMissingRefNos();
@@ -370,7 +388,7 @@ async function listProponents({ approvedOnly = false } = {}) {
       u.status AS account_status
     FROM dbo.proponents p
     LEFT JOIN dbo.users u ON u.id = p.user_id
-    ${approvedOnly ? "WHERE EXISTS (SELECT 1 FROM dbo.applications a WHERE a.proponent_id = p.id AND a.status = 'APPROVED')" : ""}
+    ${approvedOnly ? "WHERE p.is_manual_registration = 1 OR EXISTS (SELECT 1 FROM dbo.applications a WHERE a.proponent_id = p.id AND a.status = 'APPROVED')" : ""}
     ORDER BY p.id DESC
     `
   );
@@ -443,9 +461,13 @@ async function getProponentById(id) {
       p.is_active,
       ct.effective_start AS start_term,
       ct.effective_end AS end_term,
-      ct.contract_type_id,
+      COALESCE(ct.contract_type_id, p.contract_type_id) AS contract_type_id,
       toctype.name AS contract_type_name,
-      apptype.name AS business_type
+      COALESCE(apptype.name, manual_apptype.name) AS business_type,
+      p.industry_code,
+      COALESCE(latest_app.application_type, p.industry_code) AS effective_industry_code,
+      CASE WHEN latest_app.application_type IS NULL THEN 0 ELSE 1 END AS has_application,
+      CASE WHEN ct.effective_start IS NULL AND ct.effective_end IS NULL AND ct.contract_type_id IS NULL THEN 0 ELSE 1 END AS has_contract
     FROM dbo.proponents p
     LEFT JOIN dbo.users officer ON officer.id = p.account_officer_id
     LEFT JOIN dbo.land_use lu ON lu.id = p.land_use_id
@@ -456,7 +478,7 @@ async function getProponentById(id) {
       WHERE a.proponent_id = p.id
       ORDER BY c.effective_end DESC, c.id DESC
     ) ct
-    LEFT JOIN dbo.type_of_contract toctype ON toctype.id = ct.contract_type_id
+    LEFT JOIN dbo.type_of_contract toctype ON toctype.id = COALESCE(ct.contract_type_id, p.contract_type_id)
     OUTER APPLY (
       SELECT TOP (1) a2.application_type
       FROM dbo.applications a2
@@ -464,6 +486,7 @@ async function getProponentById(id) {
       ORDER BY a2.created_at DESC, a2.id DESC
     ) latest_app
     LEFT JOIN dbo.application_types apptype ON apptype.code = latest_app.application_type
+    LEFT JOIN dbo.application_types manual_apptype ON manual_apptype.code = p.industry_code
     WHERE p.id = @param0
     `,
     [id]
@@ -519,6 +542,10 @@ async function getProponentById(id) {
     contract_type_id: p.contract_type_id ?? null,
     contract_type_name: p.contract_type_name ?? null,
     business_type: p.business_type ?? null,
+    industry_code: p.industry_code ?? null,
+    effective_industry_code: p.effective_industry_code ?? null,
+    has_application: Boolean(p.has_application),
+    has_contract: Boolean(p.has_contract),
     properties,
     stockholders,
     contact_persons,
@@ -559,7 +586,7 @@ async function listProponentsForLocatorList() {
       p.is_active,
       p.created_at,
       creator.full_name AS encoded_by,
-      apptype.name AS business_type,
+      COALESCE(apptype.name, manual_apptype.name) AS business_type,
       ct.effective_start AS start_term,
       ct.effective_end AS end_term
     FROM dbo.proponents p
@@ -571,6 +598,7 @@ async function listProponentsForLocatorList() {
       ORDER BY a.created_at DESC, a.id DESC
     ) latest_app
     LEFT JOIN dbo.application_types apptype ON apptype.code = latest_app.application_type
+    LEFT JOIN dbo.application_types manual_apptype ON manual_apptype.code = p.industry_code
     OUTER APPLY (
       SELECT TOP (1) c.effective_start, c.effective_end
       FROM dbo.contracts c
@@ -646,6 +674,7 @@ async function createProponent({
   signatories,
   created_by,
   is_active = 1,
+  is_manual_registration = false,
 }) {
   await ensureSchema();
   await ensureChildTables();
@@ -670,7 +699,7 @@ async function createProponent({
          paid_up_capital,paid_up_capital_currency,
          business_activities,
          land_use_id,
-         ref_no,created_by,updated_by,created_at,updated_at,is_active)
+         ref_no,created_by,updated_by,created_at,updated_at,is_active,is_manual_registration)
       OUTPUT INSERTED.id
       VALUES
         (@param0,@param1,@param2,@param3,@param4,@param5,@param6,
@@ -680,7 +709,7 @@ async function createProponent({
          @param23,@param24,
          @param25,
          @param26,
-         @param27,@param28,NULL,GETDATE(),NULL,@param29)
+         @param27,@param28,NULL,GETDATE(),NULL,@param29,@param30)
       `,
       [
         userId, business_name, registration_no, encryptValue(tin), address, contact_no, location ?? null,
@@ -690,7 +719,7 @@ async function createProponent({
         paid_up_capital ?? null, paid_up_capital_currency ?? null,
         business_activities ?? null,
         toInt(land_use_id),
-        refNo, createdBy, active,
+        refNo, createdBy, active, is_manual_registration ? 1 : 0,
       ]
     );
     const insertedId = result?.recordset?.[0]?.id;
@@ -729,6 +758,22 @@ async function createProponent({
   });
 
   return await getProponentById(newId);
+}
+
+/** Sets the manual Type of Contract / Industry fallbacks (see ensureSchema).
+ * undefined = leave alone, null/'' = clear. */
+async function setManualClassification(id, { contract_type_id, industry_code } = {}) {
+  await ensureSchema();
+  if (contract_type_id !== undefined) {
+    await updateData(`UPDATE dbo.proponents SET contract_type_id = @param1 WHERE id = @param0`, [
+      toInt(id),
+      toInt(contract_type_id),
+    ]);
+  }
+  if (industry_code !== undefined) {
+    const code = industry_code ? String(industry_code).trim().slice(0, 50) : null;
+    await updateData(`UPDATE dbo.proponents SET industry_code = @param1 WHERE id = @param0`, [toInt(id), code || null]);
+  }
 }
 
 async function updateProponent(
@@ -1022,6 +1067,7 @@ module.exports = {
   saveInvestment,
   listProponents,
   listProponentsForLocatorList,
+  setManualClassification,
   getProponentById,
   getProponentByUserId,
   createProponent,

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Save, Search } from 'lucide-react';
+import { Plus, Save, Search } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { toast } from 'sonner';
 import { SidePanel } from '../ui/SidePanel';
@@ -10,6 +10,7 @@ import { DataTableControls } from '../ui/DataTableControls';
 import { TableSkeleton } from '../ui/Skeleton';
 import { EmptyState } from '../ui/EmptyState';
 import { useSessionStorageCachedResource } from '../../hooks/useSessionStorageCachedResource';
+import { LocatorDocumentsTab, uploadLocatorDocument, type PendingLocatorDocument } from './LocatorDocumentsTab';
 
 type ProponentRow = {
   id: number;
@@ -60,6 +61,14 @@ type ProponentRow = {
   lease_term: string | null;
   contract_type_id: number | null;
   contract_type_name: string | null;
+  // Manual Industry fallback (application type code) for locators with no
+  // filed application yet — see Proponent.setManualClassification.
+  industry_code?: string | null;
+  // Latest application's type, else industry_code — what the Documents
+  // checklist filters requirements by.
+  effective_industry_code?: string | null;
+  has_application?: boolean;
+  has_contract?: boolean;
   // "Industry" in the legacy BRIDGE form — the Application Type of this
   // locator's most recently filed application, same source as the Locators
   // List's "business_type" column. Never set directly (no application yet =
@@ -141,7 +150,11 @@ type LocatorsData = {
   users: UserOption[];
   contractTypes: ContractTypeOption[];
   landUses: LookupOption[];
+  industries: IndustryOption[];
 };
+
+// Industry = Application Types catalog, keyed by code (what applications store).
+type IndustryOption = { id: number; code: string; name: string; is_active: number };
 
 // "Stockholders Information" / "Contact Person" tabs — child tables (dbo.stockholder,
 // dbo.contact_person) synced by id on every save (rows removed here are deactivated).
@@ -335,6 +348,7 @@ const BLANK_PROFILE_FORM = {
   paid_up_capital: '',
   paid_up_capital_currency: 'PHP',
   contract_type_id: '',
+  industry_code: '',
   business_activities: '',
   advance_lease_payment_months: '',
   advance_lease_payment_amount: '',
@@ -368,13 +382,15 @@ export function ProponentsManagement({
   // The Account Officer field shows who a locator is assigned to. An Account
   // Officer looking at their own assigned locators doesn't need (or should
   // see) this about themselves, so it's hidden outright for that role; every
-  // other staff role sees it, but read-only — reassignment isn't done from
-  // this dropdown.
+  // other staff role can assign/reassign it from this dropdown.
   const isAccountOfficer = (currentUserRoleName || '').trim().toUpperCase() === 'ACCOUNT OFFICER';
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<ProponentRow | null>(null);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
+  // Documents picked on the Documents tab while creating a New Locator —
+  // uploaded once the POST returns the new locator's id.
+  const [pendingDocs, setPendingDocs] = useState<PendingLocatorDocument[]>([]);
   // Mirrors the legacy BRIDGE system's Locator's Information tab strip —
   // only Profile has content so far, the rest are placeholders.
   const [activeProfileTab, setActiveProfileTab] = useState<
@@ -392,15 +408,16 @@ export function ProponentsManagement({
   const cardRefs = useRef<Record<number, HTMLButtonElement | null>>({});
 
   const { data: locatorsData, isLoading, isRevalidating, refresh } = useSessionStorageCachedResource<LocatorsData>({
-    cacheKey: 'ciac.locators.v8',
+    cacheKey: 'ciac.locators.v10',
     ttlMs: 5 * 60 * 1000,
     fetcher: async () => {
-      const [pRes, dRes, uRes, atRes, luRes] = await Promise.all([
+      const [pRes, dRes, uRes, atRes, luRes, inRes] = await Promise.all([
         fetch(api('/api/proponents?approvedOnly=1'), { credentials: 'include' }),
         fetch(api('/api/proponents/locator-list'), { credentials: 'include' }),
         fetch(api('/api/proponents/account-officers'), { credentials: 'include' }),
         fetch(api('/api/proponents/type-of-contract'), { credentials: 'include' }),
         fetch(api('/api/proponents/land-uses'), { credentials: 'include' }),
+        fetch(api('/api/proponents/industries'), { credentials: 'include' }),
       ]);
 
       const pJson = await pRes.json();
@@ -408,12 +425,14 @@ export function ProponentsManagement({
       const uJson = await uRes.json();
       const atJson = await atRes.json();
       const luJson = await luRes.json();
+      const inJson = await inRes.json();
 
       if (!pRes.ok) throw new Error(pJson?.message || 'Failed to load proponents');
       if (!dRes.ok) throw new Error(dJson?.message || 'Failed to load locator list');
       if (!uRes.ok) throw new Error(uJson?.message || 'Failed to load account officers');
       if (!atRes.ok) throw new Error(atJson?.message || 'Failed to load types of contract');
       if (!luRes.ok) throw new Error(luJson?.message || 'Failed to load land uses');
+      if (!inRes.ok) throw new Error(inJson?.message || 'Failed to load industries');
 
       const nextProponents: ProponentRow[] = (pJson.data || []).map((p: any) => ({
         ...p,
@@ -441,6 +460,7 @@ export function ProponentsManagement({
         users: nextUsers,
         contractTypes: nextContractTypes,
         landUses: toLookup(luJson.data),
+        industries: (inJson.data || []).map((t: any) => ({ ...t, is_active: Number(t?.is_active) ? 1 : 0 })),
       };
     },
     onError: (e) => {
@@ -512,7 +532,6 @@ export function ProponentsManagement({
   // Type of Contract comes from File Maintenance > Type of Contract. Only active
   // types are offered, but the locator's current one stays listed even if it was
   // since deactivated, so editing doesn't blank it.
-  const hasContract = Boolean(editing?.start_term);
   const contractTypeOptions = useMemo(
     () =>
       contractTypes
@@ -528,6 +547,17 @@ export function ProponentsManagement({
       .filter((t) => t.is_active === 1 || String(t.id) === current)
       .map((t) => ({ value: String(t.id), label: t.is_active === 1 ? t.name : `${t.name} (inactive)` }));
   const landUseOptions = useMemo(() => lookupOptions(landUses, form.land_use_id), [landUses, form.land_use_id]);
+  const industries = locatorsData?.industries ?? [];
+  const industryOptions = useMemo(
+    () =>
+      industries
+        .filter((t) => t.is_active === 1 || t.code === form.industry_code)
+        .map((t) => ({ value: t.code, label: t.is_active === 1 ? t.name : `${t.name} (inactive)` })),
+    [industries, form.industry_code],
+  );
+  // Industry is derived from the latest filed application once one exists;
+  // before that (New Locator / manual registration) it's picked here.
+  const industryDerived = Boolean(editing?.has_application);
 
   // Snapshot of the form once an edit's profile has finished loading. canSubmit only
   // compared the top few fields, so changing anything else (account officer,
@@ -727,6 +757,28 @@ export function ProponentsManagement({
     navigate(`${nextPathname}${cleanedSearch}`, { replace: true });
   }, [highlightedProponentId, locationSearch, navigate, shouldCleanProponentQuery]);
 
+  // Manual registration (walk-in/legacy locators) — the backend flags these
+  // is_manual_registration so they show in this list without an approved
+  // application behind them.
+  function openCreate() {
+    setEditing(null);
+    setForm({
+      user_id: '',
+      business_name: '',
+      registration_no: '',
+      tin: '',
+      address: '',
+      contact_no: '',
+      ...BLANK_PROFILE_FORM,
+    });
+    setActiveProfileTab('Profile');
+    setLoaded(null);
+    setPendingDocs([]);
+    locationRequestIdRef.current = null;
+    setLoadingLocation(false);
+    setIsCreateOpen(true);
+  }
+
   // Profile fields aren't part of the bulk /api/proponents list — they're
   // fetched on demand here, only when a specific locator's panel is opened,
   // rather than pulled for every row up front.
@@ -773,6 +825,7 @@ export function ProponentsManagement({
           paid_up_capital: data.paid_up_capital || '',
           paid_up_capital_currency: data.paid_up_capital_currency || 'PHP',
           contract_type_id: data.contract_type_id != null ? String(data.contract_type_id) : '',
+          industry_code: data.industry_code || '',
           business_activities: data.business_activities || '',
           advance_lease_payment_months: data.advance_lease_payment_months || '',
           advance_lease_payment_amount: data.advance_lease_payment_amount || '',
@@ -805,6 +858,9 @@ export function ProponentsManagement({
                 lease_term: data.lease_term ?? null,
                 contract_type_name: data.contract_type_name ?? null,
                 business_type: data.business_type ?? null,
+                has_application: Boolean(data.has_application),
+                effective_industry_code: data.effective_industry_code ?? null,
+                has_contract: Boolean(data.has_contract),
               }
             : prev,
         );
@@ -940,12 +996,10 @@ export function ProponentsManagement({
         properties: form.properties.map(toPropertyPayload),
       };
 
-      // Type of Contract lives on the proponent's current contract record,
-      // which only exists once editing (create has no contract yet — see
-      // Contract.setContractTypeForProponent's no-op note).
-      if (editing) {
-        payload.contract_type_id = form.contract_type_id ? Number(form.contract_type_id) : null;
-      }
+      // Type of Contract goes to the current contract when there is one,
+      // otherwise to the locator's own fallback column (manual registration).
+      payload.contract_type_id = form.contract_type_id ? Number(form.contract_type_id) : null;
+      if (!industryDerived) payload.industry_code = form.industry_code || null;
 
       if (!payload.business_name) throw new Error('Business name is required');
 
@@ -957,6 +1011,23 @@ export function ProponentsManagement({
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json?.message || 'Save failed');
+
+      let failedUploads = 0;
+      const newId = Number(json?.data?.id);
+      if (!editing && pendingDocs.length && Number.isFinite(newId)) {
+        for (const doc of pendingDocs) {
+          try {
+            await uploadLocatorDocument(newId, doc);
+          } catch (uploadError: any) {
+            failedUploads += 1;
+            toast.error(uploadError?.message || `Upload failed: ${doc.file.name}`);
+          }
+        }
+        setPendingDocs([]);
+      }
+      if (failedUploads) {
+        toast.warning(`Locator saved, but ${failedUploads} document(s) failed to upload — re-upload them from the Documents tab.`);
+      }
 
       setIsCreateOpen(false);
       setError(null);
@@ -1028,11 +1099,9 @@ export function ProponentsManagement({
           </div>
         )}
 
-        {/* No "New Locator" entry point here anymore — a locator only ever
-            reaches this registry via the real pipeline (Locator Account ->
-            New Application -> Assessment -> Approval), so manually creating
-            one straight into dbo.proponents would never show up here (it has
-            no approved application backing it) and would just be a dead end. */}
+        {/* Search + New Locator share one row on every size. Locators normally
+            arrive via an approved application; "New Locator" is the manual
+            registration path (flagged is_manual_registration server-side). */}
         <div className="flex items-center justify-between gap-2 mb-3">
           <div className="relative group flex-1 min-w-0 sm:flex-none sm:w-72">
             <Search
@@ -1050,6 +1119,15 @@ export function ProponentsManagement({
               }}
             />
           </div>
+          <button
+            className="shrink-0 h-9 rounded-lg px-3 text-xs sm:text-sm font-semibold inline-flex items-center gap-1.5 shadow-sm cursor-pointer whitespace-nowrap"
+            style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
+            onClick={openCreate}
+          >
+            <Plus size={15} />
+            <span className="sm:hidden">New</span>
+            <span className="hidden sm:inline">New Locator</span>
+          </button>
         </div>
 
         {isLoading ? (
@@ -1062,7 +1140,7 @@ export function ProponentsManagement({
             description={
               searchQuery
                 ? 'Try adjusting your search filters.'
-                : 'No locators are registered yet — a locator appears here automatically once one of their applications is approved.'
+                : 'No locators are registered yet — one appears here once an application is approved, or register one manually with New Locator.'
             }
           />
         ) : (
@@ -1240,12 +1318,18 @@ export function ProponentsManagement({
               <div>
                 {isAccountOfficer ? null : (
                   <Field compact label="Account Officer">
-                    <div
-                      className="app-form-control app-form-control-sm flex items-center px-2 overflow-hidden text-ellipsis whitespace-nowrap"
-                      style={{ color: 'var(--text)' }}
-                      title="Not editable here"
-                    >
-                      {editing?.account_officer_name || '—'}
+                    <div className="app-form-control app-form-control-sm p-0 overflow-hidden flex items-stretch">
+                      <AppSelect
+                        options={userOptions}
+                        value={form.account_officer_id}
+                        onChange={(value) => setForm((p) => ({ ...p, account_officer_id: value || '' }))}
+                        placeholder={userOptions.length ? 'Select...' : 'No account officers'}
+                        isClearable
+                        isDisabled={loadingLocation}
+                        compact
+                        boxed
+                        minHeight={26}
+                      />
                     </div>
                   </Field>
                 )}
@@ -1293,31 +1377,19 @@ export function ProponentsManagement({
 
               <div className="flex flex-col gap-2">
                 <Field compact label="Type of Contract">
-                  <div
-                    className="app-form-control app-form-control-sm p-0 overflow-hidden flex items-stretch"
-                    title={
-                      !hasContract
-                        ? 'Available once a contract has been issued for this locator (Approval & Issuance).'
-                        : undefined
-                    }
-                  >
+                  <div className="app-form-control app-form-control-sm p-0 overflow-hidden flex items-stretch">
                     <AppSelect
                       options={contractTypeOptions}
                       value={form.contract_type_id}
                       onChange={(value) => setForm((p) => ({ ...p, contract_type_id: value || '' }))}
-                      placeholder={hasContract ? 'Select...' : 'No contract yet'}
+                      placeholder="Select..."
                       isClearable
-                      isDisabled={loadingLocation || !hasContract}
+                      isDisabled={loadingLocation}
                       compact
                       boxed
                       minHeight={26}
                     />
                   </div>
-                  {!hasContract ? (
-                    <div className="mt-0.5 text-[10px] text-secondary">
-                      Available once a contract is issued (Approval &amp; Issuance).
-                    </div>
-                  ) : null}
                 </Field>
                 <div className="flex flex-col sm:flex-row gap-2">
                   <div className="flex-1 min-w-0">
@@ -1651,6 +1723,13 @@ export function ProponentsManagement({
                       onSave={() => void saveSection('investment')}
                     />
                   </div>
+                ) : activeProfileTab === 'Documents' ? (
+                  <LocatorDocumentsTab
+                    proponentId={editing?.id ?? null}
+                    industryCode={industryDerived ? editing?.effective_industry_code ?? null : form.industry_code || null}
+                    pending={pendingDocs}
+                    onPendingChange={setPendingDocs}
+                  />
                 ) : activeProfileTab !== 'Profile' ? (
                   <div className="text-xs text-secondary py-8 text-center">{activeProfileTab} — coming soon.</div>
                 ) : (
@@ -1689,14 +1768,28 @@ export function ProponentsManagement({
                   <div className="flex-1">
                     <Field compact label="Industry">
                       <div className="app-form-control app-form-control-sm p-0 overflow-hidden flex items-stretch">
-                        <input
-                          className="flex-1 min-w-0 border-0 bg-transparent outline-none px-2 py-1"
-                          style={{ color: 'var(--text)' }}
-                          value={editing?.business_type || '—'}
-                          disabled
-                          readOnly
-                          title="Derived from this locator's most recently filed application — not set here."
-                        />
+                        {industryDerived ? (
+                          <input
+                            className="flex-1 min-w-0 border-0 bg-transparent outline-none px-2 py-1"
+                            style={{ color: 'var(--text)' }}
+                            value={editing?.business_type || '—'}
+                            disabled
+                            readOnly
+                            title="Derived from this locator's most recently filed application — not set here."
+                          />
+                        ) : (
+                          <AppSelect
+                            options={industryOptions}
+                            value={form.industry_code}
+                            onChange={(value) => setForm((p) => ({ ...p, industry_code: value || '' }))}
+                            placeholder="Select..."
+                            isClearable
+                            isDisabled={loadingLocation}
+                            compact
+                            boxed
+                            minHeight={26}
+                          />
+                        )}
                       </div>
                     </Field>
                   </div>

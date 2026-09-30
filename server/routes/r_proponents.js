@@ -4,6 +4,8 @@ const proponentsController = require("../controller/c_proponents");
 const portalController = require("../controller/c_proponent_portal");
 const { requireMenuAccess, requireProponentRole, requireProponentSelf, requireOwnApplication, requireStaffRole } = require("../middleware/m_auth");
 const { handleUpload } = require("../lib/fileStorage");
+const { upload } = require("../middleware/m_upload");
+const { verifyUploadedFile } = require("../lib/uploadCheck");
 
 const MENU_KEY = "settings:proponents";
 
@@ -54,8 +56,20 @@ router.get("/", requireStaffRole, proponentsController.list);
 router.get("/locator-list", requireMenuAccess(MENU_KEY, "view"), proponentsController.listForLocatorList);
 router.get("/account-officers", requireMenuAccess(MENU_KEY, "view"), proponentsController.listAccountOfficerOptions);
 router.get("/type-of-contract", requireMenuAccess(MENU_KEY, "view"), proponentsController.listTypeOfContractOptions);
+router.get("/document-requirements", requireMenuAccess(MENU_KEY, "view"), proponentsController.listDocumentRequirementOptions);
+router.get("/industries", requireMenuAccess(MENU_KEY, "view"), proponentsController.listIndustryOptions);
 router.get("/land-uses", requireMenuAccess(MENU_KEY, "view"), proponentsController.listLandUseOptions);
 router.get("/:id", requireMenuAccess(MENU_KEY, "view"), proponentsController.getById);
+router.get("/:id/documents", requireMenuAccess(MENU_KEY, "view"), proponentsController.getDocuments);
+router.post(
+  "/:id/documents",
+  requireMenuAccess(MENU_KEY, "edit"),
+  upload.single("file"),
+  verifyUploadedFile,
+  proponentsController.uploadDocument
+);
+router.get("/:id/documents/:docId/download", requireMenuAccess(MENU_KEY, "view"), proponentsController.downloadDocument);
+router.delete("/:id/documents/:docId", requireMenuAccess(MENU_KEY, "edit"), proponentsController.deleteDocument);
 router.post("/", requireMenuAccess(MENU_KEY, "add"), proponentsController.create);
 router.put("/:id", requireMenuAccess(MENU_KEY, "edit"), proponentsController.update);
 // Section saves (Stockholders / Contact Person + Signatory / Property schedule) — see the controller.
