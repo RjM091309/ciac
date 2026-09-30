@@ -213,6 +213,8 @@ Leave `TRUST_PROXY` unset. nginx on the same machine connects from 127.0.0.1, wh
 
 With `NODE_ENV=production`, the login cookie is `Secure`, so browsers only send it over HTTPS. On plain `http://` the login appears to work and then immediately bounces back to the login page.
 
+For a temporary plain-HTTP period (e.g. staff training before the certificate is ready), add `COOKIE_SECURE=false` to `server\.env` and restart the backend. Remove that line once HTTPS is live, and before any security scan: without it the session cookie can be read by anyone on the network path.
+
 ## 8. Backups (set up before go-live)
 
 1. **Database:** schedule a daily full backup. If the database uses the FULL recovery model, also schedule log backups; otherwise the transaction log grows without limit. If point-in-time restore isn't needed, set the recovery model to SIMPLE instead.

@@ -10,11 +10,20 @@ const RECENT_FAILURE_WINDOW_MINUTES = 15;
 
 // No maxAge: a browser-session cookie, dropped when the browser quits. The
 // 15-minute idle limit is enforced by the JWT's own expiry (Auth.js), not
-// the cookie's lifetime.
+// the cookie's lifetime. Secure (HTTPS-only) in production, unless
+// COOKIE_SECURE=false — a temporary escape hatch for a plain-HTTP rollout
+// (e.g. staff training before the certificate is in place).
+function cookieSecure() {
+  const override = String(process.env.COOKIE_SECURE || "").trim().toLowerCase();
+  if (override === "false") return false;
+  if (override === "true") return true;
+  return process.env.NODE_ENV === "production";
+}
+
 function sessionCookieOptions() {
   return {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
+    secure: cookieSecure(),
     sameSite: "lax",
   };
 }
