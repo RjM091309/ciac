@@ -64,6 +64,12 @@ exports.uploadMyApplicationDocument = async (req, res) => {
       if (req.file?.path) fs.unlink(req.file.path, () => {});
       return res.status(400).json({ success: false, message: "That requirement doesn't belong to this application." });
     }
+    // The portal hides Upload on a verified requirement; enforce it here too,
+    // or a direct API call could slip an unreviewed file under a VERIFIED one.
+    if (String(match.status || "").toUpperCase() === "VERIFIED") {
+      if (req.file?.path) fs.unlink(req.file.path, () => {});
+      return res.status(400).json({ success: false, message: "This requirement is already verified." });
+    }
 
     const document = await Workflow.createDocument({
       application_id: req.application.id,

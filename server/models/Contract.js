@@ -3,6 +3,7 @@ const Notification = require("./Notification");
 const Permit = require("./Permit");
 const TypeOfContract = require("./TypeOfContract");
 const { sendMail } = require("../lib/mailer");
+const { escapeHtml } = require("../lib/html");
 
 function toInt(v) {
   // Number(null) is 0, not NaN — without this guard, an explicitly-absent
@@ -206,9 +207,9 @@ async function createContractNotifications({ applicationId, contractNo, actorId,
           `${normalizedContractNo ? ` (${normalizedContractNo})` : ""} on record.\n\n` +
           `Sign in to the portal for details: ${loginUrl}\n`,
         html:
-          `<p>Hello ${locator.full_name || ""},</p>` +
-          `<p>Your business application <b>${locator.application_no || ""}</b> now has a signed contract` +
-          `${normalizedContractNo ? ` (<b>${normalizedContractNo}</b>)` : ""} on record.</p>` +
+          `<p>Hello ${escapeHtml(locator.full_name || "")},</p>` +
+          `<p>Your business application <b>${escapeHtml(locator.application_no || "")}</b> now has a signed contract` +
+          `${normalizedContractNo ? ` (<b>${escapeHtml(normalizedContractNo)}</b>)` : ""} on record.</p>` +
           `<p><a href="${loginUrl}" style="display:inline-block;padding:10px 18px;background:#111827;color:#fff;text-decoration:none;border-radius:6px;">Sign in to the portal</a></p>`,
       });
     }

@@ -117,12 +117,24 @@ app.use("/js", express.static(path.join(__dirname, "public", "js")));
 const pageRouter = require("./routes/routes");
 pageRouter(app);
 
+// Unknown /api paths get a plain JSON 404 instead of Express's default
+// "Cannot GET ..." HTML page, which fingerprints the framework to scanners.
+app.use("/api", (req, res) => res.status(404).json({ success: false, message: "Not found" }));
+
 // Multer (file upload) errors — size limit, bad mimetype — reach here via
 // next(err) before any controller's own try/catch runs. Every other route
 // handles its own errors, so this only needs to cover upload failures.
 app.use((err, req, res, next) => {
   if (!err) return next();
   if (req.path.startsWith("/api/")) {
+    if (/^CORS blocked/.test(err.message || "")) {
+      return res.status(403).json({ success: false, message: "Cross-site request blocked" });
+    }
+    // Body-parser errors (malformed JSON, oversized body) carry their own 4xx.
+    const clientStatus = err.status >= 400 && err.status < 500 ? err.status : null;
+    if (clientStatus && err.name !== "MulterError") {
+      return res.status(clientStatus).json({ success: false, message: "Invalid request" });
+    }
     const status = err.name === "MulterError" || /unsupported file type/i.test(err.message || "") ? 400 : 500;
     // Multer's own messages ("File too large") are meant for the user.
     const message = err.name === "MulterError" ? err.message : publicErrorMessage(err, "Upload failed");

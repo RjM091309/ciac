@@ -9,6 +9,7 @@ const ApplicationType = require("../models/ApplicationType");
 const { updateData } = require("../config/database");
 const { validatePasswordStrength, generateTempPassword } = require("../lib/password");
 const { sendMail } = require("../lib/mailer");
+const { escapeHtml } = require("../lib/html");
 const { diffChanges } = require("../lib/auditDiff");
 const { publicErrorMessage } = require("../lib/httpError");
 const { checkPassword } = require("../lib/reauth");
@@ -72,10 +73,10 @@ function sendTempPasswordEmail({ to, name, username, tempPassword, isNewAccount 
       `Sign in here: ${loginUrl}\n\n` +
       `You'll be asked to set a new password right away. If you didn't expect this, contact CIAC.\n`,
     html:
-      `<p>Hello ${name},</p>` +
-      `<p>${intro}</p>` +
-      `<p>Username: <b>${username}</b><br/>` +
-      `Temporary password: <span style="font-size:18px;font-weight:bold;letter-spacing:1px;">${tempPassword}</span></p>` +
+      `<p>Hello ${escapeHtml(name)},</p>` +
+      `<p>${escapeHtml(intro)}</p>` +
+      `<p>Username: <b>${escapeHtml(username)}</b><br/>` +
+      `Temporary password: <span style="font-size:18px;font-weight:bold;letter-spacing:1px;">${escapeHtml(tempPassword)}</span></p>` +
       `<p><a href="${loginUrl}" style="display:inline-block;padding:10px 18px;background:#111827;color:#fff;text-decoration:none;border-radius:6px;">Sign in to the portal</a></p>` +
       `<p>You'll be asked to set a new password right away. If you didn't expect this, contact CIAC.</p>`,
   });

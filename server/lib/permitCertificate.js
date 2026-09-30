@@ -1,5 +1,6 @@
 const crypto = require("crypto");
 const { fmtDate, buildCertificateHtml, renderHtmlToPdf, buildQrDataUrl } = require("./certificateRenderer");
+const { escapeHtml } = require("./html");
 
 // "CONTRACT" is the one permit type that isn't a Compliance Requirement —
 // Types entry (see server/models/Permit.js) — everything else's display
@@ -82,7 +83,7 @@ async function renderPermitCertificate({
     statementHtml:
       `has duly complied with and fulfilled the mandatory criteria, documentary requirements, and ` +
       `operational standards for the above permit type, as administered under the applicable ` +
-      `compliance rules of this Office, and is hereby granted this ${permitTypeLabel(permit.permit_type, typeName)}.`,
+      `compliance rules of this Office, and is hereby granted this ${escapeHtml(permitTypeLabel(permit.permit_type, typeName))}.`,
     metaRows,
     refCode,
     qrDataUrl,

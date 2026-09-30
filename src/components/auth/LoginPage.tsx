@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { AnimatePresence, motion, type Variants } from 'motion/react';
 import { ArrowLeft, ArrowRight, CheckCircle2, Copy, Eye, EyeOff, KeyRound, Mail, Moon, Smartphone, Sun } from 'lucide-react';
-import { validatePassword } from '../../lib/passwordPolicy';
+import { PASSWORD_HINT, validatePassword } from '../../lib/passwordPolicy';
 
 type Enrollment = { otpauthUrl: string; secret: string; qrDataUrl: string };
 
@@ -887,7 +887,7 @@ export function LoginPage(props: {
                       </button>
                     </div>
                     <p className="text-[11px] ml-1" style={{ color: newPasswordError ? 'var(--errorColor)' : 'var(--text-secondary)' }}>
-                      {newPasswordError || 'At least 8 characters, with a letter and a number.'}
+                      {newPasswordError || PASSWORD_HINT}
                     </p>
                   </div>
 
@@ -1017,7 +1017,7 @@ export function LoginPage(props: {
                       </button>
                     </div>
                     <p className="text-[11px] ml-1" style={{ color: resetPasswordError ? 'var(--errorColor)' : 'var(--text-secondary)' }}>
-                      {resetPasswordError || 'At least 8 characters, with a letter and a number.'}
+                      {resetPasswordError || PASSWORD_HINT}
                     </p>
                   </div>
 

@@ -10,7 +10,7 @@ import { Skeleton, TableSkeleton } from '../ui/Skeleton';
 import { EmptyState } from '../ui/EmptyState';
 import { useSessionStorageCachedResource } from '../../hooks/useSessionStorageCachedResource';
 import { RolesPanel } from './RolesPanel';
-import { validatePassword } from '../../lib/passwordPolicy';
+import { PASSWORD_HINT, validatePassword } from '../../lib/passwordPolicy';
 import { roleDisplayName } from '../../lib/roleDisplay';
 import { useControlPanelAccess } from '../../context/ControlPanelAccessContext';
 
@@ -814,7 +814,7 @@ export function UsersManagement({
               onChange={(e) => setForm((p) => ({ ...p, password: e.target.value }))}
             />
             <p className="text-[10px] mt-1" style={{ color: passwordError ? '#f87171' : 'var(--text-muted)' }}>
-              {passwordError || 'At least 8 characters, with a letter and a number.'}
+              {passwordError || PASSWORD_HINT}
             </p>
           </Field>
         </div>

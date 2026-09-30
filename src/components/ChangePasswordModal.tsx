@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { Check, Eye, EyeOff, X } from 'lucide-react';
 import { toast } from 'sonner';
+import { MIN_LENGTH, PASSWORD_HINT, passwordChecks } from '../lib/passwordPolicy';
 
 type ChangePasswordModalProps = {
   open: boolean;
@@ -70,10 +71,8 @@ export function ChangePasswordModal({ open, onClose }: ChangePasswordModalProps)
   const [confirmPassword, setConfirmPassword] = useState('');
   const [saving, setSaving] = useState(false);
 
-  const hasMinLength = newPassword.length >= 8;
-  const hasLetter = /[a-zA-Z]/.test(newPassword);
-  const hasNumber = /[0-9]/.test(newPassword);
-  const strengthOk = hasMinLength && hasLetter && hasNumber;
+  const checks = passwordChecks(newPassword);
+  const strengthOk = Object.values(checks).every(Boolean);
   const sameAsCurrent = Boolean(newPassword) && Boolean(currentPassword) && newPassword === currentPassword;
   const confirmMismatch = Boolean(confirmPassword) && confirmPassword !== newPassword;
 
@@ -155,7 +154,7 @@ export function ChangePasswordModal({ open, onClose }: ChangePasswordModalProps)
               Change Password
             </h3>
             <p className="text-[11px] text-secondary mt-1">
-              Use at least 8 characters, with a mix of letters and numbers.
+              {PASSWORD_HINT}
             </p>
 
             <form className="mt-4 space-y-3" onSubmit={handleSubmit} noValidate>
@@ -170,9 +169,11 @@ export function ChangePasswordModal({ open, onClose }: ChangePasswordModalProps)
               <div>
                 <PasswordField label="New Password" value={newPassword} onChange={setNewPassword} error={newPasswordError} />
                 <ul className="mt-1.5 grid grid-cols-2 gap-x-2 gap-y-1">
-                  <RequirementRow met={hasMinLength} label="8+ characters" />
-                  <RequirementRow met={hasLetter} label="Contains a letter" />
-                  <RequirementRow met={hasNumber} label="Contains a number" />
+                  <RequirementRow met={checks.length} label={`${MIN_LENGTH}+ characters`} />
+                  <RequirementRow met={checks.upper} label="Contains an uppercase letter" />
+                  <RequirementRow met={checks.lower} label="Contains a lowercase letter" />
+                  <RequirementRow met={checks.number} label="Contains a number" />
+                  <RequirementRow met={checks.special} label="Contains a special character" />
                   <RequirementRow met={Boolean(newPassword) && !sameAsCurrent} label="Different from current" />
                 </ul>
               </div>

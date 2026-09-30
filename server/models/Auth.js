@@ -36,6 +36,18 @@ function pickPasswordField(row) {
   return actualKey || null;
 }
 
+// Compared against when the username doesn't exist, so that path costs about
+// as much as a real bcrypt check and response time doesn't reveal which
+// usernames exist.
+const DUMMY_HASH = bcrypt.hashSync("dummy-password-for-timing", 10);
+
+async function passwordMatches(row, password) {
+  const passField = pickPasswordField(row);
+  const stored = passField ? String(row[passField] ?? "") : "";
+  if (!stored.startsWith("$2")) return false;
+  return bcrypt.compare(password, stored);
+}
+
 async function loginViaDatabase(username, password, totpCode, newPassword) {
   const userKey = normalizeString(username);
   const pass = String(password ?? "");
@@ -66,7 +78,7 @@ async function loginViaDatabase(username, password, totpCode, newPassword) {
   if (!row) {
     const inactiveRows = await selectData(
       `
-        SELECT TOP (1) u.id, u.is_active, u.status
+        SELECT TOP (1) u.*
         FROM users u
         WHERE (u.username = @param0 OR u.email = @param0)
           AND u.is_active = 0
@@ -74,7 +86,10 @@ async function loginViaDatabase(username, password, totpCode, newPassword) {
       [userKey]
     );
     const inactive = inactiveRows?.[0];
-    if (inactive) {
+    // Only say *why* the account can't sign in once the password proves the
+    // caller owns it — otherwise any guess would confirm the username/email
+    // exists and reveal its status.
+    if (inactive && (await passwordMatches(inactive, pass))) {
       const status = String(inactive.status || "ACTIVE").trim().toUpperCase();
       if (status === "PENDING") {
         return {
@@ -97,9 +112,14 @@ async function loginViaDatabase(username, password, totpCode, newPassword) {
       }
       return { success: false, reason: "deactivated", userId: inactive.id, message: "Your account has been deactivated. Contact the administrator." };
     }
+    if (inactive) {
+      return { success: false, reason: "inactive_wrong_password", userId: inactive.id, message: "Username and Password incorrect!" };
+    }
     // Same message as a wrong password below — a distinct "User not found"
     // here would let a caller enumerate valid usernames/emails one at a time.
-    // `reason` is only for the audit log; the client never sees it.
+    // `reason` is only for the audit log; the client never sees it. The dummy
+    // compare keeps the response time close to a real wrong-password check.
+    await bcrypt.compare(pass, DUMMY_HASH);
     return { success: false, reason: "unknown_user", message: "Username and Password incorrect!" };
   }
 

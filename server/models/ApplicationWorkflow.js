@@ -4,6 +4,7 @@ const ApplicationType = require("./ApplicationType");
 const Requirement = require("./Requirement");
 const Permit = require("./Permit");
 const { sendMail } = require("../lib/mailer");
+const { escapeHtml } = require("../lib/html");
 
 function toInt(v) {
   // Number(null) is 0, not NaN — without this guard, an explicitly-absent
@@ -144,9 +145,9 @@ async function createStatusChangeNotifications({ application, toStatus, remarks,
                 (trimmedRemarks ? `Assessment summary: ${trimmedRemarks}\n\n` : "") +
                 `Sign in here: ${loginUrl}\n`,
               html:
-                `<p>Hello ${person.full_name || ""},</p>` +
-                `<p>Application <b>${applicationNo}</b>${proponentName ? ` (${proponentName})` : ""} was endorsed by Assessment and is now waiting in the <b>Approval Queue</b>.</p>` +
-                (trimmedRemarks ? `<p><b>Assessment summary:</b> ${trimmedRemarks}</p>` : "") +
+                `<p>Hello ${escapeHtml(person.full_name || "")},</p>` +
+                `<p>Application <b>${escapeHtml(applicationNo)}</b>${proponentName ? ` (${escapeHtml(proponentName)})` : ""} was endorsed by Assessment and is now waiting in the <b>Approval Queue</b>.</p>` +
+                (trimmedRemarks ? `<p><b>Assessment summary:</b> ${escapeHtml(trimmedRemarks)}</p>` : "") +
                 `<p><a href="${loginUrl}" style="display:inline-block;padding:10px 18px;background:#111827;color:#fff;text-decoration:none;border-radius:6px;">Sign in to the portal</a></p>`,
             })
           )
@@ -180,9 +181,9 @@ async function createStatusChangeNotifications({ application, toStatus, remarks,
             (trimmedRemarks ? `Remarks: ${trimmedRemarks}\n\n` : "") +
             `Sign in to the portal for details: ${loginUrl}\n`,
           html:
-            `<p>Hello ${locator.full_name || ""},</p>` +
-            `<p>The status of your business application <b>${applicationNo}</b> is now: <b>${statusLabel}</b>.</p>` +
-            (trimmedRemarks ? `<p><b>Remarks:</b> ${trimmedRemarks}</p>` : "") +
+            `<p>Hello ${escapeHtml(locator.full_name || "")},</p>` +
+            `<p>The status of your business application <b>${escapeHtml(applicationNo)}</b> is now: <b>${escapeHtml(statusLabel)}</b>.</p>` +
+            (trimmedRemarks ? `<p><b>Remarks:</b> ${escapeHtml(trimmedRemarks)}</p>` : "") +
             `<p><a href="${loginUrl}" style="display:inline-block;padding:10px 18px;background:#111827;color:#fff;text-decoration:none;border-radius:6px;">Sign in to the portal</a></p>`,
         });
       }
@@ -231,8 +232,8 @@ async function createApplicationCreatedNotifications({
           `${entryLabel} ${appNo} was filed on your behalf and is now ${currentStatus}.\n\n` +
           `Sign in to the portal to track it and upload requirements: ${loginUrl}\n`,
         html:
-          `<p>Hello ${locator.full_name || ""},</p>` +
-          `<p>${entryLabel} <b>${appNo}</b> was filed on your behalf and is now <b>${currentStatus}</b>.</p>` +
+          `<p>Hello ${escapeHtml(locator.full_name || "")},</p>` +
+          `<p>${escapeHtml(entryLabel)} <b>${escapeHtml(appNo)}</b> was filed on your behalf and is now <b>${escapeHtml(currentStatus)}</b>.</p>` +
           `<p><a href="${loginUrl}" style="display:inline-block;padding:10px 18px;background:#111827;color:#fff;text-decoration:none;border-radius:6px;">Sign in to the portal</a></p>`,
       });
     }
@@ -307,12 +308,12 @@ async function createRequirementStatusNotifications({
             (trimmedRemarks ? `Reason: ${trimmedRemarks}\n\n` : "") +
             `Please sign in to the portal to ${callToAction}: ${loginUrl}\n`,
           html:
-            `<p>Hello ${locator.full_name || ""},</p>` +
-            `<p><b>${requirementLabel || "A requirement"}</b> for application <b>${applicationNo}</b> was ${actionLabel}.</p>` +
+            `<p>Hello ${escapeHtml(locator.full_name || "")},</p>` +
+            `<p><b>${escapeHtml(requirementLabel || "A requirement")}</b> for application <b>${escapeHtml(applicationNo)}</b> was ${escapeHtml(actionLabel)}.</p>` +
             (trimmedRemarks
-              ? `<p><b>Reason:</b> ${trimmedRemarks}</p>`
+              ? `<p><b>Reason:</b> ${escapeHtml(trimmedRemarks)}</p>`
               : "") +
-            `<p>Please sign in to ${callToAction}.</p>` +
+            `<p>Please sign in to ${escapeHtml(callToAction)}.</p>` +
             `<p><a href="${loginUrl}" style="display:inline-block;padding:10px 18px;background:#111827;color:#fff;text-decoration:none;border-radius:6px;">Sign in to the portal</a></p>`,
         });
       }
@@ -1432,9 +1433,9 @@ async function addRequirementComment({ applicationRequirementId, authorId, autho
           `${requirementLabel || "A requirement"} for application ${applicationNo} has a new reply:\n\n"${trimmed}"\n\n` +
           `Sign in to the portal to view and reply: ${loginUrl}\n`,
         html:
-          `<p>Hello ${locator.full_name || ""},</p>` +
-          `<p><b>${requirementLabel || "A requirement"}</b> for application <b>${applicationNo}</b> has a new reply:</p>` +
-          `<blockquote>${trimmed}</blockquote>` +
+          `<p>Hello ${escapeHtml(locator.full_name || "")},</p>` +
+          `<p><b>${escapeHtml(requirementLabel || "A requirement")}</b> for application <b>${escapeHtml(applicationNo)}</b> has a new reply:</p>` +
+          `<blockquote>${escapeHtml(trimmed)}</blockquote>` +
           `<p><a href="${loginUrl}" style="display:inline-block;padding:10px 18px;background:#111827;color:#fff;text-decoration:none;border-radius:6px;">Sign in to reply</a></p>`,
       });
     }
@@ -1548,9 +1549,9 @@ async function addCustomRequirementToApplication({ applicationId, name, descript
           (description ? ` — ${String(description).trim()}` : "") +
           `\n\nSign in to the portal to upload it: ${loginUrl}\n`,
         html:
-          `<p>Hello ${locator.full_name || ""},</p>` +
-          `<p>A new requirement was requested for application <b>${applicationNo}</b>:</p>` +
-          `<p><b>${trimmedName}</b>${description ? ` — ${String(description).trim()}` : ""}</p>` +
+          `<p>Hello ${escapeHtml(locator.full_name || "")},</p>` +
+          `<p>A new requirement was requested for application <b>${escapeHtml(applicationNo)}</b>:</p>` +
+          `<p><b>${escapeHtml(trimmedName)}</b>${description ? ` — ${escapeHtml(String(description).trim())}` : ""}</p>` +
           `<p><a href="${loginUrl}" style="display:inline-block;padding:10px 18px;background:#111827;color:#fff;text-decoration:none;border-radius:6px;">Sign in to the portal</a></p>`,
       });
     }

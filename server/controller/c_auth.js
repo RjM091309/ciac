@@ -3,6 +3,7 @@ const AuditLog = require("../models/AuditLog");
 const ActivityLog = require("../models/ActivityLog");
 const UserSession = require("../models/UserSession");
 const { sendMail } = require("../lib/mailer");
+const { escapeHtml } = require("../lib/html");
 
 // How far back the audit log looks when counting repeat failed sign-ins.
 const RECENT_FAILURE_WINDOW_MINUTES = 15;
@@ -187,7 +188,7 @@ exports.forgotPassword = async (req, res) => {
           `${resetUrl}\n\n` +
           `If you didn't request this, you can safely ignore this email — your password won't change.\n`,
         html:
-          `<p>Hello ${name},</p>` +
+          `<p>Hello ${escapeHtml(name)},</p>` +
           `<p>We received a request to reset your password. This link expires in ${Auth.RESET_TOKEN_TTL_MINUTES} minutes.</p>` +
           `<p><a href="${resetUrl}" style="display:inline-block;padding:10px 18px;background:#111827;color:#fff;text-decoration:none;border-radius:6px;">Reset your password</a></p>` +
           `<p>If you didn't request this, you can safely ignore this email — your password won't change.</p>`,

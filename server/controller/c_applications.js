@@ -526,9 +526,27 @@ exports.createDocument = async (req, res) => {
       return res.status(400).json({ success: false, message: "A file is required" });
     }
 
+    // Same guards as the portal upload: the requirement must be on this
+    // application's checklist, and a locator can't upload under one that's
+    // already VERIFIED.
+    const requirementId = Number(req.body?.requirement_id) || null;
+    if (requirementId) {
+      const reqs = await Workflow.listApplicationRequirements(applicationId);
+      const match = reqs.find((r) => Number(r.requirement_id) === requirementId);
+      if (!match) {
+        discardFile();
+        return res.status(400).json({ success: false, message: "That requirement doesn't belong to this application." });
+      }
+      const isProponent = String(req.user?.role || "").toLowerCase() === "proponent";
+      if (isProponent && String(match.status || "").toUpperCase() === "VERIFIED") {
+        discardFile();
+        return res.status(400).json({ success: false, message: "This requirement is already verified." });
+      }
+    }
+
     const row = await Workflow.createDocument({
       application_id: applicationId,
-      requirement_id: req.body?.requirement_id ?? null,
+      requirement_id: requirementId,
       file_name: req.file.filename,
       original_file_name: req.file.originalname,
       storage_path: relativeStoragePath(req.file.path), // relative, like portal uploads — survives moving STORAGE_DIR
