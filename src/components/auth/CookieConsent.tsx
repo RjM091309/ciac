@@ -71,9 +71,8 @@ export function CookieConsent({
 
         {view === 'notice' ? (
           <p className="text-[13px] leading-relaxed text-secondary">
-            We use cookies and other tracking technologies to improve your browsing experience on our website, to show
-            you personalized content and targeted ads, to analyze our website traffic, and to understand where our
-            visitors are coming from.
+            We use cookies and tracking technologies to improve your browsing experience on our web application site, to
+            analyze our website traffic and to understand where our visitors are coming from.
           </p>
         ) : null}
 
