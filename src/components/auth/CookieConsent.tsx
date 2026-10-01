@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Cookie, Lock, ShieldCheck } from 'lucide-react';
+import { Cookie } from 'lucide-react';
 
 // Required notice before signing in: the system uses cookies to keep the
 // session secure, and records what each user encodes/changes together with
@@ -8,25 +8,7 @@ import { Cookie, Lock, ShieldCheck } from 'lucide-react';
 // work, so declining means not signing in — the notice comes back until
 // accepted.
 
-type View = 'notice' | 'details' | 'declined';
-
-const CATEGORIES = [
-  {
-    icon: Lock,
-    title: 'Strictly necessary cookies',
-    body: 'Keep you signed in and protect each request (HTTP-only session cookie and security tokens). Without them the system cannot work.',
-  },
-  {
-    icon: ShieldCheck,
-    title: 'Activity & IP address logging (Audit Log)',
-    body: 'Every sign-in and every record you encode, update, approve or delete is logged with your username, IP address, browser and time — for accountability and security reviews.',
-  },
-  {
-    icon: Cookie,
-    title: 'Display preferences',
-    body: 'Remembers things like light/dark theme and table filters on this device. Stored only in your browser.',
-  },
-];
+type View = 'notice' | 'declined';
 
 export function CookieConsent({
   open,
@@ -74,31 +56,6 @@ export function CookieConsent({
             This platform utilizes cookies and tracking technologies to optimize browsing functionality, evaluate website
             traffic patterns, and analyze user acquisition sources.
           </p>
-        ) : null}
-
-        {view === 'details' ? (
-          <div className="flex flex-col gap-2.5">
-            {CATEGORIES.map(({ icon: Icon, title, body }) => (
-              <div key={title} className="rounded-xl border p-3" style={{ borderColor: 'var(--border-subtle)' }}>
-                <div className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2 text-[13px] font-semibold">
-                    <Icon size={15} />
-                    {title}
-                  </div>
-                  <span
-                    className="shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold"
-                    style={{ color: '#059669', backgroundColor: 'rgba(16,185,129,.14)' }}
-                  >
-                    Always on
-                  </span>
-                </div>
-                <p className="mt-1.5 text-[12px] leading-relaxed text-secondary">{body}</p>
-              </div>
-            ))}
-            <p className="text-[11px] text-secondary">
-              All three are needed for the system to work, so they can't be switched off individually.
-            </p>
-          </div>
         ) : null}
 
         {view === 'declined' ? (
@@ -149,25 +106,6 @@ export function CookieConsent({
               >
                 I decline
               </button>
-              {view === 'notice' ? (
-                <button
-                  type="button"
-                  className={secondaryBtn}
-                  style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}
-                  onClick={() => setView('details')}
-                >
-                  Change my preferences
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  className={secondaryBtn}
-                  style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}
-                  onClick={() => setView('notice')}
-                >
-                  Back
-                </button>
-              )}
             </>
           )}
         </div>
