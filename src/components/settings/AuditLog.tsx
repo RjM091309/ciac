@@ -65,6 +65,7 @@ function api(path: string) {
 const ACTION_LABELS: Record<string, string> = {
   LOGIN_SUCCESS: 'Login succeeded',
   LOGIN_FAILED: 'Login failed',
+  COOKIE_CONSENT_ACCEPTED: 'Cookie consent accepted',
   LOGOUT: 'Logged out',
   SESSION_EXPIRED: 'Session expired',
   SESSION_REVOKED: 'Session ended',
@@ -544,6 +545,8 @@ function describeActivity(row: AuditLogRow): string {
   switch (row.action) {
     case 'LOGIN_SUCCESS':
       return 'Signed in to the system';
+    case 'COOKIE_CONSENT_ACCEPTED':
+      return 'Agreed to cookies and activity/IP logging';
     case 'LOGIN_FAILED':
       return describeLoginFailure(d);
     case 'LOGOUT': {

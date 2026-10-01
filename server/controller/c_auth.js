@@ -123,6 +123,21 @@ exports.login = async (req, res) => {
       sessionId: result.session?.id,
       req,
     });
+    // Cookie / activity-logging consent from the login page notice — the
+    // client sends it until one successful login has recorded it.
+    const consent = req.body?.consent;
+    if (consent && consent.accepted_at) {
+      await AuditLog.record({
+        actorId: result.user?.id,
+        actorUsername: result.user?.username,
+        action: "COOKIE_CONSENT_ACCEPTED",
+        entityType: "user",
+        entityId: result.user?.id,
+        details: { version: Number(consent.version) || null, accepted_at: String(consent.accepted_at).slice(0, 40) },
+        sessionId: result.session?.id,
+        req,
+      });
+    }
     // Proponent-facing activity timeline ("Signed in" entries).
     ActivityLog.record({
       actorUserId: result.user?.id ?? null,

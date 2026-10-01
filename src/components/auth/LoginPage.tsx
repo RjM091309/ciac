@@ -3,6 +3,8 @@ import { AnimatePresence, motion, type Variants } from 'motion/react';
 import { AlertTriangle, ArrowLeft, ArrowRight, CheckCircle2, Copy, Eye, EyeOff, Info, KeyRound, Mail, Moon, Smartphone, Sun, Wrench } from 'lucide-react';
 import { passwordHint, validatePassword } from '../../lib/passwordPolicy';
 import { bannerHeading, resolveLogo, useSiteSettings } from '../../lib/siteSettings';
+import { getCookieConsent, markCookieConsentRecorded, saveCookieConsent, type CookieConsent as StoredConsent } from '../../lib/cookieConsent';
+import { CookieConsent } from './CookieConsent';
 
 type Enrollment = { otpauthUrl: string; secret: string; qrDataUrl: string };
 
@@ -29,8 +31,10 @@ async function loginRequest(args: {
   password: string;
   token?: string;
   newPassword?: string;
+  // Sent until one successful login has recorded it in the Audit Log.
+  consent?: StoredConsent | null;
 }): Promise<LoginResult> {
-  const { backendUrl, username, password, token, newPassword } = args;
+  const { backendUrl, username, password, token, newPassword, consent } = args;
   const res = await fetch(`${normalizeBaseUrl(backendUrl)}/api/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -40,6 +44,9 @@ async function loginRequest(args: {
       password,
       ...(token ? { token } : {}),
       ...(newPassword ? { newPassword } : {}),
+      ...(consent && !consent.recorded
+        ? { consent: { version: consent.version, accepted_at: consent.accepted_at } }
+        : {}),
     }),
   });
 
@@ -237,6 +244,10 @@ export function LoginPage(props: {
   onLoggedIn: (user: { id: number; username: string; role?: string }) => void;
 }) {
   const backend = useMemo(() => normalizeBaseUrl(props.backendUrl), [props.backendUrl]);
+  // Cookie / activity-logging consent — shown once per browser, before the
+  // first sign-in, and required to sign in (see CookieConsent.tsx).
+  const [consent, setConsent] = useState<StoredConsent | null>(() => getCookieConsent());
+  const [consentOpen, setConsentOpen] = useState(() => !getCookieConsent());
   // Names, images and rules from Portal Settings (src/lib/siteSettings.ts).
   const site = useSiteSettings();
   const brand = site.branding;
@@ -386,6 +397,10 @@ export function LoginPage(props: {
     // isn't mistaken for a failed attempt.
     const wasCodeStep = codeStep;
     const wasForceChangeStep = step === 'forceChangePassword';
+    if (!consent) {
+      setConsentOpen(true);
+      return;
+    }
     try {
       const result = await loginRequest({
         backendUrl: backend,
@@ -393,6 +408,7 @@ export function LoginPage(props: {
         password,
         token: codeStep ? code.replace(/\D/g, '') : undefined,
         newPassword: step === 'forceChangePassword' ? newPassword : undefined,
+        consent,
       });
 
       if (!result.ok) {
@@ -430,6 +446,7 @@ export function LoginPage(props: {
       }
 
       setMessage({ type: 'success', text: 'Login successful. Redirecting…' });
+      markCookieConsentRecorded();
       props.onLoggedIn(result.user || EMPTY_USER);
     } catch {
       setMessage({ type: 'error', text: 'Login error. Please try again.' });
@@ -469,6 +486,15 @@ export function LoginPage(props: {
   }`;
 
   return (
+    <>
+    <CookieConsent
+      open={consentOpen}
+      privacyUrl={brand.privacy_url}
+      onAccept={() => {
+        setConsent(saveCookieConsent());
+        setConsentOpen(false);
+      }}
+    />
     <div
       className="min-h-screen flex flex-col xl:flex-row overflow-x-hidden transition-all duration-300"
       style={{ backgroundColor: 'var(--background)', color: 'var(--foreground)' }}
@@ -1276,5 +1302,6 @@ export function LoginPage(props: {
       </div>
       </div>
     </div>
+    </>
   );
 }
