@@ -6,9 +6,20 @@ function toInt(v) {
 }
 
 
-// Legacy BRIDGE dbTOC master list (only its Description is kept — the legacy RefNo was just a running number). Kept in sync with
-// server/sql/002_type_of_contract.sql.
+// The Type of Contract master list, auto-inserted on boot when missing. Kept
+// in sync with server/sql/002_type_of_contract.sql.
 const DEFAULT_NAMES = [
+  "Direct Lease",
+  "Short Term Lease",
+  "Sublease",
+  "Memorandum of Understanding (MOU)",
+  "Memorandum of Agreement (MOA)",
+];
+
+// The legacy BRIDGE dbTOC names this list used to seed — replaced by
+// DEFAULT_NAMES. Deleted on boot (references cleared first) so they don't
+// linger from the old seed.
+const RETIRED_NAMES = [
   "LEASE AGREEMENT",
   "SHORT-TERM LEASE AGREEMENT",
   "SUPPLEMENTAL LEASE AGREEMENT",
@@ -17,15 +28,46 @@ const DEFAULT_NAMES = [
   "MEMORANDUM OF AGREEMENT",
 ];
 
+// Columns pointing at type_of_contract.id. Some are added by other models'
+// ensureSchema, so each is checked before it's touched.
+const REFERENCING_COLUMNS = [
+  ["contracts", "contract_type_id"],
+  ["proponents", "contract_type_id"],
+  ["applications", "contract_type_id"],
+];
+
+async function deleteRetiredNames() {
+  const placeholders = RETIRED_NAMES.map((_, i) => `@param${i}`).join(", ");
+  const rows = await selectData(
+    `SELECT id FROM dbo.type_of_contract WHERE name IN (${placeholders})`,
+    RETIRED_NAMES
+  );
+  const ids = rows.map((r) => Number(r.id)).filter(Number.isFinite);
+  if (!ids.length) return;
+  const idList = ids.join(", ");
+
+  for (const [table, column] of REFERENCING_COLUMNS) {
+    const exists = await selectData(`SELECT COL_LENGTH(@param0, @param1) AS l`, [`dbo.${table}`, column]);
+    if (exists?.[0]?.l == null) continue;
+    await updateData(`UPDATE dbo.${table} SET ${column} = NULL WHERE ${column} IN (${idList})`);
+  }
+  await updateData(`
+    IF OBJECT_ID('dbo.requirement_contract_types', 'U') IS NOT NULL
+      DELETE FROM dbo.requirement_contract_types WHERE contract_type_id IN (${idList});
+  `);
+  await updateData(`DELETE FROM dbo.type_of_contract WHERE id IN (${idList})`);
+}
+
 let defaultsSeeded = false;
 
-/** Inserts any default whose name is missing. Matched by name only, and rows are only
- * ever deactivated (never deleted), so this can't resurrect or overwrite anything an
- * admin changed. */
+/** Deletes the retired legacy names, then inserts any default whose name is
+ * missing. Matched by name only — anything else an admin added is never
+ * touched. */
 async function seedDefaults() {
   if (defaultsSeeded) return;
   defaultsSeeded = true;
   try {
+    await deleteRetiredNames();
     const values = DEFAULT_NAMES.map((_, i) => `(@param${i})`).join(", ");
     await updateData(
       `

@@ -7,7 +7,8 @@
 
   What it does
     1. dbo.type_of_contract table   (id, name + the standard audit columns; name is unique)
-    2. the 6 types from the legacy BRIDGE dbTOC (matched by name)
+    2. deletes the retired legacy BRIDGE dbTOC names (clearing references first), then
+       seeds the 5 current types (matched by name)
     3. contracts.contract_type_id + FK -> type_of_contract(id), when dbo.contracts exists
 
   The backend also does this by itself on boot (TypeOfContract.ensureSchema), so running this
@@ -31,16 +32,39 @@ BEGIN
 END
 GO
 
--- 2. seed ----------------------------------------------------------------------
+-- 2a. remove the retired legacy names -------------------------------------------
+IF OBJECT_ID('tempdb..#retired_toc') IS NOT NULL DROP TABLE #retired_toc;
+SELECT id INTO #retired_toc
+FROM dbo.type_of_contract
+WHERE name IN (
+  N'LEASE AGREEMENT',
+  N'SHORT-TERM LEASE AGREEMENT',
+  N'SUPPLEMENTAL LEASE AGREEMENT',
+  N'APPROVAL OF SUBLEASE AGREEMENT',
+  N'CONFIRMATION OF SUBLEASE AGREEMENT',
+  N'MEMORANDUM OF AGREEMENT'
+);
+IF COL_LENGTH('dbo.contracts', 'contract_type_id') IS NOT NULL
+  EXEC(N'UPDATE dbo.contracts SET contract_type_id = NULL WHERE contract_type_id IN (SELECT id FROM #retired_toc)');
+IF COL_LENGTH('dbo.proponents', 'contract_type_id') IS NOT NULL
+  EXEC(N'UPDATE dbo.proponents SET contract_type_id = NULL WHERE contract_type_id IN (SELECT id FROM #retired_toc)');
+IF COL_LENGTH('dbo.applications', 'contract_type_id') IS NOT NULL
+  EXEC(N'UPDATE dbo.applications SET contract_type_id = NULL WHERE contract_type_id IN (SELECT id FROM #retired_toc)');
+IF OBJECT_ID('dbo.requirement_contract_types', 'U') IS NOT NULL
+  EXEC(N'DELETE FROM dbo.requirement_contract_types WHERE contract_type_id IN (SELECT id FROM #retired_toc)');
+DELETE FROM dbo.type_of_contract WHERE id IN (SELECT id FROM #retired_toc);
+DROP TABLE #retired_toc;
+GO
+
+-- 2b. seed ----------------------------------------------------------------------
 INSERT INTO dbo.type_of_contract (name)
 SELECT v.name
 FROM (VALUES
-  (N'LEASE AGREEMENT'),
-  (N'SHORT-TERM LEASE AGREEMENT'),
-  (N'SUPPLEMENTAL LEASE AGREEMENT'),
-  (N'APPROVAL OF SUBLEASE AGREEMENT'),
-  (N'CONFIRMATION OF SUBLEASE AGREEMENT'),
-  (N'MEMORANDUM OF AGREEMENT')
+  (N'Direct Lease'),
+  (N'Short Term Lease'),
+  (N'Sublease'),
+  (N'Memorandum of Understanding (MOU)'),
+  (N'Memorandum of Agreement (MOA)')
 ) AS v(name)
 WHERE NOT EXISTS (SELECT 1 FROM dbo.type_of_contract x WHERE x.name = v.name);
 GO
