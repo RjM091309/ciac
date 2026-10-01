@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { CheckCircle2, Clock3, FileText, Loader2, Trash2, Upload, X, XCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { ConfirmModal } from '../ui/ConfirmModal';
+import { RequirementGroupTabs, useRequirementGroups } from '../ui/RequirementGroupTabs';
 
 // One application_requirements row for this locator, joined with its latest
 // upload — see listRequirementDocumentsByProponent in ApplicationWorkflow.js.
@@ -25,6 +26,8 @@ type RequirementDocRow = {
   file_name: string | null;
   uploaded_at: string | null;
   document_version: number | null;
+  category_id?: number | null;
+  category_name?: string | null;
 };
 
 // A file uploaded straight onto the locator (dbo.proponent_documents).
@@ -59,6 +62,9 @@ type RequirementOption = {
   for_renewal: boolean;
   // Types of Contract this requirement is limited to — empty = every type.
   contract_type_ids: number[];
+  // Requirement Category — groups the checklist into sub-tabs.
+  category_id: number | null;
+  category_name: string | null;
 };
 
 // Same palette as Assessment & Evaluation's requirement badges.
@@ -212,6 +218,8 @@ export function LocatorDocumentsTab({
     [options, contractTypeId],
   );
   const applicableIds = useMemo(() => new Set(applicable.map((o) => o.id)), [applicable]);
+  // Requirement Category sub-tabs over the checklist (shared component).
+  const checklistGroups = useRequirementGroups(applicable);
   // Files already uploaded under a requirement that no longer applies (e.g.
   // the Type of Contract changed) stay visible, flagged, rather than silently hidden.
   const notApplicableUploads = useMemo(
@@ -397,9 +405,9 @@ export function LocatorDocumentsTab({
     );
   }
 
-  const uploadedCount = applicable.filter((o) =>
-    proponentId ? uploadsByRequirement.has(o.id) : pending.some((p) => p.requirement_id === String(o.id)),
-  ).length;
+  const isUploaded = (o: RequirementOption) =>
+    proponentId ? uploadsByRequirement.has(o.id) : pending.some((p) => p.requirement_id === String(o.id));
+  const uploadedCount = applicable.filter(isUploaded).length;
 
   return (
     <div className="flex flex-col gap-4">
@@ -419,6 +427,18 @@ export function LocatorDocumentsTab({
             {uploadedCount}/{applicable.length} uploaded
           </div>
         </div>
+
+        {checklistGroups.showTabs ? (
+          <div className="px-3 pt-2.5 pb-2 border-b" style={BORDER}>
+            <RequirementGroupTabs
+              tabs={checklistGroups.tabs}
+              activeKey={checklistGroups.current.key}
+              onChange={checklistGroups.setActiveKey}
+              isDone={isUploaded}
+              doneLabel="uploaded"
+            />
+          </div>
+        ) : null}
 
         <input
           ref={fileInputRef}
@@ -455,7 +475,7 @@ export function LocatorDocumentsTab({
                   </td>
                 </tr>
               ) : null}
-              {applicable.map((o) => {
+              {checklistGroups.current.items.map((o) => {
                 const hit = uploadsByRequirement.get(o.id);
                 const queued = pending.find((p) => p.requirement_id === String(o.id)) || null;
                 return renderRow({
@@ -470,7 +490,7 @@ export function LocatorDocumentsTab({
                 });
               })}
 
-              {notApplicableUploads
+              {(checklistGroups.isAll ? notApplicableUploads : [])
                 .filter((u) => uploadsByRequirement.get(u.requirement_id as number)?.latest.id === u.id)
                 .map((u) =>
                   renderRow({
@@ -490,7 +510,7 @@ export function LocatorDocumentsTab({
                   }),
                 )}
 
-              {(proponentId ? otherUploads : []).map((u) =>
+              {(proponentId && checklistGroups.isAll ? otherUploads : []).map((u) =>
                 renderRow({
                   key: `other-${u.id}`,
                   title: <span className="font-semibold">{u.document_name || 'Other document'}</span>,
@@ -502,7 +522,7 @@ export function LocatorDocumentsTab({
                   rowBusy: false,
                 }),
               )}
-              {(proponentId ? [] : otherPending).map((p) =>
+              {(!proponentId && checklistGroups.isAll ? otherPending : []).map((p) =>
                 renderRow({
                   key: `other-q-${p.key}`,
                   title: <span className="font-semibold">{p.label}</span>,
@@ -559,98 +579,114 @@ function StatusChip({ text, color, bg }: { text: string; color: string; bg: stri
 function ApplicationDocuments({ groups }: { groups: RequirementDocRow[][] }) {
   return (
     <div className="flex flex-col gap-4">
-      {groups.map((items) => {
-        const head = items[0];
-        const verified = items.filter((r) => r.status === 'VERIFIED').length;
-        return (
-          <div key={head.application_id} className="rounded-lg border overflow-hidden" style={BORDER}>
-            <div
-              className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 border-b"
-              style={{ backgroundColor: 'var(--control-bg)', ...BORDER }}
-            >
-              <div className="text-xs font-semibold" style={{ color: 'var(--text)' }}>
-                {head.application_no}
-                <span className="ml-2 font-normal text-secondary">
-                  {head.application_type || ''}
-                  {head.is_renewal ? ' · Renewal' : ''} · {head.application_status || '—'} · Filed {fmtDate(head.application_created_at)}
-                </span>
-              </div>
-              <div className="text-[11px] text-secondary tabular-nums">
-                {verified}/{items.length} verified
-              </div>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs border-collapse">
-                <thead>
-                  <tr>
-                    {['Requirement', 'Document', 'Uploaded', 'Status', 'Remarks', 'Processed By'].map((h) => (
-                      <th key={h} className={TH} style={{ ...BORDER, color: 'var(--text-muted)' }}>
-                        {h}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {items.map((r) => {
-                    const s = STATUS_STYLE[r.status] || STATUS_STYLE.PENDING;
-                    return (
-                      <tr key={r.id}>
-                        <td className={TD} style={{ ...BORDER, color: 'var(--text)' }}>
-                          {r.requirement_name || r.requirement_code || '—'}
-                          {r.is_mandatory ? <span style={{ color: '#ef4444' }}> *</span> : null}
-                        </td>
-                        <td className={TD} style={BORDER}>
-                          {r.document_id ? (
-                            <button
-                              type="button"
-                              className="inline-flex items-center gap-1 hover:underline text-left cursor-pointer"
-                              style={{ color: 'var(--primary, #2563eb)' }}
-                              onClick={() => window.open(`/api/documents/${r.document_id}/download?view=1`, '_blank')}
-                            >
-                              <FileText className="w-3.5 h-3.5 shrink-0" />
-                              <span className="break-all">{r.original_file_name || r.file_name}</span>
-                              {r.document_version && r.document_version > 1 ? (
-                                <span className="text-secondary">(V{r.document_version})</span>
-                              ) : null}
-                            </button>
-                          ) : (
-                            <span className="text-secondary">Not uploaded</span>
-                          )}
-                        </td>
-                        <td className={`${TD} whitespace-nowrap text-secondary`} style={BORDER}>
-                          {fmtDate(r.uploaded_at)}
-                        </td>
-                        <td className={TD} style={BORDER}>
-                          <span
-                            className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold whitespace-nowrap"
-                            style={{ color: s.color, backgroundColor: s.bg }}
-                          >
-                            <s.Icon className="w-3 h-3" />
-                            {s.label}
-                          </span>
-                        </td>
-                        <td className={`${TD} text-secondary`} style={BORDER}>
-                          {r.remarks || '—'}
-                        </td>
-                        <td className={`${TD} whitespace-nowrap`} style={BORDER}>
-                          {r.status !== 'PENDING' && r.reviewed_by_name ? (
-                            <>
-                              <div style={{ color: 'var(--text)' }}>{r.reviewed_by_name}</div>
-                              <div className="text-[10px] text-secondary">{fmtDate(r.updated_at)}</div>
-                            </>
-                          ) : (
-                            <span className="text-secondary">—</span>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        );
-      })}
+      {groups.map((items) => (
+        <ApplicationDocumentsCard key={items[0].application_id} items={items} />
+      ))}
+    </div>
+  );
+}
+
+function ApplicationDocumentsCard({ items }: { items: RequirementDocRow[] }) {
+  const head = items[0];
+  const verified = items.filter((r) => r.status === 'VERIFIED').length;
+  const reqGroups = useRequirementGroups(items);
+  return (
+    <div className="rounded-lg border overflow-hidden" style={BORDER}>
+      <div
+        className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 border-b"
+        style={{ backgroundColor: 'var(--control-bg)', ...BORDER }}
+      >
+        <div className="text-xs font-semibold" style={{ color: 'var(--text)' }}>
+          {head.application_no}
+          <span className="ml-2 font-normal text-secondary">
+            {head.application_type || ''}
+            {head.is_renewal ? ' · Renewal' : ''} · {head.application_status || '—'} · Filed {fmtDate(head.application_created_at)}
+          </span>
+        </div>
+        <div className="text-[11px] text-secondary tabular-nums">
+          {verified}/{items.length} verified
+        </div>
+      </div>
+      {reqGroups.showTabs ? (
+        <div className="px-3 pt-2.5 pb-2 border-b" style={BORDER}>
+          <RequirementGroupTabs
+            tabs={reqGroups.tabs}
+            activeKey={reqGroups.current.key}
+            onChange={reqGroups.setActiveKey}
+            isDone={(r) => r.status === 'VERIFIED'}
+            isFlagged={(r) => r.status === 'REJECTED'}
+          />
+        </div>
+      ) : null}
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs border-collapse">
+          <thead>
+            <tr>
+              {['Requirement', 'Document', 'Uploaded', 'Status', 'Remarks', 'Processed By'].map((h) => (
+                <th key={h} className={TH} style={{ ...BORDER, color: 'var(--text-muted)' }}>
+                  {h}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {reqGroups.current.items.map((r) => {
+              const s = STATUS_STYLE[r.status] || STATUS_STYLE.PENDING;
+              return (
+                <tr key={r.id}>
+                  <td className={TD} style={{ ...BORDER, color: 'var(--text)' }}>
+                    {r.requirement_name || r.requirement_code || '—'}
+                    {r.is_mandatory ? <span style={{ color: '#ef4444' }}> *</span> : null}
+                  </td>
+                  <td className={TD} style={BORDER}>
+                    {r.document_id ? (
+                      <button
+                        type="button"
+                        className="inline-flex items-center gap-1 hover:underline text-left cursor-pointer"
+                        style={{ color: 'var(--primary, #2563eb)' }}
+                        onClick={() => window.open(`/api/documents/${r.document_id}/download?view=1`, '_blank')}
+                      >
+                        <FileText className="w-3.5 h-3.5 shrink-0" />
+                        <span className="break-all">{r.original_file_name || r.file_name}</span>
+                        {r.document_version && r.document_version > 1 ? (
+                          <span className="text-secondary">(V{r.document_version})</span>
+                        ) : null}
+                      </button>
+                    ) : (
+                      <span className="text-secondary">Not uploaded</span>
+                    )}
+                  </td>
+                  <td className={`${TD} whitespace-nowrap text-secondary`} style={BORDER}>
+                    {fmtDate(r.uploaded_at)}
+                  </td>
+                  <td className={TD} style={BORDER}>
+                    <span
+                      className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold whitespace-nowrap"
+                      style={{ color: s.color, backgroundColor: s.bg }}
+                    >
+                      <s.Icon className="w-3 h-3" />
+                      {s.label}
+                    </span>
+                  </td>
+                  <td className={`${TD} text-secondary`} style={BORDER}>
+                    {r.remarks || '—'}
+                  </td>
+                  <td className={`${TD} whitespace-nowrap`} style={BORDER}>
+                    {r.status !== 'PENDING' && r.reviewed_by_name ? (
+                      <>
+                        <div style={{ color: 'var(--text)' }}>{r.reviewed_by_name}</div>
+                        <div className="text-[10px] text-secondary">{fmtDate(r.updated_at)}</div>
+                      </>
+                    ) : (
+                      <span className="text-secondary">—</span>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

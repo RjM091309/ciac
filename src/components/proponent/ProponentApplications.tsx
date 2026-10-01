@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowLeft, CheckCircle2, ChevronRight, ClipboardList, FileText, History, Loader2, MessageSquare, ScrollText, Send, Table2, Upload, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { EmptyState } from '../ui/EmptyState';
+import { RequirementGroupTabs, useRequirementGroups } from '../ui/RequirementGroupTabs';
 import { getStatusBadgeStyles } from '../dashboard/statusBadge';
 import { applicationTypeLabel } from '../../lib/applicationTypes';
 import { clearLocatorSetupSkipAndReload } from '../../lib/locatorSetup';
@@ -33,7 +34,12 @@ type RequirementRow = {
   is_mandatory: number | boolean;
   acknowledged_at?: string | null;
   acknowledged_by?: number | null;
+  // Requirement Category — groups the Requirements tab into sub-tabs.
+  category_id?: number | null;
+  category_name?: string | null;
 };
+
+const NO_REQUIREMENTS: RequirementRow[] = [];
 
 type RequirementComment = {
   id: number;
@@ -525,6 +531,10 @@ function ApplicationDetail({
     </button>
   );
 
+  // Requirement Category sub-tabs (same grouping as Assessment's Compliance
+  // tab). Called before the loading/error returns to keep hook order fixed.
+  const reqGroups = useRequirementGroups(data?.requirements ?? NO_REQUIREMENTS);
+
   if (loading) {
     return (
       <div>
@@ -548,6 +558,7 @@ function ApplicationDetail({
   }
 
   const { application: app, requirements, documents, history, contract, permits } = data;
+  const visibleRequirements = reqGroups.current.items;
 
   // History tab: status changes and document uploads merged into one
   // chronological trail (both already come back newest-first) instead of
@@ -702,13 +713,25 @@ function ApplicationDetail({
             PDF only · up to 50 MB. Use Upload/Reupload on a row below.
           </p>
 
+          {reqGroups.showTabs ? (
+            <div className="mb-3">
+              <RequirementGroupTabs
+                tabs={reqGroups.tabs}
+                activeKey={reqGroups.current.key}
+                onChange={reqGroups.setActiveKey}
+                isDone={(r) => r.status === 'VERIFIED'}
+                isFlagged={(r) => r.status === 'REJECTED'}
+              />
+            </div>
+          ) : null}
+
           {requirements.length === 0 ? (
             <EmptyState title="No requirements" description="No requirement checklist has been attached to this application yet." />
           ) : (
             <>
               {/* Mobile: card list — a 6-column <table> forces horizontal scrolling on narrow screens. */}
               <div className="sm:hidden space-y-2.5">
-                {requirements.map((r) => {
+                {visibleRequirements.map((r) => {
                   const doc = documents.find((d) => d.requirement_id === r.requirement_id);
                   return (
                     <div
@@ -799,7 +822,7 @@ function ApplicationDetail({
                     </tr>
                   </thead>
                   <tbody>
-                    {requirements.map((r) => {
+                    {visibleRequirements.map((r) => {
                       // Most recent first (documents ordered DESC by id) — after a
                       // reject-and-reupload, this is the latest file for the row.
                       const doc = documents.find((d) => d.requirement_id === r.requirement_id);

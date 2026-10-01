@@ -111,8 +111,9 @@ async function remove(id) {
  * locator's Type of Contract. */
 async function listRequirementOptions() {
   const rows = await selectData(`
-    SELECT r.id, r.code, r.name, r.is_mandatory, r.for_new, r.for_renewal
+    SELECT r.id, r.code, r.name, r.is_mandatory, r.for_new, r.for_renewal, r.category_id, rc.name AS category_name
     FROM dbo.requirements r
+    LEFT JOIN dbo.requirement_categories rc ON rc.id = r.category_id
     WHERE r.is_active = 1 AND ISNULL(r.is_ad_hoc, 0) = 0
     ORDER BY r.name ASC
   `);
@@ -130,6 +131,8 @@ async function listRequirementOptions() {
     is_mandatory: Boolean(r.is_mandatory),
     for_new: Boolean(r.for_new),
     for_renewal: Boolean(r.for_renewal),
+    category_id: r.category_id ?? null,
+    category_name: r.category_name ?? null,
     contract_type_ids: byReq.get(r.id) || [],
   }));
 }

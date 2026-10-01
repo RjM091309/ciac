@@ -1747,6 +1747,8 @@ async function listRequirementDocumentsByProponent(proponentId) {
       r.code AS requirement_code,
       r.name AS requirement_name,
       r.is_mandatory,
+      r.category_id,
+      rc.name AS category_name,
       a.application_no,
       a.application_type,
       a.is_renewal,
@@ -1761,6 +1763,7 @@ async function listRequirementDocumentsByProponent(proponentId) {
     FROM dbo.application_requirements ar
     INNER JOIN dbo.applications a ON a.id = ar.application_id
     INNER JOIN dbo.requirements r ON r.id = ar.requirement_id
+    LEFT JOIN dbo.requirement_categories rc ON rc.id = r.category_id
     LEFT JOIN dbo.users u ON u.id = ar.updated_by
     OUTER APPLY (
       SELECT TOP (1) x.id, x.original_file_name, x.file_name, x.created_at,
