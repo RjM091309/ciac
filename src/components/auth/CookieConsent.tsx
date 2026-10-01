@@ -1,14 +1,10 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { createPortal } from 'react-dom';
 import { Cookie } from 'lucide-react';
 
-// Required notice before signing in: the system uses cookies to keep the
-// session secure, and records what each user encodes/changes together with
-// their IP address and browser (Audit Log). Both are needed for the system to
-// work, so declining means not signing in — the notice comes back until
-// accepted.
-
-type View = 'notice' | 'declined';
+// Required notice before signing in. Agreeing unlocks the login form;
+// declining leaves the system for the CIAC public website.
+const DECLINE_REDIRECT_URL = 'https://www.ciac.gov.ph';
 
 export function CookieConsent({
   open,
@@ -19,7 +15,6 @@ export function CookieConsent({
   privacyUrl?: string | null;
   onAccept: () => void;
 }) {
-  const [view, setView] = useState<View>('notice');
   if (!open) return null;
 
   const primaryBtn =
@@ -47,24 +42,14 @@ export function CookieConsent({
             <Cookie size={18} />
           </span>
           <h2 id="cookie-consent-title" className="text-lg font-bold">
-            {view === 'declined' ? 'Consent required' : 'We use cookies'}
+            We use cookies
           </h2>
         </div>
 
-        {view === 'notice' ? (
-          <p className="text-[13px] leading-relaxed text-secondary">
-            This platform utilizes cookies and tracking technologies to optimize browsing functionality, evaluate website
-            traffic patterns, and analyze user acquisition sources.
-          </p>
-        ) : null}
-
-        {view === 'declined' ? (
-          <p className="text-[13px] leading-relaxed text-secondary">
-            Signing in requires agreeing to cookies and activity/IP logging — every action in the system is recorded
-            for accountability. If you'd rather not, you can close this page. You can review the notice again
-            anytime.
-          </p>
-        ) : null}
+        <p className="text-[13px] leading-relaxed text-secondary">
+          This platform utilizes cookies and tracking technologies to optimize browsing functionality, evaluate website
+          traffic patterns, and analyze user acquisition sources.
+        </p>
 
         {privacyUrl ? (
           <a
@@ -78,36 +63,23 @@ export function CookieConsent({
         ) : null}
 
         <div className="mt-5 flex flex-wrap gap-2">
-          {view === 'declined' ? (
-            <button
-              type="button"
-              className={primaryBtn}
-              style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
-              onClick={() => setView('notice')}
-            >
-              Review the notice again
-            </button>
-          ) : (
-            <>
-              <button
-                type="button"
-                className={primaryBtn}
-                style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
-                onClick={onAccept}
-                autoFocus
-              >
-                I agree
-              </button>
-              <button
-                type="button"
-                className={secondaryBtn}
-                style={{ borderColor: 'var(--border)', color: 'var(--text)' }}
-                onClick={() => setView('declined')}
-              >
-                I decline
-              </button>
-            </>
-          )}
+          <button
+            type="button"
+            className={primaryBtn}
+            style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
+            onClick={onAccept}
+            autoFocus
+          >
+            I agree
+          </button>
+          <button
+            type="button"
+            className={secondaryBtn}
+            style={{ borderColor: 'var(--border)', color: 'var(--text)' }}
+            onClick={() => window.location.assign(DECLINE_REDIRECT_URL)}
+          >
+            I decline
+          </button>
         </div>
       </div>
     </div>,
