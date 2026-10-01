@@ -39,8 +39,8 @@ async function createSchema() {
       CREATE INDEX IX_requirement_categories_name ON dbo.requirement_categories(name);
     END
 
-    -- A category's application types are derived from the requirements
-    -- filed under it (requirement_application_types); the old
+    -- A category's contract types are derived from the requirements
+    -- filed under it (requirement_contract_types); the old
     -- requirement_category_application_types table is dropped at startup
     -- by config/legacyTables.js.
 
@@ -65,34 +65,34 @@ function mapRow(rc) {
     updated_at: rc.updated_at ?? null,
     is_active: rc.is_active,
     deactivated_via_cascade: rc.deactivated_via_cascade ?? 0,
-    // Populated by the caller from a second query — the types its
+    // Populated by the caller from a second query — the contract types its
     // requirements are tagged to (read-only, derived).
-    application_types: [],
+    contract_type_ids: [],
   };
 }
 
-/** Attaches each row's application_types — every type any requirement in the
- * category is tagged to — in one extra query instead of N+1. Mutates and
- * returns the same array for convenience. */
-async function attachApplicationTypes(rows) {
+/** Attaches each row's contract_type_ids — every contract type any
+ * requirement in the category is tagged to — in one extra query instead of
+ * N+1. Mutates and returns the same array for convenience. */
+async function attachContractTypes(rows) {
   if (!rows.length) return rows;
   const ids = rows.map((r) => r.id);
   const placeholders = ids.map((_, i) => `@param${i}`).join(", ");
   const linkRows = await selectData(
-    `SELECT DISTINCT r.category_id, rat.application_type
+    `SELECT DISTINCT r.category_id, rct.contract_type_id
      FROM dbo.requirements r
-     INNER JOIN dbo.requirement_application_types rat ON rat.requirement_id = r.id
+     INNER JOIN dbo.requirement_contract_types rct ON rct.requirement_id = r.id
      WHERE r.category_id IN (${placeholders})`,
     ids
   );
   const byCategory = new Map();
   linkRows.forEach((r) => {
     const list = byCategory.get(r.category_id) || [];
-    list.push(r.application_type);
+    list.push(Number(r.contract_type_id));
     byCategory.set(r.category_id, list);
   });
   rows.forEach((r) => {
-    r.application_types = byCategory.get(r.id) || [];
+    r.contract_type_ids = byCategory.get(r.id) || [];
   });
   return rows;
 }
@@ -113,7 +113,7 @@ async function listRequirementCategories() {
     FROM dbo.requirement_categories rc
     ORDER BY rc.id DESC
   `);
-  return attachApplicationTypes(rows.map(mapRow));
+  return attachContractTypes(rows.map(mapRow));
 }
 
 async function getRequirementCategoryById(id) {
@@ -138,7 +138,7 @@ async function getRequirementCategoryById(id) {
 
   const row = rows?.[0];
   if (!row) return null;
-  const [mapped] = await attachApplicationTypes([mapRow(row)]);
+  const [mapped] = await attachContractTypes([mapRow(row)]);
   return mapped;
 }
 

@@ -261,13 +261,13 @@ export const LANDING_CONFIG: Record<AppView, LandingConfig> = {
     },
   },
   'settings:application-types': {
-    title: 'Application Types',
-    description: 'Define the lease application types locators and staff can select when filing.',
+    title: 'Industry Type',
+    description: 'Maintain the industry types a locator can be classified under.',
     badge: 'Configuration',
     icon: Layers,
     isCrud: true,
     stats: [
-      { label: 'Application Types', value: '—' },
+      { label: 'Industry Types', value: '—' },
       { label: 'Active Types', value: '—' },
       { label: 'Deactivated', value: '—' },
     ],

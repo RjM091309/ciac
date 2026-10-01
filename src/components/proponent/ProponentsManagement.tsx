@@ -1790,7 +1790,7 @@ export function ProponentsManagement({
                 ) : activeProfileTab === 'Documents' ? (
                   <LocatorDocumentsTab
                     proponentId={editing?.id ?? null}
-                    industryCode={industryDerived ? editing?.effective_industry_code ?? null : form.industry_code || null}
+                    contractTypeId={form.contract_type_id ? Number(form.contract_type_id) : null}
                     pending={pendingDocs}
                     onPendingChange={setPendingDocs}
                   />

@@ -106,9 +106,9 @@ async function remove(id) {
 
 /** Active catalog requirements for the Documents checklist, with the same
  * restriction flags application filing uses (ApplicationWorkflow's
- * requirement insert): for_new/for_renewal plus the application types the
+ * requirement insert): for_new/for_renewal plus the contract types the
  * requirement is limited to (empty = every type). The tab filters by the
- * locator's Industry. */
+ * locator's Type of Contract. */
 async function listRequirementOptions() {
   const rows = await selectData(`
     SELECT r.id, r.code, r.name, r.is_mandatory, r.for_new, r.for_renewal
@@ -116,11 +116,11 @@ async function listRequirementOptions() {
     WHERE r.is_active = 1 AND ISNULL(r.is_ad_hoc, 0) = 0
     ORDER BY r.name ASC
   `);
-  const types = await selectData(`SELECT requirement_id, application_type FROM dbo.requirement_application_types`);
+  const types = await selectData(`SELECT requirement_id, contract_type_id FROM dbo.requirement_contract_types`);
   const byReq = new Map();
   for (const t of types) {
     const list = byReq.get(t.requirement_id) || [];
-    list.push(String(t.application_type || "").toUpperCase());
+    list.push(Number(t.contract_type_id));
     byReq.set(t.requirement_id, list);
   }
   return rows.map((r) => ({
@@ -130,7 +130,7 @@ async function listRequirementOptions() {
     is_mandatory: Boolean(r.is_mandatory),
     for_new: Boolean(r.for_new),
     for_renewal: Boolean(r.for_renewal),
-    application_types: byReq.get(r.id) || [],
+    contract_type_ids: byReq.get(r.id) || [],
   }));
 }
 

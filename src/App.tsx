@@ -892,8 +892,8 @@ const LANDING_CONFIG: Record<AppView, LandingConfig> = {
     },
   },
   'settings:application-types': {
-    title: 'Application Types',
-    description: 'Manage lease application types for file maintenance.',
+    title: 'Industry Type',
+    description: 'Manage industry types for file maintenance.',
     badge: 'File Maintenance',
     icon: FileCheck,
     stats: [

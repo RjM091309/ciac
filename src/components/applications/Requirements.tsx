@@ -14,7 +14,7 @@ import { RequirementCategoriesManagement } from './RequirementCategories';
 import { useControlPanelAccess } from '../../context/ControlPanelAccessContext';
 
 const MENU_KEY = 'applications:requirements';
-const MENU_KEY_TYPES = 'settings:application-types';
+const MENU_KEY_TYPES = 'settings:type-of-contract';
 const MENU_KEY_CATEGORIES = 'applications:requirements';
 
 type RequirementRow = {
@@ -28,9 +28,9 @@ type RequirementRow = {
   for_renewal: number;
   is_mandatory: number;
   is_active: number;
-  // Application type codes this requirement is restricted to. Empty = applies
-  // to every application type (the historical, unrestricted default).
-  application_types: string[];
+  // Type of Contract ids (as strings — the tree keys types by string) this
+  // requirement is restricted to. Empty = applies to every contract type.
+  contract_types: string[];
   created_by: number | null;
   updated_by: number | null;
   created_at?: string | null;
@@ -42,23 +42,24 @@ type CategoryRow = {
   name: string;
   description?: string | null;
   is_active: number;
-  // Application type codes this category is restricted to. Empty = applies
-  // to every application type (same convention as RequirementRow above).
-  application_types?: string[];
+  // Contract type ids its requirements are tagged to (server-derived).
+  // Empty = untagged (same convention as RequirementRow above).
+  contract_types?: string[];
 };
 
-type ApplicationTypeRow = {
+// File Maintenance > Type of Contract. `code` is the id as a string — the
+// tree/selection logic below keys types by that string.
+type ContractTypeRow = {
   id: number;
   code: string;
   name: string;
-  description?: string | null;
   is_active: number;
 };
 
 type RequirementsData = {
   items: RequirementRow[];
   categories: CategoryRow[];
-  applicationTypes: ApplicationTypeRow[];
+  contractTypes: ContractTypeRow[];
 };
 
 function api(path: string) {
@@ -96,13 +97,13 @@ export function RequirementsManagement() {
 
   const { data: requirementsData, isLoading, isRevalidating, refresh } =
     useSessionStorageCachedResource<RequirementsData>({
-      cacheKey: 'ciac.requirements.categories_and_items.v1',
+      cacheKey: 'ciac.requirements.categories_and_items.v2',
       ttlMs: 5 * 60 * 1000, // 5 minutes
       fetcher: async () => {
         const [rRes, cRes, atRes] = await Promise.all([
           fetch(api('/api/requirements'), { credentials: 'include' }),
           fetch(api('/api/requirement-categories'), { credentials: 'include' }),
-          fetch(api('/api/application-types'), { credentials: 'include' }),
+          fetch(api('/api/type-of-contract'), { credentials: 'include' }),
         ]);
 
         const rJson = await rRes.json().catch(() => ({}));
@@ -111,7 +112,7 @@ export function RequirementsManagement() {
 
         if (!rRes.ok) throw new Error(rJson?.message || 'Failed to load requirements');
         if (!cRes.ok) throw new Error(cJson?.message || 'Failed to load requirement categories');
-        if (!atRes.ok) throw new Error(atJson?.message || 'Failed to load application types');
+        if (!atRes.ok) throw new Error(atJson?.message || 'Failed to load types of contract');
 
         return {
           items: (rJson.data || []).map((item: any) => ({
@@ -120,18 +121,17 @@ export function RequirementsManagement() {
             for_renewal: Number(item?.for_renewal) ? 1 : 0,
             is_mandatory: Number(item?.is_mandatory) ? 1 : 0,
             is_active: Number(item?.is_active) ? 1 : 0,
-            application_types: Array.isArray(item?.application_types) ? item.application_types : [],
+            contract_types: Array.isArray(item?.contract_type_ids) ? item.contract_type_ids.map(String) : [],
           })),
           categories: (cJson.data || []).map((c: any) => ({
             ...c,
             is_active: Number(c?.is_active) ? 1 : 0,
-            application_types: Array.isArray(c?.application_types) ? c.application_types : [],
+            contract_types: Array.isArray(c?.contract_type_ids) ? c.contract_type_ids.map(String) : [],
           })),
-          applicationTypes: (atJson.data || []).map((t: any) => ({
+          contractTypes: (atJson.data || []).map((t: any) => ({
             id: t.id,
-            code: t.code,
+            code: String(t.id),
             name: t.name,
-            description: t.description ?? null,
             is_active: Number(t?.is_active) ? 1 : 0,
           })),
         };
@@ -145,7 +145,7 @@ export function RequirementsManagement() {
 
   const items = requirementsData?.items ?? [];
   const categories = requirementsData?.categories ?? [];
-  const applicationTypes = requirementsData?.applicationTypes ?? [];
+  const contractTypes = requirementsData?.contractTypes ?? [];
 
   const [form, setForm] = useState({
     code: '',
@@ -155,16 +155,16 @@ export function RequirementsManagement() {
     for_new: true,
     for_renewal: true,
     is_mandatory: true,
-    application_types: [] as string[],
+    contract_types: [] as string[],
   });
 
-  // --- Inline CRUD for Application Type / Requirement Category, launched
+  // --- Inline CRUD for Type of Contract / Requirement Category, launched
   // directly from the tree so managing the catalog doesn't require leaving
   // this page for the dedicated settings screens. ---
-  const [editingType, setEditingType] = useState<ApplicationTypeRow | null>(null);
+  const [editingType, setEditingType] = useState<ContractTypeRow | null>(null);
   const [isTypePanelOpen, setIsTypePanelOpen] = useState(false);
   const [confirmDeactivateTypeId, setConfirmDeactivateTypeId] = useState<number | null>(null);
-  const [typeForm, setTypeForm] = useState({ code: '', name: '', description: '' });
+  const [typeForm, setTypeForm] = useState({ name: '' });
 
   const [editingCategory, setEditingCategory] = useState<CategoryRow | null>(null);
   const [isCategoryPanelOpen, setIsCategoryPanelOpen] = useState(false);
@@ -176,22 +176,22 @@ export function RequirementsManagement() {
     [categories]
   );
 
-  const activeApplicationTypes = useMemo(
-    () => applicationTypes.filter((t) => t.is_active === 1),
-    [applicationTypes]
+  const activeContractTypes = useMemo(
+    () => contractTypes.filter((t) => t.is_active === 1),
+    [contractTypes]
   );
 
-  const applicationTypeNameByCode = useMemo(() => {
+  const contractTypeNameByCode = useMemo(() => {
     const map: Record<string, string> = {};
-    applicationTypes.forEach((t) => { map[t.code] = t.name; });
+    contractTypes.forEach((t) => { map[t.code] = t.name; });
     return map;
-  }, [applicationTypes]);
+  }, [contractTypes]);
 
-  const applicationTypeByCode = useMemo(() => {
-    const map = new Map<string, ApplicationTypeRow>();
-    applicationTypes.forEach((t) => map.set(t.code, t));
+  const contractTypeByCode = useMemo(() => {
+    const map = new Map<string, ContractTypeRow>();
+    contractTypes.forEach((t) => map.set(t.code, t));
     return map;
-  }, [applicationTypes]);
+  }, [contractTypes]);
 
   const categoryById = useMemo(() => {
     const map = new Map<string, CategoryRow>();
@@ -199,9 +199,9 @@ export function RequirementsManagement() {
     return map;
   }, [categories]);
 
-  function applicationTypesLabel(codes: string[]) {
-    if (!codes || codes.length === 0) return 'All types';
-    return codes.map((c) => applicationTypeNameByCode[c] || c).join(', ');
+  function contractTypesLabel(codes: string[]) {
+    if (!codes || codes.length === 0) return 'All contract types';
+    return codes.map((c) => contractTypeNameByCode[c] || c).join(', ');
   }
 
   const stats = useMemo(() => {
@@ -213,9 +213,9 @@ export function RequirementsManagement() {
   const activeItems = useMemo(() => items.filter((i) => i.is_active === 1), [items]);
   const deactivatedItems = useMemo(() => items.filter((i) => i.is_active === 0), [items]);
 
-  // --- 3-panel dynamic browser: Application Type -> Requirement Category -> Requirements ---
+  // --- 3-panel dynamic browser: Type of Contract -> Requirement Category -> Requirements ---
   // Browsing here uses explicit tagging only — a requirement/category with an
-  // empty application_types array ("unrestricted", applies everywhere when
+  // empty contract_types array ("unrestricted", applies everywhere when
   // actually filing an application) still shows up under "All Types", but
   // does NOT auto-count toward a specific type's node until it's explicitly
   // tagged to it. Otherwise a brand-new type would immediately inherit every
@@ -233,7 +233,7 @@ export function RequirementsManagement() {
   const [isTreeOpenMobile, setIsTreeOpenMobile] = useState(false);
 
   function appliesToType(item: RequirementRow, code: string) {
-    return item.application_types.includes(code);
+    return item.contract_types.includes(code);
   }
 
   const itemsForSelectedType = useMemo(() => {
@@ -243,20 +243,20 @@ export function RequirementsManagement() {
   }, [activeItems, selectedTypeCode]);
 
   function categoryAppliesToType(category: CategoryRow, code: string) {
-    return (category.application_types || []).includes(code);
+    return (category.contract_types || []).includes(code);
   }
 
   // Built together so a Type's badge always matches exactly what its
   // expanded category list shows (same membership rule, computed once).
   // A category counts under a type if any of its requirements (active or
-  // not — the server derives category.application_types from all of them)
+  // not — the server derives category.contract_types from all of them)
   // is tagged to that type, or it has active items under that type.
   // Inactive types/categories stay IN the tree (faded, see JSX below) rather
   // than disappearing, so a deactivate is easy to spot and undo right there.
   const { typePanelOptions, categoryOptionsByType } = useMemo(() => {
     const typesToWalk = [
-      { code: '__all__', name: 'All Types', is_active: 1 },
-      ...applicationTypes.map((t) => ({ code: t.code, name: t.name, is_active: t.is_active })),
+      { code: '__all__', name: 'All Contract Types', is_active: 1 },
+      ...contractTypes.map((t) => ({ code: t.code, name: t.name, is_active: t.is_active })),
     ];
 
     const categoryMap = new Map<string, { key: string; name: string; count: number; is_active: number }[]>();
@@ -299,7 +299,7 @@ export function RequirementsManagement() {
     }
 
     return { typePanelOptions: typeOptions, categoryOptionsByType: categoryMap };
-  }, [applicationTypes, activeItems, categories]);
+  }, [contractTypes, activeItems, categories]);
 
   // Search over the tree itself — matches a Type's own name, or falls
   // through to any of its Categories' names so a category match still
@@ -367,7 +367,7 @@ export function RequirementsManagement() {
         (i.description || '').toLowerCase().includes(q) ||
         (i.category_name || '').toLowerCase().includes(q) ||
         flags.includes(q) ||
-        applicationTypesLabel(i.application_types).toLowerCase().includes(q)
+        contractTypesLabel(i.contract_types).toLowerCase().includes(q)
       );
     });
   }, [panelFilteredItems, searchQuery]);
@@ -381,7 +381,7 @@ export function RequirementsManagement() {
     if (!requirementsSearchActive) return new Set<string>();
     const set = new Set<string>();
     filteredItems.forEach((item) => {
-      (item.application_types || []).forEach((code) => set.add(code));
+      (item.contract_types || []).forEach((code) => set.add(code));
     });
     return set;
   }, [filteredItems, requirementsSearchActive]);
@@ -406,7 +406,7 @@ export function RequirementsManagement() {
         (i.description || '').toLowerCase().includes(q) ||
         (i.category_name || '').toLowerCase().includes(q) ||
         flags.includes(q) ||
-        applicationTypesLabel(i.application_types).toLowerCase().includes(q)
+        contractTypesLabel(i.contract_types).toLowerCase().includes(q)
       );
     });
   }, [deactivatedItems, recoverySearch]);
@@ -433,8 +433,8 @@ export function RequirementsManagement() {
     const originalForNew = Number(editing.for_new) === 1;
     const originalForRenewal = Number(editing.for_renewal) === 1;
     const originalMandatory = Number(editing.is_mandatory) === 1;
-    const originalTypes = [...(editing.application_types || [])].sort().join(',');
-    const currentTypes = [...form.application_types].sort().join(',');
+    const originalTypes = [...(editing.contract_types || [])].sort().join(',');
+    const currentTypes = [...form.contract_types].sort().join(',');
 
     return (
       code !== originalCode ||
@@ -446,7 +446,7 @@ export function RequirementsManagement() {
       mandatory !== originalMandatory ||
       currentTypes !== originalTypes
     );
-  }, [editing, form.category_id, form.code, form.description, form.for_new, form.for_renewal, form.is_mandatory, form.name, form.application_types]);
+  }, [editing, form.category_id, form.code, form.description, form.for_new, form.for_renewal, form.is_mandatory, form.name, form.contract_types]);
 
   const totalPages = useMemo(() => Math.max(1, Math.ceil(filteredItems.length / Math.max(1, pageSize))), [filteredItems.length, pageSize]);
 
@@ -533,7 +533,7 @@ export function RequirementsManagement() {
       for_new: true,
       for_renewal: true,
       is_mandatory: true,
-      application_types: selectedTypeCode && selectedTypeCode !== '__all__' ? [selectedTypeCode] : [],
+      contract_types: selectedTypeCode && selectedTypeCode !== '__all__' ? [selectedTypeCode] : [],
     });
     setIsCreateOpen(true);
   }
@@ -548,17 +548,17 @@ export function RequirementsManagement() {
       for_new: Number(item.for_new) === 1,
       for_renewal: Number(item.for_renewal) === 1,
       is_mandatory: Number(item.is_mandatory) === 1,
-      application_types: [...(item.application_types || [])],
+      contract_types: [...(item.contract_types || [])],
     });
     setIsCreateOpen(true);
   }
 
-  function toggleApplicationType(code: string) {
+  function toggleContractType(code: string) {
     setForm((p) => ({
       ...p,
-      application_types: p.application_types.includes(code)
-        ? p.application_types.filter((c) => c !== code)
-        : [...p.application_types, code],
+      contract_types: p.contract_types.includes(code)
+        ? p.contract_types.filter((c) => c !== code)
+        : [...p.contract_types, code],
     }));
   }
 
@@ -574,7 +574,7 @@ export function RequirementsManagement() {
         for_new: form.for_new ? 1 : 0,
         for_renewal: form.for_renewal ? 1 : 0,
         is_mandatory: form.is_mandatory ? 1 : 0,
-        application_types: form.application_types,
+        contract_type_ids: form.contract_types.map(Number),
       };
       if (!payload.code) throw new Error('Code is required');
       if (!payload.name) throw new Error('Name is required');
@@ -645,13 +645,13 @@ export function RequirementsManagement() {
 
   function openCreateType() {
     setEditingType(null);
-    setTypeForm({ code: '', name: '', description: '' });
+    setTypeForm({ name: '' });
     setIsTypePanelOpen(true);
   }
 
-  function openEditType(row: ApplicationTypeRow) {
+  function openEditType(row: ContractTypeRow) {
     setEditingType(row);
-    setTypeForm({ code: row.code || '', name: row.name || '', description: row.description || '' });
+    setTypeForm({ name: row.name || '' });
     setIsTypePanelOpen(true);
   }
 
@@ -659,15 +659,10 @@ export function RequirementsManagement() {
     setSaving(true);
     setError(null);
     try {
-      const payload: any = {
-        code: typeForm.code.trim(),
-        name: typeForm.name.trim(),
-        description: typeForm.description.trim() || null,
-      };
-      if (!payload.code) throw new Error('Code is required');
+      const payload: any = { name: typeForm.name.trim() };
       if (!payload.name) throw new Error('Name is required');
 
-      const res = await fetch(api(editingType ? `/api/application-types/${editingType.id}` : '/api/application-types'), {
+      const res = await fetch(api(editingType ? `/api/type-of-contract/${editingType.id}` : '/api/type-of-contract'), {
         method: editingType ? 'PUT' : 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -678,7 +673,7 @@ export function RequirementsManagement() {
       setIsTypePanelOpen(false);
       setError(null);
       await refresh({ showLoading: false });
-      toast.success(editingType ? 'Application type updated successfully' : 'Application type created successfully');
+      toast.success(editingType ? 'Type of contract updated successfully' : 'Type of contract created successfully');
     } catch (e: any) {
       const message = e?.message || 'Save failed';
       setError(message);
@@ -692,12 +687,12 @@ export function RequirementsManagement() {
     setSaving(true);
     setError(null);
     try {
-      const res = await fetch(api(`/api/application-types/${id}/deactivate`), { method: 'PATCH', credentials: 'include' });
+      const res = await fetch(api(`/api/type-of-contract/${id}/deactivate`), { method: 'PATCH', credentials: 'include' });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json?.message || 'Deactivate failed');
       setError(null);
       await refresh({ showLoading: false });
-      toast.success('Application type deactivated successfully');
+      toast.success('Type of contract deactivated successfully');
       setConfirmDeactivateTypeId(null);
     } catch (e: any) {
       const message = e?.message || 'Deactivate failed';
@@ -712,12 +707,12 @@ export function RequirementsManagement() {
     setSaving(true);
     setError(null);
     try {
-      const res = await fetch(api(`/api/application-types/${id}/reactivate`), { method: 'PATCH', credentials: 'include' });
+      const res = await fetch(api(`/api/type-of-contract/${id}/reactivate`), { method: 'PATCH', credentials: 'include' });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json?.message || 'Reactivate failed');
       setError(null);
       await refresh({ showLoading: false });
-      toast.success('Application type reactivated successfully');
+      toast.success('Type of contract reactivated successfully');
     } catch (e: any) {
       const message = e?.message || 'Reactivate failed';
       setError(message);
@@ -813,16 +808,10 @@ export function RequirementsManagement() {
   }
 
   const canSubmitType = useMemo(() => {
-    const code = typeForm.code.trim();
     const name = typeForm.name.trim();
-    if (!code || !name) return false;
+    if (!name) return false;
     if (!editingType) return true;
-    const description = typeForm.description.trim();
-    return (
-      code !== (editingType.code || '').trim() ||
-      name !== (editingType.name || '').trim() ||
-      description !== (editingType.description || '').trim()
-    );
+    return name !== (editingType.name || '').trim();
   }, [editingType, typeForm]);
 
   const canSubmitCategory = useMemo(() => {
@@ -931,7 +920,7 @@ export function RequirementsManagement() {
                   <div className="text-sm font-bold" style={{ color: 'var(--text)' }}>
                     Requirement Categories
                   </div>
-                  <div className="text-[11px] text-secondary">Group requirements into categories per application type.</div>
+                  <div className="text-[11px] text-secondary">Group requirements into categories per type of contract.</div>
                 </div>
                 <button
                   className="rounded-lg p-1 border shrink-0 cursor-pointer"
@@ -950,7 +939,7 @@ export function RequirementsManagement() {
         ) : null}
       </AnimatePresence>
 
-      {/* Tree browser: Application Types expand inline to reveal their
+      {/* Tree browser: Types of Contract expand inline to reveal their
           Requirement Categories (several can stay open at once); picking a
           category filters the Requirements table beside it. */}
       <div className="flex flex-col lg:flex-row gap-4 items-start">
@@ -1024,7 +1013,7 @@ export function RequirementsManagement() {
                 ? true
                 : expandedTypeCodes.has(t.code) || searchExpandedTypeCodes.has(t.code);
               const typeCategories = visibleCategoriesForType(t.code, t.name);
-              const typeRow = t.code !== '__all__' ? applicationTypeByCode.get(t.code) : null;
+              const typeRow = t.code !== '__all__' ? contractTypeByCode.get(t.code) : null;
               const typeInactive = t.is_active !== 1;
               return (
                 <div key={t.code} className={cn(typeInactive && 'opacity-50')}>
@@ -1322,7 +1311,7 @@ export function RequirementsManagement() {
                   {item.for_renewal ? <FlagChip label="Renewal" /> : null}
                   <FlagChip label={item.is_mandatory ? 'Mandatory' : 'Optional'} strong={!!item.is_mandatory} />
                 </div>
-                <div className="mt-1.5 text-[10px] text-secondary">{applicationTypesLabel(item.application_types)}</div>
+                <div className="mt-1.5 text-[10px] text-secondary">{contractTypesLabel(item.contract_types)}</div>
               </div>
             ))}
           </div>
@@ -1356,7 +1345,7 @@ export function RequirementsManagement() {
                           .filter(Boolean)
                           .join(', ')}
                       </div>
-                      <div className="text-[10px] mt-0.5 opacity-80">{applicationTypesLabel(item.application_types)}</div>
+                      <div className="text-[10px] mt-0.5 opacity-80">{contractTypesLabel(item.contract_types)}</div>
                     </td>
                     <td className="px-3 py-2 pr-2">
                       <div className="flex items-center justify-end gap-2">{renderItemActions(item)}</div>
@@ -1443,21 +1432,21 @@ export function RequirementsManagement() {
             />
           </div>
           <div className="sm:col-span-2">
-            <Field label="Application Types">
-              {activeApplicationTypes.length === 0 ? (
-                <p className="text-[11px] text-secondary">No active application types configured yet.</p>
+            <Field label="Types of Contract">
+              {activeContractTypes.length === 0 ? (
+                <p className="text-[11px] text-secondary">No active types of contract configured yet.</p>
               ) : (
                 <>
                   <p className="text-[11px] text-secondary mb-2">
-                    Leave all unchecked to apply this requirement to every application type.
+                    Leave all unchecked to apply this requirement to every type of contract.
                   </p>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    {activeApplicationTypes.map((t) => (
+                    {activeContractTypes.map((t) => (
                       <CheckToggle
                         key={t.code}
                         label={t.name}
-                        checked={form.application_types.includes(t.code)}
-                        onChange={() => toggleApplicationType(t.code)}
+                        checked={form.contract_types.includes(t.code)}
+                        onChange={() => toggleContractType(t.code)}
                       />
                     ))}
                   </div>
@@ -1495,43 +1484,20 @@ export function RequirementsManagement() {
 
       <SidePanel
         open={isTypePanelOpen}
-        title={editingType ? 'Edit Application Type' : 'New Application Type'}
-        subtitle="Application types master table"
+        title={editingType ? 'Edit Type of Contract' : 'New Type of Contract'}
+        subtitle="Type of Contract master table"
         onClose={() => setIsTypePanelOpen(false)}
         onSave={saveType}
         saving={saving}
         saveDisabled={!canSubmitType}
       >
         <div className="grid grid-cols-1 gap-3">
-          <Field label="Code">
-            <input
-              className="app-input"
-              value={typeForm.code}
-              onChange={(e) => setTypeForm((p) => ({ ...p, code: e.target.value }))}
-              placeholder="e.g. DIRECT_LEASE"
-              disabled={!!editingType}
-              readOnly={!!editingType}
-              style={editingType ? { opacity: 0.6, cursor: 'not-allowed' } : undefined}
-            />
-            {editingType ? (
-              <p className="text-[11px] text-secondary mt-1">
-                Code can't be changed after creation — it's referenced by filed applications and by requirement/category wiring.
-              </p>
-            ) : null}
-          </Field>
           <Field label="Name">
             <input
               className="app-input"
               value={typeForm.name}
               onChange={(e) => setTypeForm((p) => ({ ...p, name: e.target.value }))}
-              placeholder="e.g. Direct Lease"
-            />
-          </Field>
-          <Field label="Description">
-            <input
-              className="app-input"
-              value={typeForm.description}
-              onChange={(e) => setTypeForm((p) => ({ ...p, description: e.target.value }))}
+              placeholder="e.g. LEASE AGREEMENT"
             />
           </Field>
         </div>
@@ -1539,8 +1505,8 @@ export function RequirementsManagement() {
 
       <ConfirmModal
         open={confirmDeactivateTypeId !== null}
-        title="Deactivate application type?"
-        description="Locators and staff will no longer be able to select this type when filing a new application. Any category wired only to this type (and its requirements) will be deactivated along with it, and reactivated automatically if you reactivate this type later."
+        title="Deactivate type of contract?"
+        description="It will no longer be offered when filing a new application or on the locator form. Requirements tagged to it stay as they are."
         confirmText="Deactivate"
         danger
         loading={saving}
@@ -1575,7 +1541,7 @@ export function RequirementsManagement() {
             />
           </Field>
           <p className="text-[11px] text-secondary">
-            A category appears under an application type once it has a requirement tagged to that type.
+            A category appears under a type of contract once it has a requirement tagged to that type.
           </p>
         </div>
       </SidePanel>
@@ -1692,7 +1658,7 @@ export function RequirementsManagement() {
                                   .filter(Boolean)
                                   .join(', ')}
                               </div>
-                              <div className="text-[10px] mt-0.5 opacity-80">{applicationTypesLabel(item.application_types)}</div>
+                              <div className="text-[10px] mt-0.5 opacity-80">{contractTypesLabel(item.contract_types)}</div>
                             </td>
                             <td className="px-3 py-2 pr-2">
                               <div className="flex items-center justify-end gap-2">

@@ -72,6 +72,22 @@ async function createSchema() {
       );
     END
 
+    -- Requirements are restricted by Type of Contract (dbo.type_of_contract),
+    -- matching the legacy BRIDGE system — not by application type/Industry.
+    -- No rows for a requirement = it applies to every contract type. Created
+    -- once; on creation the old application-type tags are cleared (they were
+    -- Industry/application-type based and don't carry over).
+    IF OBJECT_ID('dbo.requirement_contract_types', 'U') IS NULL
+    BEGIN
+      CREATE TABLE dbo.requirement_contract_types (
+        requirement_id INT NOT NULL,
+        contract_type_id INT NOT NULL,
+        CONSTRAINT PK_requirement_contract_types PRIMARY KEY (requirement_id, contract_type_id),
+        CONSTRAINT FK_req_contract_types_requirement FOREIGN KEY (requirement_id) REFERENCES dbo.requirements(id)
+      );
+      DELETE FROM dbo.requirement_application_types;
+    END
+
     -- Set when this row was deactivated automatically because its category
     -- (or, one level further up, its category's application type) was
     -- deactivated — as opposed to someone deactivating it directly. Lets a
@@ -101,43 +117,43 @@ function mapRow(row) {
     created_at: row.created_at ?? null,
     updated_at: row.updated_at ?? null,
     // Populated by the caller (listRequirements/getRequirementById) from a
-    // second query — empty array means "applies to every application type".
-    application_types: [],
+    // second query — empty array means "applies to every contract type".
+    contract_type_ids: [],
   };
 }
 
-/** Attaches each row's linked application_types in one extra query instead
+/** Attaches each row's linked contract_type_ids in one extra query instead
  * of N+1 — mutates and returns the same array for convenience. */
-async function attachApplicationTypes(rows) {
+async function attachContractTypes(rows) {
   if (!rows.length) return rows;
   const ids = rows.map((r) => r.id);
   const placeholders = ids.map((_, i) => `@param${i}`).join(", ");
   const linkRows = await selectData(
-    `SELECT requirement_id, application_type FROM dbo.requirement_application_types WHERE requirement_id IN (${placeholders})`,
+    `SELECT requirement_id, contract_type_id FROM dbo.requirement_contract_types WHERE requirement_id IN (${placeholders})`,
     ids
   );
   const byRequirement = new Map();
   linkRows.forEach((r) => {
     const list = byRequirement.get(r.requirement_id) || [];
-    list.push(r.application_type);
+    list.push(Number(r.contract_type_id));
     byRequirement.set(r.requirement_id, list);
   });
   rows.forEach((r) => {
-    r.application_types = byRequirement.get(r.id) || [];
+    r.contract_type_ids = byRequirement.get(r.id) || [];
   });
   return rows;
 }
 
-async function setApplicationTypes(requirementId, applicationTypes) {
-  const types = Array.isArray(applicationTypes)
-    ? [...new Set(applicationTypes.map((t) => String(t).trim().toUpperCase()).filter(Boolean))]
+async function setContractTypes(requirementId, contractTypeIds) {
+  const ids = Array.isArray(contractTypeIds)
+    ? [...new Set(contractTypeIds.map((t) => toInt(t)).filter((t) => t !== null && t > 0))]
     : [];
   await runInTransaction(async (tx) => {
-    await tx.query(`DELETE FROM dbo.requirement_application_types WHERE requirement_id = @param0`, [requirementId]);
-    for (const type of types) {
+    await tx.query(`DELETE FROM dbo.requirement_contract_types WHERE requirement_id = @param0`, [requirementId]);
+    for (const typeId of ids) {
       await tx.query(
-        `INSERT INTO dbo.requirement_application_types (requirement_id, application_type) VALUES (@param0, @param1)`,
-        [requirementId, type]
+        `INSERT INTO dbo.requirement_contract_types (requirement_id, contract_type_id) VALUES (@param0, @param1)`,
+        [requirementId, typeId]
       );
     }
   });
@@ -168,7 +184,7 @@ async function listRequirements() {
     ORDER BY r.id DESC
   `);
   const mapped = rows.map(mapRow);
-  return attachApplicationTypes(mapped);
+  return attachContractTypes(mapped);
 }
 
 async function getRequirementById(id) {
@@ -199,7 +215,7 @@ async function getRequirementById(id) {
   );
   const row = rows?.[0];
   if (!row) return null;
-  const [mapped] = await attachApplicationTypes([mapRow(row)]);
+  const [mapped] = await attachContractTypes([mapRow(row)]);
   return mapped;
 }
 
@@ -212,7 +228,7 @@ async function createRequirement({
   for_renewal,
   is_mandatory,
   is_active = 1,
-  application_types,
+  contract_type_ids,
   created_by,
 }) {
   await ensureSchema();
@@ -229,13 +245,13 @@ async function createRequirement({
     [code, name, description ?? null, categoryId, toBit(for_new), toBit(for_renewal), toBit(is_mandatory), toBit(is_active), createdBy]
   );
   const id = result?.recordset?.[0]?.id;
-  if (application_types !== undefined && application_types !== null) await setApplicationTypes(id, application_types);
+  if (contract_type_ids !== undefined && contract_type_ids !== null) await setContractTypes(id, contract_type_ids);
   return getRequirementById(id);
 }
 
 async function updateRequirement(
   id,
-  { code, name, description, category_id, for_new, for_renewal, is_mandatory, is_active, application_types, updated_by }
+  { code, name, description, category_id, for_new, for_renewal, is_mandatory, is_active, contract_type_ids, updated_by }
 ) {
   await ensureSchema();
   const sets = [];
@@ -267,7 +283,7 @@ async function updateRequirement(
     await updateData(query, params);
   }
 
-  if (application_types !== undefined && application_types !== null) await setApplicationTypes(id, application_types);
+  if (contract_type_ids !== undefined && contract_type_ids !== null) await setContractTypes(id, contract_type_ids);
 
   return getRequirementById(id);
 }

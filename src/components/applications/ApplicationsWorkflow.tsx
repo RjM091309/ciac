@@ -35,6 +35,9 @@ type ApplicationRow = {
   application_type: string;
   is_renewal: number;
   renewed_from_permit_id?: number | null;
+  // Type of Contract picked at filing — decides which requirements attach.
+  contract_type_id?: number | null;
+  contract_type_name?: string | null;
   status: string;
   requirements_count?: number;
   created_at?: string | null;
@@ -71,10 +74,17 @@ type ApplicationTypeOption = {
   name: string;
 };
 
+// File Maintenance > Type of Contract (active only).
+type ContractTypeOption = {
+  id: number;
+  name: string;
+};
+
 type ApplicationsBaseData = {
   applications: ApplicationRow[];
   proponents: ProponentRow[];
   applicationTypes: ApplicationTypeOption[];
+  contractTypes: ContractTypeOption[];
 };
 
 type AppRequirementRow = {
@@ -160,20 +170,27 @@ export function ApplicationsWorkflow({
 
   const { data: baseData, isLoading: baseLoading, isRevalidating: baseRevalidating, refresh: refreshBase } =
     useSessionStorageCachedResource<ApplicationsBaseData>({
-      cacheKey: 'ciac.applications_base.v2',
+      cacheKey: 'ciac.applications_base.v3',
       ttlMs: 5 * 60 * 1000, // 5 minutes
       fetcher: async () => {
-        const [appsRes, propsRes, typesRes] = await Promise.all([
+        const [appsRes, propsRes, typesRes, tocRes] = await Promise.all([
           fetch(api('/api/applications'), { credentials: 'include' }),
           fetch(api('/api/proponents'), { credentials: 'include' }),
           fetch(api('/api/application-types'), { credentials: 'include' }),
+          fetch(api('/api/type-of-contract'), { credentials: 'include' }),
         ]);
 
-        const [appsJson, propsJson, typesJson] = await Promise.all([appsRes.json(), propsRes.json(), typesRes.json()]);
+        const [appsJson, propsJson, typesJson, tocJson] = await Promise.all([
+          appsRes.json(),
+          propsRes.json(),
+          typesRes.json(),
+          tocRes.json(),
+        ]);
 
         if (!appsRes.ok) throw new Error(appsJson?.message || 'Failed to load applications');
         if (!propsRes.ok) throw new Error(propsJson?.message || 'Failed to load proponents');
         if (!typesRes.ok) throw new Error(typesJson?.message || 'Failed to load application types');
+        if (!tocRes.ok) throw new Error(tocJson?.message || 'Failed to load types of contract');
 
         const applicationsRows: ApplicationRow[] = Array.isArray(appsJson?.data) ? appsJson.data : [];
         const proponentsRows: ProponentRow[] = Array.isArray(propsJson?.data)
@@ -185,7 +202,18 @@ export function ApplicationsWorkflow({
               .map((t: any) => ({ code: String(t.code), name: String(t.name) }))
           : [];
 
-        return { applications: applicationsRows, proponents: proponentsRows, applicationTypes: applicationTypeRows };
+        const contractTypeRows: ContractTypeOption[] = Array.isArray(tocJson?.data)
+          ? tocJson.data
+              .filter((t: any) => Number(t?.is_active) === 1)
+              .map((t: any) => ({ id: Number(t.id), name: String(t.name) }))
+          : [];
+
+        return {
+          applications: applicationsRows,
+          proponents: proponentsRows,
+          applicationTypes: applicationTypeRows,
+          contractTypes: contractTypeRows,
+        };
       },
       onError: (e) => {
         const message = e instanceof Error ? e.message : 'Failed to load applications';
@@ -207,7 +235,7 @@ export function ApplicationsWorkflow({
   // backend enforces.
   const [editOpen, setEditOpen] = useState(false);
   const [editApp, setEditApp] = useState<ApplicationRow | null>(null);
-  const [editForm, setEditForm] = useState({ application_type: '', is_renewal: false });
+  const [editForm, setEditForm] = useState({ application_type: '', is_renewal: false, contract_type_id: '' });
   const consumedNotificationQueryRef = useRef<string>('');
   const consumedStatusQueryRef = useRef<string>('');
   const applicationRowRefs = useRef<Record<number, HTMLTableRowElement | null>>({});
@@ -229,6 +257,7 @@ export function ApplicationsWorkflow({
   const [createForm, setCreateForm] = useState({
     proponent_id: '',
     application_type: 'DIRECT_LEASE',
+    contract_type_id: '',
     save_as_draft: false,
     renewed_from_permit_id: null as number | null,
   });
@@ -260,8 +289,17 @@ export function ApplicationsWorkflow({
   const createFormCanSubmit = useMemo(() => {
     const proponentId = Number(createForm.proponent_id);
     if (!Number.isFinite(proponentId) || proponentId <= 0) return false;
+    // Type of Contract decides the requirement checklist — required to
+    // submit, optional while only saving a draft.
+    if (!createForm.save_as_draft && !createForm.contract_type_id) return false;
     return true;
-  }, [createForm.proponent_id]);
+  }, [createForm.proponent_id, createForm.save_as_draft, createForm.contract_type_id]);
+
+  const contractTypesEffective = baseData?.contractTypes ?? [];
+  const contractTypeSelectOptions = useMemo(
+    () => contractTypesEffective.map((t) => ({ value: String(t.id), label: t.name })),
+    [contractTypesEffective]
+  );
 
   const proponentSelectOptions = useMemo(
     () => proponentsEffective.map((p) => ({ value: String(p.id), label: p.business_name })),
@@ -471,7 +509,11 @@ export function ApplicationsWorkflow({
 
   function openEditApplication(row: ApplicationRow) {
     setEditApp(row);
-    setEditForm({ application_type: row.application_type, is_renewal: Boolean(row.is_renewal) });
+    setEditForm({
+      application_type: row.application_type,
+      is_renewal: Boolean(row.is_renewal),
+      contract_type_id: row.contract_type_id != null ? String(row.contract_type_id) : '',
+    });
     setEditOpen(true);
   }
 
@@ -485,6 +527,7 @@ export function ApplicationsWorkflow({
     setCreateForm({
       proponent_id: String(row.proponent_id),
       application_type: row.application_type,
+      contract_type_id: row.contract_type_id != null ? String(row.contract_type_id) : '',
       save_as_draft: true,
       renewed_from_permit_id: null,
     });
@@ -496,7 +539,13 @@ export function ApplicationsWorkflow({
   function openManualRenewal() {
     setContinuingDraftId(null);
     setRenewFromPermit(null);
-    setCreateForm({ proponent_id: '', application_type: 'DIRECT_LEASE', save_as_draft: false, renewed_from_permit_id: null });
+    setCreateForm({
+      proponent_id: '',
+      application_type: 'DIRECT_LEASE',
+      contract_type_id: '',
+      save_as_draft: false,
+      renewed_from_permit_id: null,
+    });
     setIsCreateOpen(true);
   }
 
@@ -509,6 +558,7 @@ export function ApplicationsWorkflow({
     setCreateForm({
       proponent_id: String(permit.proponent_id),
       application_type: permit.original_application_type || '',
+      contract_type_id: '',
       save_as_draft: false,
       renewed_from_permit_id: permit.id,
     });
@@ -523,7 +573,11 @@ export function ApplicationsWorkflow({
         method: 'PATCH',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ application_type: editForm.application_type, is_renewal: editForm.is_renewal ? 1 : 0 }),
+        body: JSON.stringify({
+          application_type: editForm.application_type,
+          is_renewal: editForm.is_renewal ? 1 : 0,
+          contract_type_id: editForm.contract_type_id ? Number(editForm.contract_type_id) : null,
+        }),
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok || !json?.success) throw new Error(json?.message || 'Failed to update application');
@@ -555,6 +609,7 @@ export function ApplicationsWorkflow({
             application_type: createForm.application_type.trim() || 'DIRECT_LEASE',
             is_renewal: renewalMode ? 1 : 0,
             proponent_id: proponentId,
+            contract_type_id: createForm.contract_type_id ? Number(createForm.contract_type_id) : null,
           }),
         });
         const json = await res.json().catch(() => ({}));
@@ -598,6 +653,7 @@ export function ApplicationsWorkflow({
           is_renewal: renewalMode ? 1 : 0,
           save_as_draft: createForm.save_as_draft,
           renewed_from_permit_id: createForm.renewed_from_permit_id || undefined,
+          contract_type_id: createForm.contract_type_id ? Number(createForm.contract_type_id) : null,
         }),
       });
       const json = await res.json().catch(() => ({}));
@@ -618,7 +674,7 @@ export function ApplicationsWorkflow({
       requestNotificationsRefresh();
       setIsCreateOpen(false);
       setRenewFromPermit(null);
-      setCreateForm((p) => ({ ...p, save_as_draft: false, renewed_from_permit_id: null }));
+      setCreateForm((p) => ({ ...p, contract_type_id: '', save_as_draft: false, renewed_from_permit_id: null }));
       await refreshBase({ showLoading: false });
     } catch (error: any) {
       toast.error(error?.message || 'Failed to create application');
@@ -1073,6 +1129,19 @@ export function ApplicationsWorkflow({
             isClearable={false}
           />
 
+          <label className="text-xs font-semibold uppercase tracking-wider text-secondary">Type of Contract</label>
+          <AppSelect
+            options={contractTypeSelectOptions}
+            value={createForm.contract_type_id}
+            onChange={(value) => setCreateForm((p) => ({ ...p, contract_type_id: value || '' }))}
+            placeholder="Select type of contract..."
+            isDisabled={saving}
+            isClearable
+          />
+          <p className="-mt-1.5 text-[10px] text-secondary">
+            Decides which requirements are attached to this application.
+          </p>
+
           <label className="flex items-center gap-2 rounded-lg border px-3 py-2 text-xs cursor-pointer" style={{ borderColor: 'var(--input-border)' }}>
             <input
               type="checkbox"
@@ -1114,6 +1183,19 @@ export function ApplicationsWorkflow({
             isDisabled={saving}
             isClearable={false}
           />
+
+          <label className="text-xs font-semibold uppercase tracking-wider text-secondary">Type of Contract</label>
+          <AppSelect
+            options={contractTypeSelectOptions}
+            value={editForm.contract_type_id}
+            onChange={(value) => setEditForm((p) => ({ ...p, contract_type_id: value || '' }))}
+            placeholder="Select type of contract..."
+            isDisabled={saving}
+            isClearable
+          />
+          <p className="-mt-1.5 text-[10px] text-secondary">
+            Changing it rebuilds the requirement checklist (only while no documents are uploaded).
+          </p>
         </div>
       </SidePanel>
     </div>

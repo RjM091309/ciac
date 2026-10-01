@@ -398,6 +398,11 @@ async function createSchema() {
       CREATE INDEX IX_applications_renewed_from_permit_id ON dbo.applications(renewed_from_permit_id);
     END;
 
+    -- Type of Contract picked at filing (dbo.type_of_contract) — decides
+    -- which requirements get attached (see requirement_contract_types).
+    IF COL_LENGTH('dbo.applications', 'contract_type_id') IS NULL
+      ALTER TABLE dbo.applications ADD contract_type_id INT NULL;
+
     IF OBJECT_ID('dbo.application_requirements', 'U') IS NULL
     BEGIN
       CREATE TABLE dbo.application_requirements (
@@ -558,6 +563,8 @@ async function listApplications() {
       a.application_type,
       a.is_renewal,
       a.renewed_from_permit_id,
+      a.contract_type_id,
+      toc.name AS contract_type_name,
       a.status,
       a.submitted_at,
       a.current_officer_id,
@@ -572,6 +579,7 @@ async function listApplications() {
       ) AS requirements_count
     FROM dbo.applications a
     LEFT JOIN dbo.proponents p ON p.id = a.proponent_id
+    LEFT JOIN dbo.type_of_contract toc ON toc.id = a.contract_type_id
     ORDER BY a.id DESC
   `);
   return rows;
@@ -730,6 +738,8 @@ async function getApplicationById(id) {
       a.application_type,
       a.is_renewal,
       a.renewed_from_permit_id,
+      a.contract_type_id,
+      toc.name AS contract_type_name,
       a.status,
       a.submitted_at,
       a.current_officer_id,
@@ -739,11 +749,24 @@ async function getApplicationById(id) {
       a.updated_at
     FROM dbo.applications a
     LEFT JOIN dbo.proponents p ON p.id = a.proponent_id
+    LEFT JOIN dbo.type_of_contract toc ON toc.id = a.contract_type_id
     WHERE a.id = @param0
     `,
     [id]
   );
   return rows?.[0] || null;
+}
+
+/** Validates an optional Type of Contract id for filing — null/'' = none
+ * picked; anything else must be an active dbo.type_of_contract row. */
+async function resolveContractTypeId(value) {
+  if (value === undefined || value === null || value === "") return null;
+  const id = toInt(value);
+  const rows = id
+    ? await selectData(`SELECT TOP (1) id FROM dbo.type_of_contract WHERE id = @param0 AND is_active = 1`, [id])
+    : [];
+  if (!rows?.[0]) throw new Error("Invalid type of contract.");
+  return id;
 }
 
 async function createApplication({
@@ -755,6 +778,7 @@ async function createApplication({
   current_officer_id,
   created_by,
   renewed_from_permit_id,
+  contract_type_id,
 }) {
   await ensureSchema();
   await Notification.ensureSchema();
@@ -768,6 +792,7 @@ async function createApplication({
     throw new Error("Invalid application type.");
   }
   const normalizedType = String(application_type).trim().toUpperCase();
+  const contractTypeId = await resolveContractTypeId(contract_type_id);
 
   const renewedFromPermitId = toInt(renewed_from_permit_id);
   if (renewedFromPermitId) {
@@ -786,10 +811,10 @@ async function createApplication({
     const result = await tx.query(
       `
       INSERT INTO dbo.applications
-        (proponent_id, application_no, application_type, is_renewal, status, submitted_at, current_officer_id, created_by, updated_by, created_at, updated_at, renewed_from_permit_id)
+        (proponent_id, application_no, application_type, is_renewal, status, submitted_at, current_officer_id, created_by, updated_by, created_at, updated_at, renewed_from_permit_id, contract_type_id)
       OUTPUT INSERTED.id
       VALUES
-        (@param0, @param1, @param2, @param3, @param4, @param5, @param6, @param7, NULL, SYSUTCDATETIME(), NULL, @param8)
+        (@param0, @param1, @param2, @param3, @param4, @param5, @param6, @param7, NULL, SYSUTCDATETIME(), NULL, @param8, @param9)
       `,
       [
         proponentId,
@@ -801,6 +826,7 @@ async function createApplication({
         officerId,
         createdBy,
         renewedFromPermitId,
+        contractTypeId,
       ]
     );
     const newId = result?.recordset?.[0]?.id;
@@ -826,12 +852,14 @@ async function createApplication({
           (@param2 = 0 AND r.for_new = 1)
         )
         AND (
-          -- No rows in requirement_application_types for this requirement
-          -- means it applies to every application type (historical default).
-          NOT EXISTS (SELECT 1 FROM dbo.requirement_application_types rat WHERE rat.requirement_id = r.id)
+          -- Requirements are restricted by Type of Contract (legacy BRIDGE
+          -- rule). No rows in requirement_contract_types = applies to every
+          -- contract type; an application with no contract type picked only
+          -- gets those unrestricted ones.
+          NOT EXISTS (SELECT 1 FROM dbo.requirement_contract_types rct WHERE rct.requirement_id = r.id)
           OR EXISTS (
-            SELECT 1 FROM dbo.requirement_application_types rat
-            WHERE rat.requirement_id = r.id AND rat.application_type = @param3
+            SELECT 1 FROM dbo.requirement_contract_types rct
+            WHERE rct.requirement_id = r.id AND rct.contract_type_id = @param3
           )
         )
         AND NOT EXISTS (
@@ -840,7 +868,7 @@ async function createApplication({
           WHERE ar.application_id = @param0 AND ar.requirement_id = r.id
         )
       `,
-      [newId, createdBy, renewalBit, normalizedType]
+      [newId, createdBy, renewalBit, contractTypeId]
     );
 
     await tx.query(
@@ -971,7 +999,7 @@ const TYPE_EDITABLE_STATUSES = ["DRAFT", "SUBMITTED", "RESUBMITTED", "RETURNED"]
  * is also editable, but DRAFT-only (see the check below) and never
  * triggers a notification/email either way — a draft is unfinished
  * filing, not an event worth telling anyone about yet. */
-async function updateDraftApplication(id, { application_type, is_renewal, proponent_id, changed_by }) {
+async function updateDraftApplication(id, { application_type, is_renewal, proponent_id, contract_type_id, changed_by }) {
   await ensureSchema();
   const application = await getApplicationById(id);
   if (!application) return null;
@@ -1010,15 +1038,21 @@ async function updateDraftApplication(id, { application_type, is_renewal, propon
   // switching types (e.g. Direct Lease -> Sublease) needs the same checklist
   // rebuild as switching New <-> Renewal used to trigger alone.
   const typeChanged = nextType !== String(application.application_type || "").trim().toUpperCase();
+  // Requirements follow the Type of Contract, so changing it rebuilds the
+  // checklist too (same document guard as the other two).
+  const currentContractTypeId = toInt(application.contract_type_id);
+  const nextContractTypeId =
+    contract_type_id === undefined ? currentContractTypeId : await resolveContractTypeId(contract_type_id);
+  const contractTypeChanged = nextContractTypeId !== currentContractTypeId;
   const changedBy = toInt(changed_by);
 
-  if (renewalChanged || typeChanged) {
+  if (renewalChanged || typeChanged || contractTypeChanged) {
     const docRows = await selectData(
       `SELECT COUNT(1) AS n FROM dbo.documents WHERE application_id = @param0`,
       [id]
     );
     if (Number(docRows?.[0]?.n || 0) > 0) {
-      throw new Error("Remove the uploaded documents before switching between New and Renewal, or changing the application type.");
+      throw new Error("Remove the uploaded documents before switching between New and Renewal, or changing the application type or type of contract.");
     }
   }
 
@@ -1026,13 +1060,14 @@ async function updateDraftApplication(id, { application_type, is_renewal, propon
     await tx.query(
       `
       UPDATE dbo.applications
-      SET application_type = @param1, is_renewal = @param2, proponent_id = @param3, updated_by = @param4, updated_at = SYSUTCDATETIME()
+      SET application_type = @param1, is_renewal = @param2, proponent_id = @param3, updated_by = @param4,
+          contract_type_id = @param5, updated_at = SYSUTCDATETIME()
       WHERE id = @param0
       `,
-      [id, nextType, nextRenewal, nextProponentId, changedBy]
+      [id, nextType, nextRenewal, nextProponentId, changedBy, nextContractTypeId]
     );
 
-    if (renewalChanged || typeChanged) {
+    if (renewalChanged || typeChanged || contractTypeChanged) {
       // Ad-hoc requirements (is_ad_hoc = 1) are scoped to just this one
       // application and never part of the catalog re-seed below — deleting
       // them here would silently lose a specific request the Assessment
@@ -1055,14 +1090,14 @@ async function updateDraftApplication(id, { application_type, is_renewal, propon
         WHERE r.is_active = 1
           AND ((@param2 = 1 AND r.for_renewal = 1) OR (@param2 = 0 AND r.for_new = 1))
           AND (
-            NOT EXISTS (SELECT 1 FROM dbo.requirement_application_types rat WHERE rat.requirement_id = r.id)
+            NOT EXISTS (SELECT 1 FROM dbo.requirement_contract_types rct WHERE rct.requirement_id = r.id)
             OR EXISTS (
-              SELECT 1 FROM dbo.requirement_application_types rat
-              WHERE rat.requirement_id = r.id AND rat.application_type = @param3
+              SELECT 1 FROM dbo.requirement_contract_types rct
+              WHERE rct.requirement_id = r.id AND rct.contract_type_id = @param3
             )
           )
         `,
-        [id, changedBy, nextRenewal, nextType]
+        [id, changedBy, nextRenewal, nextContractTypeId]
       );
     }
   });

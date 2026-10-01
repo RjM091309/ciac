@@ -297,6 +297,7 @@ exports.createLocatorWithApplication = async (req, res) => {
       application_type,
       is_renewal,
       save_as_draft,
+      contract_type_id,
     } = req.body || {};
 
     if (!username) return res.status(400).json({ success: false, message: "username is required" });
@@ -371,6 +372,7 @@ exports.createLocatorWithApplication = async (req, res) => {
         is_renewal: Number(is_renewal) ? 1 : 0,
         status: isDraft ? "DRAFT" : "SUBMITTED",
         created_by: req.user?.id ?? null,
+        contract_type_id,
       });
     } catch (error) {
       console.error("Create locator with application: application step failed:", error);

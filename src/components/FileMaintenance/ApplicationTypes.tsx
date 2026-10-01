@@ -122,7 +122,7 @@ export function ApplicationTypesManagement() {
     try {
       const res = await fetch(api('/api/application-types'), { credentials: 'include' });
       const json = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(json?.message || 'Failed to load application types');
+      if (!res.ok) throw new Error(json?.message || 'Failed to load industry types');
       setItems(
         (json.data || []).map((item: any) => ({
           ...item,
@@ -189,7 +189,7 @@ export function ApplicationTypesManagement() {
 
       setIsCreateOpen(false);
       await loadAll();
-      toast.success(editing ? 'Application type updated successfully' : 'Application type created successfully');
+      toast.success(editing ? 'Industry type updated successfully' : 'Industry type created successfully');
     } catch (e: any) {
       const message = e?.message || 'Save failed';
       setError(message);
@@ -210,7 +210,7 @@ export function ApplicationTypesManagement() {
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json?.message || 'Deactivate failed');
       await loadAll();
-      toast.success('Application type deactivated successfully');
+      toast.success('Industry type deactivated successfully');
       setConfirmDeactivateId(null);
     } catch (e: any) {
       const message = e?.message || 'Deactivate failed';
@@ -232,7 +232,7 @@ export function ApplicationTypesManagement() {
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json?.message || 'Reactivate failed');
       await loadAll();
-      toast.success('Application type reactivated successfully');
+      toast.success('Industry type reactivated successfully');
     } catch (e: any) {
       const message = e?.message || 'Reactivate failed';
       setError(message);
@@ -318,7 +318,7 @@ export function ApplicationTypesManagement() {
       <div className="glass-card p-3 sm:p-5 !border-transparent" style={{ backgroundColor: 'var(--surface)' }}>
         <div className="flex items-center justify-between mb-3 gap-2">
           <h3 className="text-sm font-bold tracking-tight" style={{ color: 'var(--text)' }}>
-            Application Types List
+            Industry Types List
           </h3>
           {canAdd ? (
             <button
@@ -343,11 +343,11 @@ export function ApplicationTypesManagement() {
           </div>
         ) : filteredItems.length === 0 ? (
           <EmptyState
-            title="No application types found"
+            title="No industry types found"
             description={
               searchQuery
                 ? 'Try adjusting your search filters.'
-                : 'There are no application types to show here yet. Create a new application type to get started.'
+                : 'There are no industry types to show here yet. Create a new industry type to get started.'
             }
             action={
               !searchQuery && canAdd ? (
@@ -356,7 +356,7 @@ export function ApplicationTypesManagement() {
                   style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
                   onClick={openCreate}
                 >
-                  Create Application Type
+                  Create Industry Type
                 </button>
               ) : undefined
             }
@@ -371,7 +371,7 @@ export function ApplicationTypesManagement() {
                 />
                 <input
                   type="text"
-                  placeholder="Search application types..."
+                  placeholder="Search industry types..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   className="h-9 rounded-full pl-9 pr-3 text-xs w-full focus:outline-none focus:ring-1 focus:ring-[var(--border)] text-[var(--text)] placeholder:text-[var(--text-muted)] transition-all"
@@ -467,8 +467,8 @@ export function ApplicationTypesManagement() {
 
       <SidePanel
         open={isCreateOpen}
-        title={editing ? 'Edit Application Type' : 'New Application Type'}
-        subtitle="Application types master table"
+        title={editing ? 'Edit Industry Type' : 'New Industry Type'}
+        subtitle="Industry types master table"
         onClose={() => setIsCreateOpen(false)}
         onSave={save}
         saving={saving}
@@ -511,7 +511,7 @@ export function ApplicationTypesManagement() {
 
       <ConfirmModal
         open={confirmDeactivateId !== null}
-        title="Deactivate application type?"
+        title="Deactivate industry type?"
         description="Locators and staff will no longer be able to select this type when filing a new application. You can re-activate later."
         confirmText="Deactivate"
         danger
@@ -524,7 +524,7 @@ export function ApplicationTypesManagement() {
 
       <ConfirmModal
         open={confirmReactivateId !== null}
-        title="Reactivate application type?"
+        title="Reactivate industry type?"
         description="This type will be selectable again when filing a new application."
         confirmText="Reactivate"
         loading={saving}

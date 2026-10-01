@@ -43,7 +43,7 @@ exports.getById = async (req, res) => {
 
 exports.create = async (req, res) => {
   try {
-    const { code, name, description, category_id, for_new, for_renewal, is_mandatory, is_active, application_types } = req.body || {};
+    const { code, name, description, category_id, for_new, for_renewal, is_mandatory, is_active, contract_type_ids } = req.body || {};
     if (!code || !String(code).trim()) return res.status(400).json({ success: false, message: "code is required" });
     if (!name || !String(name).trim()) return res.status(400).json({ success: false, message: "name is required" });
 
@@ -56,7 +56,7 @@ exports.create = async (req, res) => {
       for_renewal,
       is_mandatory,
       is_active,
-      application_types,
+      contract_type_ids,
       created_by: req.user?.id ?? null,
     });
     await audit(req, "REQUIREMENT_CREATED", row?.id, { code: row?.code, name: row?.name });
@@ -77,7 +77,7 @@ exports.update = async (req, res) => {
   try {
     const id = Number(req.params.id);
     if (!Number.isFinite(id)) return res.status(400).json({ success: false, message: "Invalid id" });
-    const { code, name, description, category_id, for_new, for_renewal, is_mandatory, is_active, application_types } = req.body || {};
+    const { code, name, description, category_id, for_new, for_renewal, is_mandatory, is_active, contract_type_ids } = req.body || {};
 
     const row = await Requirement.updateRequirement(id, {
       code: code !== undefined ? String(code).trim() : undefined,
@@ -88,7 +88,7 @@ exports.update = async (req, res) => {
       for_renewal,
       is_mandatory,
       is_active,
-      application_types,
+      contract_type_ids,
       updated_by: req.user?.id ?? null,
     });
     if (!row) return res.status(404).json({ success: false, message: "Requirement not found" });

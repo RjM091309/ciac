@@ -57,8 +57,8 @@ type RequirementOption = {
   is_mandatory: boolean;
   for_new: boolean;
   for_renewal: boolean;
-  // Application types this requirement is limited to — empty = every type.
-  application_types: string[];
+  // Types of Contract this requirement is limited to — empty = every type.
+  contract_type_ids: number[];
 };
 
 // Same palette as Assessment & Evaluation's requirement badges.
@@ -101,14 +101,14 @@ export async function uploadLocatorDocument(
  *   gave each requirement (verify/reject stays in Assessment & Evaluation). */
 export function LocatorDocumentsTab({
   proponentId,
-  industryCode = null,
+  contractTypeId = null,
   pending = [],
   onPendingChange,
 }: {
   proponentId: number | null;
-  // The locator's Industry (application type code) — the checklist follows the
-  // same restriction rules as filing a New application of that type.
-  industryCode?: string | null;
+  // The locator's Type of Contract — the checklist follows the same
+  // restriction rules as filing a New application under that contract type.
+  contractTypeId?: number | null;
   pending?: PendingLocatorDocument[];
   onPendingChange?: (next: PendingLocatorDocument[]) => void;
 }) {
@@ -184,18 +184,19 @@ export function LocatorDocumentsTab({
 
   // Same rule ApplicationWorkflow uses when it attaches requirements to a new
   // application: active (server-filtered), For New, and either unrestricted or
-  // restricted to this Industry. Without an Industry only unrestricted ones apply.
-  const industry = (industryCode || '').trim().toUpperCase();
+  // restricted to this Type of Contract. Without one only unrestricted ones apply.
   const applicable = useMemo(
     () =>
       options.filter(
-        (o) => o.for_new && (o.application_types.length === 0 || (industry !== '' && o.application_types.includes(industry))),
+        (o) =>
+          o.for_new &&
+          (o.contract_type_ids.length === 0 || (contractTypeId != null && o.contract_type_ids.includes(contractTypeId))),
       ),
-    [options, industry],
+    [options, contractTypeId],
   );
   const applicableIds = useMemo(() => new Set(applicable.map((o) => o.id)), [applicable]);
   // Files already uploaded under a requirement that no longer applies (e.g.
-  // the Industry changed) stay visible, flagged, rather than silently hidden.
+  // the Type of Contract changed) stay visible, flagged, rather than silently hidden.
   const notApplicableUploads = useMemo(
     () => (proponentId ? uploads.filter((u) => u.requirement_id != null && !applicableIds.has(u.requirement_id)) : []),
     [proponentId, uploads, applicableIds],
@@ -424,11 +425,11 @@ export function LocatorDocumentsTab({
               </tr>
             </thead>
             <tbody>
-              {!industry ? (
+              {contractTypeId == null ? (
                 <tr className="border-b" style={{ borderColor: 'var(--border-subtle)' }}>
                   <td colSpan={6} className="px-3 py-2 text-[11px]" style={{ color: '#f59e0b', backgroundColor: 'rgba(245,158,11,.08)' }}>
-                    No Industry selected — only requirements that apply to every industry are listed. Pick an Industry on the
-                    Profile tab to see the rest.
+                    No Type of Contract selected — only requirements that apply to every contract type are listed. Pick a
+                    Type of Contract on the Profile tab to see the rest.
                   </td>
                 </tr>
               ) : null}
@@ -455,7 +456,7 @@ export function LocatorDocumentsTab({
                     title: (
                       <>
                         <span className="font-semibold">{u.requirement_code ? `${u.requirement_code} — ` : ''}{u.document_name}</span>
-                        <div className="text-[10px] mt-0.5" style={{ color: '#f59e0b' }}>Not required for this industry</div>
+                        <div className="text-[10px] mt-0.5" style={{ color: '#f59e0b' }}>Not required for this type of contract</div>
                       </>
                     ),
                     mandatory: '—',

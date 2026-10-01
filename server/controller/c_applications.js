@@ -124,7 +124,7 @@ exports.getById = async (req, res) => {
 
 exports.create = async (req, res) => {
   try {
-    const { application_type, is_renewal, save_as_draft, submitted_at, current_officer_id, renewed_from_permit_id } = req.body || {};
+    const { application_type, is_renewal, save_as_draft, submitted_at, current_officer_id, renewed_from_permit_id, contract_type_id } = req.body || {};
     let { proponent_id } = req.body || {};
 
     const role = String(req.user?.role || "").toLowerCase();
@@ -165,6 +165,7 @@ exports.create = async (req, res) => {
       current_officer_id,
       created_by: req.user?.id ?? null,
       renewed_from_permit_id: renewed_from_permit_id ?? null,
+      contract_type_id,
     });
 
     // Only a real submission activates a still-pending locator — a draft
@@ -286,11 +287,12 @@ exports.updateDraft = async (req, res) => {
     if (forbidden) return res.status(403).json({ success: false, message: "Forbidden" });
     if (!application) return res.status(404).json({ success: false, message: "Application not found" });
 
-    const { application_type, is_renewal, proponent_id } = req.body || {};
+    const { application_type, is_renewal, proponent_id, contract_type_id } = req.body || {};
     const row = await Workflow.updateDraftApplication(id, {
       application_type,
       is_renewal,
       proponent_id,
+      contract_type_id,
       changed_by: req.user?.id ?? null,
     });
 

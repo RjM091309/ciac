@@ -461,7 +461,7 @@ async function getProponentById(id) {
       p.is_active,
       ct.effective_start AS start_term,
       ct.effective_end AS end_term,
-      COALESCE(ct.contract_type_id, p.contract_type_id) AS contract_type_id,
+      COALESCE(ct.contract_type_id, latest_app.contract_type_id, p.contract_type_id) AS contract_type_id,
       toctype.name AS contract_type_name,
       COALESCE(apptype.name, manual_apptype.name) AS business_type,
       p.industry_code,
@@ -478,15 +478,15 @@ async function getProponentById(id) {
       WHERE a.proponent_id = p.id
       ORDER BY c.effective_end DESC, c.id DESC
     ) ct
-    LEFT JOIN dbo.type_of_contract toctype ON toctype.id = COALESCE(ct.contract_type_id, p.contract_type_id)
     OUTER APPLY (
-      SELECT TOP (1) a2.application_type
+      SELECT TOP (1) a2.application_type, a2.contract_type_id
       FROM dbo.applications a2
       WHERE a2.proponent_id = p.id
       ORDER BY a2.created_at DESC, a2.id DESC
     ) latest_app
     LEFT JOIN dbo.application_types apptype ON apptype.code = latest_app.application_type
     LEFT JOIN dbo.application_types manual_apptype ON manual_apptype.code = p.industry_code
+    LEFT JOIN dbo.type_of_contract toctype ON toctype.id = COALESCE(ct.contract_type_id, latest_app.contract_type_id, p.contract_type_id)
     WHERE p.id = @param0
     `,
     [id]
