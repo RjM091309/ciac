@@ -62,7 +62,9 @@ export function RequirementGroupTabs<T>({
   flaggedLabel?: string;
 }) {
   return (
-    <div className="flex gap-1.5 overflow-x-auto pb-1 -mb-1" role="tablist" aria-label="Requirement categories">
+    // Wraps onto extra rows instead of scrolling sideways — no horizontal
+    // scrollbar, and every category stays visible at once.
+    <div className="flex flex-wrap gap-1.5" role="tablist" aria-label="Requirement categories">
       {tabs.map((g) => {
         const selected = g.key === activeKey;
         const done = g.items.filter(isDone).length;
