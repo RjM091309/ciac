@@ -88,6 +88,10 @@ type RequirementRow = {
   remarks: string | null;
   is_mandatory?: number | boolean;
   acknowledged_at?: string | null;
+  // Requirement Category (File Maintenance > Requirements) — groups the
+  // Compliance tab's sub-tabs. Null for uncategorized/ad-hoc requirements.
+  category_id?: number | null;
+  category_name?: string | null;
 };
 
 type RequirementComment = {
@@ -1258,6 +1262,29 @@ function ComplianceTab({
   const [remarksTarget, setRemarksTarget] = useState<{ id: number; label: string } | null>(null);
   const [remarksDraft, setRemarksDraft] = useState('');
   const [addingRequirement, setAddingRequirement] = useState(false);
+  // Sub-tabs: one per Requirement Category (same grouping as the
+  // Requirements page tree), plus "All". Uncategorized/ad-hoc rows go last.
+  const [activeGroup, setActiveGroup] = useState('__all__');
+  const groups = useMemo(() => {
+    const map = new Map<string, { key: string; name: string; items: RequirementRow[] }>();
+    for (const r of data.requirements) {
+      const key = r.category_id != null ? String(r.category_id) : '__none__';
+      const name = r.category_name || 'Other Requirements';
+      const g = map.get(key) || { key, name, items: [] };
+      g.items.push(r);
+      map.set(key, g);
+    }
+    return Array.from(map.values()).sort((a, b) =>
+      a.key === '__none__' ? 1 : b.key === '__none__' ? -1 : a.name.localeCompare(b.name)
+    );
+  }, [data.requirements]);
+  const groupTabs = useMemo(
+    () => [{ key: '__all__', name: 'All', items: data.requirements }, ...groups],
+    [data.requirements, groups]
+  );
+  // A category can disappear (e.g. its last requirement moved) — fall back to All.
+  const currentGroup = groupTabs.find((g) => g.key === activeGroup) || groupTabs[0];
+  const visibleRequirements = currentGroup.items;
   // Same lock as the Recommendation tab — once the assessment is COMPLETED
   // or RETURNED, requirement verification shouldn't keep moving under an
   // already-submitted recommendation (or a decision Approval may have acted on).
@@ -1300,6 +1327,37 @@ function ComplianceTab({
           </button>
         ) : null}
       </div>
+      {data.requirements.length > 0 && groups.length > 1 ? (
+        <div className="flex gap-1.5 overflow-x-auto pb-1 -mb-1" role="tablist" aria-label="Requirement categories">
+          {groupTabs.map((g) => {
+            const selected = currentGroup.key === g.key;
+            const verified = g.items.filter((r) => r.status === 'VERIFIED').length;
+            const rejected = g.items.some((r) => r.status === 'REJECTED');
+            return (
+              <button
+                key={g.key}
+                type="button"
+                role="tab"
+                aria-selected={selected}
+                onClick={() => setActiveGroup(g.key)}
+                className="shrink-0 inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] border cursor-pointer whitespace-nowrap transition-colors"
+                style={
+                  selected
+                    ? { backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)', borderColor: 'var(--nav-active-bg)', fontWeight: 600 }
+                    : { borderColor: 'var(--border)', color: 'var(--text-muted)' }
+                }
+                title={`${verified} of ${g.items.length} verified${rejected ? ' · has rejected items' : ''}`}
+              >
+                {rejected ? <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: '#ef4444' }} /> : null}
+                {g.name}
+                <span className="tabular-nums opacity-75">
+                  {verified}/{g.items.length}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
       {data.requirements.length === 0 ? (
         <EmptyState
           icon={<FileText size={40} className="opacity-40" />}
@@ -1308,7 +1366,7 @@ function ComplianceTab({
         />
       ) : (
         <div className="rounded-xl border divide-y" style={{ borderColor: 'var(--border)' }}>
-          {data.requirements.map((r) => {
+          {visibleRequirements.map((r) => {
             // Most recent first (listDocumentsByApplication orders DESC by id) —
             // if a requirement was rejected and re-uploaded, this is the latest one.
             const doc = data.documents.find((d) => d.requirement_id === r.requirement_id);

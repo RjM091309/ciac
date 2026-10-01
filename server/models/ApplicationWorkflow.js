@@ -1319,9 +1319,12 @@ async function listApplicationRequirements(applicationId) {
       r.code AS requirement_code,
       r.name AS requirement_name,
       r.description AS requirement_description,
-      r.is_mandatory
+      r.is_mandatory,
+      r.category_id,
+      rc.name AS category_name
     FROM dbo.application_requirements ar
     INNER JOIN dbo.requirements r ON r.id = ar.requirement_id
+    LEFT JOIN dbo.requirement_categories rc ON rc.id = r.category_id
     WHERE ar.application_id = @param0
     ORDER BY ar.id ASC
     `,
