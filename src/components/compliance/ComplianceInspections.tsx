@@ -257,11 +257,14 @@ const REQUIREMENT_STATUS_ICON: Record<string, typeof CalendarClock> = {
   NOT_COMPLIED: X,
 };
 
-const REQ_TOOLTIP_ROW_HEIGHT = 30;
+const REQ_TOOLTIP_ROW_HEIGHT = 34;
 
-/** Hover breakdown for the Compliance count: each requirement of the locator
- * and its status. Same popover as Assessment's compliance tooltip — portaled
- * with `position: fixed` so the table's overflow wrapper can't clip it. */
+/** Hover summary for the Compliance count: one row per requirement group
+ * (Compliance / Permits / Performance) with its complied/total, plus flags
+ * for anything not complied or with expired/expiring validity. Never lists
+ * individual requirements — the tooltip can't scroll (those are in the
+ * locator's checklist). Same popover as Assessment's compliance tooltip —
+ * portaled with `position: fixed` so the table's overflow wrapper can't clip it. */
 function RequirementsTooltip({
   items,
   children,
@@ -273,12 +276,22 @@ function RequirementsTooltip({
   const [pos, setPos] = useState<{ top: number; left: number; openUp: boolean; arrowLeft: number } | null>(null);
   const triggerRef = useRef<HTMLSpanElement>(null);
   const width = TOOLTIP_WIDTH + 90;
+  const groups = useMemo(() => {
+    const map = new Map<string, { key: string; items: LocatorComplianceRow['items'] }>();
+    for (const it of items || []) {
+      const key = it.category || '';
+      const g = map.get(key) || { key, items: [] };
+      g.items.push(it);
+      map.set(key, g);
+    }
+    return Array.from(map.values());
+  }, [items]);
 
   const computePosition = () => {
     const trigger = triggerRef.current;
     if (!trigger) return;
     const rect = trigger.getBoundingClientRect();
-    const tooltipHeight = items.length * REQ_TOOLTIP_ROW_HEIGHT + TOOLTIP_PADDING;
+    const tooltipHeight = groups.length * REQ_TOOLTIP_ROW_HEIGHT + TOOLTIP_PADDING;
     const spaceBelow = window.innerHeight - rect.bottom;
     const openUp = spaceBelow < tooltipHeight + TOOLTIP_VIEWPORT_MARGIN && rect.top > tooltipHeight + TOOLTIP_VIEWPORT_MARGIN;
     const left = Math.min(Math.max(TOOLTIP_VIEWPORT_MARGIN, rect.left), window.innerWidth - width - TOOLTIP_VIEWPORT_MARGIN);
@@ -353,14 +366,19 @@ function RequirementsTooltip({
                 }}
               />
               <div className="relative py-2">
-                {items.map((it, idx) => {
-                  const s = checklistBadge(it.status);
-                  const Icon = REQUIREMENT_STATUS_ICON[it.status] || CalendarClock;
-                  const vState = validityState(it.validity_to);
+                {groups.map((g, idx) => {
+                  const complied = g.items.filter((it) => it.status === 'COMPLIED').length;
+                  const notComplied = g.items.filter((it) => it.status === 'NOT_COMPLIED').length;
+                  const expired = g.items.filter((it) => validityState(it.validity_to) === 'expired').length;
+                  const expiring = g.items.filter((it) => validityState(it.validity_to) === 'expiring').length;
+                  const done = complied === g.items.length;
+                  const status = done ? 'COMPLIED' : notComplied ? 'NOT_COMPLIED' : 'PENDING';
+                  const s = checklistBadge(status);
+                  const Icon = REQUIREMENT_STATUS_ICON[status] || CalendarClock;
                   return (
                     <div
-                      key={it.code}
-                      className={cn('flex items-center gap-2 px-3', idx !== items.length - 1 && 'border-b')}
+                      key={g.key}
+                      className={cn('flex items-center gap-2 px-3', idx !== groups.length - 1 && 'border-b')}
                       style={{
                         height: REQ_TOOLTIP_ROW_HEIGHT,
                         borderColor: 'color-mix(in oklab, var(--border) 45%, transparent)',
@@ -372,16 +390,25 @@ function RequirementsTooltip({
                       >
                         <Icon size={11} strokeWidth={2.5} />
                       </span>
-                      <span className="min-w-0 flex-1 truncate text-[11px] font-medium" style={{ color: 'var(--text)' }}>
-                        {it.name}
+                      <span className="min-w-0 flex-1 truncate text-[12px] font-medium" style={{ color: 'var(--text)' }}>
+                        {CHECKLIST_GROUP_LABEL[g.key] || g.key || 'Other'}
                       </span>
-                      {vState === 'expired' || vState === 'expiring' ? (
-                        <span className="shrink-0 text-[9px] font-bold uppercase" style={{ color: VALIDITY_COLOR[vState] }}>
-                          {vState === 'expired' ? 'Expired' : 'Expiring'}
+                      {notComplied ? (
+                        <span className="shrink-0 text-[9px] font-bold uppercase" style={{ color: '#ef4444' }}>
+                          {notComplied} not complied
                         </span>
                       ) : null}
-                      <span className="shrink-0 text-[9px] font-bold uppercase tracking-wide" style={{ color: s.color }}>
-                        {CHECKLIST_STATUS_LABELS[it.status] || it.status}
+                      {expired ? (
+                        <span className="shrink-0 text-[9px] font-bold uppercase" style={{ color: VALIDITY_COLOR.expired }}>
+                          {expired} expired
+                        </span>
+                      ) : expiring ? (
+                        <span className="shrink-0 text-[9px] font-bold uppercase" style={{ color: VALIDITY_COLOR.expiring }}>
+                          {expiring} expiring
+                        </span>
+                      ) : null}
+                      <span className="shrink-0 text-[11px] font-bold tabular-nums" style={{ color: done ? '#10b981' : 'var(--text)' }}>
+                        {complied}/{g.items.length}
                       </span>
                     </div>
                   );

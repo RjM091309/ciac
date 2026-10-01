@@ -77,7 +77,7 @@ type AssessmentRow = {
   days_in_assessment: number | null;
   requirements_total: number;
   requirements_verified: number;
-  requirements_breakdown: { name: string | null; status: string }[];
+  requirements_breakdown: RequirementBreakdown[];
 };
 
 type RequirementRow = {
@@ -201,8 +201,15 @@ const REQ_STATUS_STYLE: Record<string, { color: string; bg: string; Icon: typeof
   PENDING: { color: '#f59e0b', bg: 'rgba(245,158,11,.15)', Icon: Clock3 },
 };
 
-const TOOLTIP_WIDTH = 250;
-const TOOLTIP_ROW_HEIGHT = 42;
+// One requirement in the queue's "X/Y verified" hover breakdown. `category`
+// is its Requirement Category (absent when uncategorized/ad-hoc).
+type RequirementBreakdown = { name: string | null; status: string; category?: string | null };
+
+const TOOLTIP_WIDTH = 270;
+// One summary row per Requirement Category (name + verified/total). The
+// tooltip can't scroll, and an application can carry 30+ requirements, so it
+// never lists individual documents — those are in the Compliance tab.
+const TOOLTIP_GROUP_HEIGHT = 34;
 const TOOLTIP_PADDING = 16;
 const TOOLTIP_VIEWPORT_MARGIN = 8;
 const TOOLTIP_ARROW_OFFSET = 16;
@@ -223,10 +230,24 @@ function ComplianceTooltip({
   breakdown,
   children,
 }: {
-  breakdown: { name: string | null; status: string }[];
+  breakdown: RequirementBreakdown[];
   children: React.ReactNode;
 }) {
   const [open, setOpen] = useState(false);
+  // Same grouping as the Compliance tab's sub-tabs: categories A–Z,
+  // uncategorized last, each with its verified/total count.
+  const groups = useMemo(() => {
+    const map = new Map<string, { name: string; items: RequirementBreakdown[] }>();
+    for (const b of breakdown || []) {
+      const name = b.category || 'Other Requirements';
+      const g = map.get(name) || { name, items: [] };
+      g.items.push(b);
+      map.set(name, g);
+    }
+    return Array.from(map.values()).sort((a, b) =>
+      a.name === 'Other Requirements' ? 1 : b.name === 'Other Requirements' ? -1 : a.name.localeCompare(b.name)
+    );
+  }, [breakdown]);
   const [pos, setPos] = useState<{ top: number; left: number; openUp: boolean; arrowLeft: number } | null>(null);
   const triggerRef = useRef<HTMLSpanElement>(null);
 
@@ -234,7 +255,7 @@ function ComplianceTooltip({
     const trigger = triggerRef.current;
     if (!trigger) return;
     const rect = trigger.getBoundingClientRect();
-    const tooltipHeight = breakdown.length * TOOLTIP_ROW_HEIGHT + TOOLTIP_PADDING;
+    const tooltipHeight = groups.length * TOOLTIP_GROUP_HEIGHT + TOOLTIP_PADDING;
     const spaceBelow = window.innerHeight - rect.bottom;
     const openUp = spaceBelow < tooltipHeight + TOOLTIP_VIEWPORT_MARGIN && rect.top > tooltipHeight + TOOLTIP_VIEWPORT_MARGIN;
     const left = Math.min(Math.max(TOOLTIP_VIEWPORT_MARGIN, rect.left), window.innerWidth - TOOLTIP_WIDTH - TOOLTIP_VIEWPORT_MARGIN);
@@ -310,32 +331,34 @@ function ComplianceTooltip({
                 }}
               />
               <div className="relative py-2">
-                {breakdown.map((b, idx) => {
-                  const s = REQ_STATUS_STYLE[b.status] || REQ_STATUS_STYLE.PENDING;
+                {groups.map((g, gIdx) => {
+                  const verified = g.items.filter((b) => b.status === 'VERIFIED').length;
+                  const rejected = g.items.filter((b) => b.status === 'REJECTED').length;
+                  const done = verified === g.items.length;
+                  const s = done ? REQ_STATUS_STYLE.VERIFIED : rejected ? REQ_STATUS_STYLE.REJECTED : REQ_STATUS_STYLE.PENDING;
                   const Icon = s.Icon;
                   return (
                     <div
-                      key={idx}
-                      className={cn(
-                        'flex items-center gap-2.5 px-3.5',
-                        idx !== breakdown.length - 1 && 'border-b'
-                      )}
-                      style={{ height: TOOLTIP_ROW_HEIGHT, borderColor: 'color-mix(in oklab, var(--border) 45%, transparent)' }}
+                      key={g.name}
+                      className={cn('flex items-center gap-2.5 px-3.5', gIdx !== groups.length - 1 && 'border-b')}
+                      style={{ height: TOOLTIP_GROUP_HEIGHT, borderColor: 'color-mix(in oklab, var(--border) 45%, transparent)' }}
                     >
                       <span
-                        className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full"
+                        className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full"
                         style={{ backgroundColor: s.bg, color: s.color }}
                       >
-                        <Icon size={13} strokeWidth={2.5} />
+                        <Icon size={11} strokeWidth={2.5} />
                       </span>
                       <span className="min-w-0 flex-1 truncate text-[12px] font-medium" style={{ color: 'var(--text)' }}>
-                        {b.name || 'Requirement'}
+                        {g.name}
                       </span>
-                      <span
-                        className="shrink-0 text-[9px] font-bold uppercase tracking-wide"
-                        style={{ color: s.color }}
-                      >
-                        {b.status === 'VERIFIED' ? 'Verified' : b.status === 'REJECTED' ? 'Rejected' : 'Pending'}
+                      {rejected ? (
+                        <span className="shrink-0 text-[9px] font-bold uppercase tracking-wide" style={{ color: '#ef4444' }}>
+                          {rejected} rejected
+                        </span>
+                      ) : null}
+                      <span className="shrink-0 text-[11px] font-bold tabular-nums" style={{ color: done ? '#10b981' : 'var(--text)' }}>
+                        {verified}/{g.items.length}
                       </span>
                     </div>
                   );

@@ -283,9 +283,10 @@ const LIST_SELECT = `
     -- enough per application (a handful of requirements) to inline here
     -- rather than a separate round trip per row on hover.
     (
-      SELECT r.name AS name, ar.status AS status
+      SELECT r.name AS name, ar.status AS status, rc.name AS category
       FROM dbo.application_requirements ar
       LEFT JOIN dbo.requirements r ON r.id = ar.requirement_id
+      LEFT JOIN dbo.requirement_categories rc ON rc.id = r.category_id
       WHERE ar.application_id = a.id
       ORDER BY r.name
       FOR JSON PATH
