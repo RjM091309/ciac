@@ -378,6 +378,9 @@ exports.createLocatorWithApplication = async (req, res) => {
       });
     } catch (error) {
       console.error("Create locator with application: application step failed:", error);
+      // 400s (e.g. no requirements match the type of contract) carry a
+      // message the admin can act on — only mask genuine failures.
+      if (error?.status === 400) throw error;
       throw Object.assign(new Error("Failed to create the application."), { status: 500 });
     }
 

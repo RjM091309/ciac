@@ -831,7 +831,7 @@ async function createApplication({
     );
     const newId = result?.recordset?.[0]?.id;
 
-    await tx.query(
+    const seeded = await tx.query(
       `
       INSERT INTO dbo.application_requirements
         (application_id, requirement_id, status, remarks, created_by, updated_by, created_at, updated_at)
@@ -870,6 +870,22 @@ async function createApplication({
       `,
       [newId, createdBy, renewalBit, contractTypeId]
     );
+
+    // A submitted application with an empty checklist leaves the locator
+    // nothing to upload and Assessment nothing to verify — almost always a
+    // missing Type of Contract or a Requirements catalog with no match for
+    // it. Rolls back the whole transaction instead of filing it silently.
+    // Drafts are let through since they can still be edited before submit.
+    if (!isDraft && Number(seeded?.rowsAffected?.[0] || 0) === 0) {
+      throw Object.assign(
+        new Error(
+          contractTypeId
+            ? "No active requirements match this type of contract. Set them up in File Maintenance > Requirements first."
+            : "Select a type of contract — no requirements apply to an application without one."
+        ),
+        { status: 400 }
+      );
+    }
 
     await tx.query(
       `

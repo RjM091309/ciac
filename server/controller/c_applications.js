@@ -195,7 +195,7 @@ exports.create = async (req, res) => {
     });
   } catch (error) {
     console.error("Create application error:", error);
-    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
+    return res.status(error.status || 500).json({ success: false, message: publicErrorMessage(error) });
   }
 };
 

@@ -225,6 +225,33 @@ export function LocatorUsersManagement({
     },
   });
 
+  // Type of Contract decides which requirements get attached when the
+  // application is created (see ApplicationWorkflow.createApplication).
+  // Fetched on its own instead of through the users_roles cache above, since
+  // that cache key is shared with UsersManagement, whose fetcher wouldn't
+  // carry this field.
+  const [contractTypeOptions, setContractTypeOptions] = useState<{ value: string; label: string }[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    fetch(api('/api/type-of-contract'), { credentials: 'include' })
+      .then((res) => res.json().catch(() => ({})))
+      .then((json) => {
+        if (cancelled) return;
+        const rows = Array.isArray(json?.data) ? json.data : [];
+        setContractTypeOptions(
+          rows
+            .filter((t: any) => Number(t?.is_active) === 1)
+            .map((t: any) => ({ value: String(t.id), label: String(t.name) }))
+        );
+      })
+      .catch(() => {
+        if (!cancelled) setContractTypeOptions([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const allRoles = usersRoles?.roles ?? [];
   const applicationTypeOptions = usersRoles?.applicationTypes ?? [];
   const companyByUserId = usersRoles?.companyByUserId ?? {};
@@ -263,6 +290,7 @@ export function LocatorUsersManagement({
     lease_address: '',
     contact_no: '',
     application_type: 'DIRECT_LEASE',
+    contract_type_id: '',
     save_as_draft: false,
   });
   const [originalForm, setOriginalForm] = useState<typeof form | null>(null);
@@ -474,7 +502,8 @@ export function LocatorUsersManagement({
           form.business_name.trim() &&
           form.contact_no.trim() &&
           form.address.trim() &&
-          form.application_type.trim()
+          form.application_type.trim() &&
+          form.contract_type_id
       );
     }
 
@@ -511,6 +540,7 @@ export function LocatorUsersManagement({
       lease_address: '',
       contact_no: '',
       application_type: 'DIRECT_LEASE',
+      contract_type_id: '',
       save_as_draft: false,
     });
     setIsCreateOpen(true);
@@ -532,6 +562,7 @@ export function LocatorUsersManagement({
       // application isn't created/changed here) — kept only so `form` has
       // one consistent shape between create and edit.
       application_type: 'DIRECT_LEASE',
+      contract_type_id: '',
       save_as_draft: false,
     };
     setForm(baseline);
@@ -583,6 +614,7 @@ export function LocatorUsersManagement({
           lease_address: form.lease_address.trim() || undefined,
           contact_no: form.contact_no.trim(),
           application_type: form.application_type,
+          contract_type_id: form.contract_type_id ? Number(form.contract_type_id) : null,
           save_as_draft: form.save_as_draft,
         };
 
@@ -592,6 +624,7 @@ export function LocatorUsersManagement({
         if (!payload.contact_no) throw new Error('Contact number is required');
         if (!payload.address) throw new Error('Business address is required');
         if (!payload.application_type) throw new Error('Application type is required');
+        if (!payload.contract_type_id) throw new Error('Type of contract is required');
 
         const res = await fetch(api('/api/users/locator-with-application'), {
           method: 'POST',
@@ -1375,6 +1408,17 @@ export function LocatorUsersManagement({
                 }
                 value={form.application_type}
                 onChange={(value) => setForm((p) => ({ ...p, application_type: value }))}
+              />
+            </Field>
+          ) : null}
+          {!editing ? (
+            <Field label="Type of contract *">
+              <AppSelect
+                isClearable={false}
+                options={contractTypeOptions}
+                value={form.contract_type_id}
+                onChange={(value) => setForm((p) => ({ ...p, contract_type_id: value || '' }))}
+                placeholder="Select type of contract"
               />
             </Field>
           ) : null}
