@@ -19,10 +19,12 @@ const MENU_KEY = 'compliance:permits';
 // has configured, not one of those configurable entries itself.
 const RESERVED_PERMIT_TYPE = { value: 'CONTRACT', label: 'Lease Contract' };
 
+// EXPIRED uses the same solid rose as the header's notification count badge
+// (bg-rose-500, white text) — the old light tint read as pink.
 const STATUS_STYLE: Record<string, { bg: string; color: string }> = {
   VALID: { bg: 'rgba(16,185,129,0.12)', color: '#10b981' },
   EXPIRING: { bg: 'rgba(245,158,11,0.14)', color: '#f59e0b' },
-  EXPIRED: { bg: 'rgba(220,38,38,0.14)', color: '#fca5a5' },
+  EXPIRED: { bg: '#f43f5e', color: '#ffffff' },
   REVOKED: { bg: 'rgba(148,163,184,0.14)', color: '#94a3b8' },
 };
 
@@ -338,7 +340,7 @@ export function PermitsManagement({
     return (
       <div className="mt-0.5 flex items-center gap-1.5 flex-wrap">
         {days < 0 ? (
-          <span className="inline-flex items-center gap-1 text-[10px] font-semibold" style={{ color: '#fca5a5' }}>
+          <span className="inline-flex items-center gap-1 text-[10px] font-semibold" style={{ color: '#f43f5e' }}>
             <AlertTriangle size={10} /> {Math.abs(days)}d overdue
           </span>
         ) : (
@@ -723,7 +725,7 @@ function ExpiryStatCard({
   active: boolean;
   onClick: () => void;
 }) {
-  const color = tone === 'danger' ? '#fca5a5' : tone === 'warn' ? '#f59e0b' : 'var(--text)';
+  const color = tone === 'danger' ? '#f43f5e' : tone === 'warn' ? '#f59e0b' : 'var(--text)';
   return (
     <button
       type="button"
