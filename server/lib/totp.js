@@ -1,14 +1,17 @@
 const crypto = require("crypto");
 const { generateSecret, generate, verify, generateURI } = require("otplib");
 const QRCode = require("qrcode");
+const { getters: site } = require("./siteSettings");
 
 // Accept small clock drift between server and the user's phone (±1 period).
 const EPOCH_TOLERANCE_SECONDS = 30;
 
 const ENC_PREFIX = "enc:v1:";
 
+// Portal Settings' "Authenticator app name", else "<org short name> Portal"
+// (lib/siteSettings.js). Only affects new enrollments.
 function getIssuer() {
-  return process.env.TOTP_ISSUER || "CIAC Portal";
+  return site.totpIssuer();
 }
 
 /**

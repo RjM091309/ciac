@@ -13,6 +13,7 @@ const { escapeHtml } = require("../lib/html");
 const { diffChanges } = require("../lib/auditDiff");
 const { publicErrorMessage } = require("../lib/httpError");
 const { checkPassword } = require("../lib/reauth");
+const { getters: site } = require("../lib/siteSettings");
 
 /** Translates a raw MSSQL unique-constraint violation (error 2627/2601) on
  * dbo.users into a friendly message plus which field it belongs to, so the
@@ -60,25 +61,26 @@ async function userAuditSnapshot(id) {
  * to the portal. */
 function sendTempPasswordEmail({ to, name, username, tempPassword, isNewAccount }) {
   const intro = isNewAccount
-    ? "An account was created for you on the CIAC Locator Portal."
+    ? `An account was created for you on the ${site.locatorPortalLabel()}.`
     : "An administrator reset your password.";
   const loginUrl = `${String(process.env.FRONTEND_URL || "").replace(/\/+$/, "")}/`;
+  const contact = site.contactPhrase();
   return sendMail({
     to,
-    subject: isNewAccount ? "Your CIAC Locator Portal account" : "Your CIAC Locator Portal password was reset",
+    subject: isNewAccount ? `Your ${site.locatorPortalLabel()} account` : `Your ${site.locatorPortalLabel()} password was reset`,
     text:
       `Hello ${name},\n\n${intro}\n\n` +
       `Username: ${username}\n` +
       `Temporary password: ${tempPassword}\n\n` +
       `Sign in here: ${loginUrl}\n\n` +
-      `You'll be asked to set a new password right away. If you didn't expect this, contact CIAC.\n`,
+      `You'll be asked to set a new password right away. If you didn't expect this, ${contact}.\n`,
     html:
       `<p>Hello ${escapeHtml(name)},</p>` +
       `<p>${escapeHtml(intro)}</p>` +
       `<p>Username: <b>${escapeHtml(username)}</b><br/>` +
       `Temporary password: <span style="font-size:18px;font-weight:bold;letter-spacing:1px;">${escapeHtml(tempPassword)}</span></p>` +
       `<p><a href="${loginUrl}" style="display:inline-block;padding:10px 18px;background:#111827;color:#fff;text-decoration:none;border-radius:6px;">Sign in to the portal</a></p>` +
-      `<p>You'll be asked to set a new password right away. If you didn't expect this, contact CIAC.</p>`,
+      `<p>You'll be asked to set a new password right away. If you didn't expect this, ${escapeHtml(contact)}.</p>`,
   });
 }
 
@@ -755,7 +757,7 @@ exports.approve = async (req, res) => {
     try {
       await Notification.createNotification({
         userId: id,
-        subject: "Your CIAC account has been approved",
+        subject: `Your ${site.orgShortName()} account has been approved`,
         body: "Your registration was approved. You can now sign in to the proponent portal.",
         createdBy: req.user?.id ?? null,
         eventType: "application_status",

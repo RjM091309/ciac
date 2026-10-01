@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Building2, ChevronLeft, ChevronRight, Clock, FileText, MoreHorizontal, Rocket, TrendingUp, XCircle } from 'lucide-react';
 import { cn } from '../../lib/utils';
+import { useSiteSettings } from '../../lib/siteSettings';
 import {
   AttentionCard,
   PerformanceCard,
@@ -126,6 +127,7 @@ const MetricCard = ({
 type Navigate = (to: string, opts?: { replace?: boolean }) => void;
 
 export function Dashboard({ data, navigate }: { data: AdminDashboardData | null; navigate?: Navigate }) {
+  const orgShortName = useSiteSettings().branding.org_short_name;
   const [currentTime, setCurrentTime] = useState(new Date());
 
   useEffect(() => {
@@ -259,7 +261,7 @@ export function Dashboard({ data, navigate }: { data: AdminDashboardData | null;
                 </div>
 
                 <div className="md:mt-4 space-y-0.5 md:space-y-1">
-                  <p className="text-xs sm:text-sm font-medium text-secondary">CIAC Lease Desk</p>
+                  <p className="text-xs sm:text-sm font-medium text-secondary">{orgShortName} Lease Desk</p>
                   <p className="text-xs font-semibold text-secondary">Application Monitoring</p>
                   <p className="text-[10px] sm:text-xs text-secondary">
                     {currentTime.toLocaleDateString('en-US', {

@@ -280,8 +280,8 @@ notifications.
   Client: `src/lib/notificationClient.ts`, bell in `AppHeader`.
 - Events already firing: application status change, requirement update, document upload,
   assessment recommendation / deficiency, inspection assignment / completion.
-- **Email ⚠️:** `nodemailer` is wired (`server/config/mailer.js`) but `SMTP_*` env is empty —
-  no mail is sent until configured.
+- **Email:** `nodemailer` (`server/lib/mailer.js`), configured by an admin in Portal Settings →
+  Email (not `.env`). No mail is sent until an SMTP server and username are set there.
 - **Pending:** SMS notifications, renewal reminders, expiring-permit alerts, pending-action
   digests, configurable alert rules.
 

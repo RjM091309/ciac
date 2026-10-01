@@ -16,6 +16,7 @@ import {
   YAxis,
 } from 'recharts';
 import { cn } from '../../lib/utils';
+import { getSiteSettings } from '../../lib/siteSettings';
 import { useControlPanelAccess } from '../../context/ControlPanelAccessContext';
 import { AppSelect } from '../ui/AppSelect';
 import { DataTableControls } from '../ui/DataTableControls';
@@ -654,7 +655,7 @@ export function ReportsAnalytics({ navigate }: { navigate?: (to: string, opts?: 
       const doc = new jsPDF({ orientation: 'landscape' });
 
       doc.setFontSize(14);
-      doc.text('CIAC — Reports & Analytics', 14, 16);
+      doc.text(`${getSiteSettings().branding.org_short_name} — Reports & Analytics`, 14, 16);
 
       doc.setFontSize(9);
       doc.setTextColor(100);

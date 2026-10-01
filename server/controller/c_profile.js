@@ -6,6 +6,7 @@ const { decryptSecret, encryptSecret, newSecret, buildEnrollment, verifyToken } 
 const { saveAvatar, resolveAvatar, avatarContentType, deleteAvatar } = require("../lib/avatarStorage");
 const { publicErrorMessage } = require("../lib/httpError");
 const { guardedCheck, checkPassword } = require("../lib/reauth");
+const { getters: site } = require("../lib/siteSettings");
 
 // My Profile — the signed-in user's own account (staff only on the frontend;
 // Locators keep "Settings" → My Business Profile). Every route here acts on
@@ -65,37 +66,39 @@ exports.get = async (req, res) => {
 function sendEmailChangeNotices({ name, username, oldEmail, newEmail }) {
   const when = new Date().toLocaleString("en-US", { timeZone: "Asia/Manila", dateStyle: "long", timeStyle: "short" });
   const safeName = escapeHtml(name);
+  const portal = site.portalLabel();
+  const contact = site.contactPhrase();
   const mails = [
     sendMail({
       to: newEmail,
-      subject: "Your CIAC Portal email address was updated",
+      subject: `Your ${portal} email address was updated`,
       text:
         `Hello ${name},\n\n` +
-        `This address is now the email on the CIAC Portal account "${username}" (changed ${when}). ` +
+        `This address is now the email on the ${portal} account "${username}" (changed ${when}). ` +
         `Password-reset links and account notices will be sent here from now on.\n\n` +
-        `If you didn't make this change, contact CIAC right away.\n`,
+        `If you didn't make this change, ${contact} right away.\n`,
       html:
         `<p>Hello ${safeName},</p>` +
-        `<p>This address is now the email on the CIAC Portal account <b>${escapeHtml(username)}</b> (changed ${when}). ` +
+        `<p>This address is now the email on the ${escapeHtml(portal)} account <b>${escapeHtml(username)}</b> (changed ${when}). ` +
         `Password-reset links and account notices will be sent here from now on.</p>` +
-        `<p>If you didn't make this change, contact CIAC right away.</p>`,
+        `<p>If you didn't make this change, ${escapeHtml(contact)} right away.</p>`,
     }),
   ];
   if (oldEmail) {
     mails.push(
       sendMail({
         to: oldEmail,
-        subject: "The email on your CIAC Portal account was changed",
+        subject: `The email on your ${portal} account was changed`,
         text:
           `Hello ${name},\n\n` +
-          `The email on the CIAC Portal account "${username}" was changed from this address to ${newEmail} (${when}). ` +
+          `The email on the ${portal} account "${username}" was changed from this address to ${newEmail} (${when}). ` +
           `You won't receive account emails here anymore.\n\n` +
-          `If you didn't make this change, contact CIAC right away — someone else may have access to your account.\n`,
+          `If you didn't make this change, ${contact} right away — someone else may have access to your account.\n`,
         html:
           `<p>Hello ${safeName},</p>` +
-          `<p>The email on the CIAC Portal account <b>${escapeHtml(username)}</b> was changed from this address to ` +
+          `<p>The email on the ${escapeHtml(portal)} account <b>${escapeHtml(username)}</b> was changed from this address to ` +
           `<b>${escapeHtml(newEmail)}</b> (${when}). You won't receive account emails here anymore.</p>` +
-          `<p>If you didn't make this change, contact CIAC right away — someone else may have access to your account.</p>`,
+          `<p>If you didn't make this change, ${escapeHtml(contact)} right away — someone else may have access to your account.</p>`,
       })
     );
   }

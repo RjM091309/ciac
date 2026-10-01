@@ -9,7 +9,7 @@
 const IGNORED = new Set(["id", "created_at", "updated_at", "created_by", "updated_by"]);
 // Recorded as "changed" without either value, so the audit trail never holds
 // a copy of the secret itself.
-const MASKED = new Set(["password", "password_hash", "tin", "totp_secret"]);
+const MASKED = new Set(["password", "password_hash", "tin", "totp_secret", "smtp_pass", "google_maps_api_key"]);
 const MAX_VALUE_LENGTH = 200;
 const MAX_CHANGES = 40;
 

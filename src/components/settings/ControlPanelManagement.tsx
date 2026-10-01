@@ -310,8 +310,13 @@ export function ControlPanelManagement({ locationSearch }: { locationSearch?: st
   });
   const [pendingRoleId, setPendingRoleId] = useState<string | null>(null);
 
+  // Admin-only pages (Portal Settings) can't be granted to a role, so they
+  // aren't offered here at all.
   const sidebarMenuItems: MenuItem[] = useMemo(
-    () => Object.entries(LANDING_CONFIG).map(([key, cfg]) => ({ key, label: cfg.title })),
+    () =>
+      Object.entries(LANDING_CONFIG)
+        .filter(([, cfg]) => !cfg.adminOnly)
+        .map(([key, cfg]) => ({ key, label: cfg.title })),
     []
   );
 

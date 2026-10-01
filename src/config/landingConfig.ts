@@ -1,5 +1,5 @@
 import type { AppView } from '../layout/AppLayout';
-import { BarChart3, FileCheck, FolderTree, Layers, ShieldCheck, Users } from 'lucide-react';
+import { BarChart3, FileCheck, FolderTree, Layers, Settings2, ShieldCheck, Users } from 'lucide-react';
 
 export type LandingConfig = {
   title: string;
@@ -13,6 +13,9 @@ export type LandingConfig = {
   // in Control Panel, so the admin configuring access sees what each switch
   // actually unlocks on that screen instead of a bare "Add/Edit/Delete" label.
   crudHints?: { add?: string; edit?: string; delete?: string };
+  // Administrators only, always: Control Panel never lists it as a menu a
+  // role can be given (the server refuses everyone else regardless).
+  adminOnly?: boolean;
   stats: { label: string; value: string; hint?: string }[];
   table: {
     columns: string[];
@@ -354,5 +357,14 @@ export const LANDING_CONFIG: Record<AppView, LandingConfig> = {
         ['Save Action', 'admin API', 'Upsert role permissions', 'Active'],
       ],
     },
+  },
+  'settings:portal': {
+    title: 'Portal Settings',
+    description: 'Branding, outgoing email, integrations, security policy and announcements for the whole portal.',
+    badge: 'Configuration',
+    icon: Settings2,
+    adminOnly: true,
+    stats: [],
+    table: { columns: [], rows: [] },
   },
 };

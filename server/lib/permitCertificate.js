@@ -1,6 +1,7 @@
 const crypto = require("crypto");
 const { fmtDate, buildCertificateHtml, renderHtmlToPdf, buildQrDataUrl } = require("./certificateRenderer");
 const { escapeHtml } = require("./html");
+const { getters: site } = require("./siteSettings");
 
 // "CONTRACT" is the one permit type that isn't a Compliance Requirement —
 // Types entry (see server/models/Permit.js) — everything else's display
@@ -74,7 +75,7 @@ async function renderPermitCertificate({
   ];
 
   const html = buildCertificateHtml({
-    officeLine: "Office of Compliance & Permits — CIAC Locator & Compliance System",
+    officeLine: `Office of Compliance & Permits — ${site.orgShortName()} Locator & Compliance System`,
     titleText: certificateTitle(permit.permit_type, typeName),
     certLabel: "CERTIFICATE NO",
     certNo: certificateNo(permit),

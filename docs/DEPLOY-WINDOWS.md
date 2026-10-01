@@ -48,7 +48,7 @@ npm run build          # output: dist/
 
 The build calls `/api` on its own origin, which nginx forwards to the backend. The dev `.env`'s `VITE_BACKEND_URL` is **not** used by the build. Leave `VITE_API_ORIGIN` unset unless the API really lives on a different domain.
 
-For address autocomplete, set `VITE_GOOGLE_MAPS_API_KEY` in `.env` **before** building. Restrict that key to the client's domain in Google Cloud.
+For address autocomplete, set `VITE_GOOGLE_MAPS_API_KEY` in `.env` **before** building, or have an administrator enter the key later in Portal Settings → Integrations (that one wins and needs no rebuild). Either way, restrict the key to the client's domain in Google Cloud.
 
 Copy the **contents** of `dist/` to `C:\nginx\html\ciac`.
 
@@ -76,8 +76,9 @@ FRONTEND_URL=https://ciac.example.gov.ph
 
 # Three DIFFERENT long random strings (e.g. 64 hex chars each).
 # Never reuse the dev server's values. Keep a copy somewhere safe: losing
-# APP_ENC_KEY makes stored TINs unreadable, and losing TOTP_ENC_KEY forces
-# everyone to re-enroll their authenticator.
+# APP_ENC_KEY makes stored TINs (and the SMTP password / Maps key saved in
+# Portal Settings) unreadable, and losing TOTP_ENC_KEY forces everyone to
+# re-enroll their authenticator.
 JWT_SECRET=...
 APP_ENC_KEY=...
 TOTP_ENC_KEY=...
@@ -92,15 +93,11 @@ DB_PASSWORD=...
 # DB_TRUSTED_CONNECTION=true
 
 STORAGE_DIR=D:\ciac-data\uploads
-
-SMTP_HOST=...
-SMTP_PORT=587
-SMTP_SECURE=false
-SMTP_USER=...
-SMTP_PASS=...
-SMTP_FROM="3CORE Portal <no-reply@example.gov.ph>"
-TOTP_ISSUER=3CORE Portal
 ```
+
+**Email, sign-in lockout and the authenticator name are not in `.env`.** An administrator sets them (plus the Google Maps key, idle timeout, password length, branding and maintenance mode) in **System Settings → Portal Settings** after the first sign-in. They live only in `dbo.site_settings`; nothing there falls back to `.env`. The SMTP password and Maps key are stored encrypted with `APP_ENC_KEY` (falls back to `JWT_SECRET`). Uploaded logos and the favicon are stored under `STORAGE_DIR\branding`, so they're covered by the file backup in §8 (Backups). Database, secrets, `FRONTEND_URL` and CORS origins can only be changed here in `.env`.
+
+**Upgrading a server that still has `SMTP_*`, `LOGIN_MAX_ATTEMPTS`, `LOGIN_LOCKOUT_MINUTES` or `TOTP_ISSUER` in `.env`:** on its first start with this version, the backend copies them into Portal Settings once (validated, SMTP password encrypted, recorded in the Audit Log as "Settings imported from server config"), then never reads them again. A value outside Portal Settings' limits (for example a lockout under 15 minutes) isn't imported — `backend-error.log` says which, and the default applies until an admin sets it. After that start, delete those lines from `.env`; the backend writes a warning to `backend-error.log` on every start while they're still there.
 
 Generate a random value with:
 
@@ -253,4 +250,4 @@ Schema changes apply themselves on startup. Unused old tables listed in `server/
 | Contract/permit certificate fails to generate | `npx playwright install chromium` wasn't run in `C:\ciac\server` |
 | Uploads fail with 413 | nginx `client_max_body_size` is missing or too small |
 | Notifications don't update live | The `/api/notifications/stream` block is missing, or buffering isn't off |
-| No password-reset or account emails | `SMTP_*` settings. The error is in `backend-error.log`. |
+| No password-reset or account emails | Portal Settings → Email (use **Send test email**). `SMTP_*` in `.env` is no longer read. The error is in `backend-error.log`. |

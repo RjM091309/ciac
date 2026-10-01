@@ -183,6 +183,8 @@ async function countRecentLoginFailures(username, minutes = 15) {
 // every action lands in exactly one group; anything not matched earlier
 // (applications, assessment, approval, permits, inspections…) is workflow.
 const CATEGORY_RULES = [
+  // Portal Settings: branding, email, API key, security policy, maintenance.
+  ["system", /^(SITE_|MAINTENANCE_MODE_)/],
   ["auth", /^(LOGIN_|LOGOUT$|SESSION_|PASSWORD_RESET_|USER_PASSWORD_SELF_CHANGE$)/],
   ["access", /^(DOCUMENT_VIEWED|DOCUMENT_DOWNLOADED|CERTIFICATE_VIEWED|CERTIFICATE_DOWNLOADED|REPORT_EXPORTED|AUDIT_LOG_EXPORTED)$/],
   ["accounts", /^(USER_|ROLE_|PERMISSIONS_)/],

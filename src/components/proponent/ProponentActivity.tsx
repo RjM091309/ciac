@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { FileUp, KeyRound, Loader2, LogIn, ShieldCheck, UserPlus, PencilLine } from 'lucide-react';
 import { EmptyState } from '../ui/EmptyState';
 import { clearLocatorSetupSkipAndReload } from '../../lib/locatorSetup';
+import { useSiteSettings } from '../../lib/siteSettings';
 
 type ActivityRow = {
   id: number;
@@ -16,7 +17,7 @@ type ActivityRow = {
 const ACTION_META: Record<string, { label: string; icon: any; color: string }> = {
   LOGIN: { label: 'Signed in', icon: LogIn, color: '#6366f1' },
   REGISTERED: { label: 'Submitted registration', icon: UserPlus, color: '#3b82f6' },
-  ACCOUNT_APPROVED: { label: 'Account approved by CIAC', icon: ShieldCheck, color: '#10b981' },
+  ACCOUNT_APPROVED: { label: 'Account approved by {org}', icon: ShieldCheck, color: '#10b981' },
   ACCOUNT_REJECTED: { label: 'Registration declined', icon: ShieldCheck, color: '#ef4444' },
   PASSWORD_CHANGED: { label: 'Password changed', icon: KeyRound, color: '#f59e0b' },
   PROFILE_CHANGE_REQUESTED: { label: 'Profile change requested', icon: PencilLine, color: '#f59e0b' },
@@ -43,6 +44,7 @@ function detail(row: ActivityRow): string | null {
 }
 
 export function ProponentActivity() {
+  const org = useSiteSettings().branding.org_short_name;
   const [rows, setRows] = useState<ActivityRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -105,7 +107,8 @@ export function ProponentActivity() {
       ) : (
         <ol className="relative border-l ml-2" style={{ borderColor: 'var(--border-subtle)' }}>
           {rows.map((row) => {
-            const meta = ACTION_META[row.action] || { label: row.action, icon: ShieldCheck, color: 'var(--text-muted)' };
+            const base = ACTION_META[row.action] || { label: row.action, icon: ShieldCheck, color: 'var(--text-muted)' };
+            const meta = { ...base, label: base.label.replace('{org}', org) };
             const Icon = meta.icon;
             const d = detail(row);
             return (

@@ -156,6 +156,7 @@ export function DatePicker({
   dense = false,
   boxed = false,
   bordered = false,
+  minDate,
 }: {
   value: any;
   onChange: (next: any) => void;
@@ -180,6 +181,8 @@ export function DatePicker({
   /** Standard form field: the same `.app-input` box as the app's text
    * boxes and AppSelect, instead of the borderless filter-bar pill. */
   bordered?: boolean;
+  /** Earliest selectable day; earlier days are greyed out. */
+  minDate?: Date;
 }) {
   const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
   const open = Boolean(anchorEl);
@@ -201,7 +204,10 @@ export function DatePicker({
     selectedPreset = detectPreset(value || [null, null]);
   }
   // Month the calendar opens on (selected date, else today) — kept in sync via onMonthChange.
-  const openMonth = (mode === 'single' ? value : start) || new Date();
+  const picked = (mode === 'single' ? value : start) || new Date();
+  // Never open on a month that's entirely before minDate (e.g. an end date
+  // that has already passed) — show the first month that can be picked.
+  const openMonth = minDate && picked < minDate ? minDate : picked;
   const weekRows = weeksInMonth(viewMonth);
   const presets: { key: PresetKey; label: string; range?: [Date, Date] }[] = [
     { key: 'today', label: 'Today', range: getTodayRange() },
@@ -350,7 +356,11 @@ export function DatePicker({
           ) : null}
 
           <DateCalendar
-            value={mode === 'single' ? value : start}
+            // A selected day before minDate (e.g. an end date that already
+            // passed) isn't handed to the calendar, so it opens on openMonth.
+            value={minDate && picked < minDate ? null : mode === 'single' ? value : start}
+            referenceDate={openMonth}
+            minDate={minDate}
             onMonthChange={setViewMonth}
             onChange={(picked) => {
               if (!picked) return;

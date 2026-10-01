@@ -44,12 +44,11 @@ export function AddressAutocomplete({
   const [highlighted, setHighlighted] = useState(0);
 
   useEffect(() => {
-    const loader = loadGoogleMaps();
-    if (!loader) return; // no API key configured — stays a plain input
     let cancelled = false;
-    loader
+    loadGoogleMaps()
       .then((google) => {
-        if (cancelled) return;
+        // null: no API key configured (Portal Settings or .env) — stays a plain input.
+        if (cancelled || !google) return;
         serviceRef.current = new google.maps.places.AutocompleteService();
         setReady(true);
       })

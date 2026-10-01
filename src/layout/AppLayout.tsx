@@ -1,5 +1,6 @@
 import React, { useEffect, useLayoutEffect, useState, useMemo } from 'react';
 import { AppFooter } from '../components/AppFooter';
+import { SiteBanner } from '../components/SiteBanner';
 import { AppHeader } from '../components/AppHeader';
 import { AppSidebar } from '../components/AppSidebar';
 import { ProponentSidebar } from '../components/proponent/ProponentSidebar';
@@ -30,7 +31,8 @@ export type AppView =
   | 'settings:building'
   | 'settings:land-use'
   | 'settings:control-panel'
-  | 'settings:audit-log';
+  | 'settings:audit-log'
+  | 'settings:portal';
 
 type Theme = 'light' | 'dark';
 type ThemeMode = 'system' | 'manual';
@@ -302,6 +304,7 @@ export function AppLayout({
               style={showBottomNav ? { paddingBottom: `calc(${BOTTOM_NAV_HEIGHT}px + max(1.5rem, env(safe-area-inset-bottom, 0px)))` } : undefined}
             >
               <div className="min-h-full flex flex-col">
+                <SiteBanner isAdmin={userRole === 'admin'} />
                 <div className="flex-1">{children}</div>
                 <AppFooter />
               </div>

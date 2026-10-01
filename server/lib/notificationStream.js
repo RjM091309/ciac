@@ -74,10 +74,19 @@ function publishToUsers(userIds, payload, eventName = "notification") {
   }
 }
 
+/** Every open page of every signed-in user (e.g. "portal settings changed,
+ * re-fetch them"). The payload must be safe for anyone to see. */
+function publishToAll(payload, eventName) {
+  for (const clients of clientsByUserId.values()) {
+    for (const res of clients) writeEvent(res, eventName, payload || {});
+  }
+}
+
 module.exports = {
   subscribeUser,
   writeEvent,
   publishToUser,
   publishToUsers,
+  publishToAll,
   endSessionStreams,
 };

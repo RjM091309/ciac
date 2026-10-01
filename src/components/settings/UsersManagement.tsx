@@ -4,13 +4,15 @@ import { cn } from '../../lib/utils';
 import { toast } from 'sonner';
 import { SidePanel } from '../ui/SidePanel';
 import { ConfirmModal } from '../ui/ConfirmModal';
+import { NoAutofillPasswordInput } from '../ui/NoAutofillPasswordInput';
 import { AppSelect } from '../ui/AppSelect';
 import { DataTableControls } from '../ui/DataTableControls';
 import { Skeleton, TableSkeleton } from '../ui/Skeleton';
 import { EmptyState } from '../ui/EmptyState';
 import { useSessionStorageCachedResource } from '../../hooks/useSessionStorageCachedResource';
 import { RolesPanel } from './RolesPanel';
-import { PASSWORD_HINT, validatePassword } from '../../lib/passwordPolicy';
+import { passwordHint, validatePassword } from '../../lib/passwordPolicy';
+import { useSiteSettings } from '../../lib/siteSettings';
 import { roleDisplayName } from '../../lib/roleDisplay';
 import { useControlPanelAccess } from '../../context/ControlPanelAccessContext';
 
@@ -126,6 +128,7 @@ export function UsersManagement({
   );
   const roles = (usersRoles?.roles ?? []).filter((r) => !isLocatorRoleName(r.name));
 
+  useSiteSettings(); // re-render when the password rules change
   const [form, setForm] = useState({
     username: '',
     email: '',
@@ -806,15 +809,14 @@ export function UsersManagement({
             />
           </Field>
           <Field label={editing ? 'Password (leave blank to keep)' : 'Password'}>
-            <input
+            <NoAutofillPasswordInput
               className="app-input"
               style={{ borderColor: passwordError ? '#f87171' : undefined }}
-              type="password"
               value={form.password}
               onChange={(e) => setForm((p) => ({ ...p, password: e.target.value }))}
             />
             <p className="text-[10px] mt-1" style={{ color: passwordError ? '#f87171' : 'var(--text-muted)' }}>
-              {passwordError || PASSWORD_HINT}
+              {passwordError || passwordHint()}
             </p>
           </Field>
         </div>

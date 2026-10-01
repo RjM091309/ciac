@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 import { SidePanel } from '../ui/SidePanel';
 import { UserAvatar } from '../ui/UserAvatar';
 import { Skeleton } from '../ui/Skeleton';
+import { NoAutofillPasswordInput } from '../ui/NoAutofillPasswordInput';
 import { loadMyProfile, patchMyProfile, setMyProfile, useMyProfile, type MyProfile } from '../../lib/myProfile';
 import { roleDisplayName } from '../../lib/roleDisplay';
 import { PhotoEditorModal } from './PhotoEditorModal';
@@ -432,12 +433,10 @@ function TwoFactorCard({ profile }: { profile: MyProfile }) {
         >
           <p className="text-[11px] text-secondary">First, enter your current password.</p>
           <div className="flex items-center gap-2">
-            <input
-              type="password"
+            <NoAutofillPasswordInput
               className="app-input min-w-0 flex-1"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              autoComplete="current-password"
               aria-label="Current password"
               autoFocus
             />
@@ -647,13 +646,7 @@ export function MyProfilePanel({ open, onClose }: { open: boolean; onClose: () =
                   error={shown('currentPassword')}
                   hint="Required to change your email. Both your old and new address will be notified."
                 >
-                  <input
-                    type="password"
-                    className="app-input"
-                    value={form.currentPassword}
-                    onChange={set('currentPassword')}
-                    autoComplete="current-password"
-                  />
+                  <NoAutofillPasswordInput className="app-input" value={form.currentPassword} onChange={set('currentPassword')} />
                 </Field>
               ) : null}
               <Field label="Mobile number" error={shown('phone')} hint="Optional. Philippine mobile number, e.g. 912 345 6789.">

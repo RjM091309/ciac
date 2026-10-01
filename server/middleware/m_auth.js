@@ -5,6 +5,7 @@ const User = require("../models/User");
 const Proponent = require("../models/Proponent");
 const ApplicationWorkflow = require("../models/ApplicationWorkflow");
 const UserSession = require("../models/UserSession");
+const { getters: siteSettings } = require("../lib/siteSettings");
 
 function getJwtSecret() {
   const secret = process.env.JWT_SECRET;
@@ -41,17 +42,27 @@ async function attachUserFromJwt(req, res, next) {
       const check = await User.getSessionCheck(decoded.id);
       // A token outlives its session when the user signed out, closed their
       // last tab, or signed in somewhere else (UserSession.closedReason) —
-      // reject it too. 'replaced' is passed on so the page can say why.
+      // reject it too. 'replaced' and 'maintenance' (Portal Settings closed
+      // the portal) are passed on so the page can say why.
       const revoked = check && (!check.isActive || check.tokenVersion !== Number(decoded.tv || 0));
       const closed = revoked ? null : await UserSession.closedReason(decoded.sid);
       if (revoked || closed) {
-        if (closed === "replaced") req.sessionEndedReason = "replaced";
+        if (closed === "replaced" || closed === "maintenance") req.sessionEndedReason = closed;
         req.user = undefined;
         res.locals.user = undefined;
         res.clearCookie("jwt");
       }
     } catch {
       // DB unreachable — fall back to trusting the JWT alone this request.
+    }
+    // Maintenance mode (Portal Settings): only administrators stay signed in.
+    // Turning it on also closes the other sessions outright (c_site_settings.js);
+    // this covers any token that request didn't reach.
+    if (req.user && String(req.user.role || "").toLowerCase() !== "admin" && siteSettings.maintenance().enabled) {
+      req.sessionEndedReason = "maintenance";
+      req.user = undefined;
+      res.locals.user = undefined;
+      res.clearCookie("jwt");
     }
     if (req.user) UserSession.touch(req.user.sid);
   } catch {

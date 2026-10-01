@@ -73,6 +73,7 @@ function deleteAvatar(fileName) {
 }
 
 module.exports = {
+  sniffImageType,
   handleAvatarUpload,
   saveAvatar,
   resolveAvatar,

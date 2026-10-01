@@ -5,12 +5,13 @@ const UserSession = require("../models/UserSession");
 const { sendMail } = require("../lib/mailer");
 const { endSessionStreams } = require("../lib/notificationStream");
 const { escapeHtml } = require("../lib/html");
+const { getters: site } = require("../lib/siteSettings");
 
 // How far back the audit log looks when counting repeat failed sign-ins.
 const RECENT_FAILURE_WINDOW_MINUTES = 15;
 
 // No maxAge: a browser-session cookie, dropped when the browser quits. The
-// 15-minute idle limit is enforced by the JWT's own expiry (Auth.js), not
+// idle limit (Portal Settings) is enforced by the JWT's own expiry (Auth.js), not
 // the cookie's lifetime. Secure (HTTPS-only) in production, unless
 // COOKIE_SECURE=false — a temporary escape hatch for a plain-HTTP rollout
 // (e.g. staff training before the certificate is in place).
@@ -71,9 +72,11 @@ exports.login = async (req, res) => {
           req,
         });
       }
-      return res.status(401).json({
+      // 503 for maintenance mode: the sign-in itself was fine, the portal is closed.
+      return res.status(result.maintenance ? 503 : 401).json({
         success: false,
         message: result.message,
+        maintenance: Boolean(result.maintenance),
         mfaRequired: Boolean(result.mfaRequired),
         enrollmentRequired: Boolean(result.enrollmentRequired),
         mustChangePassword: Boolean(result.mustChangePassword),
@@ -207,7 +210,7 @@ exports.forgotPassword = async (req, res) => {
       const name = result.user.full_name || result.user.username;
       const mailResult = await sendMail({
         to: result.user.email,
-        subject: "Reset your CIAC Locator Portal password",
+        subject: `Reset your ${site.locatorPortalLabel()} password`,
         text:
           `Hello ${name},\n\n` +
           `We received a request to reset your password. This link expires in ${Auth.RESET_TOKEN_TTL_MINUTES} minutes:\n\n` +

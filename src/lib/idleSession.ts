@@ -1,7 +1,12 @@
 import { useEffect, useRef } from 'react';
+import { getSiteSettings } from './siteSettings';
 
-// Must match SESSION_IDLE_TIMEOUT_SECONDS in server/models/Auth.js.
-export const IDLE_TIMEOUT_MS = 15 * 60 * 1000;
+// Same value the server gives the session token (Portal Settings → Security,
+// server/models/Auth.js sessionIdleTimeoutSeconds). Read on every tick, so a
+// change an admin saves applies here as soon as the settings refresh.
+export function idleTimeoutMs(): number {
+  return getSiteSettings().security.idle_timeout_minutes * 60 * 1000;
+}
 
 // Keep-alive cadence: while the user is active, extend the server session at
 // most this often. Background polling/SSE never extend it (server side), so
@@ -26,11 +31,16 @@ const TAB_ID_KEY = 'ciac:tabId';
 
 const ACTIVITY_EVENTS = ['mousedown', 'mousemove', 'keydown', 'wheel', 'scroll', 'touchstart'] as const;
 
-export type SignOutReason = 'idle' | 'ended' | 'replaced';
+export type SignOutReason = 'idle' | 'ended' | 'replaced' | 'maintenance';
 
 // Fired by AppHeader when the notification stream reports that a newer
 // sign-in of this account replaced this session (one session per account).
 export const SESSION_ENDED_EVENT = 'ciac:session:ended';
+
+/** Why the server says the session is gone (/api/auth/check, /refresh). */
+function reasonFrom(reason: unknown): SignOutReason {
+  return reason === 'replaced' || reason === 'maintenance' ? reason : 'ended';
+}
 
 function readSharedActivity(): number {
   try {
@@ -68,7 +78,7 @@ function getTabId(): string {
 
 /**
  * Session lifetime rules for a signed-in page:
- *  - Idle: signs out after IDLE_TIMEOUT_MS without interaction, and keeps the
+ *  - Idle: signs out after idleTimeoutMs() without interaction, and keeps the
  *    server session alive (POST /api/auth/refresh) while the user is active.
  *  - Tab close: closing ANY tab signs the session out in every tab. On
  *    pagehide the tab reports POST /api/auth/tab-closed; the server ends the
@@ -117,7 +127,7 @@ export function useIdleSession(opts: {
         const res = await fetch(`${base}/api/auth/refresh${tabQuery}`, { method: 'POST', credentials: 'include' });
         if (res.status === 401) {
           const json = await res.json().catch(() => ({} as any));
-          return signOut(json?.reason === 'replaced' ? 'replaced' : 'ended');
+          return signOut(reasonFrom(json?.reason));
         }
         if (res.ok) lastRefresh = Date.now();
       } catch {
@@ -131,7 +141,7 @@ export function useIdleSession(opts: {
       try {
         const res = await fetch(`${base}/api/auth/check`, { credentials: 'include' });
         const json = await res.json().catch(() => ({} as any));
-        if (res.ok && json && json.authenticated === false) signOut(json.reason === 'replaced' ? 'replaced' : 'ended');
+        if (res.ok && json && json.authenticated === false) signOut(reasonFrom(json.reason));
       } catch {
         // network blip — the next refresh will find out
       }
@@ -141,7 +151,7 @@ export function useIdleSession(opts: {
       if (signedOut) return;
       const now = Date.now();
       const last = latestActivity();
-      if (now - last >= IDLE_TIMEOUT_MS) return signOut('idle');
+      if (now - last >= idleTimeoutMs()) return signOut('idle');
       if (last > lastRefresh && now - lastRefresh >= REFRESH_MIN_INTERVAL_MS) void refresh();
     };
 
@@ -154,7 +164,7 @@ export function useIdleSession(opts: {
       }
       // Waking a laptop after a long sleep: the first input must not revive a
       // session that already went idle while the timers were suspended.
-      if (now - latestActivity() >= IDLE_TIMEOUT_MS) return signOut('idle');
+      if (now - latestActivity() >= idleTimeoutMs()) return signOut('idle');
       lastActivity = now;
       writeSharedActivity(now);
     };

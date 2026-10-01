@@ -5,6 +5,7 @@ const User = require("./User");
 const UserSession = require("./UserSession");
 const { decryptSecret, encryptSecret, newSecret, buildEnrollment, verifyToken } = require("../lib/totp");
 const { validatePasswordStrength } = require("../lib/password");
+const { getters: siteSettings } = require("../lib/siteSettings");
 
 function getJwtSecret() {
   const secret = process.env.JWT_SECRET;
@@ -16,10 +17,11 @@ function normalizeString(v) {
   return String(v ?? "").trim();
 }
 
-// TOR: "account lockout after configurable failed login attempts".
+// TOR: "account lockout after configurable failed login attempts". Set in
+// Portal Settings (Security tab); unsaved, 5 attempts / 15 minutes. (The old
+// LOGIN_MAX_ATTEMPTS / LOGIN_LOCKOUT_MINUTES .env values were imported once.)
 function getLockoutConfig() {
-  const maxAttempts = Number(process.env.LOGIN_MAX_ATTEMPTS);
-  const lockoutMinutes = Number(process.env.LOGIN_LOCKOUT_MINUTES);
+  const { maxAttempts, lockoutMinutes } = siteSettings.lockout();
   return {
     maxAttempts: Number.isFinite(maxAttempts) && maxAttempts > 0 ? maxAttempts : 5,
     lockoutMinutes: Number.isFinite(lockoutMinutes) && lockoutMinutes > 0 ? lockoutMinutes : 15,
@@ -96,7 +98,7 @@ async function loginViaDatabase(username, password, totpCode, newPassword) {
           success: false,
           reason: "pending_approval",
           userId: inactive.id,
-          message: "Your account is still awaiting approval by CIAC. You'll be able to sign in once it's activated.",
+          message: `Your account is still awaiting approval by ${siteSettings.orgShortName()}. You'll be able to sign in once it's activated.`,
         };
       }
       if (status === "REJECTED") {
@@ -104,7 +106,7 @@ async function loginViaDatabase(username, password, totpCode, newPassword) {
           success: false,
           reason: "registration_rejected",
           userId: inactive.id,
-          message: "Your registration was not approved. Please contact CIAC for details.",
+          message: `Your registration was not approved. Please ${siteSettings.contactPhrase()} for details.`,
         };
       }
       if (status === "SUSPENDED") {
@@ -277,6 +279,14 @@ async function loginViaDatabase(username, password, totpCode, newPassword) {
     }
   }
 
+  // Maintenance mode (Portal Settings): only administrators may sign in.
+  // Checked only after the password and code are proven, so a stranger can't
+  // use it to learn which usernames belong to an administrator.
+  const maintenance = siteSettings.maintenance();
+  if (maintenance.enabled && String(effectiveRole).trim().toLowerCase() !== "admin") {
+    return { success: false, maintenance: true, reason: "maintenance", userId: id, message: maintenance.message };
+  }
+
   // Fully signed in (password and, where required, authenticator code) — only
   // now clear the failed-attempt counter, so a correct password alone can't
   // reset it between code guesses.
@@ -296,18 +306,21 @@ async function loginViaDatabase(username, password, totpCode, newPassword) {
   };
 }
 
-// Idle timeout: a session token lives 15 minutes and is only extended by
+// Idle timeout: a session token lives for the idle timeout set in Portal
+// Settings (Security tab, 5–30 minutes, default 15) and is only extended by
 // POST /api/auth/refresh, which the frontend calls while the user is
 // actively using the app (see src/lib/idleSession.ts). Background polling
 // and the notification stream deliberately don't extend it, so an
 // unattended tab lets the session lapse.
-const SESSION_IDLE_TIMEOUT_SECONDS = 15 * 60;
+function sessionIdleTimeoutSeconds() {
+  return siteSettings.idleTimeoutSeconds();
+}
 
 function issueSessionToken(user, tokenVersion, sessionId) {
   const token = jwt.sign(
     { id: user.id, username: user.username, role: user.role, tv: tokenVersion, sid: sessionId },
     getJwtSecret(),
-    { expiresIn: SESSION_IDLE_TIMEOUT_SECONDS }
+    { expiresIn: sessionIdleTimeoutSeconds() }
   );
   const { exp } = jwt.decode(token);
   return { token, expiresAt: new Date(exp * 1000) };
@@ -366,7 +379,7 @@ module.exports = {
   requestPasswordReset,
   resetPasswordWithToken,
   RESET_TOKEN_TTL_MINUTES,
-  SESSION_IDLE_TIMEOUT_SECONDS,
+  sessionIdleTimeoutSeconds,
   issueSessionToken,
 };
 

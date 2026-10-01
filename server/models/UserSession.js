@@ -135,7 +135,7 @@ async function closedReason(id) {
   if (!id) return null;
   await ensureSchema();
   const rows = await selectData(
-    `SELECT TOP (1) end_reason FROM dbo.user_sessions WHERE id = @param0 AND end_reason IN ('logout', 'tab_closed', 'replaced')`,
+    `SELECT TOP (1) end_reason FROM dbo.user_sessions WHERE id = @param0 AND end_reason IN ('logout', 'tab_closed', 'replaced', 'maintenance')`,
     [id]
   );
   return rows?.[0]?.end_reason || null;
@@ -175,6 +175,35 @@ async function endOtherSessions(userId, keepId) {
     console.error("End other sessions failed:", error);
     return [];
   }
+}
+
+/** Maintenance mode was turned on (Portal Settings): closes every open
+ * session of an account that doesn't hold the admin role. Returns
+ * [{ id, user_id }] so the caller can tell those pages over the stream. */
+async function endNonAdminSessions() {
+  await ensureSchema();
+  const rows = await selectData(
+    `
+    UPDATE s
+    SET ended_at = SYSUTCDATETIME(), end_reason = 'maintenance'
+    OUTPUT inserted.id, inserted.user_id
+    FROM dbo.user_sessions s
+    WHERE s.ended_at IS NULL AND s.expires_at > SYSUTCDATETIME()
+      AND NOT EXISTS (
+        SELECT 1 FROM dbo.user_roles ur JOIN dbo.roles r ON r.id = ur.role_id
+        WHERE ur.user_id = s.user_id AND LOWER(r.name) = 'admin'
+      )
+    `
+  );
+  for (const row of rows || []) {
+    lastTouched.delete(row.id);
+    const pending = pendingTabCloses.get(row.id);
+    if (pending) {
+      clearTimeout(pending.timer);
+      pendingTabCloses.delete(row.id);
+    }
+  }
+  return rows || [];
 }
 
 // Closing any tab signs the whole session out (every tab). The frontend can't
@@ -325,6 +354,7 @@ module.exports = {
   isClosedByUser,
   closedReason,
   endOtherSessions,
+  endNonAdminSessions,
   scheduleTabClose,
   cancelTabClose,
   sweep,

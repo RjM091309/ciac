@@ -2,13 +2,14 @@ import React, { useCallback, useEffect, useMemo, useState, Suspense, lazy } from
 import { AnimatePresence, motion } from 'motion/react';
 import { AppLayout, AppView } from './layout/AppLayout';
 import { SubHeader, type DashboardPreviewRole } from './components/SubHeader';
-import { FileCheck, FolderTree, ShieldCheck, Users, Loader2, Search, BarChart3 } from 'lucide-react';
+import { FileCheck, FolderTree, ShieldCheck, Users, Loader2, Search, BarChart3, Settings2 } from 'lucide-react';
 import { LoginPage } from './components/auth/LoginPage';
 import { locatorSetupSkipKey } from './lib/locatorSetup';
 import { PageSkeleton } from './components/ui/PageSkeleton';
 import { Toaster } from 'sonner';
 import { useIdleSession } from './lib/idleSession';
 import { setMyProfile } from './lib/myProfile';
+import { formatMinutes, getSiteSettings, loadSiteSettings } from './lib/siteSettings';
 
 // Both pull in react-select (via AppSelect), which otherwise lands in the
 // entry chunk every visitor downloads before the login page renders.
@@ -35,6 +36,7 @@ const TypeOfContractManagement = lazy(() => import('./components/FileMaintenance
 const BuildingManagement = lazy(() => import('./components/FileMaintenance/Building').then((m) => ({ default: m.BuildingManagement })));
 const LandUseManagement = lazy(() => import('./components/FileMaintenance/LandUse').then((m) => ({ default: m.LandUseManagement })));
 const AuditLog = lazy(() => import('./components/settings/AuditLog').then((m) => ({ default: m.AuditLog })));
+const PortalSettings = lazy(() => import('./components/settings/PortalSettings').then((m) => ({ default: m.PortalSettings })));
 const ReportsAnalytics = lazy(() => import('./components/reports/ReportsAnalytics').then((m) => ({ default: m.ReportsAnalytics })));
 
 /** "New Application" no longer has its own page — a locator account and its
@@ -46,6 +48,15 @@ function RedirectToLocatorAccounts({ navigate }: { navigate: (to: string, opts?:
   useEffect(() => {
     navigate('/applications/locator-users', { replace: true });
   }, [navigate]);
+  return null;
+}
+
+/** Sends a page this account may not open (e.g. an admin-only one reached by
+ * typing its URL) somewhere it can. */
+function RedirectTo({ to, navigate }: { to: string; navigate: (to: string, opts?: { replace?: boolean }) => void }) {
+  useEffect(() => {
+    navigate(to, { replace: true });
+  }, [navigate, to]);
   return null;
 }
 
@@ -92,6 +103,7 @@ const VIEW_TO_PATH: Record<AppView, string> = {
   'settings:land-use': '/settings/land-use',
   'settings:audit-log': '/settings/audit-log',
   'settings:control-panel': '/settings/control-panel',
+  'settings:portal': '/settings/portal',
 };
 
 const PATH_TO_VIEW = Object.entries(VIEW_TO_PATH).reduce(
@@ -121,6 +133,7 @@ const PROPONENT_PATH_TO_VIEW: Record<string, ProponentView> = Object.entries(PRO
   {} as Record<string, ProponentView>
 );
 
+// {org} is replaced with the organization short name from Portal Settings.
 const PROPONENT_SUBHEADER: Record<ProponentView, { title: string; description: string; badge: string }> = {
   dashboard: {
     title: 'Dashboard',
@@ -129,7 +142,7 @@ const PROPONENT_SUBHEADER: Record<ProponentView, { title: string; description: s
   },
   'me:profile': {
     title: 'My Business Profile',
-    description: 'Your registered business information and contact details on file with CIAC.',
+    description: 'Your registered business information and contact details on file with {org}.',
     badge: 'Profile',
   },
   'me:applications': {
@@ -139,7 +152,7 @@ const PROPONENT_SUBHEADER: Record<ProponentView, { title: string; description: s
   },
   'me:contracts-permits': {
     title: 'Contracts & Permits',
-    description: 'Your executed lease contracts and the permits on record with CIAC.',
+    description: 'Your executed lease contracts and the permits on record with {org}.',
     badge: 'Compliance',
   },
   'me:activity': {
@@ -192,6 +205,17 @@ export default function App() {
   // 'checking' until /api/auth/check answers, so a refresh with a live
   // session doesn't flash the login page first.
   const [authState, setAuthState] = useState<'checking' | 'authed' | 'guest'>('checking');
+  // Portal Settings (names, images, security rules) load before the first
+  // screen so the login page never flashes the defaults; loadSiteSettings()
+  // gives up after a few seconds and the built-in defaults are used.
+  const [siteSettingsReady, setSiteSettingsReady] = useState(false);
+  useEffect(() => {
+    loadSiteSettings().finally(() => setSiteSettingsReady(true));
+  }, []);
+  // Signing in or out: pick up anything an admin changed in the meantime.
+  useEffect(() => {
+    if (authState !== 'checking') void loadSiteSettings();
+  }, [authState]);
   // Shown on the login screen after an automatic sign-out (idle timeout).
   const [loginNotice, setLoginNotice] = useState<string | null>(null);
   const [view, setView] = useState<AppView>('dashboard');
@@ -406,10 +430,14 @@ export default function App() {
     onSignedOut: (reason) =>
       logout(
         reason === 'idle'
-          ? 'You were signed out after 15 minutes of inactivity.'
+          ? `You were signed out after ${formatMinutes(getSiteSettings().security.idle_timeout_minutes)} of inactivity.`
           : reason === 'replaced'
             ? 'You were signed out because your account signed in on another device or browser.'
-            : 'Your session has ended. Please sign in again.'
+            : reason === 'maintenance'
+              // The maintenance message itself is already on the login page
+              // (and is the reply to a sign-in attempt), so it isn't repeated here.
+              ? 'You were signed out because the portal is under maintenance.'
+              : 'Your session has ended. Please sign in again.'
       ),
   });
 
@@ -440,7 +468,7 @@ export default function App() {
     };
   }, [navigate, path]);
 
-  if (authState === 'checking') {
+  if (authState === 'checking' || !siteSettingsReady) {
     return (
       <div className="flex h-screen w-screen items-center justify-center" style={{ backgroundColor: 'var(--background)' }}>
         <Loader2 className="h-8 w-8 animate-spin text-secondary opacity-50" />
@@ -570,7 +598,7 @@ export default function App() {
         {isProponent ? (
           <SubHeader
             title={PROPONENT_SUBHEADER[proponentView].title}
-            description={PROPONENT_SUBHEADER[proponentView].description}
+            description={PROPONENT_SUBHEADER[proponentView].description.replace('{org}', getSiteSettings().branding.org_short_name)}
             badge={PROPONENT_SUBHEADER[proponentView].badge}
           />
         ) : view === 'dashboard' ? (
@@ -661,6 +689,9 @@ export default function App() {
                 <AuditLog />
               ) : view === 'settings:control-panel' ? (
                 <ControlPanelManagement locationSearch={locationSearch} />
+              ) : view === 'settings:portal' ? (
+                // Administrators only (the API refuses everyone else too).
+                user?.role === 'admin' ? <PortalSettings /> : <RedirectTo to="/dashboard" navigate={navigate} />
               ) : view === 'compliance:permits' ? (
                 <PermitsManagement locationSearch={locationSearch} navigate={navigate} />
               ) : (
@@ -981,6 +1012,14 @@ const LANDING_CONFIG: Record<AppView, LandingConfig> = {
         ['Save Action', 'admin API', 'Upsert role permissions', 'Active'],
       ],
     },
+  },
+  'settings:portal': {
+    title: 'Portal Settings',
+    description: 'Branding, outgoing email, integrations, security policy and announcements for the whole portal.',
+    badge: 'Configuration',
+    icon: Settings2,
+    stats: [],
+    table: { columns: [], rows: [] },
   },
 };
 

@@ -1,7 +1,8 @@
 import React, { useMemo, useState } from 'react';
 import { AnimatePresence, motion, type Variants } from 'motion/react';
-import { ArrowLeft, ArrowRight, CheckCircle2, Copy, Eye, EyeOff, KeyRound, Mail, Moon, Smartphone, Sun } from 'lucide-react';
-import { PASSWORD_HINT, validatePassword } from '../../lib/passwordPolicy';
+import { AlertTriangle, ArrowLeft, ArrowRight, CheckCircle2, Copy, Eye, EyeOff, Info, KeyRound, Mail, Moon, Smartphone, Sun, Wrench } from 'lucide-react';
+import { passwordHint, validatePassword } from '../../lib/passwordPolicy';
+import { bannerHeading, resolveLogo, useSiteSettings } from '../../lib/siteSettings';
 
 type Enrollment = { otpauthUrl: string; secret: string; qrDataUrl: string };
 
@@ -13,6 +14,7 @@ type LoginResult = {
   enrollmentRequired?: boolean;
   enrollment?: Enrollment;
   mustChangePassword?: boolean;
+  maintenance?: boolean;
 };
 
 type ThemeMode = 'light' | 'dark';
@@ -54,10 +56,63 @@ async function loginRequest(args: {
     enrollmentRequired: Boolean(json?.enrollmentRequired),
     enrollment: json?.enrollment,
     mustChangePassword: Boolean(json?.mustChangePassword),
+    maintenance: Boolean(json?.maintenance),
   };
 }
 
 const EMPTY_USER = { id: 0, username: '' };
+
+/** Maintenance / announcement box above the sign-in form. */
+function LoginNotice({
+  tone,
+  icon,
+  title,
+  children,
+}: {
+  tone: 'info' | 'warning';
+  icon: React.ReactNode;
+  title?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div
+      role={tone === 'warning' ? 'alert' : 'status'}
+      className="flex items-start gap-2.5 rounded-xl border px-3.5 py-3 text-[13px] leading-snug"
+      style={{
+        borderColor: tone === 'warning' ? 'rgba(245,158,11,.45)' : 'var(--input-border)',
+        backgroundColor: tone === 'warning' ? 'rgba(245,158,11,.12)' : 'var(--input-bg)',
+        color: 'var(--text)',
+      }}
+    >
+      <span className="mt-px shrink-0" style={{ color: tone === 'warning' ? '#f59e0b' : 'var(--text-secondary)' }}>
+        {icon}
+      </span>
+      <div className="min-w-0 break-words">
+        {title ? <div className="font-bold mb-0.5">{title}</div> : null}
+        {children}
+      </div>
+    </div>
+  );
+}
+
+/** Privacy / Terms: an https link from Portal Settings, opened in a new tab;
+ * falls back to a "not configured" note when none is set. */
+function FooterLink({ href, label, onMissing }: { href: string; label: string; onMissing: () => void }) {
+  // The server only stores https:// links; checked again so nothing else
+  // (javascript:, data:) could ever end up in an href here.
+  if (href && /^https:\/\//i.test(href)) {
+    return (
+      <a href={href} target="_blank" rel="noopener noreferrer" className="hover:opacity-80">
+        {label}
+      </a>
+    );
+  }
+  return (
+    <button type="button" className="hover:opacity-80" onClick={onMissing}>
+      {label}
+    </button>
+  );
+}
 
 /** Staggered reveal for the sign-in form: the container staggers its
  * children, each item fades up. On mobile it plays when the bottom sheet
@@ -182,6 +237,9 @@ export function LoginPage(props: {
   onLoggedIn: (user: { id: number; username: string; role?: string }) => void;
 }) {
   const backend = useMemo(() => normalizeBaseUrl(props.backendUrl), [props.backendUrl]);
+  // Names, images and rules from Portal Settings (src/lib/siteSettings.ts).
+  const site = useSiteSettings();
+  const brand = site.branding;
 
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -380,9 +438,21 @@ export function LoginPage(props: {
     }
   }
 
-  // The brand artwork has black lettering; the dark theme uses a variant with
-  // the lettering recolored white (the orange mark is unchanged).
-  const brandSrc = theme === 'dark' ? '/images/ciac-brand-white.png' : '/images/ciac-brand.png';
+  // Portal Settings images. The built-in partner artwork has black lettering
+  // with a white-lettered variant for dark mode; the built-in login logo is
+  // black-only and inverted on dark backgrounds. Uploaded ones follow the
+  // admin's dark-mode choice (resolveLogo).
+  const partnerLogo = resolveLogo(site.assets.partner_logo, theme === 'dark');
+  const loginLogoDesktop = resolveLogo(site.assets.login_logo, theme === 'dark');
+  // Over the navy header once the mobile sheet opens, the logo sits on a dark
+  // background even in light mode.
+  const loginLogoMobile = resolveLogo(site.assets.login_logo, theme === 'dark' || mobileFormOpen);
+  const backgroundSrc = site.assets.login_background.url || site.assets.login_background.builtin;
+  const logoAlt = `${brand.org_short_name} — ${brand.org_name}`;
+  const idleLabel = `${site.security.idle_timeout_minutes}m`;
+  // The headline was sized for "BRIDGE+"; a longer name (up to 40 characters)
+  // steps down a size and may wrap, so it never runs off a phone screen.
+  const longName = brand.portal_name.length > 12;
 
   const messageColor =
     message.type === 'error'
@@ -414,7 +484,7 @@ export function LoginPage(props: {
       >
         <motion.div
           className="absolute inset-0 bg-cover bg-center pointer-events-none"
-          style={{ backgroundImage: "url('/images/leftside-panel-bg.jpg')" }}
+          style={{ backgroundImage: `url("${backgroundSrc}")` }}
           initial={false}
           animate={mobileFormOpen ? { scale: 1.08, filter: 'blur(6px)' } : { scale: 1, filter: 'blur(0px)' }}
           transition={{ duration: 0.6, ease: 'easeOut' }}
@@ -436,17 +506,17 @@ export function LoginPage(props: {
           transition={{ duration: 0.5 }}
         />
 
-        <img
-          src="/images/ciac-logo-black.png"
-          alt="CIAC — Clark International Airport Corporation"
-          className="relative z-10 mt-5 ml-5 sm:mt-6 sm:ml-8 h-11 sm:h-12 w-auto self-start pointer-events-none select-none"
-          // Black-only artwork: flip it to white on the dark theme, and over
-          // the navy header once the sheet is open.
-          style={{
-            filter: theme === 'dark' || mobileFormOpen ? 'invert(1)' : 'none',
-            transition: 'filter 0.5s ease-out',
-          }}
-        />
+        {loginLogoMobile.src ? (
+          <img
+            src={loginLogoMobile.src}
+            alt={logoAlt}
+            className="relative z-10 mt-5 ml-5 sm:mt-6 sm:ml-8 h-11 sm:h-12 w-auto max-w-[70vw] object-contain self-start pointer-events-none select-none"
+            style={{
+              filter: loginLogoMobile.invert ? 'invert(1)' : 'none',
+              transition: 'filter 0.5s ease-out',
+            }}
+          />
+        ) : null}
 
         <motion.div
           className="relative z-10 flex-1 flex flex-col overflow-y-auto"
@@ -458,23 +528,25 @@ export function LoginPage(props: {
             <div className="max-w-xl">
               <h1 className="mb-6">
                 <span
-                  className="block text-6xl sm:text-7xl font-bold leading-[0.9] tracking-tighter"
+                  className={`block ${longName ? 'text-4xl sm:text-5xl' : 'text-6xl sm:text-7xl'} font-bold leading-[0.95] tracking-tighter [overflow-wrap:anywhere]`}
                   style={theme === 'light' ? { color: '#282974' } : undefined}
                 >
-                  BRIDGE+
+                  {brand.portal_name}
                 </span>
-                <span className="block mt-4 text-xl sm:text-2xl font-semibold leading-snug tracking-tight text-secondary">
-                  Business Registration &amp; Information Digital Gateway for Enterprises Plus
-                </span>
+                {brand.portal_tagline ? (
+                  <span className="block mt-4 text-xl sm:text-2xl font-semibold leading-snug tracking-tight text-secondary">
+                    {brand.portal_tagline}
+                  </span>
+                ) : null}
               </h1>
 
-              <p className="text-base sm:text-lg text-secondary max-w-md leading-relaxed mb-8">
-                Sign in securely to continue to your workspace and dashboard.
-              </p>
+              {brand.login_subtitle ? (
+                <p className="text-base sm:text-lg text-secondary max-w-md leading-relaxed mb-8">{brand.login_subtitle}</p>
+              ) : null}
 
               <div className="flex items-center justify-center gap-8 mb-10">
                 <div className="flex flex-col items-center">
-                  <span className="text-2xl sm:text-3xl font-bold">15m</span>
+                  <span className="text-2xl sm:text-3xl font-bold">{idleLabel}</span>
                   <span className="text-[11px] uppercase tracking-widest text-secondary">Idle timeout</span>
                 </div>
                 <div className="w-px h-10 bg-border" />
@@ -500,11 +572,14 @@ export function LoginPage(props: {
             </div>
           </div>
 
-          <img
-            src={brandSrc}
-            alt="Clark Aviation Capital"
-            className="relative z-10 self-end mr-5 mb-6 sm:mr-8 sm:mb-8 w-[170px] sm:w-[220px] opacity-80 pointer-events-none select-none"
-          />
+          {partnerLogo.src ? (
+            <img
+              src={partnerLogo.src}
+              alt="Partner logo"
+              className="relative z-10 self-end mr-5 mb-6 sm:mr-8 sm:mb-8 w-[170px] sm:w-[220px] object-contain opacity-80 pointer-events-none select-none"
+              style={partnerLogo.invert ? { filter: 'invert(1)' } : undefined}
+            />
+          ) : null}
         </motion.div>
       </div>
 
@@ -539,7 +614,7 @@ export function LoginPage(props: {
             and a dark one in dark mode. */}
         <div
           className="absolute inset-0 bg-cover bg-center pointer-events-none"
-          style={{ backgroundImage: "url('/images/leftside-panel-bg.jpg')" }}
+          style={{ backgroundImage: `url("${backgroundSrc}")` }}
         />
         <div
           className="absolute inset-0 pointer-events-none"
@@ -554,42 +629,50 @@ export function LoginPage(props: {
           <div className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] rounded-full bg-primary/5 blur-[100px]" />
         </div>
 
-        <img
-          src="/images/ciac-logo-black.png"
-          alt="CIAC — Clark International Airport Corporation"
-          className="absolute top-8 left-8 2xl:top-10 2xl:left-10 z-10 h-14 2xl:h-16 w-auto pointer-events-none select-none"
-          // Black-only artwork: flip it to white on the dark theme.
-          style={theme === 'dark' ? { filter: 'invert(1)' } : undefined}
-        />
+        {loginLogoDesktop.src ? (
+          <img
+            src={loginLogoDesktop.src}
+            alt={logoAlt}
+            className="absolute top-8 left-8 2xl:top-10 2xl:left-10 z-10 h-14 2xl:h-16 w-auto max-w-[40%] object-contain pointer-events-none select-none"
+            style={loginLogoDesktop.invert ? { filter: 'invert(1)' } : undefined}
+          />
+        ) : null}
 
-        <img
-          src={brandSrc}
-          alt="Clark Aviation Capital"
-          className="absolute bottom-8 right-8 2xl:bottom-10 2xl:right-10 z-10 w-[220px] 2xl:w-[260px] opacity-60 pointer-events-none select-none"
-        />
+        {partnerLogo.src ? (
+          <img
+            src={partnerLogo.src}
+            alt="Partner logo"
+            className="absolute bottom-8 right-8 2xl:bottom-10 2xl:right-10 z-10 w-[220px] 2xl:w-[260px] object-contain opacity-60 pointer-events-none select-none"
+            style={partnerLogo.invert ? { filter: 'invert(1)' } : undefined}
+          />
+        ) : null}
 
         <div className="relative z-10 max-w-xl">
           <motion.div initial={{ opacity: 0, x: -30 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.8, ease: 'easeOut' }}>
             <h1 className="mb-8">
               <span
-                className="block text-5xl md:text-6xl xl:text-7xl 2xl:text-8xl font-bold leading-[0.9] tracking-tighter"
+                className={`block ${
+                  longName ? 'text-4xl xl:text-5xl 2xl:text-6xl' : 'text-5xl md:text-6xl xl:text-7xl 2xl:text-8xl'
+                } font-bold leading-[0.95] tracking-tighter [overflow-wrap:anywhere]`}
                 // Same navy as the light-mode sign-in panel.
                 style={theme === 'light' ? { color: '#282974' } : undefined}
               >
-                BRIDGE+
+                {brand.portal_name}
               </span>
-              <span className="block mt-5 text-xl xl:text-2xl 2xl:text-3xl font-semibold leading-snug tracking-tight text-secondary">
-                Business Registration &amp; Information Digital Gateway for Enterprises Plus
-              </span>
+              {brand.portal_tagline ? (
+                <span className="block mt-5 text-xl xl:text-2xl 2xl:text-3xl font-semibold leading-snug tracking-tight text-secondary">
+                  {brand.portal_tagline}
+                </span>
+              ) : null}
             </h1>
 
-            <p className="text-lg text-secondary max-w-md leading-relaxed mb-10">
-              Sign in securely to continue to your workspace and dashboard.
-            </p>
+            {brand.login_subtitle ? (
+              <p className="text-lg text-secondary max-w-md leading-relaxed mb-10">{brand.login_subtitle}</p>
+            ) : null}
 
             <div className="flex items-center gap-8">
               <div className="flex flex-col">
-                <span className="text-3xl font-bold">15m</span>
+                <span className="text-3xl font-bold">{idleLabel}</span>
                 <span className="text-xs uppercase tracking-widest text-secondary">Idle timeout</span>
               </div>
               <div className="w-px h-10 bg-border" />
@@ -603,7 +686,7 @@ export function LoginPage(props: {
 
         <div className="absolute right-8 top-1/2 -translate-y-1/2 hidden xl:block">
           <span className="writing-mode-vertical text-[10px] uppercase tracking-[0.4em] text-secondary opacity-50 rotate-180">
-            CIAC • LOCATOR &amp; COMPLIANCE PORTAL
+            {brand.org_short_name} • LOCATOR &amp; COMPLIANCE PORTAL
           </span>
         </div>
       </div>
@@ -649,6 +732,25 @@ export function LoginPage(props: {
           variants={revealContainer}
           className="w-full max-w-[420px] min-w-0"
         >
+          {site.maintenance.enabled || site.banner ? (
+            <motion.div variants={revealItem} className="mb-6 space-y-2">
+              {site.maintenance.enabled ? (
+                <LoginNotice tone="warning" icon={<Wrench size={15} />} title="Under maintenance">
+                  {site.maintenance.message} Administrators can still sign in.
+                </LoginNotice>
+              ) : null}
+              {site.banner ? (
+                <LoginNotice
+                  tone={site.banner.level === 'info' ? 'info' : 'warning'}
+                  icon={site.banner.level === 'info' ? <Info size={15} /> : <AlertTriangle size={15} />}
+                  title={bannerHeading(site.banner)}
+                >
+                  {site.banner.message}
+                </LoginNotice>
+              ) : null}
+            </motion.div>
+          ) : null}
+
           <motion.div variants={revealItem} className="mb-7 sm:mb-10">
             <h2 className="text-3xl sm:text-4xl font-bold tracking-tight mb-2 sm:mb-3">
               {step === 'enroll'
@@ -833,10 +935,11 @@ export function LoginPage(props: {
                   />
                   {step === 'mfa' ? (
                     <p className="text-[11px] text-secondary ml-1">
-                      {/* Enrollments before the rebrand were issued as "3CORE Portal"
-                          (server/lib/totp.js), and authenticator apps keep that label. */}
-                      Open your authenticator app and enter the current 6-digit code for CIAC Portal (shown as
-                      3CORE Portal if you set up 2FA before the name change).
+                      {/* The issuer is Portal Settings' "Authenticator app name"
+                          (server/lib/totp.js). Authenticator apps keep the label they
+                          were set up with, e.g. "3CORE Portal" from before the rebrand. */}
+                      Open your authenticator app and enter the current 6-digit code for {site.security.authenticator_name}
+                      (it may show an older name, such as 3CORE Portal, if you set up 2FA before a name change).
                     </p>
                   ) : null}
                 </motion.div>
@@ -887,7 +990,7 @@ export function LoginPage(props: {
                       </button>
                     </div>
                     <p className="text-[11px] ml-1" style={{ color: newPasswordError ? 'var(--errorColor)' : 'var(--text-secondary)' }}>
-                      {newPasswordError || PASSWORD_HINT}
+                      {newPasswordError || passwordHint()}
                     </p>
                   </div>
 
@@ -1017,7 +1120,7 @@ export function LoginPage(props: {
                       </button>
                     </div>
                     <p className="text-[11px] ml-1" style={{ color: resetPasswordError ? 'var(--errorColor)' : 'var(--text-secondary)' }}>
-                      {resetPasswordError || PASSWORD_HINT}
+                      {resetPasswordError || passwordHint()}
                     </p>
                   </div>
 
@@ -1157,13 +1260,16 @@ export function LoginPage(props: {
         </motion.div>
 
         <div className="w-full mt-8 sm:mt-10 flex justify-center gap-5 sm:gap-8 text-[9px] sm:text-[10px] uppercase tracking-[0.16em] sm:tracking-widest text-secondary opacity-50 xl:hidden">
-          <button type="button" className="hover:opacity-80" onClick={() => setMessage({ type: 'muted', text: 'Privacy policy not configured.' })}>
-            Privacy
-          </button>
-          <button type="button" className="hover:opacity-80" onClick={() => setMessage({ type: 'muted', text: 'Terms not configured.' })}>
-            Terms
-          </button>
-          <button type="button" className="hover:opacity-80" onClick={() => setMessage({ type: 'muted', text: 'Support not configured.' })}>
+          <FooterLink href={brand.privacy_url} label="Privacy" onMissing={() => setMessage({ type: 'muted', text: 'Privacy policy not configured.' })} />
+          <FooterLink href={brand.terms_url} label="Terms" onMissing={() => setMessage({ type: 'muted', text: 'Terms not configured.' })} />
+          <button
+            type="button"
+            className="hover:opacity-80"
+            onClick={() => {
+              const contact = [brand.support_email, brand.support_phone].filter(Boolean).join(' · ');
+              setMessage({ type: 'muted', text: contact ? `Support: ${contact}` : 'Support not configured.' });
+            }}
+          >
             Support
           </button>
         </div>

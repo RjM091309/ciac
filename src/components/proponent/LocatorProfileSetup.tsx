@@ -3,6 +3,7 @@ import { motion } from 'motion/react';
 import { ArrowRight, Building2, ShieldCheck } from 'lucide-react';
 import { toast } from 'sonner';
 import { AddressAutocomplete } from '../ui/AddressAutocomplete';
+import { useSiteSettings } from '../../lib/siteSettings';
 
 type FormState = {
   business_name: string;
@@ -49,6 +50,7 @@ function Field({
  * MFA/force-password-change steps, just for this one extra thing.
  */
 export function LocatorProfileSetup({ onComplete, onSkip }: { onComplete: () => void; onSkip: () => void }) {
+  const org = useSiteSettings().branding.org_short_name;
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -106,12 +108,12 @@ export function LocatorProfileSetup({ onComplete, onSkip }: { onComplete: () => 
             >
               <ShieldCheck size={20} />
             </div>
-            <span className="text-sm font-bold tracking-tight uppercase text-secondary">CIAC Portal Setup</span>
+            <span className="text-sm font-bold tracking-tight uppercase text-secondary">{org} Portal Setup</span>
           </div>
 
           <h1 className="text-2xl sm:text-3xl font-bold tracking-tight mb-2">One more step</h1>
           <p className="text-secondary mb-6">
-            Tell us about your business — this becomes your locator profile, and it's what CIAC uses to track your
+            Tell us about your business — this becomes your locator profile, and it's what {org} uses to track your
             applications, contracts, and permits. Your dashboard opens as soon as this is saved.
           </p>
 

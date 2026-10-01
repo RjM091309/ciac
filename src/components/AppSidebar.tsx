@@ -360,10 +360,14 @@ export function AppSidebar({
   const showPermits = canView('compliance:permits');
   const showComplianceGroup = showComplianceInspection || showPermits;
   const showReports = canView('reports:analytics');
+  // Portal Settings is for administrators only — never a Control Panel grant,
+  // and not shown while previewing another role's sidebar.
+  const showPortalSettings = fullAccess && !permissionOverride;
   const showSystemSettings =
     canView('settings:users') ||
     canView('settings:control-panel') ||
-    canView('settings:audit-log');
+    canView('settings:audit-log') ||
+    showPortalSettings;
   const showFileMaintenance =
     canView('applications:requirements') ||
     canView('settings:application-types') ||
@@ -401,6 +405,7 @@ export function AppSidebar({
     canView('settings:users') && { key: 'settings:users', label: 'User Management', active: view === 'settings:users', onClick: () => onViewChange('settings:users') },
     canView('settings:control-panel') && { key: 'settings:control-panel', label: 'Control Panel', active: view === 'settings:control-panel', onClick: () => onViewChange('settings:control-panel') },
     canView('settings:audit-log') && { key: 'settings:audit-log', label: 'Audit Log', active: view === 'settings:audit-log', onClick: () => onViewChange('settings:audit-log') },
+    showPortalSettings && { key: 'settings:portal', label: 'Portal Settings', active: view === 'settings:portal', onClick: () => onViewChange('settings:portal') },
   ].filter(Boolean) as SidebarLeaf[];
 
   const fileMaintenanceItems: SidebarLeaf[] = [

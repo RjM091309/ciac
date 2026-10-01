@@ -44,6 +44,7 @@ import { requestPermissionsRefresh } from '../lib/permissionsRefresh';
 import { roleDisplayName } from '../lib/roleDisplay';
 import { SESSION_ENDED_EVENT } from '../lib/idleSession';
 import { useMyProfile } from '../lib/myProfile';
+import { loadSiteSettings, resolveLogo, useSiteSettings } from '../lib/siteSettings';
 import { UserAvatar } from './ui/UserAvatar';
 import { toast } from 'sonner';
 
@@ -165,6 +166,8 @@ export function AppHeader({
    * "Settings", which goes to their business profile page. */
   onOpenProfile?: () => void;
 }) {
+  const site = useSiteSettings();
+  const headerLogo = resolveLogo(site.assets.header_logo, theme === 'dark');
   const [currentUser, setCurrentUser] = useState<{ username: string; role: string } | null>(null);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [notificationOpen, setNotificationOpen] = useState(false);
@@ -371,6 +374,10 @@ export function AppHeader({
     const onPermissions = () => {
       requestPermissionsRefresh();
     };
+    // An admin saved Portal Settings: re-fetch names, images, rules, banner.
+    const onSiteSettings = () => {
+      void loadSiteSettings();
+    };
     // A newer sign-in of this account replaced this session — useIdleSession
     // confirms with the server and signs this page out.
     const onSessionEnded = () => {
@@ -380,11 +387,13 @@ export function AppHeader({
     source.addEventListener('notification', onNotification);
     source.addEventListener('connected', onNotification);
     source.addEventListener('permissions', onPermissions);
+    source.addEventListener('site-settings', onSiteSettings);
     source.addEventListener('session-ended', onSessionEnded);
     return () => {
       source.removeEventListener('notification', onNotification);
       source.removeEventListener('connected', onNotification);
       source.removeEventListener('permissions', onPermissions);
+      source.removeEventListener('site-settings', onSiteSettings);
       source.removeEventListener('session-ended', onSessionEnded);
       source.close();
     };
@@ -586,16 +595,19 @@ export function AppHeader({
       >
         {/* Left: hamburger + logo */}
         <div className="flex items-center gap-1.5 sm:gap-2 md:gap-3 min-w-0 shrink">
-          <img
-            src="/images/ciac-logo-only.png"
-            alt="CIAC"
-            className="h-7 w-auto shrink-0 select-none"
-            // Black-only artwork: flip it to white on the dark theme.
-            style={theme === 'dark' ? { filter: 'invert(1)' } : undefined}
-            draggable={false}
-          />
-          <span className="text-[11px] sm:text-sm font-bold tracking-tight text-[var(--text)] truncate max-w-[4.25rem] sm:max-w-none">
-            BRIDGE+
+          {headerLogo.src ? (
+            <img
+              src={headerLogo.src}
+              alt={site.branding.org_short_name}
+              className="h-7 w-auto max-w-[5.5rem] sm:max-w-[8rem] object-contain shrink-0 select-none"
+              // Built-in artwork is black-only and flipped on the dark theme;
+              // uploads follow Portal Settings' "Invert in dark mode" (resolveLogo).
+              style={headerLogo.invert ? { filter: 'invert(1)' } : undefined}
+              draggable={false}
+            />
+          ) : null}
+          <span className="text-[11px] sm:text-sm font-bold tracking-tight text-[var(--text)] truncate max-w-[4.25rem] sm:max-w-[14rem]">
+            {site.branding.portal_name}
           </span>
         </div>
 

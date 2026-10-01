@@ -4,7 +4,7 @@ const { getLockoutConfig } = require("../models/Auth");
 
 // Re-checks a signed-in user's password or authenticator code (Change
 // Password, My Profile email change / 2FA). These share the sign-in lockout
-// in Auth.js — same counter, same LOGIN_MAX_ATTEMPTS / LOGIN_LOCKOUT_MINUTES,
+// in Auth.js — same counter, same lockout limits (Portal Settings → Security),
 // admins included — so an open session can't be used to guess the
 // password or code more times than the login page allows. Hitting the limit
 // also ends the account's sessions: whoever is guessing gets signed out and,

@@ -32,6 +32,7 @@ const Building = require("./models/Building");
 const LandUse = require("./models/LandUse");
 const Contract = require("./models/Contract");
 const UserSession = require("./models/UserSession");
+const siteSettings = require("./lib/siteSettings");
 const { dropUnusedLegacyTables } = require("./config/legacyTables");
 const { ensureIndexes, dropRedundantIndexes } = require("./config/indexes");
 
@@ -157,6 +158,10 @@ initializeDatabase()
     // rest from being created (the old single try/catch swallowed the first error
     // and silently skipped everything after it). Order matters only where noted.
     const steps = [
+      // First: the security policy (lockout, idle timeout, password length)
+      // and maintenance mode come from here; until it loads they fall back
+      // to built-in defaults (never .env — see lib/siteSettings.js).
+      ["portal settings", () => siteSettings.init()],
       ["roles", () => Role.ensureSchema()],
       ["users (+ departments, users.department_id)", () => User.ensureSchema()], // after roles
       ["type of contract", () => TypeOfContract.ensureSchema()],

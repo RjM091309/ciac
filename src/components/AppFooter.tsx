@@ -1,7 +1,9 @@
 import React from 'react';
+import { useSiteSettings } from '../lib/siteSettings';
 
 export function AppFooter() {
   const year = new Date().getFullYear();
+  const { branding } = useSiteSettings();
 
   return (
     <footer className="hidden sm:block shrink-0 mt-6 text-[11px] text-secondary">
@@ -15,7 +17,7 @@ export function AppFooter() {
       >
         <div className="flex items-center justify-between gap-4">
           <span>
-            © {year} Clark International Airport Corporation. All rights reserved.
+            © {year} {branding.org_name}.{branding.footer_text ? ` ${branding.footer_text}` : ''}
           </span>
 
           <div
@@ -27,7 +29,7 @@ export function AppFooter() {
                 '0 2px 6px rgba(0,0,0,0.12), 0 0 0 1px color-mix(in oklab, var(--border-subtle) 70%, transparent)',
             }}
           >
-            BRIDGE+ Ver.1.0.0
+            {branding.portal_name} Ver.1.0.0
           </div>
         </div>
       </div>

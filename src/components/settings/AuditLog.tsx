@@ -31,6 +31,7 @@ const CATEGORY_LABELS: Record<string, string> = {
   locators: 'Locators',
   workflow: 'Applications & workflow',
   maintenance: 'File maintenance',
+  system: 'Portal settings',
 };
 const CATEGORY_OPTIONS = Object.entries(CATEGORY_LABELS).map(([value, label]) => ({ value, label }));
 
@@ -211,6 +212,14 @@ const ACTION_LABELS: Record<string, string> = {
   CERTIFICATE_DOWNLOADED: 'Certificate downloaded',
   REPORT_EXPORTED: 'Report exported',
   AUDIT_LOG_EXPORTED: 'Audit log exported',
+  // Portal Settings
+  SITE_SETTINGS_UPDATED: 'Portal settings changed',
+  SITE_SETTINGS_IMPORTED: 'Settings imported from server config',
+  SITE_ASSET_UPLOADED: 'Portal image uploaded',
+  SITE_ASSET_REMOVED: 'Portal image removed',
+  SITE_EMAIL_TEST_SENT: 'Test email sent',
+  MAINTENANCE_MODE_ENABLED: 'Maintenance mode turned on',
+  MAINTENANCE_MODE_DISABLED: 'Maintenance mode turned off',
 };
 
 // `details.reason` on LOGIN_FAILED (server/models/Auth.js). Admin-facing only
@@ -227,6 +236,7 @@ const LOGIN_FAILURE_REASONS: Record<string, string> = {
   weak_new_password: 'New password did not meet the requirements',
   unsupported_password_format: 'Stored password is in an unsupported format',
   config_error: 'Sign-in configuration error',
+  maintenance: 'Portal is in maintenance mode (only administrators can sign in)',
   server_error: 'Server error during sign-in',
 };
 
@@ -316,6 +326,43 @@ const FIELD_LABELS: Record<string, string> = {
   assigned_inspector_id: 'inspector',
   contact_persons: 'contact persons',
   is_renewal: 'renewal',
+  // Portal Settings (server/lib/siteSettings.js field names)
+  portal_name: 'portal name',
+  portal_tagline: 'tagline',
+  login_subtitle: 'login page message',
+  tab_title: 'browser tab title',
+  org_short_name: 'organization short name',
+  org_name: 'organization name',
+  footer_text: 'footer text',
+  support_email: 'support email',
+  support_phone: 'support phone',
+  privacy_url: 'privacy policy link',
+  totp_issuer: 'authenticator app name',
+  terms_url: 'terms of use link',
+  header_logo_invert: 'invert header logo in dark mode',
+  login_logo_invert: 'invert login logo in dark mode',
+  partner_logo_invert: 'invert partner logo in dark mode',
+  smtp_host: 'SMTP server',
+  smtp_port: 'SMTP port',
+  smtp_security: 'connection security',
+  smtp_user: 'SMTP username',
+  smtp_pass: 'SMTP password',
+  mail_from_address: 'from address',
+  mail_from_name: 'from name',
+  mail_reply_to: 'reply-to address',
+  google_maps_api_key: 'Google Maps API key',
+  login_max_attempts: 'failed sign-in attempts before lockout',
+  login_lockout_minutes: 'lockout duration (minutes)',
+  idle_timeout_minutes: 'idle timeout (minutes)',
+  password_min_length: 'minimum password length',
+  banner_enabled: 'announcement banner',
+  banner_title: 'banner title',
+  banner_message: 'announcement',
+  banner_level: 'banner style',
+  banner_starts_at: 'show from',
+  banner_ends_at: 'show until',
+  maintenance_enabled: 'maintenance mode',
+  maintenance_message: 'maintenance message',
 };
 
 function fieldLabel(field: string) {
@@ -424,6 +471,7 @@ const ENTITY_TYPE_LABELS: Record<string, string> = {
   land_use: 'Land use',
   type_of_contract: 'Type of contract',
   report: 'Report',
+  site_settings: 'Portal settings',
 };
 
 // Which `details` field holds the real, human-readable name for each
@@ -456,6 +504,7 @@ const ENTITY_NAME_FIELDS: Record<string, string[]> = {
   building: ['name'],
   land_use: ['name'],
   type_of_contract: ['name'],
+  site_settings: ['asset_label', 'section_label'],
 };
 
 /** Entity column text: the real name from `details` when available, falling
@@ -504,8 +553,8 @@ function describeActivity(row: AuditLogRow): string {
     case 'SESSION_EXPIRED': {
       const active = formatDuration(d.active_seconds);
       return active
-        ? `Session reached its 24h limit without a sign-out — last activity ${active} after sign-in`
-        : 'Session reached its 24h limit without a sign-out';
+        ? `Session timed out without a sign-out — last activity ${active} after sign-in`
+        : 'Session timed out without a sign-out';
     }
     case 'SESSION_REVOKED': {
       const duration = formatDuration(d.duration_seconds);
@@ -764,6 +813,35 @@ function describeActivity(row: AuditLogRow): string {
       const format = typeof d.format === 'string' ? d.format.toUpperCase() : 'CSV';
       return `Exported the audit log to ${format === 'XLSX' ? 'Excel' : format}${count != null ? ` (${count} ${count === 1 ? 'row' : 'rows'})` : ''}${filterText}`;
     }
+
+    // --- Portal Settings ---
+    case 'SITE_SETTINGS_UPDATED':
+      // The changed fields are listed under this line (details.changes).
+      return `Changed ${String(d.section_label ?? 'portal')} settings`;
+    case 'SITE_SETTINGS_IMPORTED': {
+      // One-time copy of the old server/.env values (server/lib/siteSettings.js).
+      const n = Array.isArray(d.imported) ? d.imported.length : 0;
+      const skipped = Array.isArray(d.skipped) ? d.skipped.length : 0;
+      return `Imported ${n} ${n === 1 ? 'setting' : 'settings'} from the server configuration file (.env) into Portal Settings${
+        skipped ? ` — ${skipped} not imported (see details)` : ''
+      }`;
+    }
+    case 'SITE_ASSET_UPLOADED':
+      return `${d.replaced ? 'Replaced' : 'Uploaded'} the ${String(d.asset_label ?? 'portal image').toLowerCase()}`;
+    case 'SITE_ASSET_REMOVED':
+      return `Removed the ${String(d.asset_label ?? 'portal image').toLowerCase()} (back to the built-in image)`;
+    case 'SITE_EMAIL_TEST_SENT':
+      return d.sent
+        ? `Sent a test email to ${String(d.to ?? 'their own address')} through ${String(d.host ?? 'the SMTP server')}`
+        : `Test email through ${String(d.host ?? 'the SMTP server')} failed`;
+    case 'MAINTENANCE_MODE_ENABLED': {
+      const n = typeof d.sessions_ended === 'number' ? d.sessions_ended : null;
+      return `Turned on maintenance mode — only administrators can sign in${
+        n != null ? ` (${n} other ${n === 1 ? 'session' : 'sessions'} signed out)` : ''
+      }`;
+    }
+    case 'MAINTENANCE_MODE_DISABLED':
+      return 'Turned off maintenance mode — everyone can sign in again';
 
     default: {
       // Safety net for any action without a dedicated case above: never

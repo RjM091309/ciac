@@ -3,6 +3,7 @@ import { Building2, Clock, Loader2, PencilLine } from 'lucide-react';
 import { toast } from 'sonner';
 import { EmptyState } from '../ui/EmptyState';
 import { clearLocatorSetupSkipAndReload } from '../../lib/locatorSetup';
+import { getSiteSettings, useSiteSettings } from '../../lib/siteSettings';
 
 type ProponentProfileData = {
   id: number;
@@ -71,6 +72,7 @@ function Field({ label, value }: { label: string; value: string | null }) {
 }
 
 export function ProponentProfile() {
+  const org = useSiteSettings().branding.org_short_name;
   const [state, setState] = useState<LoadState>({ status: 'loading' });
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -120,7 +122,7 @@ export function ProponentProfile() {
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json?.message || 'Failed to submit change request');
-      toast.success('Change request submitted for CIAC review.');
+      toast.success(`Change request submitted for ${getSiteSettings().branding.org_short_name} review.`);
       setEditing(false);
       await load();
     } catch (e: any) {
@@ -205,7 +207,7 @@ export function ProponentProfile() {
                   {isActive ? 'Active' : 'Inactive'}
                 </span>
               </div>
-              <p className="text-xs text-secondary">Your registered business information on file with CIAC.</p>
+              <p className="text-xs text-secondary">Your registered business information on file with {org}.</p>
             </div>
           </div>
 
@@ -242,7 +244,7 @@ export function ProponentProfile() {
             ))}
           </ul>
           <p className="mt-2 text-[11px] text-secondary">
-            You can submit new changes once CIAC has reviewed this request.
+            You can submit new changes once {org} has reviewed this request.
           </p>
         </div>
       ) : null}
@@ -253,7 +255,7 @@ export function ProponentProfile() {
             Request profile changes
           </h4>
           <p className="text-[11px] text-secondary mb-4">
-            Edit the fields you want to change. Your request goes to CIAC for approval before it takes effect.
+            Edit the fields you want to change. Your request goes to {org} for approval before it takes effect.
           </p>
           <div className="grid grid-cols-2 gap-4">
             {EDITABLE.map((f) => (

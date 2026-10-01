@@ -14,6 +14,8 @@
 // just not synchronously with onload) is what actually closes the race,
 // without depending on exactly which bootstrap API shape this key/version
 // combination ends up serving.
+import { loadRuntimeSettings } from './siteSettings';
+
 let loaderPromise: Promise<typeof google> | null = null;
 
 function waitForPlacesLibrary(): Promise<typeof google> {
@@ -35,31 +37,50 @@ function waitForPlacesLibrary(): Promise<typeof google> {
   });
 }
 
-export function loadGoogleMaps(): Promise<typeof google> | null {
-  const apiKey = (import.meta as any).env?.VITE_GOOGLE_MAPS_API_KEY as string | undefined;
-  if (!apiKey) return null;
+/** The key saved in Portal Settings (Integrations tab), else the build-time
+ * VITE_GOOGLE_MAPS_API_KEY. Resolves null when neither is set. */
+async function resolveApiKey(): Promise<string | null> {
+  const runtime = await loadRuntimeSettings();
+  if (runtime.google_maps_api_key) return runtime.google_maps_api_key;
+  const buildKey = (import.meta as any).env?.VITE_GOOGLE_MAPS_API_KEY as string | undefined;
+  return buildKey || null;
+}
 
+/** Resolves with the Maps API, or null when no key is configured (callers
+ * then fall back to a plain text field). A key changed in Portal Settings
+ * applies from the next page load — the script can only load once. */
+export function loadGoogleMaps(): Promise<typeof google | null> {
   if (typeof window !== 'undefined' && (window as any).google?.maps?.places) {
     return Promise.resolve((window as any).google);
   }
 
   if (!loaderPromise) {
-    loaderPromise = new Promise((resolve, reject) => {
-      const existing = document.querySelector('script[data-google-maps-loader]');
-      if (existing) {
-        existing.addEventListener('load', () => waitForPlacesLibrary().then(resolve, reject));
-        existing.addEventListener('error', reject);
-        return;
+    loaderPromise = resolveApiKey().then((apiKey) => {
+      if (!apiKey) {
+        loaderPromise = null;
+        return null as unknown as typeof google;
       }
-      const script = document.createElement('script');
-      script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(apiKey)}&libraries=places&loading=async`;
-      script.async = true;
-      script.defer = true;
-      script.dataset.googleMapsLoader = 'true';
-      script.onload = () => waitForPlacesLibrary().then(resolve, reject);
-      script.onerror = () => reject(new Error('Failed to load Google Maps script'));
-      document.head.appendChild(script);
+      return injectScript(apiKey);
     });
   }
-  return loaderPromise;
+  return loaderPromise.then((g) => g || null);
+}
+
+function injectScript(apiKey: string): Promise<typeof google> {
+  return new Promise((resolve, reject) => {
+    const existing = document.querySelector('script[data-google-maps-loader]');
+    if (existing) {
+      existing.addEventListener('load', () => waitForPlacesLibrary().then(resolve, reject));
+      existing.addEventListener('error', reject);
+      return;
+    }
+    const script = document.createElement('script');
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(apiKey)}&libraries=places&loading=async`;
+    script.async = true;
+    script.defer = true;
+    script.dataset.googleMapsLoader = 'true';
+    script.onload = () => waitForPlacesLibrary().then(resolve, reject);
+    script.onerror = () => reject(new Error('Failed to load Google Maps script'));
+    document.head.appendChild(script);
+  });
 }

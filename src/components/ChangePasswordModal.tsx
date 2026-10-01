@@ -2,7 +2,9 @@ import React, { useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { Check, Eye, EyeOff, X } from 'lucide-react';
 import { toast } from 'sonner';
-import { MIN_LENGTH, PASSWORD_HINT, passwordChecks } from '../lib/passwordPolicy';
+import { NoAutofillPasswordInput } from './ui/NoAutofillPasswordInput';
+import { minPasswordLength, passwordHint, passwordChecks } from '../lib/passwordPolicy';
+import { useSiteSettings } from '../lib/siteSettings';
 
 type ChangePasswordModalProps = {
   open: boolean;
@@ -28,20 +30,27 @@ function PasswordField({
   const [show, setShow] = useState(false);
   const [touched, setTouched] = useState(false);
   const showError = touched && error;
+  // "Current password" proves it's really you, so the browser mustn't fill it
+  // in. The new-password fields stay normal so a password manager can still
+  // generate and save a strong one.
+  const isCurrent = label === 'Current Password';
+  const inputProps = {
+    value,
+    onChange: (e: React.ChangeEvent<HTMLInputElement>) => onChange(e.target.value),
+    onBlur: () => setTouched(true),
+    autoFocus,
+    className: 'app-input pr-9',
+    style: { borderColor: showError ? '#ef4444' : undefined },
+  };
   return (
     <label className="block space-y-1">
       <span className="text-[11px] font-semibold text-secondary">{label}</span>
       <div className="relative">
-        <input
-          type={show ? 'text' : 'password'}
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          onBlur={() => setTouched(true)}
-          autoFocus={autoFocus}
-          autoComplete={label === 'Current Password' ? 'current-password' : 'new-password'}
-          className="app-input pr-9"
-          style={{ borderColor: showError ? '#ef4444' : undefined }}
-        />
+        {isCurrent ? (
+          <NoAutofillPasswordInput {...inputProps} revealed={show} />
+        ) : (
+          <input {...inputProps} type={show ? 'text' : 'password'} autoComplete="new-password" />
+        )}
         <button
           type="button"
           onClick={() => setShow((prev) => !prev)}
@@ -70,6 +79,7 @@ export function ChangePasswordModal({ open, onClose }: ChangePasswordModalProps)
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [saving, setSaving] = useState(false);
+  useSiteSettings(); // re-render when the password rules change
 
   const checks = passwordChecks(newPassword);
   const strengthOk = Object.values(checks).every(Boolean);
@@ -154,7 +164,7 @@ export function ChangePasswordModal({ open, onClose }: ChangePasswordModalProps)
               Change Password
             </h3>
             <p className="text-[11px] text-secondary mt-1">
-              {PASSWORD_HINT}
+              {passwordHint()}
             </p>
 
             <form className="mt-4 space-y-3" onSubmit={handleSubmit} noValidate>
@@ -169,7 +179,7 @@ export function ChangePasswordModal({ open, onClose }: ChangePasswordModalProps)
               <div>
                 <PasswordField label="New Password" value={newPassword} onChange={setNewPassword} error={newPasswordError} />
                 <ul className="mt-1.5 grid grid-cols-2 gap-x-2 gap-y-1">
-                  <RequirementRow met={checks.length} label={`${MIN_LENGTH}+ characters`} />
+                  <RequirementRow met={checks.length} label={`${minPasswordLength()}+ characters`} />
                   <RequirementRow met={checks.upper} label="Contains an uppercase letter" />
                   <RequirementRow met={checks.lower} label="Contains a lowercase letter" />
                   <RequirementRow met={checks.number} label="Contains a number" />

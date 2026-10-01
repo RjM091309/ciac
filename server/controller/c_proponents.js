@@ -15,6 +15,7 @@ const fs = require("fs");
 const path = require("path");
 const { resolveStoredPath, relativeStoragePath, contentDisposition } = require("../lib/fileStorage");
 const { publicErrorMessage } = require("../lib/httpError");
+const { getters: site } = require("../lib/siteSettings");
 
 /** "", null, undefined -> null; otherwise the id as a number (NaN passes through and is rejected below). */
 function toNullableId(value) {
@@ -245,7 +246,7 @@ exports.updateMine = async (req, res) => {
       return res.status(409).json({
         success: false,
         code: "PENDING_REQUEST_EXISTS",
-        message: "You already have a pending change request. Please wait for CIAC to review it.",
+        message: `You already have a pending change request. Please wait for ${site.orgShortName()} to review it.`,
       });
     }
 
@@ -294,7 +295,7 @@ exports.updateMine = async (req, res) => {
       await Notification.createNotification({
         userId: req.user?.id ?? null,
         subject: "Profile change request submitted",
-        body: "Your requested changes to your business profile were submitted to CIAC for review.",
+        body: `Your requested changes to your business profile were submitted to ${site.orgShortName()} for review.`,
         createdBy: req.user?.id ?? null,
         eventType: "application_status",
       });
@@ -371,7 +372,7 @@ exports.approveChangeRequest = async (req, res) => {
         await Notification.createNotification({
           userId: proponent.user_id,
           subject: "Profile change request approved",
-          body: "CIAC approved your requested changes. Your business profile has been updated.",
+          body: `${site.orgShortName()} approved your requested changes. Your business profile has been updated.`,
           createdBy: req.user?.id ?? null,
           eventType: "application_status",
         });
@@ -428,8 +429,8 @@ exports.rejectChangeRequest = async (req, res) => {
           userId: proponent.user_id,
           subject: "Profile change request declined",
           body: remarks
-            ? `CIAC declined your requested profile changes. Note: ${remarks}`
-            : "CIAC declined your requested profile changes. Please contact CIAC for details.",
+            ? `${site.orgShortName()} declined your requested profile changes. Note: ${remarks}`
+            : `${site.orgShortName()} declined your requested profile changes. Please ${site.contactPhrase()} for details.`,
           createdBy: req.user?.id ?? null,
           eventType: "application_status",
         });
