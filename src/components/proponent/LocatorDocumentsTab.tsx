@@ -68,6 +68,23 @@ const STATUS_STYLE: Record<string, { color: string; bg: string; Icon: typeof Che
   PENDING: { color: '#f59e0b', bg: 'rgba(245,158,11,.15)', Icon: Clock3, label: 'Pending' },
 };
 
+// Matches the server's documents-only limit (m_upload.js uploadDocumentOnly).
+const MAX_UPLOAD_MB = 50;
+const ALLOWED_EXTENSIONS = ['.pdf', '.doc', '.docx', '.xls', '.xlsx'];
+
+/** Client-side pre-check so an oversized or non-document file is rejected
+ * right away instead of after uploading (or, for a New Locator, on Save). */
+function fileProblem(file: File): string | null {
+  const name = file.name.toLowerCase();
+  if (!ALLOWED_EXTENSIONS.some((ext) => name.endsWith(ext))) {
+    return `${file.name}: only PDF, Word or Excel documents are allowed.`;
+  }
+  if (file.size > MAX_UPLOAD_MB * 1024 * 1024) {
+    return `${file.name} is too large (max ${MAX_UPLOAD_MB} MB).`;
+  }
+  return null;
+}
+
 const TH = 'px-3 py-2 text-left font-semibold uppercase tracking-wide text-[9px] border-b';
 const TD = 'px-3 py-2 border-b align-top';
 const BORDER = { borderColor: 'var(--input-border)' };
@@ -219,6 +236,11 @@ export function LocatorDocumentsTab({
     if (!target) return;
     const { requirement_id, document_name, label } = target;
     setTarget(null);
+    const problem = fileProblem(file);
+    if (problem) {
+      toast.error(problem);
+      return;
+    }
 
     if (!proponentId) {
       // One queued file per requirement — picking again replaces it.
@@ -389,7 +411,7 @@ export function LocatorDocumentsTab({
           <div className="text-xs font-semibold" style={{ color: 'var(--text)' }}>
             Locator Documents
             <span className="ml-2 font-normal text-secondary">
-              PDF, Word, Excel or image · up to 15 MB. Use Upload/Reupload on a row below.
+              PDF, Word or Excel only · up to {MAX_UPLOAD_MB} MB. Use Upload/Reupload on a row below.
               {proponentId ? '' : ' Files upload when you click Save.'}
             </span>
           </div>
@@ -401,7 +423,7 @@ export function LocatorDocumentsTab({
         <input
           ref={fileInputRef}
           type="file"
-          accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png,.webp"
+          accept=".pdf,.doc,.docx,.xls,.xlsx"
           className="hidden"
           onChange={(e) => {
             const f = e.target.files?.[0];

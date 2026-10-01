@@ -1,9 +1,23 @@
 const Requirement = require("../models/Requirement");
+const Workflow = require("../models/ApplicationWorkflow");
 const AuditLog = require("../models/AuditLog");
 const { publicErrorMessage } = require("../lib/httpError");
 
 function isForeignKeyViolation(error) {
   return error?.number === 547 || /FOREIGN KEY constraint/i.test(String(error?.message || ""));
+}
+
+
+/** File Maintenance changes reach applications already filed: any open
+ * application gains the requirements that now apply to it (additive only,
+ * see Workflow.syncRequirementsFromCatalog). Never fails the request. */
+async function syncOpenApplications(req) {
+  try {
+    const added = await Workflow.syncRequirementsFromCatalog({ actorId: req.user?.id ?? null });
+    if (added) console.log(`Requirements catalog sync: attached ${added} requirement(s) to open applications.`);
+  } catch (error) {
+    console.error("Requirements catalog sync error:", error);
+  }
 }
 
 function audit(req, action, entityId, details) {
@@ -24,7 +38,7 @@ exports.list = async (req, res) => {
     return res.json({ success: true, data: rows });
   } catch (error) {
     console.error("List requirements error:", error);
-    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
+    return res.status(error.status || 500).json({ success: false, message: publicErrorMessage(error) });
   }
 };
 
@@ -37,7 +51,7 @@ exports.getById = async (req, res) => {
     return res.json({ success: true, data: row });
   } catch (error) {
     console.error("Get requirement error:", error);
-    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
+    return res.status(error.status || 500).json({ success: false, message: publicErrorMessage(error) });
   }
 };
 
@@ -59,6 +73,7 @@ exports.create = async (req, res) => {
       contract_type_ids,
       created_by: req.user?.id ?? null,
     });
+    await syncOpenApplications(req);
     await audit(req, "REQUIREMENT_CREATED", row?.id, { code: row?.code, name: row?.name });
     return res.status(201).json({ success: true, data: row });
   } catch (error) {
@@ -69,7 +84,7 @@ exports.create = async (req, res) => {
         message: "Selected category no longer exists. Please refresh and choose another category.",
       });
     }
-    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
+    return res.status(error.status || 500).json({ success: false, message: publicErrorMessage(error) });
   }
 };
 
@@ -92,6 +107,7 @@ exports.update = async (req, res) => {
       updated_by: req.user?.id ?? null,
     });
     if (!row) return res.status(404).json({ success: false, message: "Requirement not found" });
+    await syncOpenApplications(req);
     await audit(req, "REQUIREMENT_UPDATED", id, { code: row?.code, name: row?.name });
     return res.json({ success: true, data: row });
   } catch (error) {
@@ -102,7 +118,7 @@ exports.update = async (req, res) => {
         message: "Selected category no longer exists. Please refresh and choose another category.",
       });
     }
-    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
+    return res.status(error.status || 500).json({ success: false, message: publicErrorMessage(error) });
   }
 };
 
@@ -116,7 +132,7 @@ exports.deactivate = async (req, res) => {
     return res.json({ success: true, data: row });
   } catch (error) {
     console.error("Deactivate requirement error:", error);
-    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
+    return res.status(error.status || 500).json({ success: false, message: publicErrorMessage(error) });
   }
 };
 
@@ -126,10 +142,11 @@ exports.reactivate = async (req, res) => {
     if (!Number.isFinite(id)) return res.status(400).json({ success: false, message: "Invalid id" });
     const row = await Requirement.reactivateRequirement(id, req.user?.id ?? null);
     if (!row) return res.status(404).json({ success: false, message: "Requirement not found" });
+    await syncOpenApplications(req);
     await audit(req, "REQUIREMENT_REACTIVATED", id, { code: row?.code, name: row?.name });
     return res.json({ success: true, data: row });
   } catch (error) {
     console.error("Reactivate requirement error:", error);
-    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
+    return res.status(error.status || 500).json({ success: false, message: publicErrorMessage(error) });
   }
 };

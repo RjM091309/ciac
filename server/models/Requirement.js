@@ -144,6 +144,27 @@ async function attachContractTypes(rows) {
   return rows;
 }
 
+/** requirement_contract_types has no FK to type_of_contract, so an id that
+ * doesn't exist there (stale UI, data copied from another database) would
+ * be saved silently and never match any application. Rejects the save
+ * instead — called before anything is written. */
+async function assertContractTypesExist(contractTypeIds) {
+  if (!Array.isArray(contractTypeIds)) return;
+  const ids = [...new Set(contractTypeIds.map((t) => toInt(t)).filter((t) => t !== null && t > 0))];
+  if (!ids.length) return;
+  const placeholders = ids.map((_, i) => `@param${i}`).join(", ");
+  const rows = await selectData(
+    `SELECT id FROM dbo.type_of_contract WHERE is_active = 1 AND id IN (${placeholders})`,
+    ids
+  );
+  if ((rows || []).length !== ids.length) {
+    throw Object.assign(
+      new Error("One or more selected types of contract no longer exist or are inactive. Refresh the page and select again."),
+      { status: 400 }
+    );
+  }
+}
+
 async function setContractTypes(requirementId, contractTypeIds) {
   const ids = Array.isArray(contractTypeIds)
     ? [...new Set(contractTypeIds.map((t) => toInt(t)).filter((t) => t !== null && t > 0))]
@@ -232,6 +253,7 @@ async function createRequirement({
   created_by,
 }) {
   await ensureSchema();
+  await assertContractTypesExist(contract_type_ids);
   const createdBy = toInt(created_by);
   const categoryId = toInt(category_id);
   const result = await insertData(
@@ -254,6 +276,7 @@ async function updateRequirement(
   { code, name, description, category_id, for_new, for_renewal, is_mandatory, is_active, contract_type_ids, updated_by }
 ) {
   await ensureSchema();
+  await assertContractTypesExist(contract_type_ids);
   const sets = [];
   const params = [];
   const pushSet = (sqlFrag, value) => {

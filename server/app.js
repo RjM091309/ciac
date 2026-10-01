@@ -18,6 +18,7 @@ require("dotenv").config({ path: path.join(__dirname, ".env"), override: true })
 const { attachUserFromJwt } = require("./middleware/m_auth");
 const { csrfGuard } = require("./middleware/m_csrf");
 const { publicErrorMessage } = require("./lib/httpError");
+const { MAX_DOCUMENT_MB } = require("./lib/fileStorage");
 const { initializeDatabase } = require("./config/database");
 const Role = require("./models/Role");
 const User = require("./models/User");
@@ -30,6 +31,7 @@ const FinancialTerms = require("./models/FinancialTerms");
 const Investment = require("./models/Investment");
 const Building = require("./models/Building");
 const LandUse = require("./models/LandUse");
+const Workflow = require("./models/ApplicationWorkflow");
 const Contract = require("./models/Contract");
 const UserSession = require("./models/UserSession");
 const siteSettings = require("./lib/siteSettings");
@@ -138,7 +140,12 @@ app.use((err, req, res, next) => {
     }
     const status = err.name === "MulterError" || /unsupported file type/i.test(err.message || "") ? 400 : 500;
     // Multer's own messages ("File too large") are meant for the user.
-    const message = err.name === "MulterError" ? err.message : publicErrorMessage(err, "Upload failed");
+    const message =
+      err.name === "MulterError"
+        ? err.code === "LIMIT_FILE_SIZE"
+          ? `File is too large (max ${MAX_DOCUMENT_MB} MB).`
+          : err.message
+        : publicErrorMessage(err, "Upload failed");
     return res.status(status).json({ success: false, message });
   }
   return next(err);
@@ -177,6 +184,16 @@ initializeDatabase()
       ["drop unused legacy tables", () => dropUnusedLegacyTables()], // see config/legacyTables.js
       ["indexes", () => ensureIndexes()], // see config/indexes.js
       ["redundant indexes", () => dropRedundantIndexes()], // see config/indexes.js
+      // Last: catches up any open application whose checklist is missing
+      // requirements the catalog now applies to it (e.g. filed before the
+      // requirement was set up). Additive only.
+      [
+        "sync requirement checklists",
+        async () => {
+          const added = await Workflow.syncRequirementsFromCatalog();
+          if (added) console.log(`Requirements catalog sync: attached ${added} requirement(s) to open applications.`);
+        },
+      ],
     ];
     for (const [name, run] of steps) {
       try {

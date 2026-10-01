@@ -4,7 +4,7 @@ const proponentsController = require("../controller/c_proponents");
 const portalController = require("../controller/c_proponent_portal");
 const { requireMenuAccess, requireProponentRole, requireProponentSelf, requireOwnApplication, requireStaffRole } = require("../middleware/m_auth");
 const { handleUpload } = require("../lib/fileStorage");
-const { upload } = require("../middleware/m_upload");
+const { uploadDocumentOnly } = require("../middleware/m_upload");
 const { verifyUploadedFile } = require("../lib/uploadCheck");
 
 const MENU_KEY = "settings:proponents";
@@ -64,7 +64,7 @@ router.get("/:id/documents", requireMenuAccess(MENU_KEY, "view"), proponentsCont
 router.post(
   "/:id/documents",
   requireMenuAccess(MENU_KEY, "edit"),
-  upload.single("file"),
+  uploadDocumentOnly,
   verifyUploadedFile,
   proponentsController.uploadDocument
 );

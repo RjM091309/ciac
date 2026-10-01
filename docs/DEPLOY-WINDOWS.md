@@ -167,7 +167,7 @@ server {
     ssl_certificate_key C:/nginx/ssl/ciac.key;
 
     root C:/nginx/html/ciac;
-    client_max_body_size 20m;              # document uploads go up to 15 MB
+    client_max_body_size 55m;              # every document upload goes up to 50 MB
 
     # The React app does its own routing — unknown paths serve index.html.
     location / {

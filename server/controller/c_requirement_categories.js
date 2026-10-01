@@ -1,6 +1,20 @@
 const RequirementCategory = require("../models/RequirementCategory");
+const Workflow = require("../models/ApplicationWorkflow");
 const AuditLog = require("../models/AuditLog");
 const { publicErrorMessage } = require("../lib/httpError");
+
+
+/** File Maintenance changes reach applications already filed: any open
+ * application gains the requirements that now apply to it (additive only,
+ * see Workflow.syncRequirementsFromCatalog). Never fails the request. */
+async function syncOpenApplications(req) {
+  try {
+    const added = await Workflow.syncRequirementsFromCatalog({ actorId: req.user?.id ?? null });
+    if (added) console.log(`Requirements catalog sync: attached ${added} requirement(s) to open applications.`);
+  } catch (error) {
+    console.error("Requirements catalog sync error:", error);
+  }
+}
 
 function audit(req, action, entityId, details) {
   return AuditLog.record({
@@ -107,6 +121,7 @@ exports.reactivate = async (req, res) => {
     const row = await RequirementCategory.reactivateRequirementCategory(id, req.user?.id ?? null);
     if (!row) return res.status(404).json({ success: false, message: "Requirement category not found" });
 
+    await syncOpenApplications(req);
     await audit(req, "REQUIREMENT_CATEGORY_REACTIVATED", id, { name: row?.name });
     return res.json({ success: true, data: row });
   } catch (error) {

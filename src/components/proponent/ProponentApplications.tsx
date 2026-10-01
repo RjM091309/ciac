@@ -699,7 +699,7 @@ function ApplicationDetail({
             }}
           />
           <p className="text-[10px] text-secondary mb-3">
-            PDF only · up to 10 MB. Use Upload/Reupload on a row below.
+            PDF only · up to 50 MB. Use Upload/Reupload on a row below.
           </p>
 
           {requirements.length === 0 ? (

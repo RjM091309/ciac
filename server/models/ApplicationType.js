@@ -12,10 +12,11 @@ function toInt(v) {
 // (already stored with these exact codes) keep resolving to a real type
 // instead of the dropdown starting empty and blocking every new filing
 // until an admin manually recreates them in File Maintenance.
+// Names are stored UPPERCASE (UPPER() on insert enforces it).
 const DEFAULT_TYPES = [
-  { code: "DIRECT_LEASE", name: "Direct Lease", description: null },
-  { code: "WAREHOUSE_LEASE", name: "Warehouse Lease", description: null },
-  { code: "SUBLEASE", name: "Sublease", description: null },
+  { code: "DIRECT_LEASE", name: "DIRECT LEASE", description: null },
+  { code: "WAREHOUSE_LEASE", name: "WAREHOUSE LEASE", description: null },
+  { code: "SUBLEASE", name: "SUBLEASE", description: null },
 ];
 
 // Once per process: the DDL below is idempotent but not free, and
@@ -57,7 +58,7 @@ async function createSchema() {
       await insertData(
         `
         INSERT INTO dbo.application_types (code, name, description, created_at, is_active)
-        VALUES (@param0, @param1, @param2, SYSUTCDATETIME(), 1)
+        VALUES (UPPER(@param0), UPPER(@param1), @param2, SYSUTCDATETIME(), 1)
         `,
         [t.code, t.name, t.description]
       );

@@ -972,6 +972,26 @@ async function submitApplication(id, { changed_by }) {
     }
   }
 
+  // Same empty-checklist guard createApplication applies to a direct submit —
+  // a draft can be saved without a type of contract, so this is the first
+  // point it's actually enforced for drafts.
+  if (currentStatus === "DRAFT") {
+    const reqRows = await selectData(
+      `SELECT COUNT(1) AS n FROM dbo.application_requirements WHERE application_id = @param0`,
+      [id]
+    );
+    if (Number(reqRows?.[0]?.n || 0) === 0) {
+      throw Object.assign(
+        new Error(
+          application.contract_type_id
+            ? "No active requirements match this type of contract. Set them up in File Maintenance > Requirements first."
+            : "Select a type of contract before submitting — no requirements apply to an application without one."
+        ),
+        { status: 400 }
+      );
+    }
+  }
+
   const changedBy = toInt(changed_by);
 
   await updateData(
@@ -1097,7 +1117,7 @@ async function updateDraftApplication(id, { application_type, is_renewal, propon
         `,
         [id]
       );
-      await tx.query(
+      const reseeded = await tx.query(
         `
         INSERT INTO dbo.application_requirements
           (application_id, requirement_id, status, remarks, created_by, updated_by, created_at, updated_at)
@@ -1115,6 +1135,27 @@ async function updateDraftApplication(id, { application_type, is_renewal, propon
         `,
         [id, changedBy, nextRenewal, nextContractTypeId]
       );
+
+      // Same empty-checklist guard as createApplication: clearing or switching
+      // the type of contract on an already-filed application must not leave
+      // it with nothing to upload or verify. Ad-hoc rows survive the rebuild,
+      // so they count too. Rolls back the whole edit.
+      if (String(application.status || "").toUpperCase() !== "DRAFT") {
+        const remaining = await tx.query(
+          `SELECT COUNT(1) AS n FROM dbo.application_requirements WHERE application_id = @param0`,
+          [id]
+        );
+        if (Number(remaining?.recordset?.[0]?.n || 0) === 0 && Number(reseeded?.rowsAffected?.[0] || 0) === 0) {
+          throw Object.assign(
+            new Error(
+              nextContractTypeId
+                ? "No active requirements match this type of contract. Set them up in File Maintenance > Requirements first."
+                : "Select a type of contract — no requirements apply to an application without one."
+            ),
+            { status: 400 }
+          );
+        }
+      }
     }
   });
 
@@ -1203,8 +1244,66 @@ async function updateApplicationStatus(id, { to_status, remarks, changed_by }) {
   return getApplicationById(id);
 }
 
+// Application statuses whose checklist still follows the Requirements catalog.
+// Past these (FOR_APPROVAL onward) Assessment has already signed off, so the
+// checklist is frozen as reviewed.
+const CATALOG_SYNC_STATUSES_SQL = "'DRAFT', 'SUBMITTED', 'RESUBMITTED', 'RETURNED'";
+
+/** Attaches every catalog requirement that applies to an open application
+ * but isn't on its checklist yet — e.g. a requirement added or re-tagged in
+ * File Maintenance after the locator filed. Strictly additive: never removes
+ * or resets a row, so uploads/verifications are untouched. Skips checklists
+ * Assessment has already recommended on (same lock as
+ * updateApplicationRequirementStatus). `applicationId` null = every open
+ * application. Returns the number of rows added. */
+async function syncRequirementsFromCatalog({ applicationId = null, actorId = null } = {}) {
+  await ensureSchema();
+  const appId = toInt(applicationId);
+  const result = await updateData(
+    `
+    INSERT INTO dbo.application_requirements
+      (application_id, requirement_id, status, remarks, created_by, updated_by, created_at, updated_at)
+    SELECT a.id, r.id, 'PENDING', NULL, COALESCE(@param1, a.created_by, p.user_id), NULL, SYSUTCDATETIME(), NULL
+    FROM dbo.applications a
+    LEFT JOIN dbo.proponents p ON p.id = a.proponent_id
+    JOIN dbo.requirements r
+      ON r.is_active = 1
+     AND r.is_ad_hoc = 0
+     AND ((a.is_renewal = 1 AND r.for_renewal = 1) OR (a.is_renewal = 0 AND r.for_new = 1))
+     AND (
+       NOT EXISTS (SELECT 1 FROM dbo.requirement_contract_types rct WHERE rct.requirement_id = r.id)
+       OR EXISTS (
+         SELECT 1 FROM dbo.requirement_contract_types rct
+         WHERE rct.requirement_id = r.id AND rct.contract_type_id = a.contract_type_id
+       )
+     )
+    WHERE a.status IN (${CATALOG_SYNC_STATUSES_SQL})
+      AND (@param0 IS NULL OR a.id = @param0)
+      AND COALESCE(@param1, a.created_by, p.user_id) IS NOT NULL
+      AND NOT EXISTS (
+        SELECT 1 FROM dbo.application_assessments asm
+        WHERE asm.application_id = a.id AND UPPER(asm.stage) IN ('COMPLETED', 'RETURNED')
+      )
+      AND NOT EXISTS (
+        SELECT 1 FROM dbo.application_requirements ar
+        WHERE ar.application_id = a.id AND ar.requirement_id = r.id
+      )
+    `,
+    [appId, toInt(actorId)]
+  );
+  return Number(result?.rowsAffected?.[0] || 0);
+}
+
 async function listApplicationRequirements(applicationId) {
   await ensureSchema();
+  // Reading a checklist (Locator portal, Assessment, staff) first pulls in
+  // anything the catalog gained since filing, so every screen downstream of
+  // File Maintenance sees the same, current list. Never blocks the read.
+  try {
+    await syncRequirementsFromCatalog({ applicationId });
+  } catch (error) {
+    console.error("Sync requirements from catalog error:", error);
+  }
   const rows = await selectData(
     `
     SELECT
@@ -1916,6 +2015,7 @@ module.exports = {
   deleteDraftApplication,
   updateApplicationStatus,
   listApplicationRequirements,
+  syncRequirementsFromCatalog,
   updateApplicationRequirementStatus,
   updateApplicationRequirementRemarks,
   getApplicationRequirementById,

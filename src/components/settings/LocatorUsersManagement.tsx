@@ -61,7 +61,7 @@ type UsersRolesData = {
   // keyed by user_id (via the linked proponent) so each row can show which
   // business and application it created together.
   companyByUserId: Record<number, string>;
-  applicationByUserId: Record<number, { id: number; application_no: string; application_type: string; status: string }>;
+  applicationByUserId: Record<number, { id: number; application_no: string; application_type: string; status: string; contract_type_id: number | null }>;
 };
 
 function api(path: string) {
@@ -116,6 +116,7 @@ export function LocatorUsersManagement({
     contact_no: string;
   } | null>(null);
   const [continuingDraftType, setContinuingDraftType] = useState('DIRECT_LEASE');
+  const [continuingDraftContractType, setContinuingDraftContractType] = useState('');
   const [continuingDraftSaving, setContinuingDraftSaving] = useState(false);
   const [continuingDraftLoadingProfile, setContinuingDraftLoadingProfile] = useState(false);
   const [continuingDraftFieldErrors, setContinuingDraftFieldErrors] = useState<{ username?: string; email?: string }>({});
@@ -185,7 +186,7 @@ export function LocatorUsersManagement({
       const applicationRows: any[] = aRes.ok && Array.isArray(aJson?.data) ? aJson.data : [];
       const applicationByProponentId = new Map<
         number,
-        { id: number; application_no: string; application_type: string; status: string }
+        { id: number; application_no: string; application_type: string; status: string; contract_type_id: number | null }
       >();
       for (const a of applicationRows) {
         if (a?.proponent_id == null) continue;
@@ -194,11 +195,12 @@ export function LocatorUsersManagement({
           application_no: String(a.application_no || ''),
           application_type: String(a.application_type || ''),
           status: String(a.status || ''),
+          contract_type_id: a.contract_type_id != null ? Number(a.contract_type_id) : null,
         });
       }
       const applicationByUserId: Record<
         number,
-        { id: number; application_no: string; application_type: string; status: string }
+        { id: number; application_no: string; application_type: string; status: string; contract_type_id: number | null }
       > = {};
       for (const [userId, proponentId] of proponentIdByUserId) {
         const app = applicationByProponentId.get(proponentId);
@@ -861,7 +863,7 @@ export function LocatorUsersManagement({
   // you got there from the Applications queue or from Locator Accounts.
   // DRAFT is the one exception: Assessment excludes drafts entirely, so
   // that click opens the Continue Draft panel instead.
-  function goToApplication(u: UserRow, app: { id: number; application_no: string; application_type: string; status: string }) {
+  function goToApplication(u: UserRow, app: { id: number; application_no: string; application_type: string; status: string; contract_type_id: number | null }) {
     if (app.status === 'DRAFT') {
       setContinuingDraft({
         id: app.id,
@@ -877,6 +879,7 @@ export function LocatorUsersManagement({
         contact_no: '',
       });
       setContinuingDraftType(app.application_type || 'DIRECT_LEASE');
+      setContinuingDraftContractType(app.contract_type_id != null ? String(app.contract_type_id) : '');
       setContinuingDraftFieldErrors({});
       // Business profile fields aren't part of the bulk /api/users list —
       // same on-demand fetch openEdit() uses, so the panel doesn't have to
@@ -906,6 +909,10 @@ export function LocatorUsersManagement({
 
   async function saveContinueDraft(submit: boolean) {
     if (!continuingDraft) return;
+    if (submit && !continuingDraftContractType) {
+      toast.error('Type of contract is required before submitting.');
+      return;
+    }
     setContinuingDraftSaving(true);
     setContinuingDraftFieldErrors({});
     try {
@@ -935,7 +942,12 @@ export function LocatorUsersManagement({
         method: 'PATCH',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ application_type: continuingDraftType }),
+        body: JSON.stringify({
+          application_type: continuingDraftType,
+          // Omitted when blank so a stale cache row (no contract_type_id) never
+          // clears the type already on the draft.
+          contract_type_id: continuingDraftContractType ? Number(continuingDraftContractType) : undefined,
+        }),
       });
       const patchJson = await patchRes.json().catch(() => ({}));
       if (!patchRes.ok || !patchJson?.success) throw new Error(patchJson?.message || 'Failed to update draft');
@@ -1550,6 +1562,15 @@ export function LocatorUsersManagement({
                   }
                   value={continuingDraftType}
                   onChange={setContinuingDraftType}
+                />
+              </Field>
+              <Field label="Type of contract *">
+                <AppSelect
+                  isClearable={false}
+                  options={contractTypeOptions}
+                  value={continuingDraftContractType}
+                  onChange={(value) => setContinuingDraftContractType(value || '')}
+                  placeholder="Select type of contract"
                 />
               </Field>
             </div>

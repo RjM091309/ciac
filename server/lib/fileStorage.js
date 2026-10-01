@@ -10,7 +10,12 @@ const STORAGE_ROOT = process.env.STORAGE_DIR
   ? path.resolve(process.env.STORAGE_DIR)
   : path.join(__dirname, "..", "uploads");
 
-const MAX_FILE_BYTES = 10 * 1024 * 1024; // 10 MB
+// One cap for every requirement-document upload (locator portal, staff
+// application uploads, Registered Locator documents) — scanned documents can
+// run ~30 MB, so 50 MB leaves headroom. nginx client_max_body_size must be
+// above this (see docs/DEPLOY-WINDOWS.md).
+const MAX_DOCUMENT_MB = 50;
+const MAX_FILE_BYTES = MAX_DOCUMENT_MB * 1024 * 1024;
 
 const ALLOWED = {
   "application/pdf": ".pdf",
@@ -58,7 +63,7 @@ function handleUpload(req, res, next) {
     if (!err) return verifyUploadedFile(req, res, next);
     if (err instanceof multer.MulterError) {
       const message =
-        err.code === "LIMIT_FILE_SIZE" ? "File is too large (max 10 MB)." : `Upload error: ${err.message}`;
+        err.code === "LIMIT_FILE_SIZE" ? `File is too large (max ${MAX_DOCUMENT_MB} MB).` : `Upload error: ${err.message}`;
       return res.status(400).json({ success: false, message });
     }
     return res.status(400).json({ success: false, message: publicErrorMessage(err, "Upload failed.") });
@@ -93,6 +98,7 @@ function contentDisposition(type, name) {
 module.exports = {
   STORAGE_ROOT,
   contentDisposition,
+  MAX_DOCUMENT_MB,
   MAX_FILE_BYTES,
   handleUpload,
   resolveStoredPath,
