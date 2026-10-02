@@ -1,4 +1,5 @@
 const { selectData, insertData, updateData, updateSchema } = require("../config/database");
+const Requirement = require("./Requirement");
 
 // Documents uploaded straight onto a locator from the Registered Locator
 // panel (Documents tab) — mainly for manually registered locators, which
@@ -110,6 +111,8 @@ async function remove(id) {
  * requirement is limited to (empty = every type). The tab filters by the
  * locator's Type of Contract. */
 async function listRequirementOptions() {
+  // requirement_contract_types comes from Requirement's schema (lazy otherwise).
+  await Requirement.ensureSchema();
   const rows = await selectData(`
     SELECT r.id, r.code, r.name, r.is_mandatory, r.for_new, r.for_renewal, r.category_id, rc.name AS category_name
     FROM dbo.requirements r

@@ -43,6 +43,8 @@ export type PublicSiteSettings = {
   };
   /** authenticator_name: the label new 2FA setups get in the authenticator app. */
   security: { idle_timeout_minutes: number; password_min_length: number; authenticator_name: string };
+  /** The notice shown before the first sign-in (Portal Settings → Security). */
+  cookie_notice: { title: string; message: string; accept_label: string; decline_label: string; decline_url: string };
   banner: { title: string; message: string; level: 'info' | 'warning' | 'critical'; ends_at: string | null } | null;
   maintenance: { enabled: boolean; message: string };
 };
@@ -78,6 +80,14 @@ export const DEFAULT_SITE_SETTINGS: PublicSiteSettings = {
     favicon: { url: null, type: 'image/png' },
   },
   security: { idle_timeout_minutes: 15, password_min_length: 12, authenticator_name: 'CIAC Portal' },
+  cookie_notice: {
+    title: 'We use cookies',
+    message:
+      'This platform utilizes cookies and tracking technologies to optimize browsing functionality, evaluate website traffic patterns, and analyze user acquisition sources.',
+    accept_label: 'I agree',
+    decline_label: 'I decline',
+    decline_url: 'https://www.ciac.gov.ph',
+  },
   banner: null,
   maintenance: { enabled: false, message: 'The portal is undergoing scheduled maintenance. Please try again later.' },
 };
@@ -97,6 +107,7 @@ function merge(data: any): PublicSiteSettings {
       favicon: { ...d.assets.favicon, ...(data?.assets?.favicon || {}) },
     },
     security: { ...d.security, ...(data?.security || {}) },
+    cookie_notice: { ...d.cookie_notice, ...(data?.cookie_notice || {}) },
     banner: data?.banner && typeof data.banner.message === 'string' ? data.banner : null,
     maintenance: { ...d.maintenance, ...(data?.maintenance || {}) },
   };

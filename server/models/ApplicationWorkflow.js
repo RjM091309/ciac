@@ -366,6 +366,10 @@ function ensureSchema() {
 }
 
 async function createSchema() {
+  // Filing and the catalog sync query requirement_contract_types, which
+  // Requirement's schema creates — otherwise only once someone opened the
+  // Requirements page, so a fresh database failed until then.
+  await Requirement.ensureSchema();
   await updateSchema(`
     IF OBJECT_ID('dbo.applications', 'U') IS NULL
     BEGIN

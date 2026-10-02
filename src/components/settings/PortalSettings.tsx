@@ -29,6 +29,8 @@ type FieldMeta = {
   max?: number;
   options?: string[];
   required?: boolean;
+  /** Long text: edited in a textarea, still saved as one paragraph. */
+  multiline?: boolean;
   is_set?: boolean;
   unreadable?: boolean;
   hint?: string;
@@ -105,6 +107,11 @@ const FIELD_HELP: Record<string, string> = {
   support_phone: 'Shown with the support email.',
   privacy_url: 'The login page "Privacy" link. Must start with https://.',
   terms_url: 'The login page "Terms" link. Must start with https://.',
+  cookie_title: 'Heading of the cookie notice shown before the first sign-in.',
+  cookie_message: 'Shown as one paragraph; line breaks are turned into spaces.',
+  cookie_accept_label: 'Agreeing unlocks the sign-in form.',
+  cookie_decline_label: 'Declining leaves the portal for the page below.',
+  cookie_decline_url: 'Where someone who declines is sent. Must start with https://.',
   smtp_host: 'For example smtp.office365.com or smtp.gmail.com.',
   smtp_port: 'Usually 587 (STARTTLS) or 465 (SSL/TLS).',
   smtp_pass: 'Stored encrypted and never shown again. Re-enter it when you change the server or username.',
@@ -452,7 +459,19 @@ function FieldRow({
       break;
     }
     default:
-      control = (
+      control = meta.multiline ? (
+        <textarea
+          id={id}
+          rows={4}
+          className="app-input"
+          style={{ height: 'auto', resize: 'vertical' }}
+          maxLength={meta.max}
+          placeholder={placeholder}
+          value={value === null || value === undefined ? '' : String(value)}
+          // The server refuses line breaks in settings, so keep it one paragraph.
+          onChange={(e) => onChange(name, e.target.value.replace(/[\r\n]+/g, ' '))}
+        />
+      ) : (
         <input
           id={id}
           type={meta.type === 'email' ? 'email' : meta.type === 'url' ? 'url' : 'text'}
@@ -1228,6 +1247,14 @@ export function PortalSettings() {
         </Notice>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-4">
           {['login_max_attempts', 'login_lockout_minutes', 'idle_timeout_minutes', 'password_min_length'].map((f) => renderField(f))}
+        </div>
+        <div className="border-t pt-4" style={{ borderColor: 'var(--border-subtle)' }}>
+          <GroupHeader title="Cookie notice" hint="Shown once per browser, before the first sign-in" />
+        </div>
+        {/* Text on the left, buttons and where Decline goes on the right. */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-4">
+          <div className="space-y-4">{['cookie_title', 'cookie_message'].map((f) => renderField(f))}</div>
+          <div className="space-y-4">{['cookie_accept_label', 'cookie_decline_label', 'cookie_decline_url'].map((f) => renderField(f))}</div>
         </div>
       </div>
     );

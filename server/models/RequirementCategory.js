@@ -22,6 +22,8 @@ function ensureSchema() {
 }
 
 async function createSchema() {
+  // attachContractTypes() reads requirement_contract_types (Requirement's schema).
+  await Requirement.ensureSchema();
   await updateSchema(`
     IF OBJECT_ID('dbo.requirement_categories', 'U') IS NULL
     BEGIN

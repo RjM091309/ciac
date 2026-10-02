@@ -134,6 +134,29 @@ const FIELDS = [
   { section: "security", name: "login_lockout_minutes", label: "Lockout duration (minutes)", type: "int", min: 15, max: 1440, importFrom: "LOGIN_LOCKOUT_MINUTES", default: 15 },
   { section: "security", name: "idle_timeout_minutes", label: "Idle timeout (minutes)", type: "int", min: 5, max: 30, default: 15, public: true },
   { section: "security", name: "password_min_length", label: "Minimum password length", type: "int", min: 12, max: 64, default: 12, public: true },
+  // Cookie notice shown before the first sign-in (CookieConsent.tsx).
+  { section: "security", name: "cookie_title", label: "Cookie notice title", type: "text", max: 80, required: true, default: "We use cookies" },
+  {
+    section: "security",
+    name: "cookie_message",
+    label: "Cookie notice message",
+    type: "text",
+    max: 1000,
+    required: true,
+    multiline: true,
+    default: "This platform utilizes cookies and tracking technologies to optimize browsing functionality, evaluate website traffic patterns, and analyze user acquisition sources.",
+  },
+  { section: "security", name: "cookie_accept_label", label: "Agree button", type: "text", max: 30, required: true, default: "I agree" },
+  { section: "security", name: "cookie_decline_label", label: "Decline button", type: "text", max: 30, required: true, default: "I decline" },
+  {
+    section: "security",
+    name: "cookie_decline_url",
+    label: "Decline link",
+    type: "url",
+    max: 300,
+    required: true,
+    default: "https://www.ciac.gov.ph",
+  },
 
   // --- Announcements & maintenance ---
   { section: "announcements", name: "banner_enabled", label: "Show announcement banner", type: "bool", default: false },
@@ -544,6 +567,13 @@ function publicSettings() {
       password_min_length: get("security.password_min_length"),
       authenticator_name: getters.totpIssuer(),
     },
+    cookie_notice: {
+      title: get("security.cookie_title"),
+      message: get("security.cookie_message"),
+      accept_label: get("security.cookie_accept_label"),
+      decline_label: get("security.cookie_decline_label"),
+      decline_url: get("security.cookie_decline_url"),
+    },
     banner: isBannerActive()
       ? {
           title: get("announcements.banner_title") || "",
@@ -614,6 +644,7 @@ function adminSettings() {
       ...(f.max !== undefined ? { max: f.max } : {}),
       ...(f.options ? { options: f.options } : {}),
       ...(f.required ? { required: true } : {}),
+      ...(f.multiline ? { multiline: true } : {}),
     };
     if (f.type === "secret") {
       entry.value = null;

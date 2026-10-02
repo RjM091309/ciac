@@ -1,10 +1,12 @@
 import React from 'react';
 import { createPortal } from 'react-dom';
 import { Cookie } from 'lucide-react';
+import { DEFAULT_SITE_SETTINGS, useSiteSettings } from '../../lib/siteSettings';
 
 // Required notice before signing in. Agreeing unlocks the login form;
-// declining leaves the system for the CIAC public website.
-const DECLINE_REDIRECT_URL = 'https://www.ciac.gov.ph';
+// declining leaves the system for the page set in Portal Settings → Security
+// → Cookie notice (the CIAC public website by default). All its text comes
+// from there too.
 
 export function CookieConsent({
   open,
@@ -15,7 +17,10 @@ export function CookieConsent({
   privacyUrl?: string | null;
   onAccept: () => void;
 }) {
+  const notice = useSiteSettings().cookie_notice;
   if (!open) return null;
+  const fallback = DEFAULT_SITE_SETTINGS.cookie_notice;
+  const declineUrl = notice.decline_url || fallback.decline_url;
 
   const primaryBtn =
     'inline-flex items-center justify-center rounded-lg px-4 py-2 text-xs font-semibold cursor-pointer transition-opacity hover:opacity-90';
@@ -42,14 +47,11 @@ export function CookieConsent({
             <Cookie size={18} />
           </span>
           <h2 id="cookie-consent-title" className="text-lg font-bold">
-            We use cookies
+            {notice.title || fallback.title}
           </h2>
         </div>
 
-        <p className="text-[13px] leading-relaxed text-secondary">
-          This platform utilizes cookies and tracking technologies to optimize browsing functionality, evaluate website
-          traffic patterns, and analyze user acquisition sources.
-        </p>
+        <p className="text-[13px] leading-relaxed text-secondary">{notice.message || fallback.message}</p>
 
         {privacyUrl ? (
           <a
@@ -70,15 +72,15 @@ export function CookieConsent({
             onClick={onAccept}
             autoFocus
           >
-            I agree
+            {notice.accept_label || fallback.accept_label}
           </button>
           <button
             type="button"
             className={secondaryBtn}
             style={{ borderColor: 'var(--border)', color: 'var(--text)' }}
-            onClick={() => window.location.assign(DECLINE_REDIRECT_URL)}
+            onClick={() => window.location.assign(declineUrl)}
           >
-            I decline
+            {notice.decline_label || fallback.decline_label}
           </button>
         </div>
       </div>
