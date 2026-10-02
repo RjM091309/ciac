@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, Check, ImageUp, Info, Loader2, Mail, RotateCcw, Save, Trash2 } from 'lucide-react';
+import { AlertTriangle, Check, ImageUp, Info, Loader2, Lock, Mail, Pencil, RotateCcw, Save, Trash2, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { Skeleton } from '../ui/Skeleton';
 import { EmptyState } from '../ui/EmptyState';
@@ -349,6 +349,119 @@ function SourceBadge({ meta }: { meta: FieldMeta }) {
 }
 
 /** One setting: label, control, help text and a Reset link. */
+/** A stored secret (API key, SMTP password). Once saved it shows as locked
+ * with its masked hint, so it's obvious a value is there; typing a new one
+ * takes a deliberate Replace. The value itself is never sent back. */
+function SecretControl({
+  id,
+  name,
+  meta,
+  draft,
+  onChange,
+}: {
+  id: string;
+  name: string;
+  meta: FieldMeta;
+  draft: Record<string, unknown> | undefined;
+  onChange: (name: string, value: unknown) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  // A save (or reload) brings back new metadata — back to the locked view.
+  useEffect(() => setEditing(false), [meta.is_set, meta.hint, meta.source]);
+
+  const cleared = Boolean(draft && name in draft && draft[name] === null);
+  const saved = Boolean(meta.is_set && meta.source === 'saved');
+  const btn =
+    'inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold border cursor-pointer hover:bg-[var(--hover-bg)] shrink-0';
+  const btnStyle = { borderColor: 'var(--border-subtle)', color: 'var(--text)' };
+
+  if (saved && !editing) {
+    return (
+      <div className="flex flex-col sm:flex-row gap-2">
+        <div
+          id={id}
+          className="app-input flex-1 min-w-0 flex items-center gap-2 cursor-not-allowed"
+          style={{ opacity: cleared ? 0.6 : 1, backgroundColor: 'var(--hover-bg)' }}
+          aria-disabled="true"
+        >
+          {cleared ? (
+            <span className="text-secondary">Will be cleared on save</span>
+          ) : (
+            <>
+              <Lock size={13} className="shrink-0 text-secondary" />
+              <span className="font-mono tracking-wider truncate" style={{ color: 'var(--text)' }}>
+                {/* hint is "…" + the last 4 characters (maskKey on the server) */}
+                ••••••••••••{meta.hint ? meta.hint.replace(/^…/, '') : ''}
+              </span>
+              <span
+                className="ml-auto inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold shrink-0"
+                style={{ backgroundColor: 'color-mix(in oklab, #10b981 15%, transparent)', color: '#10b981' }}
+              >
+                <Check size={10} />
+                Saved
+              </span>
+            </>
+          )}
+        </div>
+        {cleared ? (
+          <button type="button" className={btn} style={btnStyle} onClick={() => onChange(name, undefined)}>
+            Undo clear
+          </button>
+        ) : (
+          <button type="button" className={btn} style={btnStyle} onClick={() => setEditing(true)}>
+            <Pencil size={12} />
+            Replace
+          </button>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col sm:flex-row gap-2">
+      <NoAutofillPasswordInput
+        id={id}
+        className="app-input flex-1 min-w-0"
+        maxLength={meta.max}
+        autoFocus={editing}
+        placeholder={saved ? 'Enter the new value — the saved one stays until you save' : 'Not set — enter a value'}
+        value={typeof draft?.[name] === 'string' ? String(draft?.[name]) : ''}
+        onChange={(e) => onChange(name, e.target.value === '' ? undefined : e.target.value)}
+      />
+      {saved ? (
+        <>
+          <button
+            type="button"
+            className={btn}
+            style={btnStyle}
+            onClick={() => {
+              onChange(name, undefined);
+              setEditing(false);
+            }}
+          >
+            <X size={12} />
+            Cancel
+          </button>
+          {/* Rarely needed (e.g. turning address suggestions off, or an SMTP
+              server without a password), so it lives here, not on the locked view. */}
+          <button
+            type="button"
+            className={btn}
+            style={{ borderColor: 'var(--border-subtle)', color: '#ef4444' }}
+            onClick={() => {
+              onChange(name, null);
+              setEditing(false);
+            }}
+          >
+            <Trash2 size={12} />
+            Remove saved
+          </button>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
 function FieldRow({
   name,
   meta,
@@ -429,35 +542,9 @@ function FieldRow({
         />
       );
       break;
-    case 'secret': {
-      const pending = draft && name in draft;
-      const cleared = pending && draft?.[name] === null;
-      control = (
-        <div className="flex flex-col sm:flex-row gap-2">
-          <NoAutofillPasswordInput
-            id={id}
-            className="app-input flex-1 min-w-0"
-            maxLength={meta.max}
-            placeholder={
-              cleared ? 'Will be cleared on save' : meta.is_set ? `Saved${meta.hint ? ` (${meta.hint})` : ''} — type to replace` : 'Not set'
-            }
-            value={typeof draft?.[name] === 'string' ? String(draft?.[name]) : ''}
-            onChange={(e) => onChange(name, e.target.value === '' ? undefined : e.target.value)}
-          />
-          {meta.is_set && meta.source === 'saved' ? (
-            <button
-              type="button"
-              className="rounded-lg px-3 py-2 text-xs font-semibold border cursor-pointer hover:bg-[var(--hover-bg)] shrink-0"
-              style={{ borderColor: 'var(--border-subtle)', color: 'var(--text)' }}
-              onClick={() => onChange(name, cleared ? undefined : null)}
-            >
-              {cleared ? 'Undo clear' : 'Clear'}
-            </button>
-          ) : null}
-        </div>
-      );
+    case 'secret':
+      control = <SecretControl id={id} name={name} meta={meta} draft={draft} onChange={onChange} />;
       break;
-    }
     default:
       control = meta.multiline ? (
         <textarea
