@@ -40,6 +40,19 @@ const { ensureIndexes, dropRedundantIndexes } = require("./config/indexes");
 
 const app = express();
 
+// Query strings parse to flat string values only: a repeated key keeps its
+// first value, and no arrays or nested objects (Express's default qs parser
+// turns ?a=1&a=2 or ?a[b]=1 into those). Every handler expects plain strings,
+// and an array reaching a SQL parameter only produced a 500. Must be set
+// before the first app.use().
+app.set("query parser", (str) => {
+  const out = {};
+  for (const [key, value] of new URLSearchParams(str)) {
+    if (!(key in out)) out[key] = value;
+  }
+  return out;
+});
+
 // Requests normally reach this server through a proxy (Vite's /api proxy in
 // dev, a reverse proxy in production), so req.ip would be the proxy's own
 // address. Trusting X-Forwarded-For only when the connection comes from that

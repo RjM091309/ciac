@@ -4,7 +4,6 @@ import { AppLayout, AppView } from './layout/AppLayout';
 import { SubHeader, type DashboardPreviewRole } from './components/SubHeader';
 import { FileCheck, FolderTree, ShieldCheck, Users, Loader2, Search, BarChart3, Settings2 } from 'lucide-react';
 import { LoginPage } from './components/auth/LoginPage';
-import { locatorSetupSkipKey } from './lib/locatorSetup';
 import { PageSkeleton } from './components/ui/PageSkeleton';
 import { Toaster } from 'sonner';
 import { useIdleSession } from './lib/idleSession';
@@ -13,7 +12,6 @@ import { formatMinutes, getSiteSettings, loadSiteSettings } from './lib/siteSett
 
 // Both pull in react-select (via AppSelect), which otherwise lands in the
 // entry chunk every visitor downloads before the login page renders.
-const LocatorProfileSetup = lazy(() => import('./components/proponent/LocatorProfileSetup').then((m) => ({ default: m.LocatorProfileSetup })));
 const DataTableControls = lazy(() => import('./components/ui/DataTableControls').then((m) => ({ default: m.DataTableControls })));
 const RoleDashboard = lazy(() => import('./components/dashboard/RoleDashboard').then((m) => ({ default: m.RoleDashboard })));
 const PreviewDashboard = lazy(() => import('./components/dashboard/PreviewDashboard').then((m) => ({ default: m.PreviewDashboard })));
@@ -294,44 +292,6 @@ export default function App() {
 
   const isProponent = user?.role === 'proponent';
 
-  // First-login gate: a real Locator with no business profile yet sees only
-  // the setup wizard (LocatorProfileSetup) instead of the portal, until they
-  // declare their own business info — an officer/admin only ever creates the
-  // login account, not the business record, so nobody else fills this in for
-  // them. `null` = not applicable / not checked yet; checked once per login.
-  const [proponentSetupComplete, setProponentSetupComplete] = useState<boolean | null>(null);
-
-  useEffect(() => {
-    if (!isProponent || !user?.id) {
-      setProponentSetupComplete(null);
-      return;
-    }
-    // "Skip for now" is a per-browser dismissal (no backend flag) — a fresh
-    // browser/device still gets prompted once, which is fine for a one-time
-    // "fill this in later" nudge rather than a hard gate.
-    try {
-      if (window.localStorage.getItem(locatorSetupSkipKey(user.id)) === '1') {
-        setProponentSetupComplete(true);
-        return;
-      }
-    } catch {
-      // localStorage unavailable — fall through to the real check
-    }
-    let cancelled = false;
-    setProponentSetupComplete(null);
-    fetch('/api/proponents/me/setup-status', { credentials: 'include' })
-      .then((res) => res.json())
-      .then((json) => {
-        if (cancelled) return;
-        setProponentSetupComplete(json?.success ? Boolean(json.setupComplete) : true);
-      })
-      .catch(() => {
-        if (!cancelled) setProponentSetupComplete(true);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [isProponent, user?.id]);
 
   useEffect(() => {
     const onPop = () =>
@@ -491,34 +451,6 @@ export default function App() {
           navigate('/dashboard');
         }}
       />
-    );
-  }
-
-  if (isProponent && proponentSetupComplete === null) {
-    return (
-      <div className="flex h-screen w-screen items-center justify-center" style={{ backgroundColor: 'var(--background)' }}>
-        <Loader2 className="h-8 w-8 animate-spin text-secondary opacity-50" />
-      </div>
-    );
-  }
-
-  if (isProponent && proponentSetupComplete === false) {
-    return (
-      <Suspense fallback={<PageSkeleton />}>
-        <LocatorProfileSetup
-          onComplete={() => setProponentSetupComplete(true)}
-          onSkip={() => {
-            if (user?.id) {
-              try {
-                window.localStorage.setItem(locatorSetupSkipKey(user.id), '1');
-              } catch {
-                // ignore — worst case, they're prompted again next login
-              }
-            }
-            setProponentSetupComplete(true);
-          }}
-        />
-      </Suspense>
     );
   }
 

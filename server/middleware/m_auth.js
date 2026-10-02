@@ -283,24 +283,6 @@ function requireUserMenuAccess(action = "view") {
 }
 
 /**
- * Role-only half of requireProponentSelf's check, exported separately for the
- * one self-service route that must work BEFORE a proponent profile exists —
- * first-login business profile setup. Everything else should use
- * requireProponentSelf instead, which also attaches req.proponent.
- */
-async function requireProponentRole(req, res, next) {
-  if (!req.user) {
-    return res.status(401).json({ success: false, message: "Access token required" });
-  }
-  const isProponent =
-    String(req.user.role || "").toLowerCase() === "proponent" || (await Role.userHasRoleName(req.user.id, "proponent"));
-  if (!isProponent) {
-    return res.status(403).json({ success: false, message: "Forbidden" });
-  }
-  return next();
-}
-
-/**
  * Blocks the 'proponent' (Locator) role while letting every other
  * authenticated role through — for shared reference-data lookups (e.g. the
  * locator picker behind r_proponents.js's plain GET "/") that many staff
@@ -312,7 +294,7 @@ async function requireProponentRole(req, res, next) {
  * locator-facing screen has any legitimate reason to need.
  *
  * Checks only the JWT's effective role (req.user.role), NOT
- * Role.userHasRoleName — unlike requireProponentRole/requireProponentSelf,
+ * Role.userHasRoleName — unlike requireProponentSelf,
  * which OR in that live DB check as a permissive fallback (grant access if
  * proponent is ANY of the caller's roles, handy for an admin account also
  * holding 'proponent' to test self-service routes). Blocking is the
@@ -403,7 +385,6 @@ module.exports = {
   requireAnyMenuAccess,
   requireUserMenuAccess,
   requireApplicationsAccess,
-  requireProponentRole,
   requireStaffRole,
   requireProponentSelf,
   requireOwnApplication,

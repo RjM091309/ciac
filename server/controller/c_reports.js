@@ -7,13 +7,20 @@ function fail(res, error, label) {
   return res.status(500).json({ success: false, message: publicErrorMessage(error) });
 }
 
+// A repeated query key (?status=A&status=B) parses to an array, which the
+// SQL parameter can't take — only plain strings count as a filter.
+function queryText(req, key) {
+  const value = req.query[key];
+  return typeof value === "string" && value.trim() ? value.trim().slice(0, 100) : null;
+}
+
 function filtersFromQuery(req) {
   return {
-    dateFrom: req.query.dateFrom || null,
-    dateTo: req.query.dateTo || null,
-    applicationType: req.query.applicationType || null,
-    status: req.query.status || null,
-    isRenewal: req.query.isRenewal || null,
+    dateFrom: queryText(req, "dateFrom"),
+    dateTo: queryText(req, "dateTo"),
+    applicationType: queryText(req, "applicationType"),
+    status: queryText(req, "status"),
+    isRenewal: queryText(req, "isRenewal"),
   };
 }
 

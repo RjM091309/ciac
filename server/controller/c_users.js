@@ -174,8 +174,14 @@ exports.create = async (req, res) => {
     // (business_name left blank), account creation stays immediate/active,
     // same as before.
     const hasBusinessProfile = String(business_name || "").trim().length > 0;
-    const locatorRoleId = hasBusinessProfile ? await Role.getActiveRoleIdByName("proponent") : null;
-    const isDeferredLocator = Boolean(hasBusinessProfile && locatorRoleId && Number(role_id) === Number(locatorRoleId));
+    const locatorRoleId = await Role.getActiveRoleIdByName("proponent");
+    const isLocatorAccount = Boolean(locatorRoleId && Number(role_id) === Number(locatorRoleId));
+    // Locators can't set up their own profile — staff create it with the
+    // account — so a Locator account without one would be a dead end.
+    if (isLocatorAccount && !hasBusinessProfile) {
+      return res.status(400).json({ success: false, message: "Business name is required for a Locator account.", field: "business_name" });
+    }
+    const isDeferredLocator = Boolean(hasBusinessProfile && isLocatorAccount);
 
     // No password supplied (e.g. Locator Accounts' create form, which never
     // shows a password field) — generate one. For a deferred locator this is
@@ -204,10 +210,8 @@ exports.create = async (req, res) => {
 
     // Create the linked proponent record now so it's pickable from the New
     // Application locator dropdown right away. Best-effort: a failure here
-    // shouldn't fail account creation — for a non-deferred locator, they'd
-    // just see the "one more step" business-profile wizard
-    // (LocatorProfileSetup.tsx / POST /api/proponents/me/setup) on first
-    // login instead.
+    // doesn't fail account creation; staff can add the profile from the
+    // Registered Locator panel (the account stays PENDING until filing).
     if (row && hasBusinessProfile) {
       try {
         await Proponent.createProponent({

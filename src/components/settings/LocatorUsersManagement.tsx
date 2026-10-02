@@ -493,9 +493,8 @@ export function LocatorUsersManagement({
       return false;
 
     if (!editing) {
-      // A locator account created without a business profile lands the
-      // locator on the first-login setup wizard instead of the dashboard —
-      // requiring the profile up front here skips that extra step entirely.
+      // Locators can't set up their own business profile (staff do), so it's
+      // required up front — an account without one would be a dead end.
       // The 1:1 account-to-application rule means creating one always
       // creates the other, so application_type is required too.
       return Boolean(

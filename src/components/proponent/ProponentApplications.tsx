@@ -5,7 +5,7 @@ import { EmptyState } from '../ui/EmptyState';
 import { RequirementGroupTabs, useRequirementGroups } from '../ui/RequirementGroupTabs';
 import { getStatusBadgeStyles } from '../dashboard/statusBadge';
 import { applicationTypeLabel } from '../../lib/applicationTypes';
-import { clearLocatorSetupSkipAndReload } from '../../lib/locatorSetup';
+import { noLocatorProfileMessage } from '../../lib/locatorProfile';
 
 type Navigate = (to: string, opts?: { replace?: boolean }) => void;
 
@@ -160,7 +160,7 @@ function ApplicationsList({ navigate }: { navigate: Navigate }) {
     load();
   }, [load]);
 
-  const needsProfileSetup = Boolean(error && /no proponent profile/i.test(error));
+  const noProfile = Boolean(error && /no proponent profile/i.test(error));
 
   return (
     <div>
@@ -173,20 +173,9 @@ function ApplicationsList({ navigate }: { navigate: Navigate }) {
           <EmptyState
             title="Couldn't load your applications"
             description={
-              needsProfileSetup
-                ? "You skipped the business profile setup — finish it to unlock the rest of the portal."
+              noProfile
+                ? noLocatorProfileMessage()
                 : error
-            }
-            action={
-              needsProfileSetup ? (
-                <button
-                  className="rounded-lg px-4 py-2 text-sm font-semibold shadow-sm transition-colors cursor-pointer"
-                  style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
-                  onClick={clearLocatorSetupSkipAndReload}
-                >
-                  Complete your business profile
-                </button>
-              ) : undefined
             }
           />
         </div>

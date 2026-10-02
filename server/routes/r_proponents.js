@@ -2,7 +2,7 @@ const express = require("express");
 const router = express.Router();
 const proponentsController = require("../controller/c_proponents");
 const portalController = require("../controller/c_proponent_portal");
-const { requireMenuAccess, requireProponentRole, requireProponentSelf, requireOwnApplication, requireStaffRole } = require("../middleware/m_auth");
+const { requireMenuAccess, requireProponentSelf, requireOwnApplication, requireStaffRole } = require("../middleware/m_auth");
 const { handleUpload } = require("../lib/fileStorage");
 const { uploadDocumentOnly } = require("../middleware/m_upload");
 const { verifyUploadedFile } = require("../lib/uploadCheck");
@@ -10,10 +10,8 @@ const { verifyUploadedFile } = require("../lib/uploadCheck");
 const MENU_KEY = "settings:proponents";
 
 // Proponent self-service — must be declared before "/:id" so "me" isn't parsed as an id.
-// setup/status use requireProponentRole (role only) since they run BEFORE a
-// profile exists; every other /me route requires one and uses requireProponentSelf.
-router.get("/me/setup-status", requireProponentRole, proponentsController.getMySetupStatus);
-router.post("/me/setup", requireProponentRole, proponentsController.setupMine);
+// There's no self-setup: staff (Assessment Officer) create a locator's
+// business profile, so every /me route needs one (requireProponentSelf).
 router.get("/me", requireProponentSelf, proponentsController.getMine);
 router.patch("/me", requireProponentSelf, proponentsController.updateMine);
 
