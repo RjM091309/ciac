@@ -463,8 +463,10 @@ const getters = {
   portalName: () => get("branding.portal_name"),
   orgShortName,
   orgName: () => get("branding.org_name"),
-  /** "CIAC Portal" — how emails, certificates and the authenticator refer to the app. */
-  portalLabel: () => `${orgShortName()} Portal`,
+  /** The portal's display name in emails, certificates and the authenticator
+   * — the "Portal name" set in Branding (e.g. "BRIDGE+"), falling back to
+   * "<org short name> Portal" when that field is blank. */
+  portalLabel: () => get("branding.portal_name") || `${orgShortName()} Portal`,
   /** "CIAC Locator Portal" — the name locator-facing emails use. */
   locatorPortalLabel: () => `${orgShortName()} Locator Portal`,
   supportEmail: () => get("branding.support_email") || "",
