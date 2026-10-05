@@ -19,3 +19,6 @@ uploads/
 
 # Uploaded documentary requirements (BRM-04) — runtime data, not source
 server/uploads/
+
+# PM2 process config — machine-specific (paths, watch), hindi dapat sa git
+ecosystem.config.cjs
