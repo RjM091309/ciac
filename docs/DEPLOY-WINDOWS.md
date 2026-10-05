@@ -12,7 +12,7 @@ Browser ──HTTPS 443──▶ nginx ─┬─ /        → static files from 
 
 - **nginx** serves the built frontend (`dist/`) and forwards `/api` to the backend.
 - **The backend** (`server/` folder) is a Node.js process on the same machine, installed as a Windows Service.
-- PM2 and the Vite dev server are **not** used in production. The Windows Services start on boot and restart the process if it crashes.
+- The Vite dev server is **not** used in production. The Windows Services start on boot and restart the process if it crashes.
 
 ---
 

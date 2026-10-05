@@ -43,7 +43,6 @@ server/                 Backend (separate npm workspace, CommonJS)
   config/cache.js       node-cache `remember()` — role ids + Control Panel permissions (30s TTL, invalidated on save)
   sql/, scripts/        one-off SQL files and migration/backfill/import scripts (run manually)
   uploads/              uploaded documents (gitignored, runtime data)
-ecosystem.config.cjs    PM2 config (ciac-dev = Vite, ciac-backend-dev = Express)
 docs/                   SYSTEM-GUIDE.md, PROCESS-MODULES.md (last updated 2026-09-09 — may lag the code)
 ```
 
@@ -91,13 +90,6 @@ npm run lint       # tsc --noEmit (passes clean as of 2026-09-25)
 
 Backend only: `npm --prefix server run dev` (`node app.js`) or `npm --prefix server run start` (`NODE_ENV=production`).
 
-PM2 (`ecosystem.config.cjs`, both `watch: true`; `ciac-dev` ignores `server`/`src`, backend ignores `uploads`):
-
-```bash
-pm2 restart ciac-dev ciac-backend-dev
-pm2 logs ciac-backend-dev
-```
-
 There are no automated tests in the repo.
 
 ## Environment variables
@@ -108,9 +100,9 @@ Backend (`server/.env`): `PORT`, `NODE_ENV`, `JWT_SECRET`, `FRONTEND_URL` (/`FRO
 
 ## Environments & deploy
 
-- The VPS at 45.32.119.62 (`ciac-dev` + `ciac-backend-dev`, Vite dev server, `NODE_ENV=development`, plain HTTP) is a **dev/staging box**, not the client's production. MSSQL runs in Docker (`mssql` container, DB `bridge`), with :1433 restricted to one IP through the `DOCKER-USER` iptables chain.
-- Client production is a Windows Server with nginx; the full steps are in `docs/DEPLOY-WINDOWS.md`. The backend runs as an NSSM Windows service, not PM2. A production build calls `/api` on its own origin: `VITE_BACKEND_URL` is only the dev proxy target, and `VITE_API_ORIGIN` is an optional override. A fresh DB has no admin, so create the first one with `node server/scripts/create-admin.js <username> <email>`.
-- Production (client server) checklist: `npm run build` and serve `dist/` from nginx over HTTPS; proxy `/api` to a localhost-bound backend; run the backend with `NODE_ENV=production` (needed for `secure` cookies); no PM2 `watch`; schedule backups of the database and `server/uploads/`.
+- The VPS at 45.32.119.62 (Vite dev server, `NODE_ENV=development`, plain HTTP) is a **dev/staging box**, not the client's production. MSSQL runs in Docker (`mssql` container, DB `bridge`), with :1433 restricted to one IP through the `DOCKER-USER` iptables chain.
+- Client production is a Windows Server with nginx; the full steps are in `docs/DEPLOY-WINDOWS.md`. The backend and nginx run as NSSM Windows services. A production build calls `/api` on its own origin: `VITE_BACKEND_URL` is only the dev proxy target, and `VITE_API_ORIGIN` is an optional override. A fresh DB has no admin, so create the first one with `node server/scripts/create-admin.js <username> <email>`.
+- Production (client server) checklist: `npm run build` and serve `dist/` from nginx over HTTPS; proxy `/api` to a localhost-bound backend; run the backend with `NODE_ENV=production` (needed for `secure` cookies); schedule backups of the database and `server/uploads/`.
 - Schema: there is no migration runner. `server/app.js` runs each model's idempotent `ensureSchema()` in order on startup (roles → users → type of contract → contracts → account officers → proponent sub-tables → building → land use); other models create their tables lazily on first use. Unused tables from the old schema are dropped on startup by `server/config/legacyTables.js` (`UNUSED_TABLES`, listed in FK order). This happens only if they exist, so every database cleans itself after a pull. Add a table to that list only once nothing in `server/` or `src/` uses it. Anything that isn't additive (data moves, renames) lives in `server/scripts/*.js` or `server/sql/*.sql` and must be run by hand, e.g. `server/scripts/migrate-approval-single-level.js`.
 - If the DB is unreachable the server still listens (login page loads), but DB-backed routes fail.
 
@@ -175,7 +167,6 @@ Backend (`server/.env`): `PORT`, `NODE_ENV`, `JWT_SECRET`, `FRONTEND_URL` (/`FRO
 
 - `msnodesqlv8` runs on libuv's threadpool, so `server/app.js` sets `UV_THREADPOOL_SIZE=16` before any require. Keep that line first, or parallel page loads hit "Query timeout expired".
 - `vite.config.ts` `optimizeDeps.include` lists the MUI date-picker modules on purpose, to avoid stale-chunk errors after lazy routes load. Don't remove them.
-- PM2 `ignore_watch` must keep excluding `server/uploads` (backend) and `server`/`src` (frontend). Otherwise uploads restart processes and reload the browser.
 - Error responses: controllers send `publicErrorMessage(error)` (`server/lib/httpError.js`), never raw `error.message`. Plain `new Error("…")` messages and errors with a 4xx `.status` reach the client; DB, system and runtime errors become a generic message (the real one is only in the server log). So throw user-facing validation errors as plain `Error`.
 - Storage: both upload paths write under `STORAGE_ROOT` (`STORAGE_DIR` or `server/uploads`) and save `storage_path` relative to it. Older staff uploads have absolute paths; `resolveStoredPath` handles both. A rejected upload deletes its file. Inspection "documents" are text references only; there's no file upload there.
 - Uploads: both upload paths (`m_upload.js` for staff, `fileStorage.handleUpload` for the portal) run `verifyUploadedFile` from `lib/uploadCheck.js`. A new allowed mimetype needs a signature in `SIGNATURES` there, or every upload of it is rejected.
