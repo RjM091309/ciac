@@ -18,7 +18,7 @@
     "jsonwebtoken": "^9.0.2",
     "msnodesqlv8": "^4.2.1",
     "mssql": "^11.0.1",
-    "multer": "^2.3.0",
+    "multer": "^2.4.0",
     "node-cache": "^5.1.2",
     "nodemailer": "^10.0.10",
     "otplib": "^13.5.0",
