@@ -451,9 +451,11 @@ export function RequirementsOverviewCard({
  * contracts count down to expiry (fewer days = more urgent, and an
  * already-expired one is most urgent of all); a queued application counts up
  * from when it was filed (more days waiting = more urgent). */
-function attentionBadge(item: AttentionItem) {
+/** Urgency tier for an attention item — shared by the badge color and the
+ * card's Critical/Warning filter, so the pill and the filter never disagree. */
+function attentionUrgency(item: AttentionItem): 'critical' | 'warning' | 'normal' {
   const isExpiry = item.kind === 'permit' || item.kind === 'contract';
-  const urgency: 'critical' | 'warning' | 'normal' = isExpiry
+  return isExpiry
     ? item.is_expired || item.days_waiting <= 7
       ? 'critical'
       : item.days_waiting <= 30
@@ -464,6 +466,11 @@ function attentionBadge(item: AttentionItem) {
       : item.days_waiting > 7
         ? 'warning'
         : 'normal';
+}
+
+function attentionBadge(item: AttentionItem) {
+  const isExpiry = item.kind === 'permit' || item.kind === 'contract';
+  const urgency = attentionUrgency(item);
   const days = `${item.days_waiting} day${item.days_waiting === 1 ? '' : 's'}`;
   const label = isExpiry ? (item.is_expired ? `${days} overdue` : `${days} left`) : `waiting ${days}`;
   const palette = {
@@ -498,6 +505,20 @@ export function AttentionCard({
   description?: string;
   className?: string;
 }) {
+  const [filter, setFilter] = useState<'all' | 'critical' | 'warning'>('all');
+  let criticalCount = 0;
+  let warningCount = 0;
+  for (const it of items) {
+    const u = attentionUrgency(it);
+    if (u === 'critical') criticalCount += 1;
+    else if (u === 'warning') warningCount += 1;
+  }
+  const shown = filter === 'all' ? items : items.filter((it) => attentionUrgency(it) === filter);
+  const chips: { key: 'all' | 'critical' | 'warning'; label: string; color: string; bg: string }[] = [
+    { key: 'all', label: `All (${items.length})`, color: 'var(--text)', bg: 'var(--control-bg)' },
+    { key: 'critical', label: `Critical${criticalCount ? ` (${criticalCount})` : ''}`, color: '#f43f5e', bg: 'rgba(244,63,94,.14)' },
+    { key: 'warning', label: `Warning${warningCount ? ` (${warningCount})` : ''}`, color: '#f97316', bg: 'rgba(249,115,22,.14)' },
+  ];
   return (
     <Card className={className}>
       <div className="flex items-center gap-2 mb-1">
@@ -506,17 +527,42 @@ export function AttentionCard({
           {title}
         </h4>
       </div>
-      <p className="text-[10px] text-secondary mb-4 sm:mb-6">{description}</p>
+      <p className="text-[10px] text-secondary mb-3">{description}</p>
+
+      {items.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1.5 mb-3">
+          {chips.map((chip) => {
+            const activeChip = filter === chip.key;
+            return (
+              <button
+                key={chip.key}
+                type="button"
+                onClick={() => setFilter(chip.key)}
+                className="text-[10px] font-semibold px-2 py-0.5 rounded-full border transition-colors"
+                style={
+                  activeChip
+                    ? { backgroundColor: chip.bg, color: chip.color, borderColor: 'transparent' }
+                    : { backgroundColor: 'transparent', color: 'var(--text-muted)', borderColor: 'var(--border-subtle)' }
+                }
+              >
+                {chip.label}
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {items.length === 0 ? (
         <p className="text-[11px] text-secondary">Nothing waiting — the queue is clear.</p>
+      ) : shown.length === 0 ? (
+        <p className="text-[11px] text-secondary">No {filter} items right now.</p>
       ) : (
         // Fits ~5 rows without a scrollbar; once there are more, this
         // scrolls with the same invisible-until-hover scrollbar as the
         // sidebar ("sidebar-scroll") instead of growing the whole card, with
         // a bottom fade so the next row's edge never awkwardly peeks in.
-        <div className={cn('sidebar-scroll space-y-2 pr-0.5', items.length > 5 && 'h-[310px] overflow-y-auto attention-fade-bottom')}>
-          {items.map((item) => {
+        <div className={cn('sidebar-scroll space-y-2 pr-0.5', shown.length > 5 && 'h-[310px] overflow-y-auto attention-fade-bottom')}>
+          {shown.map((item) => {
             const target = item.link !== undefined ? item.link : defaultAttentionTarget(item);
             const badge = attentionBadge(item);
             const isApplication = !item.kind || item.kind === 'application';

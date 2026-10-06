@@ -15,6 +15,8 @@ const fs = require("fs");
 const path = require("path");
 const { resolveStoredPath, relativeStoragePath, contentDisposition } = require("../lib/fileStorage");
 const { publicErrorMessage } = require("../lib/httpError");
+const Assessment = require("../models/AssessmentEvaluation");
+const { checkMenuAllowed } = require("../middleware/m_auth");
 const { getters: site } = require("../lib/siteSettings");
 
 /** "", null, undefined -> null; otherwise the id as a number (NaN passes through and is rejected below). */
@@ -47,9 +49,35 @@ exports.list = async (req, res) => {
 // Locators/Proponent List page: same underlying proponents, but with
 // Business Type / Start-End-Lease Term / Encoded By resolved dynamically
 // from the applications/contracts/users tables instead of duplicated data.
+/** A Level 2 Account Officer (role has approval:queue, not Level 1, not
+ * admin) only sees the locators assigned to them in Registered Locator.
+ * Returns their user id, or null for everyone else. */
+async function accountOfficerScope(req) {
+  const role = String(req.user?.role || "").toLowerCase();
+  if (!req.user?.id || role === "admin") return null;
+  if (!(await checkMenuAllowed(role, "approval:queue", "view"))) return null;
+  if (await Assessment.isManager(req.user)) return null;
+  return Number(req.user.id);
+}
+
+/** For the /:id Registered Locator routes: a Level 2 Account Officer can only
+ * open their own locators. */
+exports.requireOwnLocator = async (req, res, next) => {
+  try {
+    const me = await accountOfficerScope(req);
+    if (me === null) return next();
+    const row = await Proponent.getProponentById(Number(req.params.id));
+    if (row && Number(row.account_officer_id) === me) return next();
+    return res.status(403).json({ success: false, message: "This locator is assigned to another Account Officer." });
+  } catch (error) {
+    console.error("Locator scope check error:", error);
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
+  }
+};
+
 exports.listForLocatorList = async (req, res) => {
   try {
-    const rows = await Proponent.listProponentsForLocatorList();
+    const rows = await Proponent.listProponentsForLocatorList({ accountOfficerId: await accountOfficerScope(req) });
     return res.json({ success: true, data: rows });
   } catch (error) {
     console.error("List locators error:", error);
@@ -589,6 +617,15 @@ exports.create = async (req, res) => {
       is_active,
     } = req.body || {};
     if (!business_name) return res.status(400).json({ success: false, message: "business_name is required" });
+    // Registered Locator only lists locators with an Account Officer. The
+    // form hides that field from an Account Officer, so theirs defaults to them.
+    let accountOfficerId = toNullableId(account_officer_id);
+    if (!accountOfficerId && (await checkMenuAllowed(String(req.user?.role || "").toLowerCase(), "approval:queue", "view"))) {
+      accountOfficerId = Number(req.user?.id) || null;
+    }
+    if (!accountOfficerId) {
+      return res.status(400).json({ success: false, message: "Choose the locator's Account Officer." });
+    }
 
     const landUseId = toNullableId(land_use_id);
     const lookupError = await unknownLookup(landUseId, () => LandUse.listLandUses(), "land use");
@@ -607,7 +644,7 @@ exports.create = async (req, res) => {
       location,
       ref_code,
       lease_address,
-      account_officer_id,
+      account_officer_id: accountOfficerId,
       sec_registration_date,
       date_signed,
       grace_period,
@@ -809,6 +846,17 @@ exports.update = async (req, res) => {
     if (typeId !== null) {
       const known = (await TypeOfContract.listTypeOfContracts()).find((t) => t.id === typeId);
       if (!known) return res.status(400).json({ success: false, message: "Unknown type of contract" });
+    }
+    // Registered Locator only lists locators with an Account Officer, so it
+    // can be changed but not cleared — and a Level 2 Account Officer can't
+    // hand their locator to someone else (Level 1 assigns).
+    if (account_officer_id !== undefined) {
+      const nextOfficer = toNullableId(account_officer_id);
+      if (!nextOfficer) return res.status(400).json({ success: false, message: "Choose the locator's Account Officer." });
+      const me = await accountOfficerScope(req);
+      if (me !== null && nextOfficer !== me) {
+        return res.status(403).json({ success: false, message: "Only Level 1 can change a locator's Account Officer." });
+      }
     }
     // undefined = "not sent, leave alone"; null = "cleared".
     const landUseId = land_use_id === undefined ? undefined : toNullableId(land_use_id);

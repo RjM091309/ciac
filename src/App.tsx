@@ -27,7 +27,9 @@ const ProponentsManagement = lazy(() => import('./components/proponent/Proponent
 const RequirementsManagement = lazy(() => import('./components/applications/Requirements').then((m) => ({ default: m.RequirementsManagement })));
 const ApplicationsWorkflow = lazy(() => import('./components/applications/ApplicationsWorkflow').then((m) => ({ default: m.ApplicationsWorkflow })));
 const AssessmentEvaluation = lazy(() => import('./components/assessment/AssessmentEvaluation').then((m) => ({ default: m.AssessmentEvaluation })));
-const ApprovalIssuance = lazy(() => import('./components/approval/ApprovalIssuance').then((m) => ({ default: m.ApprovalIssuance })));
+const AccountOfficerAssignment = lazy(() =>
+  import('./components/approval/AccountOfficerAssignment').then((m) => ({ default: m.AccountOfficerAssignment }))
+);
 const ComplianceInspections = lazy(() => import('./components/compliance/ComplianceInspections').then((m) => ({ default: m.ComplianceInspections })));
 const ApplicationTypesManagement = lazy(() => import('./components/FileMaintenance/ApplicationTypes').then((m) => ({ default: m.ApplicationTypesManagement })));
 const TypeOfContractManagement = lazy(() => import('./components/FileMaintenance/TypeOfContract').then((m) => ({ default: m.TypeOfContractManagement })));
@@ -602,7 +604,7 @@ export default function App() {
               ) : view === 'assessment:queue' ? (
                 <AssessmentEvaluation locationSearch={locationSearch} navigate={navigate} />
               ) : view === 'approval:queue' ? (
-                <ApprovalIssuance locationSearch={locationSearch} navigate={navigate} />
+                <AccountOfficerAssignment locationSearch={locationSearch} navigate={navigate} />
               ) : view === 'compliance:inspections' ? (
                 <ComplianceInspections locationSearch={locationSearch} navigate={navigate} />
               ) : view === 'reports:analytics' ? (
@@ -735,9 +737,9 @@ const LANDING_CONFIG: Record<AppView, LandingConfig> = {
     },
   },
   'approval:queue': {
-    title: 'Approval & Issuance',
-    description: 'Route endorsed applications through the approval hierarchy, record decisions, and issue approval documents and contracts.',
-    badge: 'Approval',
+    title: 'Approved Queue',
+    description: 'Approved applications waiting for Level 1 Account Officer to assign a Level 2. Assigned locators move to Registered Locator.',
+    badge: 'Approved Queue',
     icon: FileCheck,
     stats: [
       { label: 'In Progress', value: '—' },

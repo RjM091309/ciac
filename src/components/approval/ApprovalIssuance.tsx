@@ -561,12 +561,12 @@ function StatTile({
   );
 }
 
-const TABS = ['Overview', 'Approval Chain', 'Charges', 'Contract', 'History'] as const;
+const TABS = ['Overview', 'Approval', 'Charges', 'Contract', 'History'] as const;
 type Tab = (typeof TABS)[number];
 
 type RunFn = (fn: () => Promise<unknown>, successMsg?: string) => Promise<void>;
 
-function ApprovalDetail({
+export function ApprovalDetail({
   applicationId,
   perms,
   onClose,
@@ -579,7 +579,7 @@ function ApprovalDetail({
 }) {
   const [data, setData] = useState<DetailPayload | null>(null);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState<Tab>('Approval Chain');
+  const [tab, setTab] = useState<Tab>('Approval');
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
@@ -681,7 +681,6 @@ function ApprovalDetail({
               )}
             >
               {t}
-              {t === 'Approval Chain' && data?.steps.length ? ` (${data.steps.length})` : ''}
               {t === 'Charges' && data?.charges.length ? ` (${data.charges.length})` : ''}
             </button>
           ))}
@@ -711,8 +710,8 @@ function ApprovalDetail({
             </div>
           ) : tab === 'Overview' ? (
             <OverviewTab data={data} perms={perms} busy={busy} run={run} />
-          ) : tab === 'Approval Chain' ? (
-            <ChainTab data={data} perms={perms} busy={busy} run={run} />
+          ) : tab === 'Approval' ? (
+            <ChainTab data={data} perms={perms} busy={busy} run={run} onGoToContract={() => setTab('Contract')} />
           ) : tab === 'Charges' ? (
             <ChargesTab data={data} perms={perms} busy={busy} run={run} />
           ) : tab === 'Contract' ? (
@@ -796,13 +795,18 @@ function ChainTab({
   perms,
   busy,
   run,
+  onGoToContract,
 }: {
   data: DetailPayload;
   perms: { canAdd: boolean; canEdit: boolean; canDelete: boolean };
   busy: boolean;
   run: RunFn;
+  onGoToContract?: () => void;
 }) {
   const current = data.current_step;
+  const latest = data.steps.length ? data.steps[data.steps.length - 1] : null;
+  // New application: the contract comes first (same rule on the server).
+  const needsContract = !data.approval.is_renewal && !data.contract;
   const [remarks, setRemarks] = useState('');
   const [overridePrompt, setOverridePrompt] = useState<{ message: string; resolve: (v: boolean) => void } | null>(
     null
@@ -905,30 +909,20 @@ function ChainTab({
           setOverridePrompt(null);
         }}
       />
-      <div className="flex flex-col gap-2">
-        {data.steps.map((s) => {
-          const isCurrent = current?.id === s.id;
-          return (
-            <div
-              key={s.id}
-              className={cn('rounded-xl border p-3', isCurrent && 'ring-1 ring-[var(--text)]')}
-              style={{ borderColor: 'var(--border-subtle)' }}
-            >
-              <div className="flex items-center justify-between gap-2">
-                <div className="text-[13px] font-semibold">Approval</div>
-                <Badge label={s.decision} styles={stepDecisionBadge(s.decision)} />
-              </div>
-              <div className="text-[11px] text-secondary mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
-                {s.assignee_name || s.assignee_username ? (
-                  <span>Assignee: {s.assignee_name || s.assignee_username}</span>
-                ) : null}
-                {s.endorsed_to_office ? <span>Endorsed to: {s.endorsed_to_office}</span> : null}
-              </div>
-              {s.remarks ? <div className="text-[12px] mt-1">{s.remarks}</div> : null}
-            </div>
-          );
-        })}
-      </div>
+      {/* Single-level approval: no step list. While it's pending only the
+          decision form shows; once decided, the latest decision. */}
+      {!current && latest ? (
+        <div className="rounded-xl border p-3" style={{ borderColor: 'var(--border-subtle)' }}>
+          <div className="flex items-center justify-between gap-2">
+            <div className="text-[13px] font-semibold">Approval</div>
+            <Badge label={latest.decision} styles={stepDecisionBadge(latest.decision)} />
+          </div>
+          {latest.assignee_name || latest.assignee_username ? (
+            <div className="text-[11px] text-secondary mt-1">By: {latest.assignee_name || latest.assignee_username}</div>
+          ) : null}
+          {latest.remarks ? <div className="text-[12px] mt-1">{latest.remarks}</div> : null}
+        </div>
+      ) : null}
 
       {current && perms.canEdit ? (
         <div className="rounded-xl border p-3 flex flex-col gap-3" style={{ borderColor: 'var(--border-subtle)' }}>
@@ -941,11 +935,31 @@ function ChainTab({
             />
           </Field>
 
+          {needsContract ? (
+            <div
+              className="rounded-lg border px-3 py-2 text-[12px] flex items-center justify-between gap-3"
+              style={{ borderColor: '#f59e0b55', backgroundColor: '#f59e0b1a', color: 'var(--text)' }}
+            >
+              <span>Record the contract first — Approve unlocks once it's saved.</span>
+              {onGoToContract ? (
+                <button
+                  type="button"
+                  className="rounded-md px-2.5 py-1 text-[11px] font-semibold whitespace-nowrap cursor-pointer"
+                  style={{ backgroundColor: '#f59e0b', color: '#1a1200' }}
+                  onClick={onGoToContract}
+                >
+                  Go to Contract
+                </button>
+              ) : null}
+            </div>
+          ) : null}
+
           <div className="flex flex-wrap gap-2">
             <button
               className="rounded-lg px-3 py-1.5 text-[12px] font-semibold disabled:opacity-50"
               style={{ backgroundColor: 'rgba(16,185,129,.16)', color: '#10b981', border: '1px solid rgba(16,185,129,.38)' }}
-              disabled={busy}
+              disabled={busy || needsContract}
+              title={needsContract ? 'Record the contract on the Contract tab first' : undefined}
               onClick={() => act('APPROVE')}
             >
               <CheckCircle2 size={13} className="inline mr-1" /> Approve
@@ -1246,7 +1260,7 @@ function ContractTab({
             <FileSignature size={12} /> {c ? 'Update contract' : 'Record contract'}
           </div>
           <div className="grid grid-cols-2 gap-2">
-            <Field label="Application type">
+            <Field label="Industry Type">
               <input
                 className={inputCls}
                 style={{ opacity: 0.65, cursor: 'not-allowed' }}

@@ -97,9 +97,9 @@ export const LANDING_CONFIG: Record<AppView, LandingConfig> = {
     },
   },
   'approval:queue': {
-    title: 'Approval & Issuance',
-    description: 'Route endorsed applications through a configurable multi-level approval hierarchy, record approve/return/disapprove decisions and electronic endorsements, and issue approval documents and contracts.',
-    badge: 'Approval',
+    title: 'Approved Queue',
+    description: 'Approved applications waiting for Level 1 Account Officer to assign a Level 2. Assigned locators move to Registered Locator.',
+    badge: 'Approved Queue',
     icon: FileCheck,
     isCrud: true,
     crudHints: {

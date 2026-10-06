@@ -96,6 +96,21 @@ async function ensureSchema() {
 }
 
 async function ensureSchemaImpl() {
+  // Approved Queue: an application BDO Level 1 approved, waiting for Level 1
+  // Account Officer to assign a Level 2 (new or renewal). Set on APPROVED in
+  // settleApproval, cleared by assignAccountOfficer. The first time the column
+  // is added, already-approved new applications whose locator has no
+  // Account Officer yet are queued too.
+  await updateSchema(`
+    IF COL_LENGTH('dbo.applications', 'awaiting_ao_assignment') IS NULL
+    BEGIN
+      ALTER TABLE dbo.applications ADD awaiting_ao_assignment BIT NULL;
+      EXEC('UPDATE a SET awaiting_ao_assignment = 1
+            FROM dbo.applications a INNER JOIN dbo.proponents p ON p.id = a.proponent_id
+            WHERE a.status = ''APPROVED'' AND ISNULL(a.is_renewal, 0) = 0
+              AND p.is_active = 1 AND p.account_officer_id IS NULL');
+    END
+  `);
   await updateSchema(`
     IF OBJECT_ID('dbo.application_approvals', 'U') IS NULL
     BEGIN
@@ -628,6 +643,12 @@ async function actOnStep(stepId, { action, remarks, actorId, override_unverified
   // as APPROVED) would leave it stuck "decided" with no way back to PENDING
   // if the check then rejects it.
   if (act === "APPROVE") {
+    // The contract is recorded first, so approving sends it to the Approved
+    // Queue and Permits together (the Level 1 BDO who approves
+    // has no way back to the Contract tab afterwards).
+    if (!(await Contract.getByApplicationId(approval.application_id))) {
+      throw businessError("Record the contract on the Contract tab before approving.");
+    }
     await assertMandatoryRequirementsVerified(approval.application_id, { override: override_unverified });
   }
 
@@ -736,6 +757,10 @@ async function settleApproval(approvalId, applicationId, outcome, note, actorId,
     throw error;
   }
 
+  if (headerStatus === "APPROVED") {
+    await updateData(`UPDATE dbo.applications SET awaiting_ao_assignment = 1 WHERE id = @param0`, [toInt(applicationId)]);
+  }
+
   await logActivity(approvalId, `APPROVAL_${headerStatus}`, note ? note.slice(0, 200) : null, actorId);
 
   // RETURNED is the routine "an approver kicked it back" outcome, not a
@@ -758,7 +783,7 @@ async function settleApproval(approvalId, applicationId, outcome, note, actorId,
   // never touches dbo.contracts/permits, so without this the only trace is
   // a passive status change nobody's specifically told to act on.
   const nextStepNote =
-    headerStatus === "APPROVED" ? " Record the contract on the Contract tab to complete this application's file." : "";
+    headerStatus === "APPROVED" ? " It's now in the Approved Queue for an Account Officer." : "";
   await notify({
     applicationId,
     actorId,
@@ -833,7 +858,109 @@ async function saveContract(applicationId, payload, actorId) {
   return saved;
 }
 
+/* ------------------- Account Officer assignment queue ------------------- */
+// A new application that a Level 1 BDO approved goes to the Account Officers:
+// their Level 1 assigns it to a Level 2 Account Officer (the locator's
+// account officer, proponents.account_officer_id). Once assigned it leaves
+// this queue and the locator shows up in Registered Locator.
+
+async function listAssignmentQueue() {
+  await ensureSchema();
+  return selectData(`
+    SELECT
+      a.id AS application_id,
+      a.application_no,
+      a.is_renewal,
+      ISNULL(at.name, a.application_type) AS application_type_name,
+      a.proponent_id,
+      p.business_name AS proponent_name,
+      p.account_officer_id AS current_account_officer_id,
+      cur.full_name AS current_account_officer_name,
+      COALESCE(ap.decided_at, a.updated_at, a.created_at) AS approved_at,
+      decider.full_name AS approved_by_name
+    FROM dbo.applications a
+    INNER JOIN dbo.proponents p ON p.id = a.proponent_id
+    LEFT JOIN dbo.application_types at ON at.code = a.application_type
+    LEFT JOIN dbo.application_approvals ap ON ap.application_id = a.id
+    LEFT JOIN dbo.users decider ON decider.id = ap.decided_by
+    LEFT JOIN dbo.users cur ON cur.id = p.account_officer_id
+    WHERE a.status = 'APPROVED'
+      AND a.awaiting_ao_assignment = 1
+      AND p.is_active = 1
+    -- Newest approval on top.
+    ORDER BY COALESCE(ap.decided_at, a.updated_at, a.created_at) DESC, a.id DESC
+  `);
+}
+
+/** Level 2 Account Officers: role has approval:queue (and isn't a BDO role,
+ * i.e. no assessment:queue), not Level 1, not admin. */
+async function listAssignableAccountOfficers() {
+  await ensureSchema();
+  return selectData(`
+    SELECT DISTINCT u.id, u.full_name, u.username
+    FROM dbo.users u
+    INNER JOIN dbo.user_roles ur ON ur.user_id = u.id
+    INNER JOIN dbo.roles r ON r.id = ur.role_id AND r.is_active = 1
+    INNER JOIN dbo.role_sidebar_menu_permissions p
+      ON p.role_id = r.id AND p.menu_key = 'approval:queue' AND p.is_enabled = 1
+    WHERE u.is_active = 1
+      AND LOWER(LTRIM(RTRIM(r.name))) NOT IN ('admin', 'proponent')
+      AND ISNULL(u.assessment_level, 2) <> 1
+      AND NOT EXISTS (
+        SELECT 1 FROM dbo.role_sidebar_menu_permissions q
+        WHERE q.role_id = r.id AND q.menu_key = 'assessment:queue' AND q.is_enabled = 1
+      )
+      AND NOT EXISTS (
+        SELECT 1 FROM dbo.user_roles ar INNER JOIN dbo.roles rr ON rr.id = ar.role_id
+        WHERE ar.user_id = u.id AND rr.is_active = 1 AND LOWER(LTRIM(RTRIM(rr.name))) = 'admin'
+      )
+    ORDER BY u.full_name
+  `);
+}
+
+async function assignAccountOfficer(applicationId, { accountOfficerId, actorId }) {
+  const appId = toInt(applicationId);
+  const officerId = toInt(accountOfficerId);
+  if (!officerId) throw businessError("Choose the Level 2 Account Officer.");
+  const row = (await listAssignmentQueue()).find((r) => Number(r.application_id) === appId);
+  if (!row) throw businessError("This application isn't waiting for an Account Officer anymore.");
+  const officer = (await listAssignableAccountOfficers()).find((u) => Number(u.id) === officerId);
+  if (!officer) throw businessError("The selected user can't be assigned as the Level 2 Account Officer.");
+
+  // Clearing the flag is the compare-and-swap: only one assign wins.
+  const result = await updateData(
+    `UPDATE dbo.applications SET awaiting_ao_assignment = 0 WHERE id = @param0 AND awaiting_ao_assignment = 1`,
+    [appId]
+  );
+  if (!result?.rowsAffected?.[0]) throw businessError("This application isn't waiting for an Account Officer anymore.");
+  // Registered Locator is one row per locator: a new application adds the
+  // locator to it, a renewal just updates who their Account Officer is.
+  await updateData(
+    `UPDATE dbo.proponents SET account_officer_id = @param1, updated_by = @param2, updated_at = SYSUTCDATETIME()
+     WHERE id = @param0`,
+    [toInt(row.proponent_id), officerId, toInt(actorId)]
+  );
+
+  const officerName = officer.full_name || officer.username;
+  try {
+    await Notification.createNotification({
+      userId: officerId,
+      subject: `New locator assigned: ${row.proponent_name || row.application_no}`,
+      body: `${row.proponent_name || "A locator"} (${row.application_no}) was assigned to you as their Account Officer.`,
+      createdBy: actorId,
+      applicationId: appId,
+      eventType: "locator_assigned",
+    });
+  } catch (error) {
+    console.error("Account officer assignment notification error:", error);
+  }
+  return { ...row, account_officer_id: officerId, account_officer_name: officerName };
+}
+
 module.exports = {
+  listAssignmentQueue,
+  listAssignableAccountOfficers,
+  assignAccountOfficer,
   ensureSchema,
   APPROVAL_STATUSES,
   STEP_ACTIONS,

@@ -40,7 +40,7 @@ const PROPONENT_ITEMS: BottomNavItem[] = [
 const STAFF_ITEMS: BottomNavItem[] = [
   { key: 'applications:new', label: 'Applications', icon: FilePlus2 },
   { key: 'assessment:queue', label: 'Evaluation', icon: ClipboardCheck },
-  { key: 'approval:queue', label: 'Approval', icon: Stamp },
+  { key: 'approval:queue', label: 'Approved', icon: Stamp },
   { key: 'compliance:inspections', label: 'Inspections', icon: ShieldCheck },
   { key: 'compliance:permits', label: 'Permits', icon: FileCheck },
   { key: 'reports:analytics', label: 'Reports', icon: BarChart3 },

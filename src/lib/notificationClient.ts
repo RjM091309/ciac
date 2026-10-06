@@ -20,7 +20,11 @@ function mapNotificationRows(rows: any[], userRole: Role, userId?: number | null
         ? rawCategory
         : rawCategory === 'approval_ready'
           ? 'approval'
-          : 'application_status';
+          : rawCategory === 'assessment_assigned'
+            ? 'assessment'
+            : rawCategory === 'locator_assigned'
+              ? 'locator_assigned'
+              : 'application_status';
     const applicationId = Number(row?.application_id);
     const hasApplicationId = Number.isFinite(applicationId) && applicationId > 0;
     const requirementId = Number(row?.requirement_id);
@@ -34,7 +38,9 @@ function mapNotificationRows(rows: any[], userRole: Role, userId?: number | null
     const targetPath = hasApplicationId
       ? userRole === 'proponent'
         ? '/me/applications'
-        : category === 'assessment' || category === 'document' || category === 'requirement'
+        : category === 'locator_assigned'
+          ? '/applications/proponents'
+          : category === 'assessment' || category === 'document' || category === 'requirement'
           ? '/assessment'
           : category === 'compliance' || category === 'inspection'
             ? '/compliance/inspections'
@@ -184,6 +190,10 @@ export function getNotificationCategoryLabel(value: string | undefined) {
       return 'Approval';
     case 'approval_ready':
       return 'Ready for Approval';
+    case 'assessment_assigned':
+      return 'New Assignment';
+    case 'locator_assigned':
+      return 'New Locator';
     case 'contract':
       return 'Contract';
     default:

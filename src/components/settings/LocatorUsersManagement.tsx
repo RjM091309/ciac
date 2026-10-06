@@ -1260,7 +1260,7 @@ export function LocatorUsersManagement({
             <table className="min-w-full text-left text-xs">
               <thead>
                 <tr>
-                  {['Company / Locator', 'Username', 'Full Name', 'Email', 'Application Type', '2FA', 'Status', 'Progress', 'Actions'].map((col) => (
+                  {['Company / Locator', 'Username', 'Full Name', 'Email', 'Industry Type', '2FA', 'Status', 'Progress', 'Actions'].map((col) => (
                     <th
                       key={col}
                       className={cn(
@@ -1409,7 +1409,7 @@ export function LocatorUsersManagement({
             />
           </Field>
           {!editing ? (
-            <Field label="Application type *">
+            <Field label="Industry Type *">
               <AppSelect
                 isClearable={false}
                 options={
@@ -1551,7 +1551,7 @@ export function LocatorUsersManagement({
                   style={continuingDraftFieldErrors.email ? { borderColor: '#ef4444' } : undefined}
                 />
               </Field>
-              <Field label="Application type *">
+              <Field label="Industry Type *">
                 <AppSelect
                   isClearable={false}
                   options={

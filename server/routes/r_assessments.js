@@ -22,6 +22,7 @@ router.patch("/:applicationId/reopen", requireRole("admin"), controller.reopen);
 router.post("/:applicationId/officer-review", requireMenuAccess(MENU_KEY, "edit"), controller.officerReview);
 router.post("/:applicationId/return-to-officer", requireMenuAccess(MENU_KEY, "edit"), controller.returnToOfficer);
 router.post("/:applicationId/recommendation", requireMenuAccess(MENU_KEY, "edit"), controller.recommendation);
+router.post("/:applicationId/for-approval", requireMenuAccess(MENU_KEY, "edit"), controller.forApproval);
 
 // Documentary compliance — proxy to the application requirement workflow, gated by assessment access
 router.patch("/requirements/:id/status", requireMenuAccess(MENU_KEY, "edit"), controller.updateRequirementStatus);

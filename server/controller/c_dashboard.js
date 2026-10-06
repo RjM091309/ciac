@@ -180,6 +180,12 @@ function attentionQueue(
 // expire" on the same timeline (currently: less than 12 months left).
 const EXPIRY_ATTENTION_WINDOW_DAYS = Permit.EXPIRING_WINDOW_DAYS;
 
+// The "Needs Attention" card now carries a Critical/Warning filter on the
+// frontend, so it needs every expiring/overdue item — not just the top few —
+// or a critical item could be hidden behind the old 6-row cap. A generous
+// ceiling still bounds the payload; the card scrolls past ~5 rows.
+const ATTENTION_MAX = 100;
+
 function daysUntil(dateStr) {
   if (!dateStr) return null;
   const d = new Date(dateStr);
@@ -367,17 +373,16 @@ async function buildStaffDashboard({ user, sidebarPermissions, widgetPermissions
   if (widgets["dashboard:attention"]) {
     const withLinks = (items) => items.map((i) => ({ ...i, link: linkFor(i.application_id, i.is_renewal, i.status) }));
     if (queue === "approval") {
-      const expiryItems = await buildExpiryAttentionItems(6, {
+      const expiryItems = await buildExpiryAttentionItems(ATTENTION_MAX, {
         includePermits: menus.has("compliance:permits"),
         applicationIds: scopeIds,
       });
-      const remaining = Math.max(0, 6 - expiryItems.length);
       data.attention = [
         ...expiryItems,
-        ...withLinks(attentionQueue(applications, { statuses: ["FOR_APPROVAL"], limit: remaining })),
-      ];
+        ...withLinks(attentionQueue(applications, { statuses: ["FOR_APPROVAL"], limit: ATTENTION_MAX })),
+      ].slice(0, ATTENTION_MAX);
     } else if (queue === "assessment" && !isManager) {
-      data.attention = withLinks(attentionQueue(applications, { statuses: ["SUBMITTED", "RESUBMITTED", "RETURNED"] }));
+      data.attention = withLinks(attentionQueue(applications, { statuses: ["SUBMITTED", "RESUBMITTED", "RETURNED"], limit: ATTENTION_MAX }));
     } else if (queue === "assessment") {
       const rows = await Assessment.listManagerAttention();
       data.attention = rows
@@ -391,7 +396,7 @@ async function buildStaffDashboard({ user, sidebarPermissions, widgetPermissions
           link: `/assessment?applicationId=${r.application_id}`,
         }))
         .sort((a, b) => b.days_waiting - a.days_waiting)
-        .slice(0, 6);
+        .slice(0, ATTENTION_MAX);
     }
   }
 
@@ -433,11 +438,10 @@ exports.getMyDashboard = async (req, res) => {
         Proponent.listProponents(),
         Workflow.getRequirementCompletionByCategory(),
         Workflow.getApplicationTurnaroundStats(),
-        buildExpiryAttentionItems(6),
+        buildExpiryAttentionItems(ATTENTION_MAX),
       ]);
       // Same merge the Approval-queue staff dashboard does — admin's "Needs
       // Attention" also surfaces permits/contracts about to expire.
-      const remaining = Math.max(0, 6 - expiryItems.length);
       return res.json({
         success: true,
         role,
@@ -445,7 +449,7 @@ exports.getMyDashboard = async (req, res) => {
           ...summarizeAdmin(applications, proponents),
           categoryCompletion,
           turnaround,
-          attention: [...expiryItems, ...attentionQueue(applications, { limit: remaining })],
+          attention: [...expiryItems, ...attentionQueue(applications, { limit: ATTENTION_MAX })].slice(0, ATTENTION_MAX),
         },
       });
     }

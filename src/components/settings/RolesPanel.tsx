@@ -17,7 +17,7 @@ function api(path: string) {
 // OFFICER/ASSESSMENT OFFICER have no such code dependency — they're locked
 // because the client treats them as fixed organizational positions. Any
 // other role stays freely renameable/retireable.
-const SYSTEM_ROLE_NAMES = ['ADMIN', 'PROPONENT', 'ACCOUNT OFFICER', 'ASSESSMENT OFFICER'];
+const SYSTEM_ROLE_NAMES = ['ADMIN', 'PROPONENT', 'ACCOUNT OFFICER', 'BDO'];
 function isSystemRoleName(name: string) {
   return SYSTEM_ROLE_NAMES.includes(name.trim().toUpperCase());
 }

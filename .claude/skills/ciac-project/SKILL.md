@@ -1,6 +1,6 @@
 ---
 name: ciac-project
-description: Overview, run/dev, build, and deploy instructions for the CIAC system (3CORE) — a React/Vite frontend + Express/MSSQL backend — plus the Locator → Assessment (Level 2 Officer → Level 1 Manager) → Account Officer approval workflow, permits/expiration/renewal (statuses, draft/submit/activation rules, who does what). Use when running, building, deploying, or navigating this repo, or when working on application filing/assessment/approval/permit logic.
+description: Overview, run/dev, build, and deploy instructions for the CIAC system (3CORE) — a React/Vite frontend + Express/MSSQL backend — plus the Locator → BDO assessment (Level 2 → Level 1, who approves via "For Approval") → Approved Queue (Account Officer Level 1 assigns a Level 2) → Registered Locator workflow, permits/expiration/renewal (statuses, draft/submit/activation rules, who does what). Use when running, building, deploying, or navigating this repo, or when working on application filing/assessment/approval/permit logic.
 ---
 
 # CIAC System (3CORE)
@@ -69,7 +69,11 @@ docs/                   SYSTEM-GUIDE.md, PROCESS-MODULES.md (last updated 2026-0
 - Menu keys: `applications:renewals`, `applications:requirements`, `assessment:queue`, `approval:queue`, `compliance:permits`, `compliance:inspections`, and `settings:*` (`users`, `locator-users`, `proponents`, `control-panel`, `audit-log`, `account-officers`, `application-types`, `building`, `land-use`, `type-of-contract`). Check `server/models/ControlPanelPermission.js` / `src/components/AppSidebar.tsx` for the current full list.
 - The Locator (`proponent`) role can never hold a staff menu: `ControlPanelPermission.js` drops any non-portal key for it on read and write, `requireMenuAccess`/`checkMenuAllowed` reject it, and Control Panel doesn't list it (nor admin).
 - Staff dashboard widgets (Account Officer / Assessment Officer / Viewer / custom roles): `server/lib/dashboardWidgets.js` is the single catalog: widget keys, the menus that make a role eligible, and visibility (default on; a stat card also needs its `dashboard:stats` parent). `c_dashboard.js` `buildStaffDashboard` only computes and sends eligible and enabled widgets, and Control Panel only shows toggles for eligible ones. A new widget needs an entry there, a data branch in `buildStaffDashboard`, and rendering in `OfficerDashboard.tsx`. Shared widget cards live in `src/components/dashboard/widgets.tsx`, and reflowing rows use `.balanced-row` + `src/lib/balancedColumns.ts`.
-- Assessment level is a **user** attribute, not a role: `users.assessment_level` = 1 → Level 1 Manager, otherwise Level 2 Officer (`getUserLevel`/`isManager` in `server/models/AssessmentEvaluation.js`; admin counts as Manager).
+- Two departments, each with a **per-user Level 1 / Level 2** (`users.assessment_level` = 1 → Level 1, else Level 2; set in User Management's "Level" field, shown for roles with `assessment:queue` or `approval:queue`; the users table shows e.g. `BDO-L1`, `ACCOUNT OFFICER-L2`). `getUserLevel`/`isManager` in `server/models/AssessmentEvaluation.js`; admin counts as Level 1.
+  - **BDO** (`assessment:queue`; replaced ASSESSMENT OFFICER — `server/scripts/migrate-assessment-officer-to-bdo.js` for an existing DB): Level 2 creates locator accounts/applications and evaluates only what's assigned; Level 1 sees all, assigns, and approves. The evaluator picker lists Level 2 only (no Level 1, no admins).
+  - **Account Officer** (`approval:queue`): Level 1 assigns a Level 2 from the Approved Queue; Level 2 sees only their own locators in Registered Locator.
+  - Keep `approval:queue` OFF for the BDO role, or BDO Level 2 loses its assignment scoping (`isScopedLevel2`).
+- Level 2 BDO visibility: an application is hidden from them (lists, detail, notifications) until it's assigned to them, except their own unsubmitted DRAFTs. The locator never gets staff-only events (`INTERNAL_EVENT_TYPES` in `Notification.js`). An assignment sends the evaluator a pop-up (`assessment_assigned`); a reupload of a rejected requirement says "re-uploaded" with the rejection remarks.
 
 ## Ports & proxy
 
@@ -108,7 +112,7 @@ Backend (`server/.env`): `PORT`, `NODE_ENV`, `JWT_SECRET`, `FRONTEND_URL` (/`FRO
 
 ## Application workflow
 
-**High-level:** Locator Account → Filing → Locator uploads → Assessment (Level 2 Officer review → Level 1 Manager recommendation) → Approval & Issuance (Account Officer) → Contract/Permits → Expiry monitoring → Renewal.
+**High-level:** BDO Level 2 creates Locator Account + application → BDO Level 1 assigns a BDO Level 2 → Locator uploads → BDO Level 2 reviews and submits → BDO Level 1 "For Approval" (contract, then Approve) → Approved Queue → Account Officer Level 1 assigns a Level 2 → Registered Locator → Permits/expiry → Renewal (same loop).
 
 **Application statuses** (`APPLICATION_STATUSES`, `server/models/ApplicationWorkflow.js`): `DRAFT, SUBMITTED, RESUBMITTED, RETURNED, REJECTED, FOR_APPROVAL, DISAPPROVED, APPROVED`. (`UNDER_REVIEW` was removed 2026-09-25 — nothing ever set it.)
 
@@ -118,25 +122,25 @@ Backend (`server/.env`): `PORT`, `NODE_ENV`, `JWT_SECRET`, `FRONTEND_URL` (/`FRO
 - DRAFT = on hold: no notification, no email, no activation. A DRAFT row reopens pre-filled ("Continue Draft"). The Locator can only be changed while DRAFT. The type can be changed while in `TYPE_EDITABLE_STATUSES` (DRAFT/SUBMITTED/RESUBMITTED/RETURNED), but not once documents exist and the type actually changes.
 - The mandatory-document check applies only to RETURNED → RESUBMITTED, never the first DRAFT → SUBMITTED. This is deliberate: the locator has no portal access until that first submit activates them.
 - `activateLocatorIfPending()` (`c_applications.js`) resets the password and emails it, but fires only on a non-draft create or on submit. It no-ops if the account is already ACTIVE.
-- One proponent can have many applications, including multiple DRAFTs. "One login, multiple businesses" is unsupported: `requireProponentSelf` resolves a single proponent with `TOP(1)` and no `ORDER BY`.
+- One locator = one application: `assertFilingAllowed` (`ApplicationWorkflow.js`) refuses a second non-renewal application for the same proponent (409), on create and on a draft's locator change. Renewals aren't checked there. "One login, multiple businesses" is unsupported: `requireProponentSelf` resolves a single proponent with `TOP(1)` and no `ORDER BY`.
 - Application numbers come from `generateApplicationNo`: `APP-<year>-…` for new filings, `REN-<year>-…` for renewals (per-year counters in `application_no_counters`). The requirement checklist is seeded from catalog requirements flagged `for_new` (new filing) or `for_renewal` (renewal), not both.
 
 **Stage 2 — Locator uploads** (`ProponentApplications.tsx`, `/api/proponents/me/applications/*`). The locator uploads against the checklist and submits/resubmits (DRAFT→SUBMITTED, RETURNED→RESUBMITTED). Re-uploading against a REJECTED requirement flips it back to PENDING. They can reply on a requirement's comment thread and acknowledge requirements. Profile edits go through change requests that staff approve or reject (`/api/proponents/change-requests`).
 
 **Stage 3 — Assessment** (`AssessmentEvaluation.tsx`, `/assessment`, `assessment:queue`). This is a two-tier review with its own `stage`: `UNASSIGNED → ASSIGNED → IN_REVIEW → FOR_RECOMMENDATION → COMPLETED` (or `RETURNED`).
-- Manager assigns an evaluator (`PATCH /:id/assign`). Level 2 Officers only see and act on their own assignments (`ensureCanAct`).
+- Level 1 assigns a Level 2 evaluator (`PATCH /:id/assign`). Level 2 only see and act on their own assignments (`ensureCanAct`).
 - Compliance tab: verify or reject each requirement. Verify stays disabled on a REJECTED requirement until a reupload resets it. Each document has evaluator **Remarks** (`PATCH /requirements/:id/remarks`, no status change or notification, locked once COMPLETED/RETURNED) and a comment thread shared with the Locator. Ad-hoc one-off requirements (`POST /:id/requirements/custom`, `is_ad_hoc=1`) survive a type-change rebuild. Assessment charges can be added.
 - The old **Findings tab and "Return to Locator" were removed** (commit e533090). Per-document remarks replace them.
-- Officer submits their review (`POST /:id/officer-review`, recommendation `ENDORSE`/`DISAPPROVE`) → stage FOR_RECOMMENDATION.
-- Level 1 Manager then either sends it back (`POST /:id/return-to-officer` → IN_REVIEW) or gives the final recommendation (`POST /:id/recommendation`):
-  - `ENDORSE` requires `approver_id` (an Account Officer) → application FOR_APPROVAL, and Approval starts automatically, assigned to that officer.
-  - `DISAPPROVE` → application DISAPPROVED.
+- Level 2 submits their review (`POST /:id/officer-review`, summary only; a recommendation is optional) → stage FOR_RECOMMENDATION. The Step 2 card is hidden until then.
+- Level 1 then either sends it back (`POST /:id/return-to-officer` → IN_REVIEW) or clicks **For Approval** (see below). The older `POST /:id/recommendation` (ENDORSE to a chosen Account Officer / DISAPPROVE) still exists in the API but the UI no longer uses it.
 - Once decided, it's locked until an admin reopens it (`PATCH /:id/reopen`). Reopening is refused once Approval reached APPROVED/DISAPPROVED.
 
-**Stage 4 — Approval & Issuance** (`ApprovalIssuance.tsx`, `/approval`, `approval:queue`). This is a **single-level** approval (Levels 2/3 removed in 20afca8; old data migrated by `server/scripts/migrate-approval-single-level.js`).
-- One pending step, assigned to the endorsed Account Officer; only they (or admin) may act. Account Officers see only their own queue.
+**For Approval → Approved Queue → Registered Locator (new and renewal):** BDO Level 2 files → BDO Level 1 assigns a BDO Level 2 → locator uploads → BDO Level 2 submits a summary (no recommendation) → BDO Level 1 clicks **For Approval** on the /assessment row (`POST /api/assessments/:id/for-approval`, `sendForApproval`): application FOR_APPROVAL, approval assigned to that Level 1, and the Approval panel (`ApprovalDetail`, exported from `ApprovalIssuance.tsx`) opens on /assessment for charges, contract and the final decision. Approval routes use `requireApprovalAccess` (approval:queue, or assessment:queue + Level 1). APPROVED → /approval (`AccountOfficerAssignment.tsx`, `GET /api/approvals/assignment-queue`) lists it UNASSIGNED; Level 1 Account Officer assigns a Level 2 (`proponents.account_officer_id`, `locator_assigned` notification) → it leaves /approval and appears in Registered Locator, which only lists locators with an account officer (a Level 2 Account Officer sees only theirs, `requireOwnLocator`). Renewals (REN-…) follow the same loop; the Approved Queue is driven by `applications.awaiting_ao_assignment` (set on APPROVED, cleared on assign), and assigning on a renewal just updates the locator's existing Registered Locator row (one row per locator; type/lease term come from the latest APPROVED application/contract). The contract must be recorded before Approve (`actOnStep`). /approval is titled "Approved Queue".
+
+**Stage 4 — Approval panel** (`ApprovalDetail` in `ApprovalIssuance.tsx`, opened from /assessment). A **single-level** approval (Levels 2/3 removed in 20afca8; old data migrated by `server/scripts/migrate-approval-single-level.js`); the panel shows no step list, just the decision form or the decision.
+- One pending step, assigned to the Level 1 BDO who clicked For Approval; only they (or admin) may act (`ensureApprovalAccess`).
 - Actions `APPROVE` / `DISAPPROVE` / `RETURN` are final. The compare-and-swap on `decision = 'PENDING'` prevents double decisions.
-  - APPROVE requires every mandatory requirement to be verified unless `override_unverified` is passed.
+  - APPROVE requires a recorded contract, and every mandatory requirement verified unless `override_unverified` is passed.
   - RETURN sets the application to RETURNED and auto-reopens the assessment so the officer can redo it.
 - Issuances (`APPROVAL_ORDER`, `NOTICE_OF_AWARD`, `CONTRACT`, `PERMIT`, `OTHER`), charges, and the Contract tab (`PUT /:id/contract`) live here. The next contract number comes from `GET /:id/contract/next-number`, and the certificate PDF is rendered on save.
 - Clicking a row on the Applications page always opens `/assessment?tab=Compliance`, never Approval.

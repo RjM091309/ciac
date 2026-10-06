@@ -173,7 +173,7 @@ async function logRequirementActivity(applicationId, { action, detail, actorId }
   }
 }
 
-async function notify({ applicationId, actorId, subject, body }) {
+async function notify({ applicationId, actorId, subject, body, excludeUserIds }) {
   try {
     await Notification.createApplicationScopedNotifications({
       applicationId,
@@ -181,6 +181,7 @@ async function notify({ applicationId, actorId, subject, body }) {
       eventType: "assessment",
       subject,
       body,
+      excludeUserIds,
     });
   } catch (error) {
     console.error("Assessment notification error:", error);
@@ -422,8 +423,30 @@ async function listUsersWithMenu(menuKey) {
   );
 }
 
+/** Level 1 assigns to Level 2 only: users whose role has the Evaluation Queue,
+ * who aren't Level 1 (users.assessment_level = 1) and aren't admins. */
 async function listAssignableEvaluators() {
-  return listUsersWithMenu("assessment:queue");
+  await ensureSchema();
+  await ControlPanelPermission.ensureSchema();
+  return selectData(
+    `
+    SELECT DISTINCT u.id, u.full_name, u.username
+    FROM dbo.users u
+    INNER JOIN dbo.user_roles ur ON ur.user_id = u.id
+    INNER JOIN dbo.roles r ON r.id = ur.role_id
+    INNER JOIN dbo.role_sidebar_menu_permissions p
+      ON p.role_id = r.id AND p.menu_key = 'assessment:queue' AND p.is_enabled = 1
+    WHERE u.is_active = 1
+      AND r.is_active = 1
+      AND LOWER(LTRIM(RTRIM(r.name))) NOT IN ('admin', 'proponent')
+      AND ISNULL(u.assessment_level, 2) <> 1
+      AND NOT EXISTS (
+        SELECT 1 FROM dbo.user_roles ar INNER JOIN dbo.roles rr ON rr.id = ar.role_id
+        WHERE ar.user_id = u.id AND rr.is_active = 1 AND LOWER(LTRIM(RTRIM(rr.name))) = 'admin'
+      )
+    ORDER BY u.full_name
+    `
+  );
 }
 
 /** Who a Manager can hand an endorsed application to for approval — anyone
@@ -432,8 +455,8 @@ async function listAssignableApprovers() {
   return listUsersWithMenu("approval:queue");
 }
 
-/** The user's Assessment level (users.assessment_level, set per account in
- * User Management): 1 = Manager, anything else = Level 2 Officer. */
+/** The user's level (users.assessment_level, set per account in
+ * User Management): 1 = Level 1 (manager), anything else = Level 2. */
 async function getUserLevel(userId) {
   const rows = await selectData(`SELECT TOP (1) assessment_level FROM dbo.users WHERE id = @param0`, [toInt(userId)]);
   return Number(rows?.[0]?.assessment_level) === 1 ? 1 : 2;
@@ -600,12 +623,36 @@ async function assignEvaluator(applicationId, { evaluatorId, actorId }) {
   await logActivity(asm.id, "ASSIGNED", `Assigned to ${evName}`, actorId);
 
   const app = await getApplicationRow(applicationId);
+  // The evaluator gets their own notice (a pop-up, see AppHeader.tsx);
+  // everyone else who follows the application gets the general one.
   await notify({
     applicationId,
     actorId,
     subject: `Assessment assigned: ${app?.application_no || ""}`.trim(),
     body: `Application ${app?.application_no || ""} was assigned to ${evName} for assessment.`,
+    excludeUserIds: [evId],
   });
+  if (evId !== toInt(actorId)) {
+    try {
+      const locatorRows = await selectData(
+        `SELECT TOP (1) p.business_name FROM dbo.proponents p WHERE p.id = @param0`,
+        [toInt(app?.proponent_id)]
+      );
+      const locator = locatorRows?.[0]?.business_name;
+      await Notification.createNotification({
+        userId: evId,
+        subject: `New assignment: ${app?.application_no || ""}`.trim(),
+        body: `${await userName(actorId)} assigned you application ${app?.application_no || ""}${
+          locator ? ` (${locator})` : ""
+        } for assessment.`,
+        createdBy: actorId,
+        applicationId,
+        eventType: "assessment_assigned",
+      });
+    } catch (error) {
+      console.error("Assignment notification error:", error);
+    }
+  }
 
   return getAssessmentDetail(applicationId);
 }
@@ -619,7 +666,7 @@ async function setStage(applicationId, { stage, actorId }) {
   const next = pick(stage, ["ASSIGNED", "IN_REVIEW"]);
   if (!next) throw new Error("Invalid stage");
   if (asm.stage === "FOR_RECOMMENDATION") {
-    throw businessError("This assessment is waiting for the Manager's recommendation — the Manager can return it to the officer.");
+    throw businessError("This assessment is waiting for Level 1's recommendation — Level 1 can return it to Level 2.");
   }
   if (!asm.assigned_evaluator_id) {
     throw businessError("Assign an evaluator first.");
@@ -808,10 +855,13 @@ async function submitOfficerReview(applicationId, { recommendation, summary, act
   if (!asm) return null;
   if (!asm.assigned_evaluator_id) throw businessError("Assign an evaluator before submitting a review.");
   if (!["ASSIGNED", "IN_REVIEW"].includes(asm.stage)) {
-    throw businessError("This review has already been submitted to the Manager.");
+    throw businessError("This review has already been submitted to Level 1.");
   }
-  const rec = pick(recommendation, RECOMMENDATIONS);
-  if (!rec) throw new Error("Invalid recommendation");
+  // Level 2 submits a summary only; a recommendation is optional (Level 1
+  // makes the actual call). Still validated when one is sent.
+  const hasRec = recommendation !== undefined && recommendation !== null && String(recommendation).trim() !== "";
+  const rec = hasRec ? pick(recommendation, RECOMMENDATIONS) : null;
+  if (hasRec && !rec) throw new Error("Invalid recommendation");
   const note = String(summary ?? "").trim();
 
   const result = await updateData(
@@ -825,16 +875,21 @@ async function submitOfficerReview(applicationId, { recommendation, summary, act
     [asm.id, rec, note || null, toInt(actorId)]
   );
   if (!result?.rowsAffected?.[0]) {
-    throw businessError("This review has already been submitted to the Manager.");
+    throw businessError("This review has already been submitted to Level 1.");
   }
-  await logActivity(asm.id, "OFFICER_RECOMMENDED", `${rec}${note ? `: ${note.slice(0, 200)}` : ""}`, actorId);
+  await logActivity(
+    asm.id,
+    "OFFICER_RECOMMENDED",
+    `${rec || "Review submitted"}${note ? `: ${note.slice(0, 200)}` : ""}`,
+    actorId
+  );
 
   const app = await getApplicationRow(applicationId);
   await notify({
     applicationId,
     actorId,
     subject: `For recommendation: ${app?.application_no || ""}`.trim(),
-    body: `${await userName(actorId)} finished reviewing application ${app?.application_no || ""} (${rec}) — it's waiting for the Manager's recommendation.`,
+    body: `${await userName(actorId)} finished reviewing application ${app?.application_no || ""}${rec ? ` (${rec})` : ""} — it's waiting for Level 1's recommendation.`,
   });
   return getAssessmentDetail(applicationId);
 }
@@ -856,7 +911,7 @@ async function returnToOfficer(applicationId, { note, actorId }) {
     [asm.id, toInt(actorId)]
   );
   if (!result?.rowsAffected?.[0]) {
-    throw businessError("Only a review waiting for the Manager's recommendation can be returned to the officer.");
+    throw businessError("Only a review waiting for Level 1's recommendation can be returned to Level 2.");
   }
   await logActivity(asm.id, "RETURNED_TO_OFFICER", text ? text.slice(0, 1000) : null, actorId);
 
@@ -865,7 +920,7 @@ async function returnToOfficer(applicationId, { note, actorId }) {
     applicationId,
     actorId,
     subject: `Returned for review: ${app?.application_no || ""}`.trim(),
-    body: `The Manager returned application ${app?.application_no || ""} for further review${text ? `: ${text.slice(0, 300)}` : "."}`,
+    body: `Level 1 returned application ${app?.application_no || ""} for further review${text ? `: ${text.slice(0, 300)}` : "."}`,
   });
   return getAssessmentDetail(applicationId);
 }
@@ -873,7 +928,7 @@ async function returnToOfficer(applicationId, { note, actorId }) {
 /** Level 1 Manager's final recommendation on the Officer's review. ENDORSE
  * (Approve) sends the application to Approval, assigned to the Account
  * Officer in `approverId`; DISAPPROVE closes it as DISAPPROVED. */
-async function submitRecommendation(applicationId, { recommendation, summary, approverId, actorId }) {
+async function submitRecommendation(applicationId, { recommendation, summary, approverId, actorId, selfApprove = false }) {
   const asm = await getOrCreateAssessment(applicationId, actorId);
   if (!asm) return null;
   // The frontend disables the Submit button once a.recommendation is set,
@@ -886,14 +941,20 @@ async function submitRecommendation(applicationId, { recommendation, summary, ap
     throw businessError("A recommendation has already been submitted for this assessment. An admin must reopen it first.");
   }
   if (asm.stage !== "FOR_RECOMMENDATION") {
-    throw businessError("The assigned officer must submit their review before the Manager's recommendation.");
+    throw businessError("The assigned Level 2 must submit their review before Level 1's recommendation.");
   }
   const rec = pick(recommendation, RECOMMENDATIONS);
   if (!rec) throw new Error("Invalid recommendation");
   const note = String(summary ?? "").trim();
 
   let approver = null;
-  if (rec === "ENDORSE") {
+  if (rec === "ENDORSE" && selfApprove) {
+    // New application: Level 1 approves it themselves ("For Approval"), so
+    // the approval is assigned to them, not an Account Officer.
+    const rows = await selectData(`SELECT TOP (1) id, full_name, username FROM dbo.users WHERE id = @param0`, [toInt(actorId)]);
+    approver = rows?.[0] || null;
+    if (!approver) throw businessError("Couldn't find your account to assign the approval to.");
+  } else if (rec === "ENDORSE") {
     const apId = toInt(approverId);
     if (!apId) throw businessError("Choose the Account Officer who will handle the approval.");
     approver = (await listAssignableApprovers()).find((u) => Number(u.id) === apId) || null;
@@ -969,7 +1030,25 @@ async function submitRecommendation(applicationId, { recommendation, summary, ap
   return warnings.length ? { ...detail, warnings } : detail;
 }
 
+/** "For Approval" (Level 1, new application or renewal): Level 2 has submitted their
+ * review, so Level 1 takes it to approval themselves — application goes
+ * FOR_APPROVAL with the approval assigned to them. Already done → no-op. */
+async function sendForApproval(applicationId, { summary, actorId }) {
+  const asm = await getOrCreateAssessment(applicationId, actorId);
+  if (!asm) return null;
+  if (asm.recommendation === "ENDORSE" && toInt(asm.approver_id) === toInt(actorId)) {
+    return getAssessmentDetail(applicationId);
+  }
+  return submitRecommendation(applicationId, {
+    recommendation: "ENDORSE",
+    summary,
+    actorId,
+    selfApprove: true,
+  });
+}
+
 module.exports = {
+  sendForApproval,
   ensureSchema,
   STAGES,
   CHARGE_TYPES,

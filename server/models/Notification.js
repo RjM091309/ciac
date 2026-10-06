@@ -33,6 +33,8 @@ function normalizeEventType(value) {
     raw === "assessment" ||
     raw === "approval" ||
     raw === "approval_ready" ||
+    raw === "assessment_assigned" ||
+    raw === "locator_assigned" ||
     raw === "contract"
   ) {
     return raw;
@@ -70,6 +72,8 @@ const EVENT_TYPE_MENU_KEYS = {
   // activity like level progress/issuance) so the frontend can pop a toast
   // for exactly this handoff and nothing else the Approval module does.
   approval_ready: ["approval:queue"],
+  // Sent straight to the evaluator a Level 1 just assigned (AssessmentEvaluation.assignEvaluator).
+  assessment_assigned: ["assessment:queue"],
   contract: ["compliance:permits", "applications:new", "applications:renewals"],
 };
 
@@ -128,6 +132,49 @@ async function getApplicationContext(applicationId) {
   return rows?.[0] || null;
 }
 
+// Staff-only workflow events the locator never receives (see resolveApplicationRecipients).
+const INTERNAL_EVENT_TYPES = new Set([
+  "assessment",
+  "assessment_assigned",
+  "approval",
+  "approval_ready",
+  "locator_assigned",
+]);
+
+/** Level 2 BDO (role has assessment:queue but not approval:queue, not
+ * Level 1, not admin — same as AssessmentEvaluation.isScopedLevel2) who
+ * isn't the application's assigned evaluator. */
+async function isUnassignedLevel2(userId, applicationId) {
+  const rows = await selectData(
+    `
+    SELECT TOP (1) 1 AS x
+    FROM dbo.users u
+    WHERE u.id = @param0
+      AND ISNULL(u.assessment_level, 2) <> 1
+      AND EXISTS (
+        SELECT 1 FROM dbo.user_roles ur
+        INNER JOIN dbo.roles r ON r.id = ur.role_id AND r.is_active = 1
+        INNER JOIN dbo.role_sidebar_menu_permissions p
+          ON p.role_id = r.id AND p.menu_key = 'assessment:queue' AND p.is_enabled = 1
+        WHERE ur.user_id = u.id
+      )
+      AND NOT EXISTS (
+        SELECT 1 FROM dbo.user_roles ur
+        INNER JOIN dbo.roles r ON r.id = ur.role_id AND r.is_active = 1
+        LEFT JOIN dbo.role_sidebar_menu_permissions p
+          ON p.role_id = r.id AND p.menu_key = 'approval:queue' AND p.is_enabled = 1
+        WHERE ur.user_id = u.id AND (LOWER(LTRIM(RTRIM(r.name))) = 'admin' OR p.role_id IS NOT NULL)
+      )
+      AND NOT EXISTS (
+        SELECT 1 FROM dbo.application_assessments asm
+        WHERE asm.application_id = @param1 AND asm.assigned_evaluator_id = u.id
+      )
+    `,
+    [toInt(userId), toInt(applicationId)]
+  );
+  return rows.length > 0;
+}
+
 async function resolveApplicationRecipients(application, actorId, eventType) {
   const recipients = new Set();
   const createdBy = toInt(application?.created_by);
@@ -135,10 +182,17 @@ async function resolveApplicationRecipients(application, actorId, eventType) {
   const proponentId = toInt(application?.proponent_id);
   const normalizedActorId = toInt(actorId);
 
-  if (createdBy) recipients.add(createdBy);
+  // A Level 2 BDO who filed the application doesn't hear about it until it's
+  // assigned to them (they can't open it before then either).
+  if (createdBy && !(await isUnassignedLevel2(createdBy, application?.id))) recipients.add(createdBy);
   if (assignedOfficerId) recipients.add(assignedOfficerId);
 
-  if (proponentId) {
+  // The locator only hears about their own business's application: status
+  // changes, requirements/documents, contracts and compliance — never the
+  // staff-side workflow (who it's assigned to, reviews, the approval queue).
+  // A status change still reaches them through its own application_status event.
+  const internalEvent = INTERNAL_EVENT_TYPES.has(normalizeEventType(eventType));
+  if (proponentId && !internalEvent) {
     const proponentRows = await selectData(
       `
       SELECT TOP (1) user_id
@@ -183,7 +237,28 @@ async function resolveApplicationRecipients(application, actorId, eventType) {
     await require("./ApprovalIssuance").ensureSchema();
     const placeholders = menuKeys.map((_, i) => `@param${i}`).join(", ");
     const appParam = `@param${menuKeys.length}`;
-    // Through assessment:queue, a Level 2 Assessment Officer only hears about
+    // A Level 2 BDO (role has assessment:queue, user not Level 1) only hears
+    // about the applications assigned to them, whichever menu matched —
+    // otherwise New Applications would hand them every application's
+    // events. (The one who filed it is handled above, same rule.)
+    const level2Scoped = ["application_status", "requirement", "document", "assessment"].includes(
+      normalizeEventType(eventType)
+    );
+    const level2Clause = level2Scoped
+      ? `
+        AND (
+          u.assessment_level = 1
+          OR NOT EXISTS (
+            SELECT 1 FROM dbo.role_sidebar_menu_permissions q
+            WHERE q.role_id = r.id AND q.menu_key = 'assessment:queue' AND q.is_enabled = 1
+          )
+          OR EXISTS (
+            SELECT 1 FROM dbo.application_assessments asm3
+            WHERE asm3.application_id = ${appParam} AND asm3.assigned_evaluator_id = u.id
+          )
+        )`
+      : "";
+    // Through assessment:queue, a Level 2 BDO only hears about
     // applications assigned to them — only a Level 1 Manager
     // (users.assessment_level = 1) gets the whole queue's events.
     const staffRows = await selectData(
@@ -225,7 +300,7 @@ async function resolveApplicationRecipients(application, actorId, eventType) {
                 asm2.approver_id
               ) <> u.id
           )
-        )
+        )${level2Clause}
       `,
       [...menuKeys, toInt(application?.id)]
     );
@@ -295,10 +370,12 @@ async function createApplicationScopedNotifications({
   subject,
   body,
   requirementId = null,
+  excludeUserIds = [],
 }) {
   const application = await getApplicationContext(applicationId);
   if (!application) return;
-  const recipients = await resolveApplicationRecipients(application, actorId, eventType);
+  const excluded = new Set(excludeUserIds.map(toInt).filter(Boolean));
+  const recipients = (await resolveApplicationRecipients(application, actorId, eventType)).filter((id) => !excluded.has(id));
   for (const recipientUserId of recipients) {
     try {
       await createNotification({

@@ -329,7 +329,13 @@ export function AppHeader({
       // deliberately its own event, distinct from the generic 'approval'
       // events the Approval module fires for its own in-workflow activity,
       // so this toast never fires for anything besides that one handoff).
-      const isPersistentToastEvent = item.actorRole === 'proponent' || item.eventType === 'approval_ready';
+      // Also a Level 1 assigning an application to this Level 2 evaluator
+      // ('assessment_assigned', sent only to that evaluator).
+      const isPersistentToastEvent =
+        item.actorRole === 'proponent' ||
+        item.eventType === 'approval_ready' ||
+        item.eventType === 'assessment_assigned' ||
+        item.eventType === 'locator_assigned';
       if (!isPersistentToastEvent || item.isRead) continue;
       if (openLocatorToastIdsRef.current.has(item.id)) continue;
 

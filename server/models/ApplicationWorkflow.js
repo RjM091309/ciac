@@ -59,6 +59,33 @@ function isValidStatus(status) {
   return APPLICATION_STATUSES.includes(String(status || "").toUpperCase());
 }
 
+function filingConflict(message) {
+  const err = new Error(message);
+  err.status = 409;
+  return err;
+}
+
+/** One locator = one application (business rule, see
+ * c_users.createLocatorWithApplication). Renewals aren't checked here.
+ * `excludeId` skips the application being edited (updateDraft). */
+async function assertFilingAllowed(proponentId, isRenewal, { excludeId = null } = {}) {
+  if (isRenewal) return;
+  const rows = await selectData(
+    `
+    SELECT TOP (1) application_no
+    FROM dbo.applications
+    WHERE proponent_id = @param0 AND ISNULL(is_renewal, 0) = 0 AND (@param1 IS NULL OR id <> @param1)
+    ORDER BY id
+    `,
+    [toInt(proponentId), toInt(excludeId)]
+  );
+  if (rows?.[0]) {
+    throw filingConflict(
+      `This locator already has an application (${rows[0].application_no}). A locator can only have one application.`
+    );
+  }
+}
+
 // File Maintenance-configurable (dbo.application_types, see ApplicationType.js)
 // rather than a fixed list — both the create path and the draft-edit path
 // validate against whichever codes are currently active there.
@@ -67,31 +94,6 @@ async function isValidApplicationType(type) {
   return activeCodes.includes(String(type || "").trim().toUpperCase());
 }
 
-// Staff who can act on the Approval Queue — by Control Panel permission
-// (menu_key = "approval:queue") rather than a hardcoded role name, same
-// reasoning as hasStaffApplicationAccess elsewhere: whichever role is
-// actually configured for that menu (Account Officer today, potentially a
-// renamed/custom role later) gets emailed, plus admins who always see
-// everything.
-async function getApprovalQueueStaffEmails() {
-  const rows = await selectData(
-    `
-    SELECT DISTINCT u.email, u.full_name
-    FROM dbo.users u
-    INNER JOIN dbo.user_roles ur ON ur.user_id = u.id
-    INNER JOIN dbo.roles r ON r.id = ur.role_id
-    -- The Locator role never holds a staff menu (ControlPanelPermission.js),
-    -- even if a stale row says otherwise.
-    LEFT JOIN dbo.role_sidebar_menu_permissions p
-      ON p.role_id = r.id AND p.menu_key = 'approval:queue' AND p.is_enabled = 1
-      AND LOWER(LTRIM(RTRIM(r.name))) <> 'proponent'
-    WHERE u.is_active = 1
-      AND u.email IS NOT NULL AND u.email <> ''
-      AND (LOWER(LTRIM(RTRIM(r.name))) = 'admin' OR p.role_id IS NOT NULL)
-    `
-  );
-  return rows || [];
-}
 
 async function createStatusChangeNotifications({ application, toStatus, remarks, changedBy }) {
   try {
@@ -109,57 +111,44 @@ async function createStatusChangeNotifications({ application, toStatus, remarks,
     console.error("Create status-change notifications error:", error);
   }
 
-  if (String(toStatus || "").toUpperCase() === "FOR_APPROVAL") {
+  // An application (new or renewal) approved by Level 1 BDO waits in the Approved Queue for the
+  // Level 1 Account Officer to assign a Level 2 — tell them.
+  if (String(toStatus || "").toUpperCase() === "APPROVED") {
     try {
-      // Dedicated "approval_ready" event (menu_key approval:queue only, see
-      // EVENT_TYPE_MENU_KEYS) — deliberately its own type, distinct from the
-      // generic "approval" event used for in-workflow activity (level
-      // progress, issuance, etc. in ApprovalIssuance.js), so the frontend's
-      // toast fires for exactly this handoff and nothing else the Approval
-      // module does.
-      await Notification.createApplicationScopedNotifications({
-        applicationId: application?.id,
-        actorId: changedBy,
-        eventType: "approval_ready",
-        subject: `Application ${String(application?.application_no || "").trim()} ready for approval`,
-        body: remarks
-          ? `Endorsed by Assessment and waiting in the Approval Queue. Remarks: ${String(remarks).trim()}`
-          : "Endorsed by Assessment and waiting in the Approval Queue.",
-      });
-    } catch (error) {
-      console.error("Create approval-queue notification error:", error);
-    }
-
-    try {
-      const staff = await getApprovalQueueStaffEmails();
-      if (staff.length) {
-        const applicationNo = String(application?.application_no || "").trim();
-        const proponentName = String(application?.proponent_name || "").trim();
-        const trimmedRemarks = String(remarks || "").trim();
-        const loginUrl = `${String(process.env.FRONTEND_URL || "").replace(/\/+$/, "")}/`;
-        await Promise.all(
-          staff.map((person) =>
-            sendMail({
-              to: person.email,
-              subject: `Application ${applicationNo || ""} ready for approval`,
-              text:
-                `Hello ${person.full_name || ""},\n\n` +
-                `Application ${applicationNo}${proponentName ? ` (${proponentName})` : ""} was endorsed by Assessment and is now waiting in the Approval Queue.\n\n` +
-                (trimmedRemarks ? `Assessment summary: ${trimmedRemarks}\n\n` : "") +
-                `Sign in here: ${loginUrl}\n`,
-              html:
-                `<p>Hello ${escapeHtml(person.full_name || "")},</p>` +
-                `<p>Application <b>${escapeHtml(applicationNo)}</b>${proponentName ? ` (${escapeHtml(proponentName)})` : ""} was endorsed by Assessment and is now waiting in the <b>Approval Queue</b>.</p>` +
-                (trimmedRemarks ? `<p><b>Assessment summary:</b> ${escapeHtml(trimmedRemarks)}</p>` : "") +
-                `<p><a href="${loginUrl}" style="display:inline-block;padding:10px 18px;background:#111827;color:#fff;text-decoration:none;border-radius:6px;">Sign in to the portal</a></p>`,
-            })
+      const officers = await selectData(`
+        SELECT DISTINCT u.id
+        FROM dbo.users u
+        INNER JOIN dbo.user_roles ur ON ur.user_id = u.id
+        INNER JOIN dbo.roles r ON r.id = ur.role_id AND r.is_active = 1
+        INNER JOIN dbo.role_sidebar_menu_permissions p
+          ON p.role_id = r.id AND p.menu_key = 'approval:queue' AND p.is_enabled = 1
+        WHERE u.is_active = 1 AND u.assessment_level = 1
+          AND LOWER(LTRIM(RTRIM(r.name))) NOT IN ('admin', 'proponent')
+          AND NOT EXISTS (
+            SELECT 1 FROM dbo.role_sidebar_menu_permissions q
+            WHERE q.role_id = r.id AND q.menu_key = 'assessment:queue' AND q.is_enabled = 1
           )
-        );
+      `);
+      const appNo = String(application?.application_no || "").trim();
+      const locator = String(application?.proponent_name || "").trim();
+      for (const { id } of officers) {
+        if (Number(id) === Number(changedBy)) continue;
+        await Notification.createNotification({
+          userId: id,
+          subject: `Ready for Account Officer: ${appNo}`,
+          body: `${locator || "A locator"} (${appNo}) was approved and needs a Level 2 Account Officer assigned.`,
+          createdBy: changedBy,
+          applicationId: application?.id,
+          eventType: "approval_ready",
+        });
       }
     } catch (error) {
-      console.error("Send approval-queue email error:", error);
+      console.error("Account Officer assignment notification error:", error);
     }
   }
+
+  // FOR_APPROVAL needs no broadcast: the Level 1 BDO approves it themselves
+  // ("For Approval" on the Evaluation Queue).
 
   // The locator's business only has a handful of moments worth emailing
   // about rather than watching the portal for: the application was
@@ -333,6 +322,7 @@ async function createDocumentNotifications({
   fileName,
   originalFileName,
   actorId,
+  reupload = null,
 }) {
   try {
     const requirementLabel = [String(requirementCode || "").trim(), String(requirementName || "").trim()]
@@ -344,8 +334,14 @@ async function createDocumentNotifications({
       applicationId: application?.id,
       actorId,
       eventType: "document",
-      subject: `Document uploaded for ${String(application?.application_no || "").trim()}`,
-      body: `${documentLabel} was uploaded${bodySuffix}.`,
+      subject: reupload
+        ? `Document re-uploaded for ${String(application?.application_no || "").trim()}`
+        : `Document uploaded for ${String(application?.application_no || "").trim()}`,
+      body: reupload
+        ? `${documentLabel} was re-uploaded${bodySuffix} after it was rejected — ready for review again.${
+            reupload.remarks ? ` Rejection remarks: ${String(reupload.remarks).trim().slice(0, 300)}` : ""
+          }`
+        : `${documentLabel} was uploaded${bodySuffix}.`,
     });
   } catch (error) {
     console.error("Create document notifications error:", error);
@@ -798,6 +794,8 @@ async function createApplication({
   const normalizedType = String(application_type).trim().toUpperCase();
   const contractTypeId = await resolveContractTypeId(contract_type_id);
 
+  await assertFilingAllowed(proponentId, renewalBit === 1);
+
   const renewedFromPermitId = toInt(renewed_from_permit_id);
   if (renewedFromPermitId) {
     const permit = await Permit.getById(renewedFromPermitId);
@@ -1085,6 +1083,10 @@ async function updateDraftApplication(id, { application_type, is_renewal, propon
     contract_type_id === undefined ? currentContractTypeId : await resolveContractTypeId(contract_type_id);
   const contractTypeChanged = nextContractTypeId !== currentContractTypeId;
   const changedBy = toInt(changed_by);
+
+  if (renewalChanged || nextProponentId !== toInt(application.proponent_id)) {
+    await assertFilingAllowed(nextProponentId, nextRenewal === 1, { excludeId: id });
+  }
 
   if (renewalChanged || typeChanged || contractTypeChanged) {
     const docRows = await selectData(
@@ -1884,8 +1886,16 @@ async function createDocument({
   // happens to revisit it, even though a fresh document is now sitting there
   // unreviewed. Only REJECTED resets; VERIFIED never reaches here since the
   // proponent UI disables reupload once a requirement is VERIFIED.
+  // Remembered so the notification can say it's a reupload, and why the
+  // previous one was rejected.
+  let reupload = null;
   if (toInt(requirement_id)) {
-    await updateData(
+    const rejected = await selectData(
+      `SELECT TOP (1) remarks FROM dbo.application_requirements
+       WHERE application_id = @param0 AND requirement_id = @param1 AND status = 'REJECTED'`,
+      [toInt(application_id), toInt(requirement_id)]
+    );
+    const reset = await updateData(
       `
       UPDATE dbo.application_requirements
       SET status = 'PENDING', updated_at = SYSUTCDATETIME()
@@ -1893,6 +1903,7 @@ async function createDocument({
       `,
       [toInt(application_id), toInt(requirement_id)]
     );
+    if (reset?.rowsAffected?.[0]) reupload = { remarks: rejected?.[0]?.remarks ?? null };
   }
 
   const rows = await selectData(
@@ -1917,6 +1928,7 @@ async function createDocument({
       fileName: document.file_name,
       originalFileName: document.original_file_name,
       actorId: created_by,
+      reupload,
     });
   }
   return document;

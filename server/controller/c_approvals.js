@@ -56,6 +56,57 @@ async function ensureApprovalAccess(req, res, applicationId) {
   return false;
 }
 
+/* ---------------------- Account Officer assignment ------------------------ */
+
+/** Level 1 Account Officer (or admin): the one who assigns the Level 2. */
+async function isAccountOfficerLevel1(req) {
+  if (String(req.user?.role || "").toLowerCase() === "admin") return true;
+  return Assessment.isManager(req.user);
+}
+
+exports.assignmentQueue = async (req, res) => {
+  try {
+    const canAssign = await isAccountOfficerLevel1(req);
+    const [rows, officers] = await Promise.all([
+      Approval.listAssignmentQueue(),
+      canAssign ? Approval.listAssignableAccountOfficers() : Promise.resolve([]),
+    ]);
+    return res.json({ success: true, data: { rows, officers, canAssign } });
+  } catch (error) {
+    return fail(res, error, "Account Officer assignment queue");
+  }
+};
+
+exports.assignAccountOfficer = async (req, res) => {
+  try {
+    const id = appIdParam(req, res);
+    if (id === null) return undefined;
+    if (!(await isAccountOfficerLevel1(req))) {
+      return res.status(403).json({ success: false, message: "Only Level 1 can assign an Account Officer." });
+    }
+    const data = await Approval.assignAccountOfficer(id, {
+      accountOfficerId: req.body?.account_officer_id,
+      actorId: req.user?.id ?? null,
+    });
+    await AuditLog.record({
+      actorId: req.user?.id,
+      actorUsername: req.user?.username,
+      action: "ACCOUNT_OFFICER_ASSIGNED",
+      entityType: "application",
+      entityId: id,
+      details: {
+        application_no: data.application_no,
+        proponent_name: data.proponent_name,
+        account_officer: data.account_officer_name,
+      },
+      req,
+    });
+    return res.json({ success: true, data });
+  } catch (error) {
+    return fail(res, error, "Assign Account Officer");
+  }
+};
+
 /* --------------------------------- Queue ---------------------------------- */
 
 exports.list = async (req, res) => {

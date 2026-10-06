@@ -8,7 +8,8 @@ export type NotificationCategory =
   | 'compliance'
   | 'assessment'
   | 'approval'
-  | 'contract';
+  | 'contract'
+  | 'locator_assigned';
 
 export interface NotificationItem {
   id: string;

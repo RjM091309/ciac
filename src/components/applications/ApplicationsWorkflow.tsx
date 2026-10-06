@@ -962,7 +962,7 @@ export function ApplicationsWorkflow({
                 <thead>
                   <tr style={{ borderBottom: '1px solid var(--border-subtle)' }}>
                     <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary">Company / Locator</th>
-                    <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary">Application Type</th>
+                    <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary">Industry Type</th>
                     <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary">Progress</th>
                     <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary">Status</th>
                     <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary text-right">Actions</th>
@@ -1119,7 +1119,7 @@ export function ApplicationsWorkflow({
             </div>
           ) : null}
 
-          <label className="text-xs font-semibold uppercase tracking-wider text-secondary">Application Type</label>
+          <label className="text-xs font-semibold uppercase tracking-wider text-secondary">Industry Type</label>
           <AppSelect
             options={applicationTypesEffective.map((t) => ({ value: t.code, label: t.name }))}
             value={createForm.application_type}
@@ -1174,7 +1174,7 @@ export function ApplicationsWorkflow({
             <span className="block text-[10px] mt-0.5 opacity-70">Locator can't be changed after filing.</span>
           </div>
 
-          <label className="text-xs font-semibold uppercase tracking-wider text-secondary">Application Type</label>
+          <label className="text-xs font-semibold uppercase tracking-wider text-secondary">Industry Type</label>
           <AppSelect
             options={applicationTypesEffective.map((t) => ({ value: t.code, label: t.name }))}
             value={editForm.application_type}

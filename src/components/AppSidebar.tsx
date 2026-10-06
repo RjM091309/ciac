@@ -388,7 +388,7 @@ export function AppSidebar({
   const applicationsItems: SidebarLeaf[] = [
     canView('settings:locator-users') && { key: 'settings:locator-users', label: 'Locator Accounts', active: view === 'settings:locator-users', onClick: () => onViewChange('settings:locator-users'), icon: KeyRound },
     canView('assessment:queue') && { key: 'assessment:queue', label: 'Evaluation Queue', active: view === 'assessment:queue', onClick: () => onViewChange('assessment:queue'), icon: ClipboardCheck },
-    canView('approval:queue') && { key: 'approval:queue', label: 'Approval Queue', active: view === 'approval:queue', onClick: () => onViewChange('approval:queue'), icon: Stamp },
+    canView('approval:queue') && { key: 'approval:queue', label: 'Approved Queue', active: view === 'approval:queue', onClick: () => onViewChange('approval:queue'), icon: Stamp },
     canView('settings:proponents') && { key: 'settings:proponents', label: 'Registered Locator', active: view === 'settings:proponents', onClick: () => onViewChange('settings:proponents'), icon: Users },
     canView('applications:renewals') && { key: 'applications:renewals', label: 'Renewal Tracking', active: view === 'applications:renewals', onClick: () => onViewChange('applications:renewals'), icon: RefreshCw },
   ].filter(Boolean) as SidebarLeaf[];
@@ -442,7 +442,7 @@ export function AppSidebar({
       'applications:renewals': { label: 'Renewal Tracking', icon: RefreshCw },
       'settings:proponents': { label: 'Registered Locator', icon: Users },
       'assessment:queue': { label: 'Evaluation Queue', icon: ClipboardCheck },
-      'approval:queue': { label: 'Approval Queue', icon: Stamp },
+      'approval:queue': { label: 'Approved Queue', icon: Stamp },
       'compliance:inspections': { label: 'Compliance & Inspection', icon: ClipboardCheck },
       'compliance:permits': { label: 'Permit & Contract', icon: ShieldCheck },
       'reports:analytics': { label: 'Reports & Analytics', icon: BarChart3 },

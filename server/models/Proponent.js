@@ -482,7 +482,8 @@ async function getProponentById(id) {
       SELECT TOP (1) a2.application_type, a2.contract_type_id
       FROM dbo.applications a2
       WHERE a2.proponent_id = p.id
-      ORDER BY a2.created_at DESC, a2.id DESC
+      -- Latest approved one first, so a renewal still in review doesn't change it.
+      ORDER BY CASE WHEN a2.status = 'APPROVED' THEN 0 ELSE 1 END, a2.created_at DESC, a2.id DESC
     ) latest_app
     LEFT JOIN dbo.application_types apptype ON apptype.code = latest_app.application_type
     LEFT JOIN dbo.application_types manual_apptype ON manual_apptype.code = p.industry_code
@@ -572,7 +573,10 @@ async function getProponentById(id) {
  * A proponent with no application/contract yet simply shows blanks for the
  * fields that depend on one.
  */
-async function listProponentsForLocatorList() {
+/** Registered Locator: only locators that have an Account Officer (assigned
+ * from /approval, or set when registered by hand). `accountOfficerId`
+ * narrows it to one Level 2 Account Officer's own locators. */
+async function listProponentsForLocatorList({ accountOfficerId = null } = {}) {
   await ensureSchema();
   const rows = await selectData(
     `
@@ -591,11 +595,13 @@ async function listProponentsForLocatorList() {
       ct.effective_end AS end_term
     FROM dbo.proponents p
     LEFT JOIN dbo.users creator ON creator.id = p.created_by
+    -- One row per locator: an approved renewal updates it (type here, lease
+    -- term from its contract below). A renewal still in review doesn't.
     OUTER APPLY (
       SELECT TOP (1) a.application_type
       FROM dbo.applications a
       WHERE a.proponent_id = p.id
-      ORDER BY a.created_at DESC, a.id DESC
+      ORDER BY CASE WHEN a.status = 'APPROVED' THEN 0 ELSE 1 END, a.created_at DESC, a.id DESC
     ) latest_app
     LEFT JOIN dbo.application_types apptype ON apptype.code = latest_app.application_type
     LEFT JOIN dbo.application_types manual_apptype ON manual_apptype.code = p.industry_code
@@ -606,8 +612,11 @@ async function listProponentsForLocatorList() {
       WHERE a2.proponent_id = p.id
       ORDER BY c.effective_end DESC, c.id DESC
     ) ct
+    WHERE p.account_officer_id IS NOT NULL
+      AND (@param0 IS NULL OR p.account_officer_id = @param0)
     ORDER BY p.id DESC
-    `
+    `,
+    [toInt(accountOfficerId)]
   );
 
   return rows.map((p) => ({

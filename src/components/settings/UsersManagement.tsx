@@ -25,6 +25,8 @@ type Role = {
   is_active?: number;
   /** Role reaches the Evaluation Queue — its users get an Assessment level. */
   has_assessment_queue?: boolean;
+  /** Role reaches the Approval Queue (Account Officer) — it has Level 1 / Level 2 too. */
+  has_approval_queue?: boolean;
 };
 
 type AccountStatus = 'ACTIVE' | 'SUSPENDED' | 'DEACTIVATED';
@@ -41,7 +43,7 @@ type UserRow = {
   created_at?: string | null;
   updated_at?: string | null;
   roles: { id: number; name: string; description?: string | null }[];
-  /** 1 = Assessment Manager (Level 1), 2 = Officer (Level 2). */
+  /** 1 = Level 1 (manager), 2 = Level 2 (evaluator). */
   assessment_level?: number;
 };
 
@@ -192,14 +194,16 @@ export function UsersManagement({
     () => roles.map((r) => ({ value: String(r.id), label: roleDisplayName(r.name) })),
     [roles]
   );
-  // Level 1 / Level 2 only means something for a role with the Evaluation
-  // Queue (e.g. ASSESSMENT OFFICER) — one role, two levels, set per user.
-  const roleHasAssessment = (roleId: string) =>
-    Boolean(roles.find((r) => String(r.id) === roleId)?.has_assessment_queue);
+  // Level 1 / Level 2 is set per user, for the two departments that have it:
+  // BDO (Evaluation Queue) and Account Officer (Approval Queue).
+  const roleHasAssessment = (roleId: string) => {
+    const role = roles.find((r) => String(r.id) === roleId);
+    return Boolean(role?.has_assessment_queue || role?.has_approval_queue);
+  };
   const showAssessmentLevel = roleHasAssessment(form.role_id);
   const levelOptions = [
-    { value: '1', label: 'Level 1' },
-    { value: '2', label: 'Level 2' },
+    { value: '1', label: 'Level 1 (manager — sees all, assigns)' },
+    { value: '2', label: 'Level 2 (works on what is assigned to them)' },
   ];
   const passwordError = useMemo(
     () => (form.password.trim() ? validatePassword(form.password.trim()) : null),
@@ -417,20 +421,17 @@ export function UsersManagement({
     }
   }
 
-  function renderLevelBadge(u: UserRow) {
-    if (!(u.roles || []).some((r) => roleHasAssessment(String(r.id)))) return null;
-    const manager = u.assessment_level === 1;
-    return (
-      <span
-        className="ml-1.5 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold"
-        style={{
-          backgroundColor: manager ? 'rgba(59,130,246,.14)' : 'rgba(148,163,184,.18)',
-          color: manager ? 'rgba(59,130,246,.95)' : 'var(--text-muted)',
-        }}
-      >
-        {manager ? 'Level 1' : 'Level 2'}
-      </span>
-    );
+  // A role with the Evaluation Queue (BDO) carries the user's level in its
+  // name: BDO-L1 / BDO-L2, ACCOUNT OFFICER-L1 / -L2.
+  function userRolesLabel(u: UserRow) {
+    if (!u.roles || !u.roles.length) return null;
+    const level = u.assessment_level === 1 ? 1 : 2;
+    return u.roles
+      .map((r) => {
+        const name = roleDisplayName(r.name);
+        return roleHasAssessment(String(r.id)) ? `${name}-L${level}` : name;
+      })
+      .join(', ');
   }
 
   function renderStatusBadges(u: UserRow) {
@@ -664,9 +665,8 @@ export function UsersManagement({
                 <div className="mt-2.5 flex items-center justify-between gap-2">
                   <div className="min-w-0 flex flex-wrap items-center gap-1.5 text-[11px]">
                     <span className="text-secondary truncate">
-                      {u.roles && u.roles.length ? u.roles.map((r) => roleDisplayName(r.name)).join(', ') : 'No role'}
+                      {userRolesLabel(u) ?? 'No role'}
                     </span>
-                    {renderLevelBadge(u)}
                     {u.totp_enabled === 1 ? (
                       <span
                         className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold"
@@ -709,8 +709,7 @@ export function UsersManagement({
                     <td className="px-3 py-2 text-[11px] text-secondary">{u.full_name || '-'}</td>
                     <td className="px-3 py-2 text-[11px] text-secondary">{u.email || '-'}</td>
                     <td className="px-3 py-2 text-[11px] text-secondary">
-                      {u.roles && u.roles.length ? u.roles.map((r) => roleDisplayName(r.name)).join(', ') : '-'}
-                      {renderLevelBadge(u)}
+                      {userRolesLabel(u) ?? '-'}
                     </td>
                     <td className="px-3 py-2 text-[11px]">
                       {u.totp_enabled === 1 ? (
@@ -764,15 +763,8 @@ export function UsersManagement({
         saving={saving}
         saveDisabled={!canSubmit}
       >
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <Field label="Username">
-            <input
-              className="app-input"
-              value={form.username}
-              onChange={(e) => setForm((p) => ({ ...p, username: e.target.value }))}
-            />
-          </Field>
-          <Field label="Role">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-start">
+          <Field label="Role" className={showAssessmentLevel ? undefined : 'sm:col-span-2'}>
             <AppSelect
               options={roleOptions}
               value={form.role_id}
@@ -783,7 +775,7 @@ export function UsersManagement({
             />
           </Field>
           {showAssessmentLevel ? (
-            <Field label="Assessment level">
+            <Field label="Level">
               <AppSelect
                 options={levelOptions}
                 value={form.assessment_level}
@@ -792,6 +784,13 @@ export function UsersManagement({
               />
             </Field>
           ) : null}
+          <Field label="Username">
+            <input
+              className="app-input"
+              value={form.username}
+              onChange={(e) => setForm((p) => ({ ...p, username: e.target.value }))}
+            />
+          </Field>
           <Field label="Full name">
             <input
               className="app-input"
@@ -826,11 +825,7 @@ export function UsersManagement({
             user={editing}
             onChanged={() => refresh({ showLoading: false })}
           />
-        ) : (
-          <p className="mt-4 text-[11px] text-secondary">
-            Save the user first, then reopen to set up their Google Authenticator.
-          </p>
-        )}
+        ) : null}
       </SidePanel>
 
       <ConfirmModal
@@ -909,9 +904,9 @@ function StatCard({ label, value }: { label: string; value: string }) {
   );
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({ label, children, className }: { label: string; children: React.ReactNode; className?: string }) {
   return (
-    <div className="space-y-1">
+    <div className={cn('space-y-1', className)}>
       <div className="text-[11px] font-semibold text-secondary uppercase tracking-widest">{label}</div>
       {children}
     </div>

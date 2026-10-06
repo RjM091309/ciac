@@ -64,7 +64,7 @@ exports.list = async (req, res) => {
 exports.me = async (req, res) => {
   try {
     const scope = await scopeFor(req);
-    return res.json({ success: true, data: { level: scope.manager ? 1 : 2, manager: scope.manager } });
+    return res.json({ success: true, data: { level: scope.manager ? 1 : 2, manager: scope.manager, userId: scope.userId } });
   } catch (error) {
     return fail(res, error, "Assessment level");
   }
@@ -109,7 +109,7 @@ exports.assign = async (req, res) => {
     const id = appIdParam(req, res);
     if (id === null) return undefined;
     if (!(await scopeFor(req)).manager) {
-      return res.status(403).json({ success: false, message: "Only a Level 1 Manager can assign evaluators." });
+      return res.status(403).json({ success: false, message: "Only Level 1 can assign evaluators." });
     }
     const { evaluator_id } = req.body || {};
     if (!Number.isFinite(Number(evaluator_id))) {
@@ -233,7 +233,7 @@ exports.returnToOfficer = async (req, res) => {
     const id = appIdParam(req, res);
     if (id === null) return undefined;
     if (!(await scopeFor(req)).manager) {
-      return res.status(403).json({ success: false, message: "Only a Level 1 Manager can return a review." });
+      return res.status(403).json({ success: false, message: "Only Level 1 can return a review." });
     }
     const { note } = req.body || {};
     const data = await Assessment.returnToOfficer(id, { note, actorId: req.user?.id ?? null });
@@ -253,13 +253,39 @@ exports.returnToOfficer = async (req, res) => {
   }
 };
 
+/** Level 1 "For Approval" on a new application: takes it to approval
+ * themselves (the approval panel opens next, on the same page). */
+exports.forApproval = async (req, res) => {
+  try {
+    const id = appIdParam(req, res);
+    if (id === null) return undefined;
+    if (!(await scopeFor(req)).manager) {
+      return res.status(403).json({ success: false, message: "Only Level 1 can send an application for approval." });
+    }
+    const data = await Assessment.sendForApproval(id, { summary: req.body?.summary, actorId: req.user?.id ?? null });
+    if (!data) return res.status(404).json({ success: false, message: "Application not found" });
+    await AuditLog.record({
+      actorId: req.user?.id,
+      actorUsername: req.user?.username,
+      action: "ASSESSMENT_SENT_FOR_APPROVAL",
+      entityType: "application",
+      entityId: id,
+      details: { application_no: data?.assessment?.application_no, proponent_name: data?.assessment?.proponent_name },
+      req,
+    });
+    return res.json({ success: true, data });
+  } catch (error) {
+    return fail(res, error, "Send for approval");
+  }
+};
+
 /** Level 1 Manager's final recommendation (Approve → Account Officer, or Disapprove). */
 exports.recommendation = async (req, res) => {
   try {
     const id = appIdParam(req, res);
     if (id === null) return undefined;
     if (!(await scopeFor(req)).manager) {
-      return res.status(403).json({ success: false, message: "Only a Level 1 Manager can make the final recommendation." });
+      return res.status(403).json({ success: false, message: "Only Level 1 can make the final recommendation." });
     }
     const { recommendation, summary, approver_id } = req.body || {};
     const data = await Assessment.submitRecommendation(id, {

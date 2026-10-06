@@ -78,7 +78,10 @@ async function loadWithAccess(req, applicationId) {
     // A Level 2 Assessment Officer (no other applications menu) only reaches
     // the applications a Manager assigned to them.
     const level2UserId = await Assessment.getLevel2OnlyUserId(req.user);
-    if (level2UserId && (await Assessment.getAssignedEvaluatorId(applicationId)) !== level2UserId) {
+    // Exception: their own unsubmitted DRAFT, so they can finish filing it.
+    const ownDraft =
+      String(application.status || "").toUpperCase() === "DRAFT" && Number(application.created_by) === level2UserId;
+    if (level2UserId && !ownDraft && (await Assessment.getAssignedEvaluatorId(applicationId)) !== level2UserId) {
       return { application, forbidden: true };
     }
     return { application, forbidden: false };
@@ -98,8 +101,15 @@ exports.list = async (req, res) => {
     const rows = await Workflow.listApplications();
     const level2UserId = await Assessment.getLevel2OnlyUserId(req.user);
     if (level2UserId) {
+      // Level 2 sees an application only once it's assigned to them — plus
+      // their own unsubmitted DRAFTs, so they can finish filing them.
       const assigned = await Assessment.listApplicationIdsAssignedTo(level2UserId);
-      return res.json({ success: true, data: rows.filter((r) => assigned.has(Number(r.id))) });
+      const visible = rows.filter(
+        (r) =>
+          assigned.has(Number(r.id)) ||
+          (String(r.status || "").toUpperCase() === "DRAFT" && Number(r.created_by) === level2UserId)
+      );
+      return res.json({ success: true, data: visible });
     }
     return res.json({ success: true, data: rows });
   } catch (error) {

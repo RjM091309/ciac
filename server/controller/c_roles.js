@@ -18,7 +18,7 @@ const { publicErrorMessage } = require("../lib/httpError");
 //    something an admin should accidentally rename or retire from the UI.
 //    A genuinely new custom role (anything not in this list) stays freely
 //    renameable/retireable.
-const SYSTEM_ROLE_NAMES = ["ADMIN", "PROPONENT", "ACCOUNT OFFICER", "ASSESSMENT OFFICER"];
+const SYSTEM_ROLE_NAMES = ["ADMIN", "PROPONENT", "ACCOUNT OFFICER", "BDO"];
 
 // Same set, PLUS "LOCATOR" — the cosmetic display name roleDisplayName()
 // (src/lib/roleDisplay.ts) substitutes for "PROPONENT" everywhere a human
@@ -57,9 +57,15 @@ exports.list = async (req, res) => {
     // Lets User Management show the Assessment level picker only for roles
     // that actually reach the Evaluation Queue.
     const assessmentRoleIds = await ControlPanelPermission.listRoleIdsWithMenu("assessment:queue");
+    // Account Officers have Level 1 / Level 2 too (approval:queue).
+    const approvalRoleIds = await ControlPanelPermission.listRoleIdsWithMenu("approval:queue");
     return res.json({
       success: true,
-      data: rows.map((r) => ({ ...r, has_assessment_queue: assessmentRoleIds.has(Number(r.id)) })),
+      data: rows.map((r) => ({
+        ...r,
+        has_assessment_queue: assessmentRoleIds.has(Number(r.id)),
+        has_approval_queue: approvalRoleIds.has(Number(r.id)),
+      })),
     });
   } catch (error) {
     console.error("List roles error:", error);

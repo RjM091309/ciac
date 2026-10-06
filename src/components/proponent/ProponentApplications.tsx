@@ -405,6 +405,14 @@ function ApplicationDetail({
       setTab('requirements');
       setThreadRequirement(target);
     }
+    // Drop requirementId from the URL once it's been used, so a refresh
+    // doesn't open the thread again.
+    const params = new URLSearchParams(window.location.search);
+    if (params.has('requirementId')) {
+      params.delete('requirementId');
+      const qs = params.toString();
+      navigate(`${window.location.pathname}${qs ? `?${qs}` : ''}`, { replace: true });
+    }
     // Only run once per (applicationId, focusRequirementId) landing — the
     // effect deliberately excludes `data` from deps beyond this initial run
     // so re-fetches (e.g. after acknowledging) don't reopen the modal.

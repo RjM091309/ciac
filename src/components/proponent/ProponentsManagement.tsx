@@ -970,6 +970,12 @@ export function ProponentsManagement({
   }
 
   async function save() {
+    // Registered Locator only lists locators with an Account Officer (an
+    // Account Officer's own new locator defaults to them on the server).
+    if (!isAccountOfficer && !form.account_officer_id.trim()) {
+      toast.error("Choose the locator's Account Officer.");
+      return;
+    }
     setSaving(true);
     setError(null);
     try {

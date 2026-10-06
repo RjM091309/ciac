@@ -921,7 +921,7 @@ export function ComplianceInspections({
                     <tr style={{ borderBottom: '1px solid var(--border-subtle)' }}>
                       <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary">Ref No.</th>
                       <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary">Locator</th>
-                      <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary">Application Type</th>
+                      <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary">Industry Type</th>
                       <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary">Compliance</th>
                       <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary">Status</th>
                     </tr>

@@ -57,25 +57,26 @@ router.get("/type-of-contract", requireMenuAccess(MENU_KEY, "view"), proponentsC
 router.get("/document-requirements", requireMenuAccess(MENU_KEY, "view"), proponentsController.listDocumentRequirementOptions);
 router.get("/industries", requireMenuAccess(MENU_KEY, "view"), proponentsController.listIndustryOptions);
 router.get("/land-uses", requireMenuAccess(MENU_KEY, "view"), proponentsController.listLandUseOptions);
-router.get("/:id", requireMenuAccess(MENU_KEY, "view"), proponentsController.getById);
-router.get("/:id/documents", requireMenuAccess(MENU_KEY, "view"), proponentsController.getDocuments);
+router.get("/:id", requireMenuAccess(MENU_KEY, "view"), proponentsController.requireOwnLocator, proponentsController.getById);
+router.get("/:id/documents", requireMenuAccess(MENU_KEY, "view"), proponentsController.requireOwnLocator, proponentsController.getDocuments);
 router.post(
   "/:id/documents",
   requireMenuAccess(MENU_KEY, "edit"),
+  proponentsController.requireOwnLocator,
   uploadDocumentOnly,
   verifyUploadedFile,
   proponentsController.uploadDocument
 );
-router.get("/:id/documents/:docId/download", requireMenuAccess(MENU_KEY, "view"), proponentsController.downloadDocument);
-router.delete("/:id/documents/:docId", requireMenuAccess(MENU_KEY, "edit"), proponentsController.deleteDocument);
+router.get("/:id/documents/:docId/download", requireMenuAccess(MENU_KEY, "view"), proponentsController.requireOwnLocator, proponentsController.downloadDocument);
+router.delete("/:id/documents/:docId", requireMenuAccess(MENU_KEY, "edit"), proponentsController.requireOwnLocator, proponentsController.deleteDocument);
 router.post("/", requireMenuAccess(MENU_KEY, "add"), proponentsController.create);
-router.put("/:id", requireMenuAccess(MENU_KEY, "edit"), proponentsController.update);
+router.put("/:id", requireMenuAccess(MENU_KEY, "edit"), proponentsController.requireOwnLocator, proponentsController.update);
 // Section saves (Stockholders / Contact Person + Signatory / Property schedule) — see the controller.
-router.put("/:id/stockholders", requireMenuAccess(MENU_KEY, "edit"), proponentsController.saveStockholders);
-router.put("/:id/contacts", requireMenuAccess(MENU_KEY, "edit"), proponentsController.saveContacts);
-router.put("/:id/properties", requireMenuAccess(MENU_KEY, "edit"), proponentsController.saveProperties);
-router.put("/:id/investment", requireMenuAccess(MENU_KEY, "edit"), proponentsController.saveInvestment);
-router.patch("/:id/deactivate", requireMenuAccess(MENU_KEY, "delete"), proponentsController.deactivate);
-router.patch("/:id/reactivate", requireMenuAccess(MENU_KEY, "edit"), proponentsController.reactivate);
+router.put("/:id/stockholders", requireMenuAccess(MENU_KEY, "edit"), proponentsController.requireOwnLocator, proponentsController.saveStockholders);
+router.put("/:id/contacts", requireMenuAccess(MENU_KEY, "edit"), proponentsController.requireOwnLocator, proponentsController.saveContacts);
+router.put("/:id/properties", requireMenuAccess(MENU_KEY, "edit"), proponentsController.requireOwnLocator, proponentsController.saveProperties);
+router.put("/:id/investment", requireMenuAccess(MENU_KEY, "edit"), proponentsController.requireOwnLocator, proponentsController.saveInvestment);
+router.patch("/:id/deactivate", requireMenuAccess(MENU_KEY, "delete"), proponentsController.requireOwnLocator, proponentsController.deactivate);
+router.patch("/:id/reactivate", requireMenuAccess(MENU_KEY, "edit"), proponentsController.requireOwnLocator, proponentsController.reactivate);
 
 module.exports = router;

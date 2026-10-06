@@ -716,7 +716,7 @@ export function ReportsAnalytics({ navigate }: { navigate?: (to: string, opts?: 
                 <DatePicker mode="single" bordered fullWidth value={dateTo} onChange={setDateTo} placeholder="To date" />
               </div>
             </FieldLabel>
-            <FieldLabel label="Application Type">
+            <FieldLabel label="Industry Type">
               <div className="w-full sm:w-44">
                 <AppSelect
                   compact

@@ -29,6 +29,7 @@ import { TableSkeleton } from '../ui/Skeleton';
 import { useControlPanelAccess } from '../../context/ControlPanelAccessContext';
 import { useSessionStorageCachedResource } from '../../hooks/useSessionStorageCachedResource';
 import { requestNotificationsRefresh } from '../../lib/notificationRefresh';
+import { ApprovalDetail } from '../approval/ApprovalIssuance';
 
 const MENU_KEY = 'assessment:queue';
 
@@ -36,7 +37,11 @@ const MENU_KEY = 'assessment:queue';
 // Level 1 Manager sees the whole queue, assigns, and makes the final
 // recommendation; Level 2 Officer only gets what was assigned to them. The
 // server enforces all of this — the flag only decides which controls show.
-const AssessmentLevelContext = React.createContext<{ isManager: boolean }>({ isManager: false });
+const AssessmentLevelContext = React.createContext<{
+  isManager: boolean;
+  /** Level 1, new application: send it for approval / open its approval panel. */
+  openForApproval?: (row: { application_id: number; application_no: string }, alreadySent: boolean) => void;
+}>({ isManager: false });
 const useAssessmentLevel = () => React.useContext(AssessmentLevelContext);
 
 const STAGE_LABELS: Record<string, string> = {
@@ -421,22 +426,26 @@ export function AssessmentEvaluation({
   const canDelete = fullAccess || perm.can_delete;
   // Level 1 Manager sees the whole queue and assigns; Level 2 Officer only
   // gets what was assigned to them (the server scopes the data either way).
-  const [level, setLevel] = useState<{ ready: boolean; isManager: boolean }>({ ready: false, isManager: false });
+  const [level, setLevel] = useState<{ ready: boolean; isManager: boolean; userId: number | null }>({
+    ready: false,
+    isManager: false,
+    userId: null,
+  });
   useEffect(() => {
     let cancelled = false;
     apiFetch('/api/assessments/me')
       .then((json) => {
-        if (!cancelled) setLevel({ ready: true, isManager: Boolean(json.data?.manager) });
+        if (!cancelled)
+          setLevel({ ready: true, isManager: Boolean(json.data?.manager), userId: Number(json.data?.userId) || null });
       })
       .catch(() => {
-        if (!cancelled) setLevel({ ready: true, isManager: false });
+        if (!cancelled) setLevel({ ready: true, isManager: false, userId: null });
       });
     return () => {
       cancelled = true;
     };
   }, []);
   const isManager = fullAccess || level.isManager;
-  const levelValue = useMemo(() => ({ isManager }), [isManager]);
 
   const [stageFilter, setStageFilter] = useState('');
   const [evaluatorFilter, setEvaluatorFilter] = useState('');
@@ -488,10 +497,21 @@ export function AssessmentEvaluation({
 
   // Completed applications move to their own "Completed" popup instead of
   // cluttering the working queue — the queue is for what's still in motion.
+  // New applications and renewals: Level 1 approves them in the approval
+  // panel right here ("For Approval").
+  const isAwaitingMyApproval = (r: AssessmentRow) =>
+    String(r.application_status || '').toUpperCase() === 'FOR_APPROVAL' &&
+    r.recommendation === 'ENDORSE' &&
+    (fullAccess || (level.userId != null && Number(r.approver_id) === level.userId));
+  const canSendForApproval = (r: AssessmentRow) =>
+    isManager && r.stage === 'FOR_RECOMMENDATION' && !r.recommendation;
+
   const rows = useMemo(() => {
     const term = search.trim().toLowerCase();
     return allRows.filter((r) => {
-      if ((r.stage || 'UNASSIGNED') === 'COMPLETED') return false;
+      // A new application Level 1 sent for approval stays here (as "For
+      // Approval") until they decide it in the approval panel.
+      if ((r.stage || 'UNASSIGNED') === 'COMPLETED' && !isAwaitingMyApproval(r)) return false;
       // Normally an endorsed/disapproved application's assessment.stage is
       // already COMPLETED (caught above), but the admin status-jump escape
       // hatch (PATCH /api/applications/:id/status) can move an application
@@ -507,14 +527,16 @@ export function AssessmentEvaluation({
       }
       return true;
     });
-  }, [allRows, stageFilter, evaluatorFilter, search]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allRows, stageFilter, evaluatorFilter, search, fullAccess, level.userId]);
 
   const completedRows = useMemo(
     () =>
       allRows
-        .filter((r) => (r.stage || 'UNASSIGNED') === 'COMPLETED')
+        .filter((r) => (r.stage || 'UNASSIGNED') === 'COMPLETED' && !isAwaitingMyApproval(r))
         .sort((a, b) => new Date(b.recommended_at || 0).getTime() - new Date(a.recommended_at || 0).getTime()),
-    [allRows]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [allRows, fullAccess, level.userId]
   );
 
   useEffect(() => {
@@ -554,6 +576,57 @@ export function AssessmentEvaluation({
       toast.error((err as Error).message);
     }
   }, [refresh]);
+
+  // "For Approval" (Level 1, new application): confirm, send it, then open
+  // the approval panel on this same page. Already sent → open the panel.
+  const [forApprovalTarget, setForApprovalTarget] = useState<{ id: number; no: string } | null>(null);
+  const [forApprovalBusy, setForApprovalBusy] = useState(false);
+  const [approvalPanelId, setApprovalPanelId] = useState<number | null>(null);
+  const openForApproval = useCallback(
+    (row: { application_id: number; application_no: string }, alreadySent: boolean) => {
+      if (alreadySent) {
+        setSelectedId(null);
+        setApprovalPanelId(row.application_id);
+      } else {
+        setForApprovalTarget({ id: row.application_id, no: row.application_no });
+      }
+    },
+    []
+  );
+  const confirmForApproval = async () => {
+    if (!forApprovalTarget) return;
+    setForApprovalBusy(true);
+    try {
+      await apiFetch(`/api/assessments/${forApprovalTarget.id}/for-approval`, { method: 'POST', body: '{}' });
+      await refreshAfterMutation();
+      setSelectedId(null);
+      setApprovalPanelId(forApprovalTarget.id);
+      setForApprovalTarget(null);
+    } catch (err) {
+      toast.error((err as Error).message);
+    } finally {
+      setForApprovalBusy(false);
+    }
+  };
+  const levelValue = useMemo(() => ({ isManager, openForApproval }), [isManager, openForApproval]);
+
+  const forApprovalButton = (r: AssessmentRow) => {
+    const sent = isAwaitingMyApproval(r);
+    if (!sent && !canSendForApproval(r)) return null;
+    return (
+      <button
+        type="button"
+        className="rounded-lg px-2.5 py-1 text-[11px] font-semibold whitespace-nowrap cursor-pointer"
+        style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
+        onClick={(e) => {
+          e.stopPropagation();
+          openForApproval(r, sent);
+        }}
+      >
+        For Approval
+      </button>
+    );
+  };
 
   return (
     <div className="space-y-4 sm:space-y-5">
@@ -641,9 +714,16 @@ export function AssessmentEvaluation({
                 ? Math.round((r.requirements_verified / r.requirements_total) * 100)
                 : 0;
               return (
-                <button
+                <div
                   key={r.application_id}
-                  type="button"
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      setSelectedId(r.application_id);
+                    }
+                  }}
                   className="w-full text-left rounded-xl p-3 cursor-pointer active:bg-[var(--selected-bg)] transition-colors"
                   style={{
                     border: '1px solid var(--border-subtle)',
@@ -662,7 +742,10 @@ export function AssessmentEvaluation({
                       </div>
                     </div>
                     <div className="shrink-0">
-                      <Badge label={STAGE_LABELS[r.stage] || r.stage} styles={stageBadge(r.stage)} />
+                      <Badge
+                        label={isAwaitingMyApproval(r) ? 'For Approval' : STAGE_LABELS[r.stage] || r.stage}
+                        styles={stageBadge(isAwaitingMyApproval(r) ? 'FOR_RECOMMENDATION' : r.stage)}
+                      />
                     </div>
                   </div>
 
@@ -684,6 +767,8 @@ export function AssessmentEvaluation({
                     </div>
                   </div>
 
+                  {forApprovalButton(r) ? <div className="mt-2.5 flex justify-end">{forApprovalButton(r)}</div> : null}
+
                   <div className="mt-2.5 grid grid-cols-2 gap-2 text-[11px]">
                     <div className="min-w-0">
                       <div className="text-[9px] uppercase tracking-wider text-secondary">Evaluator</div>
@@ -704,7 +789,7 @@ export function AssessmentEvaluation({
                       </div>
                     </div>
                   </div>
-                </button>
+                </div>
               );
             })}
           </div>
@@ -719,6 +804,7 @@ export function AssessmentEvaluation({
                   <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary">Evaluator</th>
                   <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary">Compliance</th>
                   <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary text-right">Working Days</th>
+                  {isManager ? <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary text-right">Action</th> : null}
                 </tr>
               </thead>
               <tbody>
@@ -737,7 +823,10 @@ export function AssessmentEvaluation({
                     </td>
                     <td className="px-3 py-2.5 text-[11px] text-secondary">{r.proponent_name || '—'}</td>
                     <td className="px-3 py-2.5">
-                      <Badge label={STAGE_LABELS[r.stage] || r.stage} styles={stageBadge(r.stage)} />
+                      <Badge
+                        label={isAwaitingMyApproval(r) ? 'For Approval' : STAGE_LABELS[r.stage] || r.stage}
+                        styles={stageBadge(isAwaitingMyApproval(r) ? 'FOR_RECOMMENDATION' : r.stage)}
+                      />
                     </td>
                     <td className="px-3 py-2.5 text-[11px] text-secondary">{r.evaluator_name || r.evaluator_username || '—'}</td>
                     <td className="px-3 py-2.5 text-[11px] text-secondary">
@@ -754,6 +843,7 @@ export function AssessmentEvaluation({
                         </span>
                       )}
                     </td>
+                    {isManager ? <td className="px-3 py-2.5 text-right">{forApprovalButton(r)}</td> : null}
                   </tr>
                 ))}
               </tbody>
@@ -791,6 +881,15 @@ export function AssessmentEvaluation({
             onMutated={refreshAfterMutation}
           />
         ) : null}
+        {approvalPanelId != null ? (
+          <ApprovalDetail
+            key={`approval-${approvalPanelId}`}
+            applicationId={approvalPanelId}
+            perms={{ canAdd, canEdit, canDelete }}
+            onClose={() => setApprovalPanelId(null)}
+            onMutated={refreshAfterMutation}
+          />
+        ) : null}
         {completedOpen ? (
           <CompletedQueueModal
             rows={completedRows}
@@ -803,6 +902,20 @@ export function AssessmentEvaluation({
         ) : null}
       </AnimatePresence>
       </AssessmentLevelContext.Provider>
+
+      <ConfirmModal
+        open={forApprovalTarget !== null}
+        title="Send for approval?"
+        description={
+          forApprovalTarget
+            ? `${forApprovalTarget.no} moves to For Approval and the approval panel opens, where you record charges and the contract and make the final decision.`
+            : undefined
+        }
+        confirmText="For Approval"
+        loading={forApprovalBusy}
+        onCancel={() => setForApprovalTarget(null)}
+        onConfirm={() => void confirmForApproval()}
+      />
     </div>
   );
 }
@@ -1791,32 +1904,15 @@ function RecommendationTab({
   run: RunFn;
 }) {
   const a = data.assessment;
-  const { isManager } = useAssessmentLevel();
+  const { isManager, openForApproval } = useAssessmentLevel();
   // Step 1 (Level 2 Officer) is open while the officer is working; step 2
   // (Level 1 Manager) once the officer has submitted. A final recommendation
   // stays locked until an admin reopens the assessment.
   const officerOpen = a.stage === 'ASSIGNED' || a.stage === 'IN_REVIEW';
   const managerOpen = a.stage === 'FOR_RECOMMENDATION' && !a.recommendation;
 
-  const [officerRec, setOfficerRec] = useState('ENDORSE');
   const [officerSummary, setOfficerSummary] = useState('');
-  const [managerRec, setManagerRec] = useState(a.officer_recommendation || 'ENDORSE');
   const [managerSummary, setManagerSummary] = useState('');
-  const [approverId, setApproverId] = useState('');
-  const [approvers, setApprovers] = useState<Evaluator[]>([]);
-
-  useEffect(() => {
-    if (!isManager || !managerOpen) return;
-    let cancelled = false;
-    apiFetch('/api/assessments/approvers')
-      .then((json) => {
-        if (!cancelled) setApprovers(json.data || []);
-      })
-      .catch((err) => toast.error(err instanceof Error ? err.message : 'Failed to load account officers'));
-    return () => {
-      cancelled = true;
-    };
-  }, [isManager, managerOpen]);
 
   const totalReq = data.requirements.length;
   const verifiedReq = data.requirements.filter((r) => r.status === 'VERIFIED').length;
@@ -1844,7 +1940,7 @@ function RecommendationTab({
           style={{ borderColor: 'rgba(16,185,129,.4)', backgroundColor: 'rgba(16,185,129,.1)', color: '#10b981' }}
         >
           <CheckCircle2 size={14} className="shrink-0" />
-          <span>All requirements verified — ready to endorse to the Approval & Issuance workflow.</span>
+          <span>All requirements verified — ready for approval.</span>
         </div>
       ) : (
         <div
@@ -1862,26 +1958,23 @@ function RecommendationTab({
 
       {/* Step 1 — Level 2 Officer's review */}
       <div className="rounded-xl border p-3 flex flex-col gap-2" style={{ borderColor: 'var(--border)' }}>
-        <div className="text-[11px] font-bold uppercase tracking-wide text-secondary">Step 1 · Officer review</div>
-        {a.officer_recommendation ? (
+        <div className="text-[11px] font-bold uppercase tracking-wide text-secondary">Step 1 · Level 2 review</div>
+        {a.officer_recommended_at ? (
           <DecisionCard
-            label={a.officer_recommendation === 'ENDORSE' ? 'Recommends approval' : 'Recommends disapproval'}
-            positive={a.officer_recommendation === 'ENDORSE'}
+            label={
+              a.officer_recommendation === 'ENDORSE'
+                ? 'Recommends approval'
+                : a.officer_recommendation === 'DISAPPROVE'
+                  ? 'Recommends disapproval'
+                  : 'Review submitted'
+            }
+            positive={a.officer_recommendation !== 'DISAPPROVE'}
             by={a.officer_recommended_by_name}
             at={a.officer_recommended_at}
             summary={a.officer_recommendation_summary}
           />
         ) : officerOpen ? (
           <>
-            <ChoiceList
-              name="officer-rec"
-              value={officerRec}
-              onChange={setOfficerRec}
-              options={[
-                { v: 'ENDORSE', label: 'Recommend approval', hint: 'Sent to the Manager for the final recommendation.' },
-                { v: 'DISAPPROVE', label: 'Recommend disapproval', hint: 'Sent to the Manager for the final recommendation.' },
-              ]}
-            />
             <Field label="Summary / basis">
               <textarea
                 className={cn(inputCls, 'min-h-[70px] resize-y')}
@@ -1899,13 +1992,13 @@ function RecommendationTab({
                   () =>
                     apiFetch(`/api/assessments/${a.application_id}/officer-review`, {
                       method: 'POST',
-                      body: JSON.stringify({ recommendation: officerRec, summary: officerSummary.trim() }),
+                      body: JSON.stringify({ summary: officerSummary.trim() }),
                     }),
-                  'Review submitted to the Manager'
+                  'Review submitted'
                 )
               }
             >
-              <Send size={13} className="inline mr-1" /> Submit to Manager
+              <Send size={13} className="inline mr-1" /> Submit
             </button>
           </>
         ) : (
@@ -1915,80 +2008,55 @@ function RecommendationTab({
         )}
       </div>
 
-      {/* Step 2 — Level 1 Manager's final recommendation */}
+      {/* Step 2 — Level 1 Manager's final recommendation. Hidden until
+          Level 2 has submitted (or once decided). */}
+      {a.recommendation || managerOpen ? (
       <div className="rounded-xl border p-3 flex flex-col gap-2" style={{ borderColor: 'var(--border)' }}>
-        <div className="text-[11px] font-bold uppercase tracking-wide text-secondary">Step 2 · Manager recommendation</div>
+        <div className="text-[11px] font-bold uppercase tracking-wide text-secondary">Step 2 · Level 1 recommendation</div>
         {a.recommendation ? (
-          <DecisionCard
-            label={
-              a.recommendation === 'ENDORSE'
-                ? `Approved${a.approver_name || a.approver_username ? ` — assigned to ${a.approver_name || a.approver_username}` : ''}`
-                : 'Disapproved'
-            }
-            positive={a.recommendation === 'ENDORSE'}
-            by={a.recommended_by_name}
-            at={a.recommended_at}
-            summary={a.recommendation_summary}
-          />
-        ) : !managerOpen ? (
-          <div className="text-[12px] text-secondary">Available once the officer submits their review.</div>
+          <>
+            <DecisionCard
+              label={
+                a.recommendation === 'ENDORSE'
+                  ? 'Sent for approval'
+                  : 'Disapproved'
+              }
+              positive={a.recommendation === 'ENDORSE'}
+              by={a.recommended_by_name}
+              at={a.recommended_at}
+              summary={a.recommendation_summary}
+            />
+            {isManager && a.recommendation === 'ENDORSE' && openForApproval ? (
+              <button
+                type="button"
+                className="rounded-lg px-3 py-2 text-[13px] font-semibold"
+                style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
+                onClick={() => openForApproval(a, true)}
+              >
+                Open approval panel
+              </button>
+            ) : null}
+          </>
         ) : !isManager ? (
-          <div className="text-[12px] text-secondary">Submitted — waiting for the Manager's recommendation.</div>
+          <div className="text-[12px] text-secondary">Submitted — waiting for Level 1's recommendation.</div>
         ) : (
           <>
-            <ChoiceList
-              name="manager-rec"
-              value={managerRec}
-              onChange={setManagerRec}
-              options={[
-                {
-                  v: 'ENDORSE',
-                  label: 'Approve',
-                  hint: 'Application moves to FOR_APPROVAL, assigned to the Account Officer you choose below.',
-                },
-                { v: 'DISAPPROVE', label: 'Disapprove', hint: 'Application status becomes DISAPPROVED; locator is notified by email.' },
-              ]}
-            />
-            {managerRec === 'ENDORSE' ? (
-              <Field label="Assign approval to (Account Officer)">
-                <AppSelect
-                  compact
-                  placeholder="Select account officer…"
-                  value={approverId}
-                  onChange={setApproverId}
-                  options={approvers.map((u) => ({ value: String(u.id), label: u.full_name || u.username }))}
-                />
-              </Field>
-            ) : null}
-            <Field label="Summary / remarks">
+            <Field label="Remarks (for Return to Level 2)">
               <textarea
                 className={cn(inputCls, 'min-h-[70px] resize-y')}
                 value={managerSummary}
                 onChange={(e) => setManagerSummary(e.target.value)}
-                placeholder="Basis for the recommendation, or what the officer should redo…"
+                placeholder="What Level 2 should redo…"
               />
             </Field>
             <div className="flex flex-col sm:flex-row gap-2">
               <button
                 className="flex-1 rounded-lg px-3 py-2 text-[13px] font-semibold disabled:opacity-50"
                 style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
-                disabled={busy || !canEdit || (managerRec === 'ENDORSE' && !approverId)}
-                onClick={() =>
-                  run(
-                    () =>
-                      apiFetch(`/api/assessments/${a.application_id}/recommendation`, {
-                        method: 'POST',
-                        body: JSON.stringify({
-                          recommendation: managerRec,
-                          summary: managerSummary.trim(),
-                          approver_id: managerRec === 'ENDORSE' ? Number(approverId) : undefined,
-                        }),
-                      }),
-                    'Recommendation submitted'
-                  )
-                }
+                disabled={busy || !canEdit || !openForApproval}
+                onClick={() => openForApproval?.(a, false)}
               >
-                Submit recommendation
+                For Approval
               </button>
               <button
                 className="rounded-lg px-3 py-2 text-[13px] font-semibold border disabled:opacity-50"
@@ -2001,46 +2069,17 @@ function RecommendationTab({
                         method: 'POST',
                         body: JSON.stringify({ note: managerSummary.trim() }),
                       }),
-                    'Returned to the officer'
+                    'Returned to Level 2'
                   )
                 }
               >
-                <RotateCcw size={13} className="inline mr-1" /> Return to officer
+                <RotateCcw size={13} className="inline mr-1" /> Return to Level 2
               </button>
             </div>
           </>
         )}
       </div>
-    </div>
-  );
-}
-
-function ChoiceList({
-  name,
-  value,
-  onChange,
-  options,
-}: {
-  name: string;
-  value: string;
-  onChange: (v: string) => void;
-  options: { v: string; label: string; hint: string }[];
-}) {
-  return (
-    <div className="flex flex-col gap-2">
-      {options.map((o) => (
-        <label
-          key={o.v}
-          className={cn('rounded-xl border p-2.5 flex gap-2 cursor-pointer', value === o.v && 'ring-1 ring-[var(--text)]')}
-          style={{ borderColor: 'var(--border)' }}
-        >
-          <input type="radio" name={name} checked={value === o.v} onChange={() => onChange(o.v)} className="mt-0.5" />
-          <div>
-            <div className="text-[13px] font-semibold">{o.label}</div>
-            <div className="text-[11px] text-secondary">{o.hint}</div>
-          </div>
-        </label>
-      ))}
+      ) : null}
     </div>
   );
 }

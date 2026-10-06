@@ -154,6 +154,37 @@ async function checkMenuAllowed(role, menuKey, action) {
 }
 
 /**
+ * Approval panel routes (/api/approvals/:applicationId/...). Open to the
+ * approval:queue menu as before, and also to a Level 1 BDO (assessment:queue
+ * + users.assessment_level = 1): for a new application they make the final
+ * approval themselves from the Evaluation Queue ("For Approval"). Which
+ * approvals they can open is still limited to the ones assigned to them
+ * (ensureApprovalAccess in c_approvals.js).
+ */
+function requireApprovalAccess(action = "view") {
+  return async function approvalAccessGuard(req, res, next) {
+    if (!req.user) {
+      return res.status(401).json({ success: false, message: "Access token required" });
+    }
+    const role = String(req.user.role || "").toLowerCase();
+    // The menu must be visible too, not just a leftover Add/Edit/Delete row.
+    const allowed = async (menuKey) =>
+      (await checkMenuAllowed(role, menuKey, "view")) && (action === "view" || (await checkMenuAllowed(role, menuKey, action)));
+    try {
+      if (await allowed("approval:queue")) return next();
+      if (await allowed("assessment:queue")) {
+        const Assessment = require("../models/AssessmentEvaluation");
+        if (await Assessment.isManager(req.user)) return next();
+      }
+      return res.status(403).json({ success: false, message: "Forbidden" });
+    } catch (error) {
+      console.error("Approval access check failed:", error);
+      return res.status(500).json({ success: false, message: "Internal server error" });
+    }
+  };
+}
+
+/**
  * Gates a route behind ANY ONE of several menu permissions — used where one
  * screen's data (e.g. GET /api/users, shared by both "User Management" and
  * "Locator Accounts") is reachable from either sidebar entry, so holding
@@ -383,6 +414,8 @@ module.exports = {
   requireRole,
   requireMenuAccess,
   requireAnyMenuAccess,
+  requireApprovalAccess,
+  checkMenuAllowed,
   requireUserMenuAccess,
   requireApplicationsAccess,
   requireStaffRole,
