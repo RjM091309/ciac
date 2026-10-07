@@ -50,6 +50,9 @@ async function userAuditSnapshot(id) {
     business_name: proponent?.business_name ?? null,
     address: proponent?.address ?? null,
     lease_address: proponent?.lease_address ?? null,
+        location: proponent?.location ?? null,
+        land_use_id: proponent?.land_use_id ?? null,
+        proposed_lease_term_years: proponent?.proposed_lease_term_years ?? null,
     contact_no: proponent?.contact_no ?? null,
   };
 }
@@ -88,6 +91,21 @@ function sendTempPasswordEmail({ to, name, username, tempPassword, isNewAccount 
 // a business profile but no immediate email, see exports.create below) gets
 // activated on its first real application submission.
 exports.sendTempPasswordEmail = sendTempPasswordEmail;
+
+/** Proposed lease term (years) on the Locator Accounts form: blank, or more than 0 up to 99. */
+function leaseTermValue(v) {
+  return v === undefined || v === null || String(v).trim() === "" ? null : Number(v);
+}
+function isValidLeaseTerm(v) {
+  const n = leaseTermValue(v);
+  return n === null || (Number.isFinite(n) && n > 0 && n <= 99);
+}
+
+/** Land Use (File Maintenance) picked on the Locator Accounts form must exist. */
+async function isKnownLandUse(id) {
+  const LandUse = require("../models/LandUse");
+  return (await LandUse.listLandUses()).some((r) => Number(r.id) === Number(id));
+}
 
 exports.list = async (req, res) => {
   try {
@@ -137,6 +155,9 @@ exports.getById = async (req, res) => {
         business_name: proponent?.business_name ?? null,
         address: proponent?.address ?? null,
         lease_address: proponent?.lease_address ?? null,
+        location: proponent?.location ?? null,
+        land_use_id: proponent?.land_use_id ?? null,
+        proposed_lease_term_years: proponent?.proposed_lease_term_years ?? null,
         contact_no: proponent?.contact_no ?? null,
       },
     });
@@ -160,8 +181,17 @@ exports.create = async (req, res) => {
       business_name,
       address,
       lease_address,
+      location,
+      land_use_id,
+      proposed_lease_term_years,
       contact_no,
     } = req.body || {};
+    if (land_use_id && !(await isKnownLandUse(land_use_id))) {
+      return res.status(400).json({ success: false, message: "Unknown land use" });
+    }
+    if (!isValidLeaseTerm(proposed_lease_term_years)) {
+      return res.status(400).json({ success: false, message: "Proposed lease term must be a number of years (more than 0, up to 99)." });
+    }
     if (!username) return res.status(400).json({ success: false, message: "username is required" });
     if (!String(email || "").trim()) return res.status(400).json({ success: false, message: "email is required" });
 
@@ -219,6 +249,9 @@ exports.create = async (req, res) => {
           business_name: String(business_name).trim(),
           address: address ? String(address).trim() : null,
           lease_address: lease_address ? String(lease_address).trim() : null,
+          location: location ? String(location).trim() : null,
+          land_use_id: land_use_id ? Number(land_use_id) : null,
+          proposed_lease_term_years: leaseTermValue(proposed_lease_term_years),
           contact_no: contact_no ? String(contact_no).trim() : null,
           created_by: req.user?.id ?? null,
         });
@@ -299,12 +332,21 @@ exports.createLocatorWithApplication = async (req, res) => {
       business_name,
       address,
       lease_address,
+      location,
+      land_use_id,
+      proposed_lease_term_years,
       contact_no,
       application_type,
       is_renewal,
       save_as_draft,
       contract_type_id,
     } = req.body || {};
+    if (land_use_id && !(await isKnownLandUse(land_use_id))) {
+      return res.status(400).json({ success: false, message: "Unknown land use" });
+    }
+    if (!isValidLeaseTerm(proposed_lease_term_years)) {
+      return res.status(400).json({ success: false, message: "Proposed lease term must be a number of years (more than 0, up to 99)." });
+    }
 
     if (!username) return res.status(400).json({ success: false, message: "username is required" });
     if (!String(email || "").trim()) return res.status(400).json({ success: false, message: "email is required" });
@@ -361,6 +403,9 @@ exports.createLocatorWithApplication = async (req, res) => {
         business_name: String(business_name).trim(),
         address: String(address).trim(),
         lease_address: lease_address ? String(lease_address).trim() : null,
+          location: location ? String(location).trim() : null,
+          land_use_id: land_use_id ? Number(land_use_id) : null,
+          proposed_lease_term_years: leaseTermValue(proposed_lease_term_years),
         contact_no: String(contact_no).trim(),
         created_by: req.user?.id ?? null,
       });
@@ -463,8 +508,17 @@ exports.update = async (req, res) => {
       business_name,
       address,
       lease_address,
+      location,
+      land_use_id,
+      proposed_lease_term_years,
       contact_no,
     } = req.body || {};
+    if (land_use_id && !(await isKnownLandUse(land_use_id))) {
+      return res.status(400).json({ success: false, message: "Unknown land use" });
+    }
+    if (!isValidLeaseTerm(proposed_lease_term_years)) {
+      return res.status(400).json({ success: false, message: "Proposed lease term must be a number of years (more than 0, up to 99)." });
+    }
     if (email !== undefined && !String(email || "").trim()) {
       return res.status(400).json({ success: false, message: "email is required" });
     }
@@ -489,7 +543,7 @@ exports.update = async (req, res) => {
     // the admin-direct edit path (gated by the same settings:locator-users
     // permission as the rest of this route), separate from the proponent's
     // own self-service change-request flow in c_proponents.js.
-    if (business_name !== undefined || address !== undefined || lease_address !== undefined || contact_no !== undefined) {
+    if (business_name !== undefined || address !== undefined || lease_address !== undefined || location !== undefined || land_use_id !== undefined || proposed_lease_term_years !== undefined || contact_no !== undefined) {
       try {
         const existing = await Proponent.getProponentByUserId(id);
         if (existing) {
@@ -497,6 +551,9 @@ exports.update = async (req, res) => {
             business_name: business_name !== undefined ? String(business_name).trim() : undefined,
             address: address !== undefined ? (address ? String(address).trim() : null) : undefined,
             lease_address: lease_address !== undefined ? (lease_address ? String(lease_address).trim() : null) : undefined,
+            location: location !== undefined ? (location ? String(location).trim() : null) : undefined,
+            land_use_id: land_use_id !== undefined ? (land_use_id ? Number(land_use_id) : null) : undefined,
+            proposed_lease_term_years: proposed_lease_term_years !== undefined ? leaseTermValue(proposed_lease_term_years) : undefined,
             contact_no: contact_no !== undefined ? (contact_no ? String(contact_no).trim() : null) : undefined,
             updated_by: req.user?.id ?? null,
           });
@@ -506,6 +563,9 @@ exports.update = async (req, res) => {
             business_name: String(business_name).trim(),
             address: address ? String(address).trim() : null,
             lease_address: lease_address ? String(lease_address).trim() : null,
+          location: location ? String(location).trim() : null,
+          land_use_id: land_use_id ? Number(land_use_id) : null,
+          proposed_lease_term_years: leaseTermValue(proposed_lease_term_years),
             contact_no: contact_no ? String(contact_no).trim() : null,
             created_by: req.user?.id ?? null,
           });

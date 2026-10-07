@@ -16,6 +16,12 @@ import { loadGoogleMaps } from '../../lib/googleMapsLoader';
  * itself returns real predictions with a deprecation warning, but the
  * widget silently shows nothing). Building the list here also sidesteps
  * `.pac-container`'s z-index/positioning quirks inside modals for free.
+ *
+ * Suggestions come from Places API (New) — `AutocompleteSuggestion
+ * .fetchAutocompleteSuggestions` — which is what a Google Cloud project
+ * created after March 2025 can enable (the legacy Places API behind
+ * AutocompleteService can't be turned on there any more). AutocompleteService
+ * is only a fallback for an older Maps script without the new class.
  */
 export function AddressAutocomplete({
   value,
@@ -36,6 +42,9 @@ export function AddressAutocomplete({
 }) {
   const wrapperRef = useRef<HTMLDivElement>(null);
   const serviceRef = useRef<google.maps.places.AutocompleteService | null>(null);
+  // Places API (New): AutocompleteSuggestion (not in every @types/google.maps version, hence `any`).
+  const newApiRef = useRef<any>(null);
+  const sessionTokenRef = useRef<any>(null);
   const debounceRef = useRef<number | null>(null);
   const requestIdRef = useRef(0);
   const [ready, setReady] = useState(false);
@@ -49,7 +58,12 @@ export function AddressAutocomplete({
       .then((google) => {
         // null: no API key configured (Portal Settings or .env) — stays a plain input.
         if (cancelled || !google) return;
-        serviceRef.current = new google.maps.places.AutocompleteService();
+        const places: any = google.maps.places;
+        if (places?.AutocompleteSuggestion?.fetchAutocompleteSuggestions) {
+          newApiRef.current = places.AutocompleteSuggestion;
+        } else {
+          serviceRef.current = new google.maps.places.AutocompleteService();
+        }
         setReady(true);
       })
       .catch(() => {
@@ -72,13 +86,41 @@ export function AddressAutocomplete({
 
   function fetchSuggestions(input: string) {
     if (debounceRef.current) window.clearTimeout(debounceRef.current);
-    if (!serviceRef.current || !input.trim()) {
+    if ((!newApiRef.current && !serviceRef.current) || !input.trim()) {
       setSuggestions([]);
       setOpen(false);
       return;
     }
     debounceRef.current = window.setTimeout(() => {
       const requestId = ++requestIdRef.current;
+      const show = (list: { placeId: string; description: string }[]) => {
+        if (requestId !== requestIdRef.current) return; // superseded by a newer keystroke
+        setSuggestions(list);
+        setHighlighted(0);
+        setOpen(list.length > 0);
+      };
+      if (newApiRef.current) {
+        const places: any = (window as any).google?.maps?.places;
+        if (!sessionTokenRef.current && places?.AutocompleteSessionToken) {
+          sessionTokenRef.current = new places.AutocompleteSessionToken();
+        }
+        newApiRef.current
+          .fetchAutocompleteSuggestions({
+            input,
+            includedRegionCodes: ['ph'],
+            ...(sessionTokenRef.current ? { sessionToken: sessionTokenRef.current } : {}),
+          })
+          .then(({ suggestions: found }: { suggestions: any[] }) =>
+            show(
+              (found || [])
+                .map((s) => s.placePrediction)
+                .filter(Boolean)
+                .map((p: any) => ({ placeId: String(p.placeId), description: String(p.text?.text ?? p.text ?? '') }))
+            )
+          )
+          .catch(() => show([]));
+        return;
+      }
       serviceRef.current!.getPlacePredictions(
         { input, componentRestrictions: { country: 'ph' } },
         (predictions, status) => {
@@ -97,6 +139,7 @@ export function AddressAutocomplete({
   }
 
   function selectSuggestion(description: string) {
+    sessionTokenRef.current = null; // a pick ends the autocomplete session
     onChange(description);
     setSuggestions([]);
     setOpen(false);

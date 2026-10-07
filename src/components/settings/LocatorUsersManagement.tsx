@@ -90,6 +90,21 @@ export function LocatorUsersManagement({
   const canEdit = fullAccess || perm.can_edit;
   const canDelete = fullAccess || perm.can_delete;
   const [saving, setSaving] = useState(false);
+  // Land Use dropdown (File Maintenance > Land Use): active ones, plus the
+  // one already on the locator even if it was deactivated since.
+  const [landUses, setLandUses] = useState<{ id: number; name: string; is_active: number | boolean }[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    fetch(api('/api/proponents/land-uses'), { credentials: 'include' })
+      .then((res) => res.json())
+      .then((json) => {
+        if (!cancelled && Array.isArray(json?.data)) setLandUses(json.data);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<UserRow | null>(null);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -113,6 +128,9 @@ export function LocatorUsersManagement({
     business_name: string;
     address: string;
     lease_address: string;
+    location: string;
+    land_use_id: string;
+    proposed_lease_term_years: string;
     contact_no: string;
   } | null>(null);
   const [continuingDraftType, setContinuingDraftType] = useState('DIRECT_LEASE');
@@ -290,12 +308,28 @@ export function LocatorUsersManagement({
     business_name: '',
     address: '',
     lease_address: '',
+    location: '',
+    land_use_id: '',
+    proposed_lease_term_years: '',
     contact_no: '',
     application_type: 'DIRECT_LEASE',
     contract_type_id: '',
     save_as_draft: false,
   });
   const [originalForm, setOriginalForm] = useState<typeof form | null>(null);
+  const landUseOptions = useMemo(
+    () =>
+      landUses
+        .filter(
+          (l) =>
+            Number(l.is_active) === 1 ||
+            l.is_active === true ||
+            String(l.id) === form.land_use_id ||
+            String(l.id) === (continuingDraft?.land_use_id ?? '')
+        )
+        .map((l) => ({ value: String(l.id), label: l.name })),
+    [landUses, form.land_use_id, continuingDraft?.land_use_id]
+  );
   const [loadingProfile, setLoadingProfile] = useState(false);
   // Inline, field-level validation errors (e.g. "username already taken") —
   // shown under the offending field itself instead of a toast leaking the
@@ -516,6 +550,9 @@ export function LocatorUsersManagement({
       form.business_name.trim() !== originalForm.business_name.trim() ||
       form.address.trim() !== originalForm.address.trim() ||
       form.lease_address.trim() !== originalForm.lease_address.trim() ||
+      form.location.trim() !== originalForm.location.trim() ||
+      form.land_use_id !== originalForm.land_use_id ||
+      form.proposed_lease_term_years !== originalForm.proposed_lease_term_years ||
       form.contact_no.trim() !== originalForm.contact_no.trim()
     );
   }, [editing, form, locatorRole, originalForm, fieldErrors, checkingField]);
@@ -539,6 +576,9 @@ export function LocatorUsersManagement({
       business_name: '',
       address: '',
       lease_address: '',
+      location: '',
+      land_use_id: '',
+      proposed_lease_term_years: '',
       contact_no: '',
       application_type: 'DIRECT_LEASE',
       contract_type_id: '',
@@ -558,6 +598,9 @@ export function LocatorUsersManagement({
       business_name: '',
       address: '',
       lease_address: '',
+      location: '',
+      land_use_id: '',
+      proposed_lease_term_years: '',
       contact_no: '',
       // Application-filing fields don't apply on edit (an account's linked
       // application isn't created/changed here) — kept only so `form` has
@@ -579,6 +622,9 @@ export function LocatorUsersManagement({
           business_name: json.data.business_name || '',
           address: json.data.address || '',
           lease_address: json.data.lease_address || '',
+          location: json.data.location || '',
+          land_use_id: json.data.land_use_id != null ? String(json.data.land_use_id) : '',
+          proposed_lease_term_years: json.data.proposed_lease_term_years != null ? String(json.data.proposed_lease_term_years) : '',
           contact_no: json.data.contact_no || '',
         };
         setForm(withProfile);
@@ -613,6 +659,9 @@ export function LocatorUsersManagement({
           business_name: form.business_name.trim(),
           address: form.address.trim(),
           lease_address: form.lease_address.trim() || undefined,
+          location: form.location.trim() || undefined,
+          land_use_id: form.land_use_id ? Number(form.land_use_id) : undefined,
+          proposed_lease_term_years: form.proposed_lease_term_years.trim() || undefined,
           contact_no: form.contact_no.trim(),
           application_type: form.application_type,
           contract_type_id: form.contract_type_id ? Number(form.contract_type_id) : null,
@@ -660,6 +709,9 @@ export function LocatorUsersManagement({
       payload.business_name = form.business_name.trim() || undefined;
       payload.address = form.address.trim() || undefined;
       payload.lease_address = form.lease_address.trim() || undefined;
+      payload.location = form.location.trim() || undefined;
+      payload.land_use_id = form.land_use_id ? Number(form.land_use_id) : null;
+      payload.proposed_lease_term_years = form.proposed_lease_term_years.trim() || null;
       payload.contact_no = form.contact_no.trim() || undefined;
       // No password field on this form: the backend generates one and emails
       // it when none is supplied, same as an admin-triggered reset.
@@ -875,6 +927,9 @@ export function LocatorUsersManagement({
         business_name: companyByUserId[u.id] || '',
         address: '',
         lease_address: '',
+        location: '',
+        land_use_id: '',
+        proposed_lease_term_years: '',
         contact_no: '',
       });
       setContinuingDraftType(app.application_type || 'DIRECT_LEASE');
@@ -894,6 +949,9 @@ export function LocatorUsersManagement({
                   ...prev,
                   address: json.data.address || '',
                   lease_address: json.data.lease_address || '',
+                  location: json.data.location || '',
+                  land_use_id: json.data.land_use_id != null ? String(json.data.land_use_id) : '',
+                  proposed_lease_term_years: json.data.proposed_lease_term_years != null ? String(json.data.proposed_lease_term_years) : '',
                   contact_no: json.data.contact_no || '',
                 }
               : prev
@@ -929,6 +987,9 @@ export function LocatorUsersManagement({
           business_name: continuingDraft.business_name.trim() || undefined,
           address: continuingDraft.address.trim() || undefined,
           lease_address: continuingDraft.lease_address.trim() || undefined,
+          location: continuingDraft.location.trim() || undefined,
+          land_use_id: continuingDraft.land_use_id ? Number(continuingDraft.land_use_id) : undefined,
+          proposed_lease_term_years: continuingDraft.proposed_lease_term_years.trim() || undefined,
           contact_no: continuingDraft.contact_no.trim() || undefined,
         }),
       });
@@ -1375,6 +1436,18 @@ export function LocatorUsersManagement({
         onSave={save}
         saving={saving}
         saveDisabled={!canSubmit}
+        footerNote={
+          !editing ? (
+            <label className="flex items-center gap-2 text-[12px] cursor-pointer" style={{ color: 'var(--text)' }}>
+              <input
+                type="checkbox"
+                checked={form.save_as_draft}
+                onChange={(e) => setForm((p) => ({ ...p, save_as_draft: e.target.checked }))}
+              />
+              Save as draft — finish and submit later
+            </label>
+          ) : undefined
+        }
       >
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Field label="Username" error={fieldErrors.username} hint={checkingField === 'username' ? 'Checking availability…' : null}>
@@ -1408,6 +1481,16 @@ export function LocatorUsersManagement({
               style={fieldErrors.email ? { borderColor: '#ef4444' } : undefined}
             />
           </Field>
+          <Field label={editing ? 'Contact number' : 'Contact number *'}>
+            <input
+              className="app-input"
+              value={form.contact_no}
+              onChange={(e) => setForm((p) => ({ ...p, contact_no: e.target.value }))}
+              placeholder="09XX XXX XXXX"
+              disabled={loadingProfile}
+              required={!editing}
+            />
+          </Field>
           {!editing ? (
             <Field label="Industry Type *">
               <AppSelect
@@ -1422,6 +1505,19 @@ export function LocatorUsersManagement({
               />
             </Field>
           ) : null}
+          <Field label="Proposed Lease Term (in years)">
+            <input
+              type="number"
+              min={0}
+              max={99}
+              step="0.5"
+              inputMode="decimal"
+              className="app-input"
+              value={form.proposed_lease_term_years}
+              onChange={(e) => setForm((p) => ({ ...p, proposed_lease_term_years: e.target.value }))}
+              placeholder="e.g. 5"
+            />
+          </Field>
           {!editing ? (
             <Field label="Type of contract *">
               <AppSelect
@@ -1433,18 +1529,17 @@ export function LocatorUsersManagement({
               />
             </Field>
           ) : null}
+          <Field label="Land Use">
+            <AppSelect
+              options={landUseOptions}
+              value={form.land_use_id}
+              onChange={(value) => setForm((p) => ({ ...p, land_use_id: value || '' }))}
+              placeholder="Select..."
+              isClearable
+            />
+          </Field>
         </div>
 
-        {!editing ? (
-          <label className="mt-2 flex items-center gap-2 text-[12px] cursor-pointer">
-            <input
-              type="checkbox"
-              checked={form.save_as_draft}
-              onChange={(e) => setForm((p) => ({ ...p, save_as_draft: e.target.checked }))}
-            />
-            Save as draft — finish and submit later
-          </label>
-        ) : null}
 
         <div className="mt-4 pt-4 border-t" style={{ borderColor: 'var(--border-subtle)' }}>
           {editing ? (
@@ -1453,26 +1548,18 @@ export function LocatorUsersManagement({
             </p>
           ) : null}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <Field label={editing ? 'Business name' : 'Business name *'}>
-              <input
-                className="app-input"
-                value={form.business_name}
-                onChange={(e) => setForm((p) => ({ ...p, business_name: e.target.value }))}
-                placeholder="e.g. SkyPort Logistics Inc."
-                disabled={loadingProfile}
-                required={!editing}
-              />
-            </Field>
-            <Field label={editing ? 'Contact number' : 'Contact number *'}>
-              <input
-                className="app-input"
-                value={form.contact_no}
-                onChange={(e) => setForm((p) => ({ ...p, contact_no: e.target.value }))}
-                placeholder="09XX XXX XXXX"
-                disabled={loadingProfile}
-                required={!editing}
-              />
-            </Field>
+            <div className="sm:col-span-2">
+              <Field label={editing ? 'Business name' : 'Business name *'}>
+                <input
+                  className="app-input"
+                  value={form.business_name}
+                  onChange={(e) => setForm((p) => ({ ...p, business_name: e.target.value }))}
+                  placeholder="e.g. SkyPort Logistics Inc."
+                  disabled={loadingProfile}
+                  required={!editing}
+                />
+              </Field>
+            </div>
             <div className="sm:col-span-2">
               <Field label={editing ? 'Principal Address' : 'Principal Address *'}>
                 <AddressAutocomplete
@@ -1492,6 +1579,16 @@ export function LocatorUsersManagement({
                   style={{ borderColor: 'var(--input-border)', color: 'var(--text)', backgroundColor: 'var(--input-bg)' }}
                   placeholder="Start typing to search, or type the full address"
                   disabled={loadingProfile}
+                />
+              </Field>
+            </div>
+            <div className="sm:col-span-2">
+              <Field label="Preferred lot area and location">
+                <input
+                  className="app-input"
+                  value={form.location}
+                  onChange={(e) => setForm((p) => ({ ...p, location: e.target.value }))}
+                  placeholder="e.g. G Puyat, Bertaphil V..."
                 />
               </Field>
             </div>
@@ -1572,6 +1669,28 @@ export function LocatorUsersManagement({
                   placeholder="Select type of contract"
                 />
               </Field>
+              <Field label="Land Use">
+                <AppSelect
+                  options={landUseOptions}
+                  value={continuingDraft.land_use_id}
+                  onChange={(value) => setContinuingDraft((p) => (p ? { ...p, land_use_id: value || '' } : p))}
+                  placeholder="Select..."
+                  isClearable
+                />
+              </Field>
+              <Field label="Proposed Lease Term (in years)">
+                <input
+                  type="number"
+                  min={0}
+                  max={99}
+                  step="0.5"
+                  inputMode="decimal"
+                  className="app-input"
+                  value={continuingDraft.proposed_lease_term_years}
+                  onChange={(e) => setContinuingDraft((p) => (p ? { ...p, proposed_lease_term_years: e.target.value } : p))}
+                  placeholder="e.g. 5"
+                />
+              </Field>
             </div>
 
             <div className="mt-4 pt-4 border-t" style={{ borderColor: 'var(--border-subtle)' }}>
@@ -1619,6 +1738,16 @@ export function LocatorUsersManagement({
                       className="app-input"
                       placeholder="Start typing to search, or type the full address"
                       disabled={continuingDraftLoadingProfile}
+                    />
+                  </Field>
+                </div>
+                <div className="sm:col-span-2">
+                  <Field label="Preferred lot area and location">
+                    <input
+                      className="app-input"
+                      value={continuingDraft.location}
+                      onChange={(e) => setContinuingDraft((p) => (p ? { ...p, location: e.target.value } : p))}
+                      placeholder="e.g. G Puyat, Bertaphil V..."
                     />
                   </Field>
                 </div>

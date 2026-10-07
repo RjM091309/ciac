@@ -2,7 +2,7 @@ const express = require("express");
 const router = express.Router();
 const proponentsController = require("../controller/c_proponents");
 const portalController = require("../controller/c_proponent_portal");
-const { requireMenuAccess, requireProponentSelf, requireOwnApplication, requireStaffRole } = require("../middleware/m_auth");
+const { requireMenuAccess, requireAnyMenuAccess, requireProponentSelf, requireOwnApplication, requireStaffRole } = require("../middleware/m_auth");
 const { handleUpload } = require("../lib/fileStorage");
 const { uploadDocumentOnly } = require("../middleware/m_upload");
 const { verifyUploadedFile } = require("../lib/uploadCheck");
@@ -56,7 +56,8 @@ router.get("/account-officers", requireMenuAccess(MENU_KEY, "view"), proponentsC
 router.get("/type-of-contract", requireMenuAccess(MENU_KEY, "view"), proponentsController.listTypeOfContractOptions);
 router.get("/document-requirements", requireMenuAccess(MENU_KEY, "view"), proponentsController.listDocumentRequirementOptions);
 router.get("/industries", requireMenuAccess(MENU_KEY, "view"), proponentsController.listIndustryOptions);
-router.get("/land-uses", requireMenuAccess(MENU_KEY, "view"), proponentsController.listLandUseOptions);
+// Also used by Locator Accounts' New Locator Account form.
+router.get("/land-uses", requireAnyMenuAccess([MENU_KEY, "settings:locator-users"], "view"), proponentsController.listLandUseOptions);
 router.get("/:id", requireMenuAccess(MENU_KEY, "view"), proponentsController.requireOwnLocator, proponentsController.getById);
 router.get("/:id/documents", requireMenuAccess(MENU_KEY, "view"), proponentsController.requireOwnLocator, proponentsController.getDocuments);
 router.post(

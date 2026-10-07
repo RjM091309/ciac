@@ -174,6 +174,13 @@ async function createSchema() {
     )
       ALTER TABLE dbo.proponents ADD location NVARCHAR(255) NULL;
   `);
+  // Proposed lease term in years, entered on Locator Accounts' New Locator
+  // Account form (what the locator is asking for; the actual term comes
+  // from the contract).
+  await updateSchema(`
+    IF COL_LENGTH('dbo.proponents', 'proposed_lease_term_years') IS NULL
+      ALTER TABLE dbo.proponents ADD proposed_lease_term_years DECIMAL(5,2) NULL;
+  `);
   // "Profile" fields mirroring the legacy BRIDGE system's Locator's
   // Information form — like `location`, these are detail/edit-panel-only
   // (never bulk-fetched for the Locators List table).
@@ -645,6 +652,7 @@ async function createProponent({
   address,
   contact_no,
   location,
+  proposed_lease_term_years,
   ref_code,
   lease_address,
   account_officer_id,
@@ -767,6 +775,12 @@ async function createProponent({
     return insertedId;
   });
 
+  if (newId && proposed_lease_term_years !== undefined && proposed_lease_term_years !== null && proposed_lease_term_years !== "") {
+    await updateData(`UPDATE dbo.proponents SET proposed_lease_term_years = @param1 WHERE id = @param0`, [
+      newId,
+      Number(proposed_lease_term_years),
+    ]);
+  }
   return await getProponentById(newId);
 }
 
@@ -796,6 +810,7 @@ async function updateProponent(
     address,
     contact_no,
     location,
+    proposed_lease_term_years,
     ref_code,
     lease_address,
     account_officer_id,
@@ -853,6 +868,12 @@ async function updateProponent(
   if (address !== undefined) pushSet("address = ?", address);
   if (contact_no !== undefined) pushSet("contact_no = ?", contact_no);
   if (location !== undefined) pushSet("location = ?", location);
+  if (proposed_lease_term_years !== undefined) {
+    pushSet(
+      "proposed_lease_term_years = ?",
+      proposed_lease_term_years === null || proposed_lease_term_years === "" ? null : Number(proposed_lease_term_years)
+    );
+  }
   if (ref_code !== undefined) pushSet("ref_code = ?", ref_code);
   if (lease_address !== undefined) pushSet("lease_address = ?", lease_address);
   if (account_officer_id !== undefined) pushSet("account_officer_id = ?", toInt(account_officer_id));
@@ -989,6 +1010,9 @@ async function getProponentByUserId(userId) {
       p.tin,
       p.address,
       p.lease_address,
+      p.location,
+      p.land_use_id,
+      p.proposed_lease_term_years,
       p.contact_no,
       p.created_by,
       p.updated_by,
@@ -1011,6 +1035,9 @@ async function getProponentByUserId(userId) {
     tin: p.tin ? decryptValue(p.tin) : null,
     address: p.address ?? null,
     lease_address: p.lease_address ?? null,
+    location: p.location ?? null,
+    land_use_id: p.land_use_id ?? null,
+    proposed_lease_term_years: p.proposed_lease_term_years != null ? Number(p.proposed_lease_term_years) : null,
     contact_no: p.contact_no ?? null,
     created_by: p.created_by ?? null,
     updated_by: p.updated_by ?? null,
