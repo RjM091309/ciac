@@ -40,7 +40,11 @@ function mapNotificationRows(rows: any[], userRole: Role, userId?: number | null
         ? '/me/applications'
         : category === 'locator_assigned'
           ? '/applications/proponents'
-          : category === 'assessment' || category === 'document' || category === 'requirement'
+          : // A renewal's review happens on the Renewal Queue (Account Officer), not the BDO's Evaluation Queue.
+            Number(row?.application_is_renewal) === 1 &&
+              (category === 'assessment' || category === 'document' || category === 'requirement')
+            ? '/applications/renewals'
+            : category === 'assessment' || category === 'document' || category === 'requirement'
           ? '/assessment'
           : category === 'compliance' || category === 'inspection'
             ? '/compliance/inspections'

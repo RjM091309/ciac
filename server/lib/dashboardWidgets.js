@@ -13,7 +13,9 @@
 //   - queue widgets — only roles that work a queue.
 
 const APPLICATION_MENUS = ["applications:new", "applications:renewals", "assessment:queue", "approval:queue"];
-const QUEUE_MENUS = ["assessment:queue", "approval:queue"];
+// The queues that have a "Needs Attention" list (BDO evaluation; Account
+// Officer Approved/Renewal Queue).
+const QUEUE_MENUS = ["assessment:queue", "approval:queue", "applications:renewals"];
 const REQUIREMENT_MENUS = [...APPLICATION_MENUS, "applications:requirements"];
 
 const STATS_PARENT = "dashboard:stats";

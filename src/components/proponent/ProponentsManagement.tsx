@@ -10,6 +10,7 @@ import { DataTableControls } from '../ui/DataTableControls';
 import { TableSkeleton } from '../ui/Skeleton';
 import { EmptyState } from '../ui/EmptyState';
 import { useSessionStorageCachedResource } from '../../hooks/useSessionStorageCachedResource';
+import { useControlPanelAccess } from '../../context/ControlPanelAccessContext';
 import { LocatorDocumentsTab, uploadLocatorDocument, type PendingLocatorDocument } from './LocatorDocumentsTab';
 
 type ProponentRow = {
@@ -386,17 +387,19 @@ const BLANK_PROFILE_FORM = {
 export function ProponentsManagement({
   locationSearch = '',
   navigate,
-  currentUserRoleName,
 }: {
   locationSearch?: string;
   navigate?: (to: string, opts?: { replace?: boolean }) => void;
-  currentUserRoleName?: string;
 } = {}) {
   // The Account Officer field shows who a locator is assigned to. An Account
   // Officer looking at their own assigned locators doesn't need (or should
   // see) this about themselves, so it's hidden outright for that role; every
   // other staff role can assign/reassign it from this dropdown.
-  const isAccountOfficer = (currentUserRoleName || '').trim().toUpperCase() === 'ACCOUNT OFFICER';
+  // An Account Officer = a role that works the Approved Queue (Control Panel)
+  // and isn't a BDO — by permission, not by role name.
+  const { fullAccess: cpFullAccess, sidebarPermissions: cpSidebar } = useControlPanelAccess();
+  const isAccountOfficer =
+    !cpFullAccess && Boolean(cpSidebar['approval:queue']) && !cpSidebar['assessment:queue'];
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<ProponentRow | null>(null);

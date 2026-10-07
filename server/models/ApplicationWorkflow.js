@@ -66,10 +66,27 @@ function filingConflict(message) {
 }
 
 /** One locator = one application (business rule, see
- * c_users.createLocatorWithApplication). Renewals aren't checked here.
+ * c_users.createLocatorWithApplication). A renewal is only for a Registered
+ * Locator (has an Account Officer), one open renewal at a time.
  * `excludeId` skips the application being edited (updateDraft). */
 async function assertFilingAllowed(proponentId, isRenewal, { excludeId = null } = {}) {
-  if (isRenewal) return;
+  if (isRenewal) {
+    const prop = await selectData(`SELECT TOP (1) account_officer_id FROM dbo.proponents WHERE id = @param0`, [toInt(proponentId)]);
+    if (!prop?.[0]?.account_officer_id) {
+      throw filingConflict("Only a Registered Locator (with an Account Officer) can file a renewal.");
+    }
+    const open = await selectData(
+      `
+      SELECT TOP (1) application_no FROM dbo.applications
+      WHERE proponent_id = @param0 AND ISNULL(is_renewal, 0) = 1
+        AND status NOT IN ('APPROVED', 'DISAPPROVED', 'REJECTED')
+        AND (@param1 IS NULL OR id <> @param1)
+      `,
+      [toInt(proponentId), toInt(excludeId)]
+    );
+    if (open?.[0]) throw filingConflict(`This locator already has a renewal in progress (${open[0].application_no}).`);
+    return;
+  }
   const rows = await selectData(
     `
     SELECT TOP (1) application_no
@@ -111,9 +128,9 @@ async function createStatusChangeNotifications({ application, toStatus, remarks,
     console.error("Create status-change notifications error:", error);
   }
 
-  // An application (new or renewal) approved by Level 1 BDO waits in the Approved Queue for the
+  // A new application approved by Level 1 BDO waits in the Approved Queue for the
   // Level 1 Account Officer to assign a Level 2 — tell them.
-  if (String(toStatus || "").toUpperCase() === "APPROVED") {
+  if (String(toStatus || "").toUpperCase() === "APPROVED" && !Number(application?.is_renewal)) {
     try {
       const officers = await selectData(`
         SELECT DISTINCT u.id
@@ -2020,7 +2037,20 @@ async function listApplicationStatusHistory(applicationId) {
   return rows;
 }
 
+/** The locator's latest APPROVED application (new or renewal) — what a
+ * renewal from Permits copies its industry type / type of contract from. */
+async function getLatestApprovedApplication(proponentId) {
+  await ensureSchema();
+  const rows = await selectData(
+    `SELECT TOP (1) id, application_type, contract_type_id FROM dbo.applications
+     WHERE proponent_id = @param0 AND status = 'APPROVED' ORDER BY id DESC`,
+    [toInt(proponentId)]
+  );
+  return rows?.[0] || null;
+}
+
 module.exports = {
+  getLatestApprovedApplication,
   APPLICATION_STATUSES,
   isValidApplicationType,
   ensureSchema,

@@ -45,6 +45,8 @@ router.patch("/requirements/:id/acknowledge", requireApplicationsAccess({ allowP
 // on the locator's behalf) — a locator's only self-service actions are
 // viewing their own applications and uploading documents against them.
 router.post("/", requireApplicationsAccess(), controller.create);
+// Permits' "Renew": file + submit the renewal for that permit's locator in one step.
+router.post("/renew-from-permit/:permitId", requireApplicationsAccess(), controller.renewFromPermit);
 router.patch("/:id/submit", requireApplicationsAccess({ allowProponent: true }), controller.submit);
 // Fixing application_type/is_renewal is staff-only, allowed through the
 // Assessment stage (see Workflow.TYPE_EDITABLE_STATUSES); deleting stays

@@ -32,7 +32,8 @@ export type AppView =
   | 'settings:land-use'
   | 'settings:control-panel'
   | 'settings:audit-log'
-  | 'settings:portal';
+  | 'settings:portal'
+  | 'settings:workflow';
 
 type Theme = 'light' | 'dark';
 type ThemeMode = 'system' | 'manual';

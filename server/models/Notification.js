@@ -65,7 +65,9 @@ const EVENT_TYPE_MENU_KEYS = {
   document: ["applications:new", "applications:renewals", "assessment:queue"],
   inspection: ["compliance:inspections"],
   compliance: ["compliance:inspections", "compliance:permits"],
-  assessment: ["assessment:queue"],
+  // The evaluation loop: the BDO's queue for new applications, the Account
+  // Officer's renewal queue for renewals (see trackClause below).
+  assessment: ["assessment:queue", "applications:renewals"],
   approval: ["approval:queue"],
   // The one moment Assessment hands an application to the Account Officer —
   // kept distinct from the generic "approval" event (used for in-workflow
@@ -258,6 +260,27 @@ async function resolveApplicationRecipients(application, actorId, eventType) {
           )
         )`
       : "";
+    // Renewals are between the Account Officer and the locator: no BDO, and
+    // only Level 1 or the renewal's own (assigned) Account Officer. Evaluation
+    // events of a new application stay with the BDO.
+    const isRenewalApp = Boolean(Number(application?.is_renewal));
+    const roleHasEvalQueue = `EXISTS (
+            SELECT 1 FROM dbo.role_sidebar_menu_permissions q2
+            WHERE q2.role_id = r.id AND q2.menu_key = 'assessment:queue' AND q2.is_enabled = 1
+          )`;
+    const trackClause = isRenewalApp
+      ? `
+        AND NOT ${roleHasEvalQueue}
+        AND (
+          u.assessment_level = 1
+          OR EXISTS (
+            SELECT 1 FROM dbo.application_assessments asm4
+            WHERE asm4.application_id = ${appParam} AND asm4.assigned_evaluator_id = u.id
+          )
+        )`
+      : normalizeEventType(eventType) === "assessment"
+        ? `AND ${roleHasEvalQueue}`
+        : "";
     // Through assessment:queue, a Level 2 BDO only hears about
     // applications assigned to them — only a Level 1 Manager
     // (users.assessment_level = 1) gets the whole queue's events.
@@ -300,7 +323,7 @@ async function resolveApplicationRecipients(application, actorId, eventType) {
                 asm2.approver_id
               ) <> u.id
           )
-        )${level2Clause}
+        )${level2Clause}${trackClause}
       `,
       [...menuKeys, toInt(application?.id)]
     );

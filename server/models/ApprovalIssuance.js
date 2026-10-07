@@ -240,6 +240,11 @@ const LIST_SELECT = `
     ap.decided_at,
     asm.id AS assessment_id,
     asm.recommendation AS assessment_recommendation,
+    asm.assigned_evaluator_id AS evaluator_id,
+    ev.full_name AS evaluator_name,
+    ev.username AS evaluator_username,
+    asm.officer_recommended_at AS review_submitted_at,
+    asm.officer_recommendation_summary AS review_summary,
     ISNULL(asm.charges_total, 0) AS charges_total,
     CASE WHEN ap.started_at IS NULL THEN NULL
       ELSE DATEDIFF(DAY, ap.started_at, SYSUTCDATETIME()) END AS days_in_approval,
@@ -255,6 +260,7 @@ const LIST_SELECT = `
   LEFT JOIN dbo.application_types at ON at.code = a.application_type
   LEFT JOIN dbo.application_approvals ap ON ap.application_id = a.id
   LEFT JOIN dbo.application_assessments asm ON asm.application_id = a.id
+  LEFT JOIN dbo.users ev ON ev.id = asm.assigned_evaluator_id
   OUTER APPLY (
     SELECT TOP (1) s.assigned_to
     FROM dbo.approval_steps s
@@ -263,109 +269,6 @@ const LIST_SELECT = `
   ) cur
   LEFT JOIN dbo.users cu ON cu.id = cur.assigned_to
 `;
-
-/** `assigneeId` limits the queue to one Account Officer's approvals (plus
- * any still unassigned) — every non-admin approver is scoped this way. */
-async function listApprovals({ status, search, assigneeId } = {}) {
-  await ensureSchema();
-  const where = ["(ap.id IS NOT NULL OR a.status = 'FOR_APPROVAL')"];
-  const params = [];
-  const asgId = toInt(assigneeId);
-  if (asgId) {
-    where.push(`(${ASSIGNEE_EXPR} = @param${params.length} OR ${ASSIGNEE_EXPR} IS NULL)`);
-    params.push(asgId);
-  }
-  const statusFilter = pick(status, APPROVAL_STATUSES);
-  if (statusFilter) {
-    where.push(`ISNULL(ap.status, 'PENDING') = @param${params.length}`);
-    params.push(statusFilter);
-  }
-  const term = String(search ?? "").trim();
-  if (term) {
-    where.push(`(a.application_no LIKE @param${params.length} OR p.business_name LIKE @param${params.length})`);
-    params.push(`%${term}%`);
-  }
-  const sql = `${LIST_SELECT} WHERE ${where.join(" AND ")} ORDER BY
-    CASE ISNULL(ap.status, 'PENDING')
-      WHEN 'PENDING' THEN 0 WHEN 'IN_PROGRESS' THEN 1 WHEN 'RETURNED' THEN 2
-      WHEN 'DISAPPROVED' THEN 3 WHEN 'APPROVED' THEN 4 ELSE 5 END,
-    a.id DESC`;
-  return selectData(sql, params);
-}
-
-/** Ids of the applications in one Account Officer's Approval queue — the
- * same "assigned to me, or unassigned" rule as listApprovals, so the
- * dashboard and the queue always agree. null `assigneeId` = every
- * application in the queue (the admin's identity-less preview). */
-async function listApplicationIdsInQueue(assigneeId = null) {
-  await ensureSchema();
-  const asgId = toInt(assigneeId);
-  const asgFilter = asgId ? `AND (${ASSIGNEE_EXPR} = @param0 OR ${ASSIGNEE_EXPR} IS NULL)` : "";
-  const rows = await selectData(
-    `
-    SELECT a.id AS application_id
-    FROM dbo.applications a
-    LEFT JOIN dbo.application_approvals ap ON ap.application_id = a.id
-    LEFT JOIN dbo.application_assessments asm ON asm.application_id = a.id
-    WHERE (ap.id IS NOT NULL OR a.status = 'FOR_APPROVAL') ${asgFilter}
-    `,
-    asgId ? [asgId] : []
-  );
-  return new Set(rows.map((r) => toInt(r.application_id)));
-}
-
-async function getSummary({ assigneeId } = {}) {
-  await ensureSchema();
-  const asgId = toInt(assigneeId);
-  const asgFilter = asgId ? `AND (${ASSIGNEE_EXPR} = @param0 OR ${ASSIGNEE_EXPR} IS NULL)` : "";
-  const asgParams = asgId ? [asgId] : [];
-  const statusRows = await selectData(
-    `
-    SELECT ISNULL(ap.status, 'PENDING') AS status, COUNT(1) AS total
-    FROM dbo.applications a
-    LEFT JOIN dbo.application_approvals ap ON ap.application_id = a.id
-    LEFT JOIN dbo.application_assessments asm ON asm.application_id = a.id
-    WHERE (ap.id IS NOT NULL OR a.status = 'FOR_APPROVAL') ${asgFilter}
-    GROUP BY ISNULL(ap.status, 'PENDING')
-    `,
-    asgParams
-  );
-  const byStatus = {};
-  APPROVAL_STATUSES.forEach((s) => { byStatus[s] = 0; });
-  statusRows.forEach((r) => { byStatus[String(r.status)] = Number(r.total || 0); });
-
-  const issuedRows = await selectData(
-    `
-    SELECT COUNT(1) AS total
-    FROM dbo.contracts c
-    INNER JOIN dbo.application_approvals ap ON ap.application_id = c.application_id
-    LEFT JOIN dbo.application_assessments asm ON asm.application_id = ap.application_id
-    WHERE 1 = 1 ${asgFilter}
-    `,
-    asgParams
-  );
-  const avgRows = await selectData(
-    `
-    SELECT AVG(CAST(DATEDIFF(DAY, ap.started_at, ap.decided_at) AS FLOAT)) AS avg_days
-    FROM dbo.application_approvals ap
-    LEFT JOIN dbo.application_assessments asm ON asm.application_id = ap.application_id
-    WHERE ap.started_at IS NOT NULL AND ap.decided_at IS NOT NULL ${asgFilter}
-    `,
-    asgParams
-  );
-
-  const total = Object.values(byStatus).reduce((sum, n) => sum + n, 0);
-  return {
-    by_status: byStatus,
-    total,
-    in_progress: byStatus.IN_PROGRESS,
-    awaiting_start: byStatus.PENDING,
-    approved: byStatus.APPROVED,
-    issued: Number(issuedRows?.[0]?.total || 0),
-    avg_days_to_decide:
-      avgRows?.[0]?.avg_days != null ? Math.round(Number(avgRows[0].avg_days) * 10) / 10 : null,
-  };
-}
 
 /** The Account Officer an application's approval belongs to (see
  * ASSIGNEE_EXPR); null when unassigned. */
@@ -758,7 +661,20 @@ async function settleApproval(approvalId, applicationId, outcome, note, actorId,
   }
 
   if (headerStatus === "APPROVED") {
-    await updateData(`UPDATE dbo.applications SET awaiting_ao_assignment = 1 WHERE id = @param0`, [toInt(applicationId)]);
+    const settled = await getApplicationRow(applicationId);
+    if (Number(settled?.is_renewal)) {
+      // A renewal stays with its Account Officer (no Approved Queue). The
+      // locator's earlier contract permits are superseded by the renewal's
+      // new one, so they stop showing as expiring/expired.
+      await updateData(
+        `UPDATE dbo.permits SET status = 'RENEWED', updated_by = @param2, updated_at = SYSUTCDATETIME()
+         WHERE proponent_id = @param0 AND permit_type = 'CONTRACT' AND ISNULL(application_id, 0) <> @param1
+           AND status <> 'REVOKED'`,
+        [toInt(settled.proponent_id), toInt(applicationId), toInt(actorId)]
+      );
+    } else {
+      await updateData(`UPDATE dbo.applications SET awaiting_ao_assignment = 1 WHERE id = @param0`, [toInt(applicationId)]);
+    }
   }
 
   await logActivity(approvalId, `APPROVAL_${headerStatus}`, note ? note.slice(0, 200) : null, actorId);
@@ -783,7 +699,7 @@ async function settleApproval(approvalId, applicationId, outcome, note, actorId,
   // never touches dbo.contracts/permits, so without this the only trace is
   // a passive status change nobody's specifically told to act on.
   const nextStepNote =
-    headerStatus === "APPROVED" ? " It's now in the Approved Queue for an Account Officer." : "";
+    headerStatus === "APPROVED" && !Number(app?.is_renewal) ? " It's now in the Approved Queue for an Account Officer." : "";
   await notify({
     applicationId,
     actorId,
@@ -856,6 +772,61 @@ async function saveContract(applicationId, payload, actorId) {
     return Contract.getById(saved.id);
   }
   return saved;
+}
+
+/** "Return to Evaluator" from the approval panel: Level 1 undoes their "For
+ * Approval" — the pending approval is closed as RETURNED (a later For
+ * Approval restarts it), the application goes back to the status it had
+ * before FOR_APPROVAL (no locator notice, this is internal), and the review
+ * goes back to Level 2. */
+async function returnToLevel2(applicationId, { note, actorId }) {
+  await ensureSchema();
+  const appId = toInt(applicationId);
+  const detail = await getApprovalDetail(appId);
+  const step = detail?.current_step;
+  if (!detail || !step || detail.approval.approval_status !== "IN_PROGRESS") {
+    throw businessError("There's no pending approval to return.");
+  }
+  const isAdmin = await Role.userHasRoleName(actorId, "admin");
+  if (!isAdmin && step.assigned_to && Number(step.assigned_to) !== Number(actorId)) {
+    throw businessError("This approval is assigned to someone else.");
+  }
+  const text = String(note ?? "").trim();
+  const stepResult = await updateData(
+    `UPDATE dbo.approval_steps
+     SET decision = 'RETURNED', action = 'RETURN', remarks = @param1, acted_by = @param2, acted_at = SYSUTCDATETIME()
+     WHERE id = @param0 AND decision = 'PENDING'`,
+    [toInt(step.id), `Returned to Evaluator${text ? `: ${text.slice(0, 1900)}` : ""}`, toInt(actorId)]
+  );
+  if (!stepResult?.rowsAffected?.[0]) throw businessError("This approval has already been decided.");
+  await updateData(
+    `UPDATE dbo.application_approvals
+     SET status = 'RETURNED', decision = 'RETURNED', decision_summary = @param1, decided_by = @param2,
+         decided_at = SYSUTCDATETIME(), updated_by = @param2, updated_at = SYSUTCDATETIME()
+     WHERE id = @param0`,
+    [toInt(step.approval_id), text || "Returned to Evaluator", toInt(actorId)]
+  );
+
+  const before = await selectData(
+    `SELECT TOP (1) from_status FROM dbo.application_status_history
+     WHERE application_id = @param0 AND to_status = 'FOR_APPROVAL' ORDER BY id DESC`,
+    [appId]
+  );
+  const backTo = String(before?.[0]?.from_status || "SUBMITTED").toUpperCase();
+  await updateData(
+    `UPDATE dbo.applications SET status = @param1, updated_by = @param2, updated_at = SYSUTCDATETIME()
+     WHERE id = @param0 AND status = 'FOR_APPROVAL'`,
+    [appId, backTo, toInt(actorId)]
+  );
+  await insertData(
+    `INSERT INTO dbo.application_status_history (application_id, from_status, to_status, changed_by, remarks, changed_at)
+     VALUES (@param0, 'FOR_APPROVAL', @param1, @param2, @param3, SYSUTCDATETIME())`,
+    [appId, backTo, toInt(actorId), `Returned to Evaluator${text ? `: ${text.slice(0, 900)}` : ""}`]
+  );
+  await logActivity(step.approval_id, "RETURNED_TO_LEVEL2", text ? text.slice(0, 200) : null, actorId);
+
+  await Assessment.returnFromApproval(appId, { note: text, actorId });
+  return getApprovalDetail(appId);
 }
 
 /* ------------------- Account Officer assignment queue ------------------- */
@@ -958,6 +929,7 @@ async function assignAccountOfficer(applicationId, { accountOfficerId, actorId }
 }
 
 module.exports = {
+  returnToLevel2,
   listAssignmentQueue,
   listAssignableAccountOfficers,
   assignAccountOfficer,
@@ -965,9 +937,6 @@ module.exports = {
   APPROVAL_STATUSES,
   STEP_ACTIONS,
   STEP_DECISIONS,
-  listApprovals,
-  listApplicationIdsInQueue,
-  getSummary,
   getApprovalAssigneeId,
   getApplicationIdForStep,
   getOrCreateApproval,

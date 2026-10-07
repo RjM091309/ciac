@@ -64,17 +64,17 @@ function widgetDescription(key: string, queue: QueueKind): string {
   switch (key) {
     case 'dashboard:stats':
       return queue === 'approval'
-        ? "Counts for each officer's own approval queue"
+        ? "Counts for the Account Officer's renewals and locators"
         : queue === 'assessment'
           ? 'Counts for Level 2 assignments, or new applications for Level 1'
           : 'Counts across every application';
     case 'dashboard:attention':
       return queue === 'approval'
-        ? 'Approvals waiting on the officer, plus permits and contracts nearing expiry'
+        ? 'Renewals and locators waiting on the Account Officer, plus permits and contracts nearing expiry'
         : 'Level 2: open assignments · Level 1: reviews to recommend and applications to assign';
     case 'dashboard:table':
       return queue === 'approval'
-        ? "Applications in the officer's own approval queue"
+        ? "Renewals and approved locators (Level 2: their own)"
         : queue === 'assessment'
           ? 'Level 2: own assignments · Level 1: new applications'
           : 'Every application, read-only';
@@ -540,10 +540,12 @@ export function ControlPanelManagement({ locationSearch }: { locationSearch?: st
     () => new Set(Object.entries(sidebarPermissions).filter(([, v]) => v).map(([k]) => k)),
     [sidebarPermissions]
   );
-  const queue: QueueKind = enabledMenus.has('approval:queue')
-    ? 'approval'
-    : enabledMenus.has('assessment:queue')
-      ? 'assessment'
+  // Same order as the server (c_dashboard queueKind): Evaluation Queue = BDO,
+  // Approved/Renewal Queue = Account Officer.
+  const queue: QueueKind = enabledMenus.has('assessment:queue')
+    ? 'assessment'
+    : enabledMenus.has('approval:queue') || enabledMenus.has('applications:renewals')
+      ? 'approval'
       : 'overview';
   const byKey = useMemo(() => new Map(catalog.map((w) => [w.key, w])), [catalog]);
   // Same as the server: a role with no menu access at all gets no widgets.

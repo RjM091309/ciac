@@ -254,7 +254,7 @@ function ComplianceTooltip({
     );
   }, [breakdown]);
   const [pos, setPos] = useState<{ top: number; left: number; openUp: boolean; arrowLeft: number } | null>(null);
-  const triggerRef = useRef<HTMLSpanElement>(null);
+  const triggerRef = useRef<HTMLDivElement>(null);
 
   const computePosition = () => {
     const trigger = triggerRef.current;
@@ -288,10 +288,9 @@ function ComplianceTooltip({
 
   return (
     <>
-      <span
+      <div
         ref={triggerRef}
-        className="cursor-help border-b border-dotted"
-        style={{ borderColor: 'var(--text-muted)' }}
+        className="cursor-help"
         onMouseEnter={() => {
           computePosition();
           setOpen(true);
@@ -299,7 +298,7 @@ function ComplianceTooltip({
         onMouseLeave={() => setOpen(false)}
       >
         {children}
-      </span>
+      </div>
       {createPortal(
         <AnimatePresence>
           {open && pos ? (
@@ -415,12 +414,20 @@ function usePagination<T>(items: T[], pageSize: number, page: number) {
 export function AssessmentEvaluation({
   locationSearch = '',
   navigate,
+  track = 'new',
+  basePath = '/assessment',
 }: {
   locationSearch?: string;
   navigate?: (to: string, opts?: { replace?: boolean }) => void;
+  /** 'new' = the BDO's Evaluation Queue; 'renewal' = the Account Officer's
+   * renewal queue (Renewal Queue page). Same screen, same Level 2 → Level 1 loop. */
+  track?: 'new' | 'renewal';
+  /** Where this screen lives, for cleaning up deep-link query params. */
+  basePath?: string;
 } = {}) {
   const { ready: permsReady, fullAccess, crudPermissions } = useControlPanelAccess();
-  const perm = crudPermissions[MENU_KEY] || { can_add: false, can_edit: false, can_delete: false };
+  const menuKey = track === 'renewal' ? 'applications:renewals' : MENU_KEY;
+  const perm = crudPermissions[menuKey] || { can_add: false, can_edit: false, can_delete: false };
   const canAdd = fullAccess || perm.can_add;
   const canEdit = fullAccess || perm.can_edit;
   const canDelete = fullAccess || perm.can_delete;
@@ -467,14 +474,14 @@ export function AssessmentEvaluation({
   }>({
     // Keyed by level so a Manager's cached full queue is never painted for an
     // Officer (and vice versa) — and held until permissions are known.
-    cacheKey: `ciac.assessments_queue.v2.${isManager ? 'l1' : 'l2'}`,
+    cacheKey: `ciac.assessments_queue.v3.${track}.${isManager ? 'l1' : 'l2'}`,
     enabled: permsReady && level.ready,
     ttlMs: 5 * 60 * 1000,
     fetcher: async () => {
       const [listJson, summaryJson, evJson] = await Promise.all([
-        apiFetch('/api/assessments'),
-        apiFetch('/api/assessments/summary'),
-        apiFetch('/api/assessments/evaluators'),
+        apiFetch(`/api/assessments?track=${track}`),
+        apiFetch(`/api/assessments/summary?track=${track}`),
+        apiFetch(`/api/assessments/evaluators?track=${track}`),
       ]);
       return {
         rows: listJson.data || [],
@@ -563,7 +570,7 @@ export function AssessmentEvaluation({
     params.delete('focus');
     params.delete('tab');
     const cleaned = params.toString();
-    navigate(`/assessment${cleaned ? `?${cleaned}` : ''}`, { replace: true });
+    navigate(`${basePath}${cleaned ? `?${cleaned}` : ''}`, { replace: true });
   }, [locationSearch, navigate]);
 
   const pg = usePagination(rows, pageSize, page);
@@ -577,56 +584,42 @@ export function AssessmentEvaluation({
     }
   }, [refresh]);
 
-  // "For Approval" (Level 1, new application): confirm, send it, then open
-  // the approval panel on this same page. Already sent → open the panel.
-  const [forApprovalTarget, setForApprovalTarget] = useState<{ id: number; no: string } | null>(null);
-  const [forApprovalBusy, setForApprovalBusy] = useState(false);
+  // "For Approval" (Level 1): one click — if Level 2's review is waiting it's
+  // sent for approval on the spot, then the approval panel opens on this same
+  // page. (Return to Evaluator in the panel undoes it.)
+  const [forApprovalBusyId, setForApprovalBusyId] = useState<number | null>(null);
   const [approvalPanelId, setApprovalPanelId] = useState<number | null>(null);
   const openForApproval = useCallback(
-    (row: { application_id: number; application_no: string }, alreadySent: boolean) => {
-      if (alreadySent) {
-        setSelectedId(null);
-        setApprovalPanelId(row.application_id);
-      } else {
-        setForApprovalTarget({ id: row.application_id, no: row.application_no });
+    async (row: { application_id: number; application_no: string }, alreadySent: boolean) => {
+      if (!alreadySent) {
+        setForApprovalBusyId(row.application_id);
+        try {
+          await apiFetch(`/api/assessments/${row.application_id}/for-approval`, { method: 'POST', body: '{}' });
+          await refreshAfterMutation();
+        } catch (err) {
+          toast.error((err as Error).message);
+          return;
+        } finally {
+          setForApprovalBusyId(null);
+        }
       }
-    },
-    []
-  );
-  const confirmForApproval = async () => {
-    if (!forApprovalTarget) return;
-    setForApprovalBusy(true);
-    try {
-      await apiFetch(`/api/assessments/${forApprovalTarget.id}/for-approval`, { method: 'POST', body: '{}' });
-      await refreshAfterMutation();
       setSelectedId(null);
-      setApprovalPanelId(forApprovalTarget.id);
-      setForApprovalTarget(null);
-    } catch (err) {
-      toast.error((err as Error).message);
-    } finally {
-      setForApprovalBusy(false);
-    }
-  };
+      setApprovalPanelId(row.application_id);
+    },
+    [refreshAfterMutation]
+  );
   const levelValue = useMemo(() => ({ isManager, openForApproval }), [isManager, openForApproval]);
 
-  const forApprovalButton = (r: AssessmentRow) => {
-    const sent = isAwaitingMyApproval(r);
-    if (!sent && !canSendForApproval(r)) return null;
-    return (
-      <button
-        type="button"
-        className="rounded-lg px-2.5 py-1 text-[11px] font-semibold whitespace-nowrap cursor-pointer"
-        style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
-        onClick={(e) => {
-          e.stopPropagation();
-          openForApproval(r, sent);
-        }}
-      >
-        For Approval
-      </button>
-    );
+  // Level 1 clicking a row whose review is in (or that's already "For
+  // Approval") goes straight to the approval panel; any other row opens the
+  // evaluation drawer. (No separate For Approval button.)
+  const openRow = (r: AssessmentRow) => {
+    if (forApprovalBusyId !== null) return; // one For Approval at a time
+    if (isAwaitingMyApproval(r)) void openForApproval(r, true);
+    else if (canSendForApproval(r)) void openForApproval(r, false);
+    else setSelectedId(r.application_id);
   };
+
 
   return (
     <div className="space-y-4 sm:space-y-5">
@@ -721,7 +714,7 @@ export function AssessmentEvaluation({
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' || e.key === ' ') {
                       e.preventDefault();
-                      setSelectedId(r.application_id);
+                      openRow(r);
                     }
                   }}
                   className="w-full text-left rounded-xl p-3 cursor-pointer active:bg-[var(--selected-bg)] transition-colors"
@@ -729,7 +722,7 @@ export function AssessmentEvaluation({
                     border: '1px solid var(--border-subtle)',
                     backgroundColor: 'color-mix(in oklab, var(--control-bg) 35%, transparent)',
                   }}
-                  onClick={() => setSelectedId(r.application_id)}
+                  onClick={() => openRow(r)}
                 >
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0 flex-1">
@@ -751,7 +744,7 @@ export function AssessmentEvaluation({
 
                   <div className="mt-2.5">
                     <div className="flex items-center justify-between mb-1 text-[10px]">
-                      <span className="uppercase tracking-wider text-secondary">Compliance</span>
+                      <span className="uppercase tracking-wider text-secondary">Compliance Progress</span>
                       <span className="font-semibold" style={{ color: 'var(--text)' }}>
                         {r.requirements_verified}/{r.requirements_total} verified
                       </span>
@@ -766,8 +759,6 @@ export function AssessmentEvaluation({
                       />
                     </div>
                   </div>
-
-                  {forApprovalButton(r) ? <div className="mt-2.5 flex justify-end">{forApprovalButton(r)}</div> : null}
 
                   <div className="mt-2.5 grid grid-cols-2 gap-2 text-[11px]">
                     <div className="min-w-0">
@@ -802,9 +793,8 @@ export function AssessmentEvaluation({
                   <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary">Locator</th>
                   <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary">Stage</th>
                   <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary">Evaluator</th>
-                  <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary">Compliance</th>
+                  <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary">Compliance Progress</th>
                   <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary text-right">Working Days</th>
-                  {isManager ? <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary text-right">Action</th> : null}
                 </tr>
               </thead>
               <tbody>
@@ -813,7 +803,7 @@ export function AssessmentEvaluation({
                     key={r.application_id}
                     className="cursor-pointer hover:bg-[var(--selected-bg)] transition-colors"
                     style={{ borderTop: '1px solid var(--border-subtle)' }}
-                    onClick={() => setSelectedId(r.application_id)}
+                    onClick={() => openRow(r)}
                   >
                     <td className="px-3 py-2.5">
                       <div className="font-semibold" style={{ color: 'var(--text)' }}>{r.application_no}</div>
@@ -829,9 +819,23 @@ export function AssessmentEvaluation({
                       />
                     </td>
                     <td className="px-3 py-2.5 text-[11px] text-secondary">{r.evaluator_name || r.evaluator_username || '—'}</td>
-                    <td className="px-3 py-2.5 text-[11px] text-secondary">
+                    <td className="px-3 py-2.5 text-[11px] text-secondary w-48">
+                      {/* Progress bar + verified/total; hover for the per-category breakdown. */}
                       <ComplianceTooltip breakdown={r.requirements_breakdown}>
-                        {r.requirements_verified}/{r.requirements_total} verified
+                        <div className="flex items-center gap-2">
+                          <div className="h-1.5 flex-1 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--control-bg)' }}>
+                            <div
+                              className="h-full rounded-full"
+                              style={{
+                                width: `${r.requirements_total ? Math.round((r.requirements_verified / r.requirements_total) * 100) : 0}%`,
+                                backgroundColor: 'var(--text)',
+                              }}
+                            />
+                          </div>
+                          <span className="shrink-0 text-[10px] tabular-nums">
+                            {r.requirements_verified}/{r.requirements_total}
+                          </span>
+                        </div>
                       </ComplianceTooltip>
                     </td>
                     <td className="px-3 py-2.5 text-right text-[11px] tabular-nums">
@@ -843,7 +847,6 @@ export function AssessmentEvaluation({
                         </span>
                       )}
                     </td>
-                    {isManager ? <td className="px-3 py-2.5 text-right">{forApprovalButton(r)}</td> : null}
                   </tr>
                 ))}
               </tbody>
@@ -902,20 +905,6 @@ export function AssessmentEvaluation({
         ) : null}
       </AnimatePresence>
       </AssessmentLevelContext.Provider>
-
-      <ConfirmModal
-        open={forApprovalTarget !== null}
-        title="Send for approval?"
-        description={
-          forApprovalTarget
-            ? `${forApprovalTarget.no} moves to For Approval and the approval panel opens, where you record charges and the contract and make the final decision.`
-            : undefined
-        }
-        confirmText="For Approval"
-        loading={forApprovalBusy}
-        onCancel={() => setForApprovalTarget(null)}
-        onConfirm={() => void confirmForApproval()}
-      />
     </div>
   );
 }
@@ -1904,7 +1893,7 @@ function RecommendationTab({
   run: RunFn;
 }) {
   const a = data.assessment;
-  const { isManager, openForApproval } = useAssessmentLevel();
+  const { isManager } = useAssessmentLevel();
   // Step 1 (Level 2 Officer) is open while the officer is working; step 2
   // (Level 1 Manager) once the officer has submitted. A final recommendation
   // stays locked until an admin reopens the assessment.
@@ -1912,7 +1901,6 @@ function RecommendationTab({
   const managerOpen = a.stage === 'FOR_RECOMMENDATION' && !a.recommendation;
 
   const [officerSummary, setOfficerSummary] = useState('');
-  const [managerSummary, setManagerSummary] = useState('');
 
   const totalReq = data.requirements.length;
   const verifiedReq = data.requirements.filter((r) => r.status === 'VERIFIED').length;
@@ -2010,7 +1998,10 @@ function RecommendationTab({
 
       {/* Step 2 — Level 1 Manager's final recommendation. Hidden until
           Level 2 has submitted (or once decided). */}
-      {a.recommendation || managerOpen ? (
+      {/* Level 1 uses "For Approval" on the queue row (Return to Evaluator is in
+          the approval panel), so there's no Step 2 form here — only the
+          outcome, or Level 2's "waiting" note. */}
+      {a.recommendation || (managerOpen && !isManager) ? (
       <div className="rounded-xl border p-3 flex flex-col gap-2" style={{ borderColor: 'var(--border)' }}>
         <div className="text-[11px] font-bold uppercase tracking-wide text-secondary">Step 2 · Level 1 recommendation</div>
         {a.recommendation ? (
@@ -2026,57 +2017,9 @@ function RecommendationTab({
               at={a.recommended_at}
               summary={a.recommendation_summary}
             />
-            {isManager && a.recommendation === 'ENDORSE' && openForApproval ? (
-              <button
-                type="button"
-                className="rounded-lg px-3 py-2 text-[13px] font-semibold"
-                style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
-                onClick={() => openForApproval(a, true)}
-              >
-                Open approval panel
-              </button>
-            ) : null}
           </>
-        ) : !isManager ? (
-          <div className="text-[12px] text-secondary">Submitted — waiting for Level 1's recommendation.</div>
         ) : (
-          <>
-            <Field label="Remarks (for Return to Level 2)">
-              <textarea
-                className={cn(inputCls, 'min-h-[70px] resize-y')}
-                value={managerSummary}
-                onChange={(e) => setManagerSummary(e.target.value)}
-                placeholder="What Level 2 should redo…"
-              />
-            </Field>
-            <div className="flex flex-col sm:flex-row gap-2">
-              <button
-                className="flex-1 rounded-lg px-3 py-2 text-[13px] font-semibold disabled:opacity-50"
-                style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
-                disabled={busy || !canEdit || !openForApproval}
-                onClick={() => openForApproval?.(a, false)}
-              >
-                For Approval
-              </button>
-              <button
-                className="rounded-lg px-3 py-2 text-[13px] font-semibold border disabled:opacity-50"
-                style={{ borderColor: 'var(--border)', color: 'var(--text)' }}
-                disabled={busy || !canEdit}
-                onClick={() =>
-                  run(
-                    () =>
-                      apiFetch(`/api/assessments/${a.application_id}/return-to-officer`, {
-                        method: 'POST',
-                        body: JSON.stringify({ note: managerSummary.trim() }),
-                      }),
-                    'Returned to Level 2'
-                  )
-                }
-              >
-                <RotateCcw size={13} className="inline mr-1" /> Return to Level 2
-              </button>
-            </div>
-          </>
+          <div className="text-[12px] text-secondary">Submitted — waiting for Level 1's recommendation.</div>
         )}
       </div>
       ) : null}

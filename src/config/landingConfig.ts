@@ -142,10 +142,17 @@ export const LANDING_CONFIG: Record<AppView, LandingConfig> = {
     },
   },
   'applications:renewals': {
-    title: 'Renewal Tracking',
-    description: 'Existing locators with lease agreements due for renewal.',
-    badge: 'Renewals',
+    title: 'Renewal Queue',
+    description: "Renewals under review by the locator's Account Officer.",
+    badge: 'Renewal Queue',
     icon: FileCheck,
+    // The Account Officer's renewal loop (filing, document review, For Approval).
+    isCrud: true,
+    crudHints: {
+      add: 'File renewals, add requirements and charges',
+      edit: 'Review renewal documents, submit, For Approval, contract',
+      delete: 'Remove a charge line',
+    },
     stats: [
       { label: 'Renewals This Year', value: '32' },
       { label: 'Expiring in 90 Days', value: '6' },
@@ -161,9 +168,9 @@ export const LANDING_CONFIG: Record<AppView, LandingConfig> = {
     },
   },
   'compliance:permits': {
-    title: 'Permits',
-    description: 'Monitoring of environmental, fire, occupancy and sanitary permits.',
-    badge: 'Compliance',
+    title: 'Renewal Tracking',
+    description: 'Permits and lease contracts with their expiry — renew an expiring or expired one from here.',
+    badge: 'Renewal Tracking',
     icon: ShieldCheck,
     // Backend (r_permits.js) already gates create/edit/deactivate behind
     // Control Panel CRUD permissions — this flag was missing, so the CRUD
@@ -361,6 +368,15 @@ export const LANDING_CONFIG: Record<AppView, LandingConfig> = {
   'settings:portal': {
     title: 'Portal Settings',
     description: 'Branding, outgoing email, integrations, security policy and announcements for the whole portal.',
+    badge: 'Configuration',
+    icon: Settings2,
+    adminOnly: true,
+    stats: [],
+    table: { columns: [], rows: [] },
+  },
+  'settings:workflow': {
+    title: 'Workflow Topology',
+    description: 'An animated map of the application workflow — who acts at each step, from a new locator to renewal.',
     badge: 'Configuration',
     icon: Settings2,
     adminOnly: true,

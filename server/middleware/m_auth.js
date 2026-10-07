@@ -185,6 +185,30 @@ function requireApprovalAccess(action = "view") {
 }
 
 /**
+ * Evaluation (assessment) routes: the BDO's Evaluation Queue
+ * (assessment:queue, new applications) or the Account Officer's renewal
+ * queue (applications:renewals). Which applications each may touch is
+ * enforced per application in c_assessments.js (ensureCanAct).
+ */
+function requireAssessmentAccess(action = "view") {
+  return async function assessmentAccessGuard(req, res, next) {
+    if (!req.user) {
+      return res.status(401).json({ success: false, message: "Access token required" });
+    }
+    const role = String(req.user.role || "").toLowerCase();
+    const allowed = async (menuKey) =>
+      (await checkMenuAllowed(role, menuKey, "view")) && (action === "view" || (await checkMenuAllowed(role, menuKey, action)));
+    try {
+      if ((await allowed("assessment:queue")) || (await allowed("applications:renewals"))) return next();
+      return res.status(403).json({ success: false, message: "Forbidden" });
+    } catch (error) {
+      console.error("Assessment access check failed:", error);
+      return res.status(500).json({ success: false, message: "Internal server error" });
+    }
+  };
+}
+
+/**
  * Gates a route behind ANY ONE of several menu permissions — used where one
  * screen's data (e.g. GET /api/users, shared by both "User Management" and
  * "Locator Accounts") is reachable from either sidebar entry, so holding
@@ -415,6 +439,7 @@ module.exports = {
   requireMenuAccess,
   requireAnyMenuAccess,
   requireApprovalAccess,
+  requireAssessmentAccess,
   checkMenuAllowed,
   requireUserMenuAccess,
   requireApplicationsAccess,

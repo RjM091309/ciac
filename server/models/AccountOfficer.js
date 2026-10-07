@@ -1,15 +1,33 @@
 /**
  * Account Officers (File Maintenance). Not a separate table: an account officer
- * is a dbo.users row holding the ACCOUNT OFFICER role, so proponents.account_officer_id,
+ * is a dbo.users row holding the Account Officer role (see AO_ROLE_FILTER), so proponents.account_officer_id,
  * notifications and the audit trail keep pointing at one identity. This model is
  * the officer-shaped view over that — plus the officer's department
  * (dbo.users.department_id -> dbo.department).
  */
 const { selectData, updateData } = require("../config/database");
 const User = require("./User");
-const Role = require("./Role");
 
-const ROLE_NAME = "ACCOUNT OFFICER";
+// The Account Officer role is whichever role works the Approved Queue
+// (Control Panel: approval:queue on, no Evaluation Queue) — not a fixed name,
+// so renaming the role or making a custom one keeps working.
+const AO_ROLE_FILTER = `
+  r.is_active = 1
+  AND LOWER(LTRIM(RTRIM(r.name))) NOT IN ('admin', 'proponent')
+  AND EXISTS (SELECT 1 FROM dbo.role_sidebar_menu_permissions p
+              WHERE p.role_id = r.id AND p.menu_key = 'approval:queue' AND p.is_enabled = 1)
+  AND NOT EXISTS (SELECT 1 FROM dbo.role_sidebar_menu_permissions q
+                  WHERE q.role_id = r.id AND q.menu_key = 'assessment:queue' AND q.is_enabled = 1)`;
+
+/** The role new Account Officers are created under (the lowest-id match). */
+async function getAccountOfficerRoleId() {
+  try {
+    const rows = await selectData(`SELECT TOP (1) r.id FROM dbo.roles r WHERE ${AO_ROLE_FILTER} ORDER BY r.id`);
+    return rows?.[0]?.id ?? null;
+  } catch {
+    return null; // Control Panel tables not created yet (fresh database at boot)
+  }
+}
 
 function toInt(v) {
   const n = Number(v);
@@ -32,7 +50,7 @@ const SELECT_OFFICERS = `
     (SELECT COUNT(*) FROM dbo.proponents p WHERE p.account_officer_id = u.id) AS locator_count
   FROM dbo.users u
   INNER JOIN dbo.user_roles ur ON ur.user_id = u.id
-  INNER JOIN dbo.roles r ON r.id = ur.role_id AND UPPER(r.name) = '${ROLE_NAME}'
+  INNER JOIN dbo.roles r ON r.id = ur.role_id AND ${AO_ROLE_FILTER}
   LEFT JOIN dbo.department d ON d.id = u.department_id
 `;
 
@@ -71,8 +89,10 @@ async function setDepartment(userId, departmentId) {
 }
 
 async function createAccountOfficer({ username, email, phone, full_name, password, department_id }) {
-  const roleId = await Role.getActiveRoleIdByName(ROLE_NAME);
-  if (!roleId) throw new Error(`The ${ROLE_NAME} role does not exist or is inactive.`);
+  const roleId = await getAccountOfficerRoleId();
+  if (!roleId) {
+    throw new Error("No Account Officer role is set up — give a role the Approved Queue in Control Panel first.");
+  }
   const user = await User.createUser({ username, email, phone, full_name, password, role_id: roleId });
   if (user?.id && toInt(department_id)) await setDepartment(user.id, department_id);
   return getAccountOfficerById(user?.id);
@@ -110,12 +130,12 @@ const LEGACY_OFFICER_DEPARTMENTS = [
   ["LYN SANCHEZ (Legacy Import)", "MD"],
 ];
 
-/** Boot-time, idempotent: gives the migrated legacy officers the ACCOUNT OFFICER role
+/** Boot-time, idempotent: gives the migrated legacy officers the Account Officer role
  * and their department. Only touches a user that still has no role / no department,
  * so it never overrides something an admin set, and it does nothing on a database
  * where those users don't exist. */
 async function applyLegacyOfficerDefaults() {
-  const roleId = await Role.getActiveRoleIdByName(ROLE_NAME);
+  const roleId = await getAccountOfficerRoleId();
   if (!roleId) return;
   for (const [fullName, deptCode] of LEGACY_OFFICER_DEPARTMENTS) {
     await updateData(

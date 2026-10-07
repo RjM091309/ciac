@@ -25,7 +25,7 @@ const LocatorUsersManagement = lazy(() => import('./components/settings/LocatorU
 const ControlPanelManagement = lazy(() => import('./components/settings/ControlPanelManagement').then((m) => ({ default: m.ControlPanelManagement })));
 const ProponentsManagement = lazy(() => import('./components/proponent/ProponentsManagement').then((m) => ({ default: m.ProponentsManagement })));
 const RequirementsManagement = lazy(() => import('./components/applications/Requirements').then((m) => ({ default: m.RequirementsManagement })));
-const ApplicationsWorkflow = lazy(() => import('./components/applications/ApplicationsWorkflow').then((m) => ({ default: m.ApplicationsWorkflow })));
+const RenewalTracking = lazy(() => import('./components/applications/RenewalTracking').then((m) => ({ default: m.RenewalTracking })));
 const AssessmentEvaluation = lazy(() => import('./components/assessment/AssessmentEvaluation').then((m) => ({ default: m.AssessmentEvaluation })));
 const AccountOfficerAssignment = lazy(() =>
   import('./components/approval/AccountOfficerAssignment').then((m) => ({ default: m.AccountOfficerAssignment }))
@@ -37,6 +37,7 @@ const BuildingManagement = lazy(() => import('./components/FileMaintenance/Build
 const LandUseManagement = lazy(() => import('./components/FileMaintenance/LandUse').then((m) => ({ default: m.LandUseManagement })));
 const AuditLog = lazy(() => import('./components/settings/AuditLog').then((m) => ({ default: m.AuditLog })));
 const PortalSettings = lazy(() => import('./components/settings/PortalSettings').then((m) => ({ default: m.PortalSettings })));
+const WorkflowTopology = lazy(() => import('./components/settings/WorkflowTopology').then((m) => ({ default: m.WorkflowTopology })));
 const ReportsAnalytics = lazy(() => import('./components/reports/ReportsAnalytics').then((m) => ({ default: m.ReportsAnalytics })));
 
 /** "New Application" no longer has its own page — a locator account and its
@@ -104,6 +105,7 @@ const VIEW_TO_PATH: Record<AppView, string> = {
   'settings:audit-log': '/settings/audit-log',
   'settings:control-panel': '/settings/control-panel',
   'settings:portal': '/settings/portal',
+  'settings:workflow': '/settings/workflow',
 };
 
 const PATH_TO_VIEW = Object.entries(VIEW_TO_PATH).reduce(
@@ -598,7 +600,7 @@ export default function App() {
               ) : view === 'applications:new' ? (
                 <RedirectToLocatorAccounts navigate={navigate} />
               ) : view === 'applications:renewals' ? (
-                <ApplicationsWorkflow renewalMode={true} locationSearch={locationSearch} navigate={navigate} />
+                <RenewalTracking locationSearch={locationSearch} navigate={navigate} />
               ) : view === 'applications:requirements' ? (
                 <RequirementsManagement />
               ) : view === 'assessment:queue' ? (
@@ -610,7 +612,7 @@ export default function App() {
               ) : view === 'reports:analytics' ? (
                 <ReportsAnalytics navigate={navigate} />
               ) : view === 'settings:proponents' ? (
-                <ProponentsManagement locationSearch={locationSearch} navigate={navigate} currentUserRoleName={user?.roleName} />
+                <ProponentsManagement locationSearch={locationSearch} navigate={navigate} />
               ) : view === 'settings:application-types' ? (
                 <ApplicationTypesManagement />
               ) : view === 'settings:type-of-contract' ? (
@@ -626,6 +628,9 @@ export default function App() {
               ) : view === 'settings:portal' ? (
                 // Administrators only (the API refuses everyone else too).
                 user?.role === 'admin' ? <PortalSettings /> : <RedirectTo to="/dashboard" navigate={navigate} />
+              ) : view === 'settings:workflow' ? (
+                // Administrators only.
+                user?.role === 'admin' ? <WorkflowTopology /> : <RedirectTo to="/dashboard" navigate={navigate} />
               ) : view === 'compliance:permits' ? (
                 <PermitsManagement locationSearch={locationSearch} navigate={navigate} />
               ) : (
@@ -680,9 +685,9 @@ const LANDING_CONFIG: Record<AppView, LandingConfig> = {
     },
   },
   'applications:renewals': {
-    title: 'Renewal Tracking',
-    description: 'Existing locators with lease agreements due for renewal.',
-    badge: 'Renewals',
+    title: 'Renewal Queue',
+    description: "Renewals under review by the locator's Account Officer.",
+    badge: 'Renewal Queue',
     icon: FileCheck,
     stats: [
       { label: 'Renewals This Year', value: '32' },
@@ -756,9 +761,9 @@ const LANDING_CONFIG: Record<AppView, LandingConfig> = {
     },
   },
   'compliance:permits': {
-    title: 'Permits',
-    description: 'Monitoring of environmental, fire, occupancy and sanitary permits.',
-    badge: 'Compliance',
+    title: 'Renewal Tracking',
+    description: 'Permits and lease contracts with their expiry — renew an expiring or expired one from here.',
+    badge: 'Renewal Tracking',
     icon: ShieldCheck,
     stats: [
       { label: 'Valid Permits', value: '211' },
@@ -950,6 +955,13 @@ const LANDING_CONFIG: Record<AppView, LandingConfig> = {
   'settings:portal': {
     title: 'Portal Settings',
     description: 'Branding, outgoing email, integrations, security policy and announcements for the whole portal.',
+    badge: 'Configuration',
+    icon: Settings2,
+    stats: [],
+    table: { columns: [], rows: [] },
+  },  'settings:workflow': {
+    title: 'Workflow Topology',
+    description: 'An animated map of the application workflow — who acts at each step, from a new locator to renewal.',
     badge: 'Configuration',
     icon: Settings2,
     stats: [],

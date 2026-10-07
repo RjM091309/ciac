@@ -2,6 +2,7 @@ const Assessment = require("../models/AssessmentEvaluation");
 const Workflow = require("../models/ApplicationWorkflow");
 const AuditLog = require("../models/AuditLog");
 const { publicErrorMessage } = require("../lib/httpError");
+const { departmentOf } = require("../lib/departments");
 
 function fail(res, error, label) {
   console.error(`${label} error:`, error);
@@ -24,18 +25,42 @@ function appIdParam(req, res) {
  * doesn't re-query the Control Panel tables. */
 async function scopeFor(req) {
   if (!req.assessmentScope) {
+    const department = await departmentOf(req.user);
+    const track = String(req.query?.track || "").toLowerCase();
     req.assessmentScope = {
       manager: await Assessment.isManager(req.user),
       userId: Number(req.user?.id) || null,
+      department,
+      // BDO works new applications, the Account Officer works renewals;
+      // admin sees both unless the screen asks for one (?track=new|renewal).
+      renewal:
+        department === "bdo" ? false : department === "ao" ? true : track === "renewal" ? true : track === "new" ? false : undefined,
     };
   }
   return req.assessmentScope;
 }
 
-/** A Level 2 Officer may only touch applications assigned to them; a Manager
- * passes straight through. Sends the 403 itself and returns false on denial. */
+/** Sends a 403 and returns false when the application belongs to the other
+ * department (a renewal for the BDO, a new application for an Account Officer). */
+async function ensureDepartment(req, res, applicationId) {
+  const scope = await scopeFor(req);
+  if (scope.department !== "bdo" && scope.department !== "ao") return true;
+  const app = await Workflow.getApplicationById(applicationId);
+  if (!app) return true; // the handler reports the 404
+  if (Boolean(Number(app.is_renewal)) === (scope.department === "ao")) return true;
+  res.status(403).json({
+    success: false,
+    message: scope.department === "ao" ? "New applications are handled by the BDO." : "Renewals are handled by the Account Officer.",
+  });
+  return false;
+}
+
+/** A Level 2 may only touch applications assigned to them; Level 1 passes
+ * straight through — both only within their own department. Sends the 403
+ * itself and returns false on denial. */
 async function ensureCanAct(req, res, applicationId) {
   const scope = await scopeFor(req);
+  if (applicationId && !(await ensureDepartment(req, res, applicationId))) return false;
   if (scope.manager) return true;
   if (applicationId && scope.userId && (await Assessment.getAssignedEvaluatorId(applicationId)) === scope.userId) {
     return true;
@@ -52,6 +77,7 @@ exports.list = async (req, res) => {
       // Level 2 only ever sees their own assignments, whatever the query says.
       evaluatorId: scope.manager ? req.query.evaluatorId : scope.userId,
       search: req.query.search,
+      renewal: scope.renewal,
     });
     return res.json({ success: true, data: rows });
   } catch (error) {
@@ -64,7 +90,10 @@ exports.list = async (req, res) => {
 exports.me = async (req, res) => {
   try {
     const scope = await scopeFor(req);
-    return res.json({ success: true, data: { level: scope.manager ? 1 : 2, manager: scope.manager, userId: scope.userId } });
+    return res.json({
+      success: true,
+      data: { level: scope.manager ? 1 : 2, manager: scope.manager, userId: scope.userId, department: scope.department },
+    });
   } catch (error) {
     return fail(res, error, "Assessment level");
   }
@@ -73,7 +102,7 @@ exports.me = async (req, res) => {
 exports.summary = async (req, res) => {
   try {
     const scope = await scopeFor(req);
-    const data = await Assessment.getSummary({ evaluatorId: scope.manager ? null : scope.userId });
+    const data = await Assessment.getSummary({ evaluatorId: scope.manager ? null : scope.userId, renewal: scope.renewal });
     return res.json({ success: true, data });
   } catch (error) {
     return fail(res, error, "Assessment summary");
@@ -84,7 +113,12 @@ exports.evaluators = async (req, res) => {
   try {
     // Only a Manager assigns, so only a Manager needs the picker's list.
     const scope = await scopeFor(req);
-    const data = scope.manager ? await Assessment.listAssignableEvaluators() : [];
+    // Renewals are evaluated by a Level 2 Account Officer, new applications by a Level 2 BDO.
+    const data = !scope.manager
+      ? []
+      : scope.renewal
+        ? await require("../models/ApprovalIssuance").listAssignableAccountOfficers()
+        : await Assessment.listAssignableEvaluators();
     return res.json({ success: true, data });
   } catch (error) {
     return fail(res, error, "List evaluators");
@@ -111,9 +145,18 @@ exports.assign = async (req, res) => {
     if (!(await scopeFor(req)).manager) {
       return res.status(403).json({ success: false, message: "Only Level 1 can assign evaluators." });
     }
+    if (!(await ensureCanAct(req, res, id))) return undefined;
     const { evaluator_id } = req.body || {};
     if (!Number.isFinite(Number(evaluator_id))) {
       return res.status(400).json({ success: false, message: "evaluator_id is required" });
+    }
+    // Only a Level 2 of the application's own department can take it.
+    const app = await Workflow.getApplicationById(id);
+    const pool = Number(app?.is_renewal)
+      ? await require("../models/ApprovalIssuance").listAssignableAccountOfficers()
+      : await Assessment.listAssignableEvaluators();
+    if (!pool.some((u) => Number(u.id) === Number(evaluator_id))) {
+      return res.status(400).json({ success: false, message: "That user can't evaluate this application." });
     }
     const data = await Assessment.assignEvaluator(id, {
       evaluatorId: evaluator_id,
@@ -184,17 +227,6 @@ exports.reopen = async (req, res) => {
   }
 };
 
-exports.approvers = async (req, res) => {
-  try {
-    // Only the Manager's final recommendation picks an Account Officer.
-    const scope = await scopeFor(req);
-    const data = scope.manager ? await Assessment.listAssignableApprovers() : [];
-    return res.json({ success: true, data });
-  } catch (error) {
-    return fail(res, error, "List approvers");
-  }
-};
-
 /** Level 2 Officer → Manager: the officer's own recommendation. */
 exports.officerReview = async (req, res) => {
   try {
@@ -235,6 +267,7 @@ exports.returnToOfficer = async (req, res) => {
     if (!(await scopeFor(req)).manager) {
       return res.status(403).json({ success: false, message: "Only Level 1 can return a review." });
     }
+    if (!(await ensureCanAct(req, res, id))) return undefined;
     const { note } = req.body || {};
     const data = await Assessment.returnToOfficer(id, { note, actorId: req.user?.id ?? null });
     if (!data) return res.status(404).json({ success: false, message: "Application not found" });
@@ -262,6 +295,7 @@ exports.forApproval = async (req, res) => {
     if (!(await scopeFor(req)).manager) {
       return res.status(403).json({ success: false, message: "Only Level 1 can send an application for approval." });
     }
+    if (!(await ensureCanAct(req, res, id))) return undefined;
     const data = await Assessment.sendForApproval(id, { summary: req.body?.summary, actorId: req.user?.id ?? null });
     if (!data) return res.status(404).json({ success: false, message: "Application not found" });
     await AuditLog.record({
@@ -276,43 +310,6 @@ exports.forApproval = async (req, res) => {
     return res.json({ success: true, data });
   } catch (error) {
     return fail(res, error, "Send for approval");
-  }
-};
-
-/** Level 1 Manager's final recommendation (Approve → Account Officer, or Disapprove). */
-exports.recommendation = async (req, res) => {
-  try {
-    const id = appIdParam(req, res);
-    if (id === null) return undefined;
-    if (!(await scopeFor(req)).manager) {
-      return res.status(403).json({ success: false, message: "Only Level 1 can make the final recommendation." });
-    }
-    const { recommendation, summary, approver_id } = req.body || {};
-    const data = await Assessment.submitRecommendation(id, {
-      recommendation,
-      summary,
-      approverId: approver_id,
-      actorId: req.user?.id ?? null,
-    });
-    if (!data) return res.status(404).json({ success: false, message: "Application not found" });
-    await AuditLog.record({
-      actorId: req.user?.id,
-      actorUsername: req.user?.username,
-      action: "ASSESSMENT_RECOMMENDATION_SUBMITTED",
-      entityType: "application",
-      entityId: id,
-      details: {
-        application_no: data?.assessment?.application_no,
-        proponent_name: data?.assessment?.proponent_name,
-        recommendation,
-        approver_name: data?.assessment?.approver_name || data?.assessment?.approver_username || undefined,
-        summary: summary || undefined,
-      },
-      req,
-    });
-    return res.json({ success: true, data });
-  } catch (error) {
-    return fail(res, error, "Submit recommendation");
   }
 };
 

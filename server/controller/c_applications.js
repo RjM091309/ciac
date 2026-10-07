@@ -11,6 +11,7 @@ const { diffChanges } = require("../lib/auditDiff");
 const { generateTempPassword } = require("../lib/password");
 const { sendTempPasswordEmail } = require("./c_users");
 const { publicErrorMessage } = require("../lib/httpError");
+const { departmentOf, aoLevel2Id } = require("../lib/departments");
 const { resolveStoredPath, relativeStoragePath } = require("../lib/fileStorage");
 
 /** A locator account created via Locator Accounts with a business profile
@@ -84,6 +85,12 @@ async function loadWithAccess(req, applicationId) {
     if (level2UserId && !ownDraft && (await Assessment.getAssignedEvaluatorId(applicationId)) !== level2UserId) {
       return { application, forbidden: true };
     }
+    // A Level 2 Account Officer only reaches their own locators' applications.
+    const aoL2 = await aoLevel2Id(req.user);
+    if (aoL2) {
+      const prop = await Proponent.getProponentById(application.proponent_id);
+      if (Number(prop?.account_officer_id) !== aoL2) return { application, forbidden: true };
+    }
     return { application, forbidden: false };
   }
 
@@ -111,6 +118,14 @@ exports.list = async (req, res) => {
       );
       return res.json({ success: true, data: visible });
     }
+    // A Level 2 Account Officer sees only their own locators' applications.
+    const aoL2 = await aoLevel2Id(req.user);
+    if (aoL2) {
+      const mine = new Set(
+        (await Proponent.listProponentIdsForAccountOfficer(aoL2)).map(Number)
+      );
+      return res.json({ success: true, data: rows.filter((r) => mine.has(Number(r.proponent_id))) });
+    }
     return res.json({ success: true, data: rows });
   } catch (error) {
     console.error("List applications error:", error);
@@ -128,6 +143,51 @@ exports.getById = async (req, res) => {
     return res.json({ success: true, data: application });
   } catch (error) {
     console.error("Get application error:", error);
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
+  }
+};
+
+/** A submitted renewal goes straight to the locator's own Account Officer
+ * (Level 2) for review — no BDO, no assigning step. No-op if it's already
+ * assigned or the locator has no Account Officer. */
+async function assignRenewalToAccountOfficer(applicationId, actorId) {
+  try {
+    const app = await Workflow.getApplicationById(applicationId);
+    if (!app || !Number(app.is_renewal)) return;
+    if (await Assessment.getAssignedEvaluatorId(applicationId)) return;
+    const prop = await Proponent.getProponentById(app.proponent_id);
+    if (!prop?.account_officer_id) return;
+    await Assessment.assignEvaluator(applicationId, { evaluatorId: prop.account_officer_id, actorId });
+  } catch (error) {
+    console.error("Assign renewal to Account Officer error:", error);
+  }
+}
+
+/** Permits' "Renew" (one confirmation, no form): files and submits the
+ * renewal straight away — same locator, industry type and type of contract
+ * as their latest approved application, linked to the permit — then it goes
+ * to the locator's Account Officer like any renewal (exports.create does the
+ * checks: Account Officer only, own locators for Level 2, one open renewal). */
+exports.renewFromPermit = async (req, res) => {
+  try {
+    const Permit = require("../models/Permit");
+    const permit = await Permit.getById(Number(req.params.permitId));
+    if (!permit) return res.status(404).json({ success: false, message: "Permit not found" });
+    const latest = await Workflow.getLatestApprovedApplication(permit.proponent_id);
+    if (!latest) {
+      return res.status(400).json({ success: false, message: "This locator has no approved application to renew." });
+    }
+    req.body = {
+      proponent_id: permit.proponent_id,
+      application_type: latest.application_type,
+      contract_type_id: latest.contract_type_id ?? null,
+      is_renewal: 1,
+      save_as_draft: false,
+      renewed_from_permit_id: permit.id,
+    };
+    return exports.create(req, res);
+  } catch (error) {
+    console.error("Renew from permit error:", error);
     return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };
@@ -153,6 +213,22 @@ exports.create = async (req, res) => {
 
     if (!Number.isFinite(Number(proponent_id))) {
       return res.status(400).json({ success: false, message: "proponent_id is required" });
+    }
+    // Renewals are between the Account Officer and the locator: filed by the
+    // Account Officer (a Level 2 only for their own locators), never the BDO.
+    const renewal = Boolean(Number(is_renewal));
+    if (renewal) {
+      const department = await departmentOf(req.user);
+      if (department !== "ao" && department !== "admin") {
+        return res.status(403).json({ success: false, message: "Renewals are filed by the locator's Account Officer." });
+      }
+      const ownOnly = await aoLevel2Id(req.user);
+      if (ownOnly) {
+        const prop = await Proponent.getProponentById(Number(proponent_id));
+        if (Number(prop?.account_officer_id) !== ownOnly) {
+          return res.status(403).json({ success: false, message: "You can only file renewals for your own locators." });
+        }
+      }
     }
     const normalizedType = String(application_type || "").trim().toUpperCase();
     if (!normalizedType) {
@@ -181,6 +257,7 @@ exports.create = async (req, res) => {
     // Only a real submission activates a still-pending locator — a draft
     // isn't a commitment yet, so it shouldn't hand out login access.
     const activation = save_as_draft ? null : await activateLocatorIfPending(proponent_id, req.user?.id ?? null);
+    if (renewal && !save_as_draft) await assignRenewalToAccountOfficer(row?.id, req.user?.id ?? null);
 
     await AuditLog.record({
       actorId: req.user?.id,
@@ -262,6 +339,8 @@ exports.submit = async (req, res) => {
     // real submission" moment, just reached via Continue Draft/Resubmit
     // instead. No-ops if the locator's account is already ACTIVE.
     const activation = await activateLocatorIfPending(row.proponent_id, req.user?.id ?? null);
+    // A renewal saved as a draft reaches its Account Officer on first submit.
+    await assignRenewalToAccountOfficer(row.id, req.user?.id ?? null);
 
     await AuditLog.record({
       actorId: req.user?.id,

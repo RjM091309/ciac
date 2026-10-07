@@ -633,8 +633,16 @@ async function getMeta() {
       FROM dbo.users u
       INNER JOIN dbo.user_roles ur ON ur.user_id = u.id
       INNER JOIN dbo.roles r ON r.id = ur.role_id
-      WHERE u.is_active = 1
-        AND LOWER(LTRIM(RTRIM(r.name))) IN ('admin', 'administrator', 'officer', 'account officer')
+      WHERE u.is_active = 1 AND r.is_active = 1
+        -- Inspectors: admins, plus anyone whose role has the Inspections menu
+        -- (Control Panel), whatever the role is called.
+        AND (
+          LOWER(LTRIM(RTRIM(r.name))) = 'admin'
+          OR EXISTS (
+            SELECT 1 FROM dbo.role_sidebar_menu_permissions p
+            WHERE p.role_id = r.id AND p.menu_key = 'compliance:inspections' AND p.is_enabled = 1
+          )
+        )
       ORDER BY u.full_name
     `),
     selectData(`SELECT id, business_name FROM dbo.proponents WHERE is_active = 1 ORDER BY business_name`),

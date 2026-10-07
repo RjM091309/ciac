@@ -352,13 +352,14 @@ export function AppSidebar({
   const showDashboard = canView('dashboard');
   const showApplicationsMgmt =
     canView('applications:renewals') ||
+    canView('compliance:permits') ||
     canView('settings:proponents') ||
     canView('settings:locator-users') ||
     canView('assessment:queue') ||
     canView('approval:queue');
   const showComplianceInspection = canView('compliance:inspections');
   const showPermits = canView('compliance:permits');
-  const showComplianceGroup = showComplianceInspection || showPermits;
+  const showComplianceGroup = showComplianceInspection;
   const showReports = canView('reports:analytics');
   // Portal Settings is for administrators only — never a Control Panel grant,
   // and not shown while previewing another role's sidebar.
@@ -390,22 +391,26 @@ export function AppSidebar({
     canView('assessment:queue') && { key: 'assessment:queue', label: 'Evaluation Queue', active: view === 'assessment:queue', onClick: () => onViewChange('assessment:queue'), icon: ClipboardCheck },
     canView('approval:queue') && { key: 'approval:queue', label: 'Approved Queue', active: view === 'approval:queue', onClick: () => onViewChange('approval:queue'), icon: Stamp },
     canView('settings:proponents') && { key: 'settings:proponents', label: 'Registered Locator', active: view === 'settings:proponents', onClick: () => onViewChange('settings:proponents'), icon: Users },
-    canView('applications:renewals') && { key: 'applications:renewals', label: 'Renewal Tracking', active: view === 'applications:renewals', onClick: () => onViewChange('applications:renewals'), icon: RefreshCw },
+    // Renewal Tracking = permits/contracts and their expiry (Renew starts a
+    // renewal); Renewal Queue = the Account Officer's renewal review.
+    canView('compliance:permits') && { key: 'compliance:permits', label: 'Renewal Tracking', active: view === 'compliance:permits', onClick: () => onViewChange('compliance:permits'), icon: ShieldCheck },
+    canView('applications:renewals') && { key: 'applications:renewals', label: 'Renewal Queue', active: view === 'applications:renewals', onClick: () => onViewChange('applications:renewals'), icon: RefreshCw },
   ].filter(Boolean) as SidebarLeaf[];
 
   const complianceInspectionItems: SidebarLeaf[] = [
     canView('compliance:inspections') && { key: 'compliance:inspections', label: 'Inspections & Monitoring', active: view === 'compliance:inspections', onClick: () => onViewChange('compliance:inspections') },
   ].filter(Boolean) as SidebarLeaf[];
 
-  const permitsItems: SidebarLeaf[] = !canView('compliance:permits') ? [] : [
-    { key: 'compliance:permits', label: 'Environmental, Fire, Occupancy, Sanitary', active: view === 'compliance:permits', onClick: () => onViewChange('compliance:permits') },
-  ];
+  // Permits moved under Applications as "Renewal Tracking".
+  const permitsItems: SidebarLeaf[] = [];
 
   const systemSettingsItems: SidebarLeaf[] = [
     canView('settings:users') && { key: 'settings:users', label: 'User Management', active: view === 'settings:users', onClick: () => onViewChange('settings:users') },
     canView('settings:control-panel') && { key: 'settings:control-panel', label: 'Control Panel', active: view === 'settings:control-panel', onClick: () => onViewChange('settings:control-panel') },
     canView('settings:audit-log') && { key: 'settings:audit-log', label: 'Audit Log', active: view === 'settings:audit-log', onClick: () => onViewChange('settings:audit-log') },
     showPortalSettings && { key: 'settings:portal', label: 'Portal Settings', active: view === 'settings:portal', onClick: () => onViewChange('settings:portal') },
+    // Admin only, same as Portal Settings.
+    showPortalSettings && { key: 'settings:workflow', label: 'Workflow Topology', active: view === 'settings:workflow', onClick: () => onViewChange('settings:workflow') },
   ].filter(Boolean) as SidebarLeaf[];
 
   const fileMaintenanceItems: SidebarLeaf[] = [
@@ -439,12 +444,12 @@ export function AppSidebar({
     // Same full labels as the desktop sidebar, so the two menus read the same.
     const SHEET_TILES: Record<string, { label: string; icon: any }> = {
       dashboard: { label: 'Dashboard', icon: LayoutDashboard },
-      'applications:renewals': { label: 'Renewal Tracking', icon: RefreshCw },
+      'applications:renewals': { label: 'Renewal Queue', icon: RefreshCw },
       'settings:proponents': { label: 'Registered Locator', icon: Users },
       'assessment:queue': { label: 'Evaluation Queue', icon: ClipboardCheck },
       'approval:queue': { label: 'Approved Queue', icon: Stamp },
       'compliance:inspections': { label: 'Compliance & Inspection', icon: ClipboardCheck },
-      'compliance:permits': { label: 'Permit & Contract', icon: ShieldCheck },
+      'compliance:permits': { label: 'Renewal Tracking', icon: ShieldCheck },
       'reports:analytics': { label: 'Reports & Analytics', icon: BarChart3 },
     };
     const leaf = (key: AppView): SidebarLeaf => ({ key, label: '', active: view === key, onClick: () => onViewChange(key) });
@@ -559,7 +564,7 @@ export function AppSidebar({
           )}
 
           {showComplianceGroup && (
-          <SidebarGroup title="Compliance & Permits" collapsed={collapsed}>
+          <SidebarGroup title="Compliance" collapsed={collapsed}>
             <div className="flex flex-col gap-1.5">
               <SidebarSection
                 icon={ClipboardCheck}
@@ -569,16 +574,6 @@ export function AppSidebar({
                 collapsed={collapsed}
                 isOpen={isDropdownOpen('compliance-inspection')}
                 onToggle={() => toggleDropdown('compliance-inspection')}
-                onDirectSelect={closeDropdowns}
-              />
-              <SidebarSection
-                icon={ShieldCheck}
-                label="Permit & Contract"
-                items={permitsItems}
-                flat={flat}
-                collapsed={collapsed}
-                isOpen={isDropdownOpen('permits')}
-                onToggle={() => toggleDropdown('permits')}
                 onDirectSelect={closeDropdowns}
               />
             </div>

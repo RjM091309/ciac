@@ -56,6 +56,32 @@ async function ensureApprovalAccess(req, res, applicationId) {
   return false;
 }
 
+/** Approval panel "Return to Evaluator": Level 1 undoes their For Approval. */
+exports.returnToLevel2 = async (req, res) => {
+  try {
+    const id = appIdParam(req, res);
+    if (id === null) return undefined;
+    if (!(await ensureApprovalAccess(req, res, id))) return undefined;
+    const data = await Approval.returnToLevel2(id, { note: req.body?.note, actorId: req.user?.id ?? null });
+    await AuditLog.record({
+      actorId: req.user?.id,
+      actorUsername: req.user?.username,
+      action: "APPROVAL_RETURNED_TO_LEVEL2",
+      entityType: "application",
+      entityId: id,
+      details: {
+        application_no: data?.approval?.application_no,
+        proponent_name: data?.approval?.proponent_name,
+        note: String(req.body?.note || "").trim() || undefined,
+      },
+      req,
+    });
+    return res.json({ success: true, data });
+  } catch (error) {
+    return fail(res, error, "Return to Evaluator");
+  }
+};
+
 /* ---------------------- Account Officer assignment ------------------------ */
 
 /** Level 1 Account Officer (or admin): the one who assigns the Level 2. */
@@ -108,27 +134,6 @@ exports.assignAccountOfficer = async (req, res) => {
 };
 
 /* --------------------------------- Queue ---------------------------------- */
-
-exports.list = async (req, res) => {
-  try {
-    const rows = await Approval.listApprovals({
-      status: req.query.status,
-      search: req.query.search,
-      assigneeId: assigneeScope(req),
-    });
-    return res.json({ success: true, data: rows });
-  } catch (error) {
-    return fail(res, error, "List approvals");
-  }
-};
-
-exports.summary = async (req, res) => {
-  try {
-    return res.json({ success: true, data: await Approval.getSummary({ assigneeId: assigneeScope(req) }) });
-  } catch (error) {
-    return fail(res, error, "Approval summary");
-  }
-};
 
 exports.detail = async (req, res) => {
   try {

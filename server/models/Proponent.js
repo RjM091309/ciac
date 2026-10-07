@@ -383,6 +383,7 @@ async function listProponents({ approvedOnly = false } = {}) {
       p.created_at,
       p.updated_at,
       p.is_active,
+      p.account_officer_id,
       u.email AS email,
       u.full_name AS contact_name,
       u.status AS account_status
@@ -1068,7 +1069,15 @@ async function saveInvestment(id, fields, actorId) {
   return Investment().getForProponent(id);
 }
 
+/** Ids of the locators assigned to one Account Officer. */
+async function listProponentIdsForAccountOfficer(userId) {
+  await ensureSchema();
+  const rows = await selectData(`SELECT id FROM dbo.proponents WHERE account_officer_id = @param0`, [toInt(userId)]);
+  return rows.map((r) => r.id);
+}
+
 module.exports = {
+  listProponentIdsForAccountOfficer,
   ensureSchema,
   saveStockholders,
   saveContacts,

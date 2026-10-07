@@ -26,6 +26,8 @@ const STATUS_STYLE: Record<string, { bg: string; color: string }> = {
   EXPIRING: { bg: 'rgba(245,158,11,0.14)', color: '#f59e0b' },
   EXPIRED: { bg: '#f43f5e', color: '#ffffff' },
   REVOKED: { bg: 'rgba(148,163,184,0.14)', color: '#94a3b8' },
+  // Superseded by an approved renewal's new contract.
+  RENEWED: { bg: 'rgba(16,185,129,0.14)', color: '#10b981' },
 };
 
 type PermitRow = {
@@ -191,7 +193,13 @@ export function PermitsManagement({
     onError: (e) => toast.error(e instanceof Error ? e.message : 'Failed to load'),
   });
 
-  const permits = data?.permits ?? [];
+  // Renewal Tracking lists only what's due: EXPIRING (within a year) or
+  // EXPIRED. VALID, REVOKED and RENEWED (superseded by an approved renewal)
+  // permits stay off this list.
+  const permits = useMemo(
+    () => (data?.permits ?? []).filter((p) => p.effective_status === 'EXPIRING' || p.effective_status === 'EXPIRED'),
+    [data?.permits]
+  );
   useEffect(() => {
     if (highlightId != null) highlightedRowRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }, [highlightId, permits]);
@@ -222,7 +230,7 @@ export function PermitsManagement({
     let next90 = 0;
     let overdue = 0;
     for (const p of permits) {
-      if (p.effective_status === 'REVOKED') continue;
+      if (p.effective_status === 'REVOKED' || p.effective_status === 'RENEWED') continue;
       const days = daysUntil(p.expiry_date);
       if (days === null) continue;
       if (days < 0) overdue += 1;
@@ -236,7 +244,7 @@ export function PermitsManagement({
     let base = permits;
     if (expiryFilter) {
       base = base.filter((p) => {
-        if (p.effective_status === 'REVOKED') return false;
+        if (p.effective_status === 'REVOKED' || p.effective_status === 'RENEWED') return false;
         const days = daysUntil(p.expiry_date);
         if (days === null) return false;
         if (expiryFilter === 'OVERDUE') return days < 0;
@@ -318,6 +326,25 @@ export function PermitsManagement({
     }
   }
 
+  // "Renew": one confirmation, then the renewal is filed and submitted for this
+  // permit's locator and you land on Renewal Tracking (no filing form).
+  const [renewTarget, setRenewTarget] = useState<PermitRow | null>(null);
+  async function renew(p: PermitRow) {
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/applications/renew-from-permit/${p.id}`, { method: 'POST', credentials: 'include' });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || json?.success === false) throw new Error(json?.message || 'Could not file the renewal');
+      setRenewTarget(null);
+      toast.success(`Renewal ${json?.data?.application_no || ''} filed — it's in the Renewal Queue with the locator's Account Officer.`);
+      navigate?.(`/applications/renewals?applicationId=${json?.data?.id}`);
+    } catch (e: any) {
+      toast.error(e?.message || 'Could not file the renewal');
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function remove(id: number) {
     setSaving(true);
     try {
@@ -336,7 +363,7 @@ export function PermitsManagement({
 
   function renderExpiryHint(p: PermitRow) {
     const days = daysUntil(p.expiry_date);
-    if (p.effective_status === 'REVOKED' || days === null) return null;
+    if (p.effective_status === 'REVOKED' || p.effective_status === 'RENEWED' || days === null) return null;
     return (
       <div className="mt-0.5 flex items-center gap-1.5 flex-wrap">
         {days < 0 ? (
@@ -372,7 +399,7 @@ export function PermitsManagement({
           <button
             className="rounded-md p-1.5 cursor-pointer"
             style={{ color: '#f59e0b' }}
-            onClick={() => navigate(`/applications/renewals?renewFromPermitId=${p.id}`)}
+            onClick={() => setRenewTarget(p)}
             title="Renew"
           >
             <RefreshCw size={14} />
@@ -472,7 +499,7 @@ export function PermitsManagement({
         {isLoading ? (
           <TableSkeleton columns={7} rows={5} />
         ) : filtered.length === 0 ? (
-          <EmptyState title="No permits" description="Add a permit to get started." />
+          <EmptyState title="Nothing due for renewal" description="Permits and contracts show up here once they are expiring (within a year) or expired." />
         ) : (
           <>
           {/* Phones: stacked cards instead of an 8-column table */}
@@ -677,6 +704,20 @@ export function PermitsManagement({
           Status shows as Valid / Expiring / Expired automatically based on the expiry date. Set Revoked to override.
         </p>
       </SidePanel>
+
+      <ConfirmModal
+        open={renewTarget !== null}
+        title="Renew this permit?"
+        description={
+          renewTarget
+            ? `A renewal application is filed for ${renewTarget.proponent_name || 'this locator'} (${renewTarget.permit_no}) and goes to their Account Officer. The locator then uploads the renewal requirements in their portal.`
+            : undefined
+        }
+        confirmText="Renew"
+        loading={saving}
+        onCancel={() => setRenewTarget(null)}
+        onConfirm={() => renewTarget && void renew(renewTarget)}
+      />
 
       <ConfirmModal
         open={confirmDeleteId !== null}

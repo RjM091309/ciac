@@ -10,10 +10,6 @@ const MENU_KEY = "approval:queue";
 router.get("/assignment-queue", requireMenuAccess(MENU_KEY, "view"), controller.assignmentQueue);
 router.post("/assignment-queue/:applicationId/assign", requireMenuAccess(MENU_KEY, "edit"), controller.assignAccountOfficer);
 
-// Read
-router.get("/", requireMenuAccess(MENU_KEY, "view"), controller.list);
-router.get("/summary", requireMenuAccess(MENU_KEY, "view"), controller.summary);
-
 // The approval panel itself — approval:queue, or a Level 1 BDO approving a
 // new application from the Evaluation Queue (see requireApprovalAccess).
 router.get("/contracts/:id/certificate", requireApprovalAccess("view"), controller.downloadContractCertificate);
@@ -24,6 +20,7 @@ router.post("/:applicationId/start", requireApprovalAccess("edit"), controller.s
 router.patch("/:applicationId/reopen", requireRole("admin"), controller.reopen);
 router.patch("/steps/:id/act", requireApprovalAccess("edit"), controller.actOnStep);
 router.patch("/steps/:id/endorse", requireApprovalAccess("edit"), controller.endorseStep);
+router.post("/:applicationId/return-to-level2", requireApprovalAccess("edit"), controller.returnToLevel2);
 
 // Charges — assessed during Assessment Evaluation
 router.post("/:applicationId/charges", requireApprovalAccess("add"), controller.addCharge);

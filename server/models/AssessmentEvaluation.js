@@ -302,7 +302,12 @@ const LIST_SELECT = `
   LEFT JOIN dbo.users apv ON apv.id = asm.approver_id
 `;
 
-async function listAssessments({ stage, evaluatorId, search } = {}) {
+// `renewal`: true = Account Officer's renewal queue, false = BDO's new
+// applications, undefined = both (admin).
+const trackSql = (renewal, alias = "a") =>
+  renewal === undefined || renewal === null ? "" : `ISNULL(${alias}.is_renewal, 0) = ${renewal ? 1 : 0}`;
+
+async function listAssessments({ stage, evaluatorId, search, renewal } = {}) {
   await ensureSchema();
   const where = [
     // A DRAFT application was never submitted and shouldn't be reviewable
@@ -314,6 +319,7 @@ async function listAssessments({ stage, evaluatorId, search } = {}) {
     // record for either status, so nothing real gets hidden.
     "(a.status NOT IN ('DRAFT', 'REJECTED') OR asm.id IS NOT NULL)",
   ];
+  if (trackSql(renewal)) where.push(trackSql(renewal));
   const params = [];
   const stageFilter = pick(stage, STAGES);
   if (stageFilter) {
@@ -346,16 +352,20 @@ async function listAssessments({ stage, evaluatorId, search } = {}) {
 
 /** `evaluatorId` scopes every count to one evaluator's assignments — used
  * for a Level 2 Officer, whose stat bar should reflect only their own work. */
-async function getSummary({ evaluatorId } = {}) {
+async function getSummary({ evaluatorId, renewal } = {}) {
   await ensureSchema();
   const evId = toInt(evaluatorId);
-  const evFilter = evId ? "AND asm.assigned_evaluator_id = @param0" : "";
+  const trackFilter = trackSql(renewal, "ax")
+    ? `AND EXISTS (SELECT 1 FROM dbo.applications ax WHERE ax.id = asm.application_id AND ${trackSql(renewal, "ax")})`
+    : "";
+  const evFilter = `${evId ? "AND asm.assigned_evaluator_id = @param0" : ""} ${trackFilter}`;
   const stageRows = await selectData(
     `
     SELECT ISNULL(asm.stage, 'UNASSIGNED') AS stage, COUNT(1) AS total
     FROM dbo.applications a
     LEFT JOIN dbo.application_assessments asm ON asm.application_id = a.id
-    WHERE (a.status NOT IN ('DRAFT', 'REJECTED') OR asm.id IS NOT NULL) ${evFilter}
+    WHERE (a.status NOT IN ('DRAFT', 'REJECTED') OR asm.id IS NOT NULL)
+      ${evId ? "AND asm.assigned_evaluator_id = @param0" : ""} ${trackSql(renewal) ? `AND ${trackSql(renewal)}` : ""}
     GROUP BY ISNULL(asm.stage, 'UNASSIGNED')
     `,
     evId ? [evId] : []
@@ -395,34 +405,6 @@ async function getSummary({ evaluatorId } = {}) {
   };
 }
 
-/** Who can be assigned to do an assessment — any role with Control Panel
- * sidebar access to assessment:queue (conventionally "Assessment Officer"),
- * plus admin. Driven by permission rather than a hardcoded role name so it
- * survives a rename and extends to any future custom role automatically,
- * same reasoning as hasStaffApplicationAccess/getApprovalQueueStaffEmails
- * elsewhere in this app. */
-async function listUsersWithMenu(menuKey) {
-  await ensureSchema();
-  await ControlPanelPermission.ensureSchema();
-  return selectData(
-    `
-    SELECT DISTINCT u.id, u.full_name, u.username
-    FROM dbo.users u
-    INNER JOIN dbo.user_roles ur ON ur.user_id = u.id
-    INNER JOIN dbo.roles r ON r.id = ur.role_id
-    -- The Locator role never holds a staff menu (ControlPanelPermission.js),
-    -- even if a stale row says otherwise.
-    LEFT JOIN dbo.role_sidebar_menu_permissions p
-      ON p.role_id = r.id AND p.menu_key = @param0 AND p.is_enabled = 1
-      AND LOWER(LTRIM(RTRIM(r.name))) <> 'proponent'
-    WHERE u.is_active = 1
-      AND (LOWER(LTRIM(RTRIM(r.name))) = 'admin' OR p.role_id IS NOT NULL)
-    ORDER BY u.full_name
-    `,
-    [menuKey]
-  );
-}
-
 /** Level 1 assigns to Level 2 only: users whose role has the Evaluation Queue,
  * who aren't Level 1 (users.assessment_level = 1) and aren't admins. */
 async function listAssignableEvaluators() {
@@ -447,12 +429,6 @@ async function listAssignableEvaluators() {
     ORDER BY u.full_name
     `
   );
-}
-
-/** Who a Manager can hand an endorsed application to for approval — anyone
- * with approval:queue (conventionally the Account Officer), plus admin. */
-async function listAssignableApprovers() {
-  return listUsersWithMenu("approval:queue");
 }
 
 /** The user's level (users.assessment_level, set per account in
@@ -507,8 +483,9 @@ async function getLevel2OnlyUserId(user) {
  * Attention widget: officer reviews awaiting their recommendation, and
  * submitted applications nobody has been assigned to yet. Same queue base
  * as listAssessments, so every item here is also in their Assessment queue. */
-async function listManagerAttention() {
+async function listManagerAttention({ renewal } = {}) {
   await ensureSchema();
+  const track = trackSql(renewal);
   return selectData(`
     SELECT
       a.id AS application_id,
@@ -522,8 +499,9 @@ async function listManagerAttention() {
     FROM dbo.applications a
     LEFT JOIN dbo.proponents p ON p.id = a.proponent_id
     LEFT JOIN dbo.application_assessments asm ON asm.application_id = a.id
-    WHERE asm.stage = 'FOR_RECOMMENDATION'
-       OR (ISNULL(asm.stage, 'UNASSIGNED') = 'UNASSIGNED' AND a.status IN ('SUBMITTED', 'RESUBMITTED'))
+    WHERE (asm.stage = 'FOR_RECOMMENDATION'
+       OR (ISNULL(asm.stage, 'UNASSIGNED') = 'UNASSIGNED' AND a.status IN ('SUBMITTED', 'RESUBMITTED')))
+      ${track ? `AND ${track}` : ""}
   `);
 }
 
@@ -925,10 +903,41 @@ async function returnToOfficer(applicationId, { note, actorId }) {
   return getAssessmentDetail(applicationId);
 }
 
-/** Level 1 Manager's final recommendation on the Officer's review. ENDORSE
- * (Approve) sends the application to Approval, assigned to the Account
- * Officer in `approverId`; DISAPPROVE closes it as DISAPPROVED. */
-async function submitRecommendation(applicationId, { recommendation, summary, approverId, actorId, selfApprove = false }) {
+/** Level 1 sends an application that's already in the approval panel back
+ * to Level 2 (the approval itself is undone in ApprovalIssuance.returnToLevel2):
+ * the assessment goes back to IN_REVIEW with the review and the "For
+ * Approval" cleared. */
+async function returnFromApproval(applicationId, { note, actorId }) {
+  const asm = await getOrCreateAssessment(applicationId, actorId);
+  if (!asm) return null;
+  const text = String(note ?? "").trim();
+  await updateData(
+    `
+    UPDATE dbo.application_assessments
+    SET stage = 'IN_REVIEW', recommendation = NULL, recommendation_summary = NULL, recommended_by = NULL,
+        recommended_at = NULL, approver_id = NULL,
+        officer_recommendation = NULL, officer_recommendation_summary = NULL,
+        officer_recommended_by = NULL, officer_recommended_at = NULL,
+        updated_by = @param1, updated_at = SYSUTCDATETIME()
+    WHERE id = @param0
+    `,
+    [asm.id, toInt(actorId)]
+  );
+  await logActivity(asm.id, "RETURNED_TO_OFFICER", text ? text.slice(0, 1000) : "Returned from approval", actorId);
+  const app = await getApplicationRow(applicationId);
+  await notify({
+    applicationId,
+    actorId,
+    subject: `Returned for review: ${app?.application_no || ""}`.trim(),
+    body: `Level 1 returned application ${app?.application_no || ""} for further review${text ? `: ${text.slice(0, 300)}` : "."}`,
+  });
+  return getAssessmentDetail(applicationId);
+}
+
+/** Level 1's call on Level 2's review, used by "For Approval"
+ * (sendForApproval): ENDORSE with selfApprove sends the application to
+ * Approval assigned to that Level 1; DISAPPROVE closes it as DISAPPROVED. */
+async function submitRecommendation(applicationId, { recommendation, summary, actorId, selfApprove = false }) {
   const asm = await getOrCreateAssessment(applicationId, actorId);
   if (!asm) return null;
   // The frontend disables the Submit button once a.recommendation is set,
@@ -955,10 +964,7 @@ async function submitRecommendation(applicationId, { recommendation, summary, ap
     approver = rows?.[0] || null;
     if (!approver) throw businessError("Couldn't find your account to assign the approval to.");
   } else if (rec === "ENDORSE") {
-    const apId = toInt(approverId);
-    if (!apId) throw businessError("Choose the Account Officer who will handle the approval.");
-    approver = (await listAssignableApprovers()).find((u) => Number(u.id) === apId) || null;
-    if (!approver) throw businessError("The selected Account Officer can't take approvals.");
+    throw businessError("Use For Approval — Level 1 approves the application themselves.");
   }
 
   const nextStage = "COMPLETED";
@@ -1049,6 +1055,7 @@ async function sendForApproval(applicationId, { summary, actorId }) {
 
 module.exports = {
   sendForApproval,
+  returnFromApproval,
   ensureSchema,
   STAGES,
   CHARGE_TYPES,
@@ -1066,7 +1073,6 @@ module.exports = {
   listAssessments,
   getSummary,
   listAssignableEvaluators,
-  listAssignableApprovers,
   getAssessmentDetail,
   assignEvaluator,
   setStage,

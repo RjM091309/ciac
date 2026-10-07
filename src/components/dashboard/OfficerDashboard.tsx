@@ -69,13 +69,14 @@ const VIEW_COPY: Record<
   DashboardView,
   { title: string; description: string; table: string; tableEmpty: string; attention: string; totalLabel: string }
 > = {
+  // Account Officer (Level 1: all renewals + the Approved Queue; Level 2: their own locators).
   approval: {
-    title: 'My Approval Queue',
-    description: 'Applications routed to you for approval, and permits or contracts nearing expiry.',
-    table: 'In My Approval Queue',
-    tableEmpty: 'Nothing is in your approval queue right now.',
-    attention: 'Approvals waiting on you, plus permits and contracts nearing expiry',
-    totalLabel: 'In My Queue',
+    title: 'Renewals & Locators',
+    description: 'Renewals under review, approved locators waiting for an Account Officer, and permits or contracts nearing expiry.',
+    table: 'Renewals & Approved Locators',
+    tableEmpty: 'No renewals or locators to show right now.',
+    attention: 'Renewals and locators waiting on you, plus permits and contracts nearing expiry',
+    totalLabel: 'Total',
   },
   'assessment-officer': {
     title: 'My Assigned Applications',

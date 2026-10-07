@@ -1,5 +1,5 @@
-﻿import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AnimatePresence, motion } from 'motion/react';
+﻿import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { motion } from 'motion/react';
 import {
   CheckCircle2,
   Clock3,
@@ -8,7 +8,6 @@ import {
   Loader2,
   Plus,
   RotateCcw,
-  Search,
   Stamp,
   Trash2,
   X,
@@ -17,13 +16,9 @@ import { toast } from 'sonner';
 import { cn } from '../../lib/utils';
 import { AppSelect } from '../ui/AppSelect';
 import { ConfirmModal } from '../ui/ConfirmModal';
-import { DataTableControls } from '../ui/DataTableControls';
 import { DatePicker, parseYmd, toYmd } from '../ui/DatePicker';
 import { EmptyState } from '../ui/EmptyState';
-import { TableSkeleton } from '../ui/Skeleton';
 import { useControlPanelAccess } from '../../context/ControlPanelAccessContext';
-import { useSessionStorageCachedResource } from '../../hooks/useSessionStorageCachedResource';
-import { requestNotificationsRefresh } from '../../lib/notificationRefresh';
 
 const MENU_KEY = 'approval:queue';
 
@@ -36,10 +31,14 @@ const APPROVAL_STATUS_LABELS: Record<string, string> = {
 };
 // APPROVED excluded — approved applications are excluded from the queue
 // entirely (see the `rows` filter), so it's never a meaningful filter choice.
-const APPROVAL_STATUS_ORDER = ['PENDING', 'IN_PROGRESS', 'DISAPPROVED', 'RETURNED'];
 const CHARGE_TYPES = ['RENTAL', 'PROCESSING_FEE', 'TAX', 'PENALTY', 'OTHER'];
 
 type ApprovalRow = {
+  /** Level 2 evaluator and when they submitted their review (Overview tab). */
+  evaluator_name?: string | null;
+  evaluator_username?: string | null;
+  review_submitted_at?: string | null;
+  review_summary?: string | null;
   application_id: number;
   application_no: string;
   application_type: string;
@@ -126,16 +125,6 @@ type DetailPayload = {
   charges: ChargeRow[];
 };
 
-type Summary = {
-  by_status: Record<string, number>;
-  total: number;
-  in_progress: number;
-  awaiting_start: number;
-  approved: number;
-  issued: number;
-  avg_days_to_decide: number | null;
-};
-
 type Approver = { id: number; full_name: string | null; username: string };
 
 function peso(n: number | null | undefined) {
@@ -219,349 +208,9 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 const inputCls = 'app-input';
 
-function usePagination<T>(items: T[], pageSize: number, page: number) {
-  return useMemo(() => {
-    const totalPages = Math.max(1, Math.ceil(items.length / Math.max(1, pageSize)));
-    const safePage = Math.min(Math.max(1, page), totalPages);
-    const start = (safePage - 1) * pageSize;
-    const visible =
-      totalPages <= 5
-        ? Array.from({ length: totalPages }, (_, i) => i + 1)
-        : safePage <= 3
-          ? [1, 2, 3, 4, 5]
-          : safePage >= totalPages - 2
-            ? [totalPages - 4, totalPages - 3, totalPages - 2, totalPages - 1, totalPages]
-            : [safePage - 2, safePage - 1, safePage, safePage + 1, safePage + 2];
-    return {
-      totalPages,
-      pageItems: items.slice(start, start + pageSize),
-      showingFrom: items.length === 0 ? 0 : start + 1,
-      showingTo: Math.min(items.length, safePage * pageSize),
-      visiblePageNumbers: visible,
-    };
-  }, [items, pageSize, page]);
-}
-
-export function ApprovalIssuance({
-  locationSearch = '',
-  navigate,
-}: {
-  locationSearch?: string;
-  navigate?: (to: string, opts?: { replace?: boolean }) => void;
-} = {}) {
-  const { fullAccess, crudPermissions } = useControlPanelAccess();
-  const perm = crudPermissions[MENU_KEY] || { can_add: false, can_edit: false, can_delete: false };
-  const canAdd = fullAccess || perm.can_add;
-  const canEdit = fullAccess || perm.can_edit;
-  const canDelete = fullAccess || perm.can_delete;
-
-  const [statusFilter, setStatusFilter] = useState('');
-  const [search, setSearch] = useState('');
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(20);
-  const [selectedId, setSelectedId] = useState<number | null>(null);
-
-  // One cached fetch of the whole queue + summary, then filter client-side.
-  // Revisits paint instantly from sessionStorage while revalidating, and
-  // typing in the search box no longer round-trips to the server.
-  const { data, isLoading, isRevalidating, refresh } = useSessionStorageCachedResource<{
-    rows: ApprovalRow[];
-    summary: Summary | null;
-  }>({
-    cacheKey: 'ciac.approvals_queue.v1',
-    ttlMs: 5 * 60 * 1000,
-    fetcher: async () => {
-      const [listJson, summaryJson] = await Promise.all([
-        apiFetch('/api/approvals'),
-        apiFetch('/api/approvals/summary'),
-      ]);
-      return {
-        rows: listJson.data || [],
-        summary: summaryJson.data || null,
-      };
-    },
-    onError: (err) => toast.error(err instanceof Error ? err.message : 'Failed to load approvals'),
-  });
-
-  const allRows = data?.rows ?? [];
-  const summary = data?.summary ?? null;
-  const loading = isLoading;
-
-  const rows = useMemo(() => {
-    const term = search.trim().toLowerCase();
-    return allRows.filter((r) => {
-      // Already-approved applications are done — they clutter the active
-      // queue and don't need any further action here, so they're excluded
-      // outright rather than just being one more filterable status.
-      if ((r.approval_status || 'PENDING') === 'APPROVED') return false;
-      if (statusFilter && (r.approval_status || 'PENDING') !== statusFilter) return false;
-      if (term) {
-        const hay = `${r.application_no ?? ''} ${r.proponent_name ?? ''}`.toLowerCase();
-        if (!hay.includes(term)) return false;
-      }
-      return true;
-    });
-  }, [allRows, statusFilter, search]);
-
-  useEffect(() => {
-    setPage(1);
-  }, [statusFilter, search]);
-
-  // Deep-link from a notification's "View" button (?applicationId=...): jump
-  // straight to that application's detail drawer, then strip the query params
-  // so a refresh/back doesn't re-trigger it.
-  const consumedNotificationQueryRef = useRef('');
-  useEffect(() => {
-    if (!navigate) return;
-    const search = String(locationSearch || '').trim();
-    if (!search || consumedNotificationQueryRef.current === search) return;
-    const params = new URLSearchParams(search.startsWith('?') ? search : `?${search}`);
-    const rawId = Number(params.get('applicationId') || '');
-    if (!Number.isFinite(rawId) || rawId <= 0) return;
-    consumedNotificationQueryRef.current = search;
-    setSelectedId(rawId);
-    params.delete('applicationId');
-    params.delete('notificationId');
-    params.delete('focus');
-    const cleaned = params.toString();
-    navigate(`/approval${cleaned ? `?${cleaned}` : ''}`, { replace: true });
-  }, [locationSearch, navigate]);
-
-  const pg = usePagination(rows, pageSize, page);
-
-  const refreshAfterMutation = useCallback(async () => {
-    try {
-      await refresh({ showLoading: false });
-      requestNotificationsRefresh();
-    } catch (err) {
-      toast.error((err as Error).message);
-    }
-  }, [refresh]);
-
-  return (
-    <div className="space-y-4 sm:space-y-5">
-      <div className="grid grid-cols-3 lg:grid-cols-6 gap-2 sm:gap-4 mt-3">
-        <StatTile label="Total" value={summary?.total ?? '—'} />
-        <StatTile label="Awaiting Start" value={summary?.awaiting_start ?? '—'} tone="#94a3b8" />
-        <StatTile label="In Progress" value={summary?.in_progress ?? '—'} tone="#3b82f6" />
-        <StatTile label="Approved" value={summary?.approved ?? '—'} tone="#10b981" />
-        <StatTile label="Contracts Issued" value={summary?.issued ?? '—'} tone="#0ea5e9" />
-        <StatTile label="Avg Days" value={summary?.avg_days_to_decide ?? '—'} tone="#f59e0b" />
-      </div>
-
-      <div className="glass-card p-4 sm:p-5 !border-transparent overflow-hidden" style={{ backgroundColor: 'var(--surface)' }}>
-        <div className="flex items-center gap-2 mb-3">
-          <div className="relative group flex-1 min-w-0 sm:flex-none sm:w-72">
-            <Search
-              size={14}
-              className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)] group-focus-within:text-[var(--text)] transition-colors pointer-events-none"
-            />
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search application / locator..."
-              className="h-9 rounded-full pl-9 pr-3 text-xs w-full focus:outline-none focus:ring-1 focus:ring-[var(--border)] text-[var(--text)] placeholder:text-[var(--text-muted)] transition-all"
-              style={{ backgroundColor: 'color-mix(in oklab, var(--control-bg) 70%, transparent)' }}
-            />
-          </div>
-          <div className="w-36 shrink-0 sm:w-48">
-            <AppSelect
-              compact
-              placeholder="All statuses"
-              value={statusFilter}
-              onChange={setStatusFilter}
-              options={APPROVAL_STATUS_ORDER.map((s) => ({ value: s, label: APPROVAL_STATUS_LABELS[s] }))}
-            />
-          </div>
-        </div>
-
-        {loading ? (
-          <div className="py-2">
-            <TableSkeleton columns={7} rows={6} />
-          </div>
-        ) : rows.length === 0 ? (
-          <EmptyState
-            icon={<Stamp size={40} className="opacity-40" />}
-            title="No applications for approval"
-            description="Applications endorsed by assessment appear here to be routed through the approval hierarchy and issued their approval documents."
-          />
-        ) : (
-          <>
-          {/* Phones: stacked cards instead of a horizontally scrolling table */}
-          <div className="sm:hidden space-y-2">
-            {pg.pageItems.map((r) => {
-              const assignee = r.current_assignee_name || r.current_assignee_username;
-              return (
-                <button
-                  key={r.application_id}
-                  type="button"
-                  className="w-full text-left rounded-xl p-3 cursor-pointer active:bg-[var(--selected-bg)] transition-colors"
-                  style={{
-                    border: '1px solid var(--border-subtle)',
-                    backgroundColor: 'color-mix(in oklab, var(--control-bg) 35%, transparent)',
-                  }}
-                  onClick={() => setSelectedId(r.application_id)}
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0 flex-1">
-                      <div className="text-[13px] font-semibold leading-snug break-words" style={{ color: 'var(--text)' }}>
-                        {r.proponent_name || '—'}
-                      </div>
-                      <div className="mt-0.5 text-[11px] text-secondary">
-                        {r.application_no} · {r.is_renewal ? 'Renewal' : 'New'}
-                        {r.application_type_name ? ` · ${r.application_type_name}` : ''}
-                      </div>
-                    </div>
-                    <div className="shrink-0">
-                      <Badge
-                        label={APPROVAL_STATUS_LABELS[r.approval_status] || r.approval_status}
-                        styles={statusBadge(r.approval_status)}
-                      />
-                    </div>
-                  </div>
-
-                  {r.approval_status === 'IN_PROGRESS' && assignee ? (
-                    <div className="mt-2 text-[11px]" style={{ color: 'var(--text)' }}>
-                      <span className="text-secondary">Assigned to: </span>
-                      {assignee}
-                    </div>
-                  ) : null}
-
-                  <div className="mt-2.5 flex items-center justify-between text-[11px]">
-                    <div>
-                      <span className="text-[9px] uppercase tracking-wider text-secondary">Issued </span>
-                      <span style={{ color: 'var(--text)' }}>{r.issued_count ? 'Contract' : '—'}</span>
-                    </div>
-                    <div>
-                      <span className="text-[9px] uppercase tracking-wider text-secondary">Days </span>
-                      <span
-                        className="tabular-nums"
-                        style={{
-                          color: r.days_in_approval != null && r.days_in_approval > 7 ? '#ef4444' : 'var(--text)',
-                        }}
-                      >
-                        {r.days_in_approval ?? '—'}
-                      </span>
-                    </div>
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-
-          <div className="hidden sm:block overflow-x-auto">
-            <table className="min-w-full text-left text-xs">
-              <thead>
-                <tr style={{ borderBottom: '1px solid var(--border-subtle)' }}>
-                  <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary">Application</th>
-                  <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary">Locator</th>
-                  <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary">Approval Status</th>
-                  <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary">Assigned To</th>
-                  <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary text-right">Decision</th>
-                  <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary text-right">Issued</th>
-                  <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary text-right">Days</th>
-                </tr>
-              </thead>
-              <tbody>
-                {pg.pageItems.map((r) => (
-                  <tr
-                    key={r.application_id}
-                    className="cursor-pointer hover:bg-[var(--selected-bg)] transition-colors"
-                    style={{ borderTop: '1px solid var(--border-subtle)' }}
-                    onClick={() => setSelectedId(r.application_id)}
-                  >
-                    <td className="px-3 py-2.5">
-                      <div className="font-semibold" style={{ color: 'var(--text)' }}>{r.application_no}</div>
-                      <div className="text-[11px] text-secondary">
-                        {r.is_renewal ? 'Renewal' : 'New'} · {r.application_type_name}
-                      </div>
-                    </td>
-                    <td className="px-3 py-2.5 text-[11px] text-secondary">{r.proponent_name || '—'}</td>
-                    <td className="px-3 py-2.5">
-                      <Badge
-                        label={APPROVAL_STATUS_LABELS[r.approval_status] || r.approval_status}
-                        styles={statusBadge(r.approval_status)}
-                      />
-                    </td>
-                    <td className="px-3 py-2.5 text-[11px] text-secondary">
-                      {r.approval_status === 'IN_PROGRESS'
-                        ? r.current_assignee_name || r.current_assignee_username || 'Unassigned'
-                        : '—'}
-                    </td>
-                    <td className="px-3 py-2.5 text-right text-[11px] text-secondary">
-                      {r.total_steps ? (r.approved_steps ? 'Decided' : 'Pending') : '—'}
-                    </td>
-                    <td className="px-3 py-2.5 text-right text-[11px] text-secondary tabular-nums">{r.issued_count ? 'Contract' : '—'}</td>
-                    <td className="px-3 py-2.5 text-right text-[11px] tabular-nums">
-                      {r.days_in_approval == null ? (
-                        <span className="text-secondary">—</span>
-                      ) : (
-                        <span style={{ color: r.days_in_approval > 7 ? '#ef4444' : undefined }}>
-                          {r.days_in_approval}
-                        </span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          </>
-        )}
-        <DataTableControls
-          page={page}
-          totalPages={pg.totalPages}
-          totalItems={rows.length}
-          showingFrom={pg.showingFrom}
-          showingTo={pg.showingTo}
-          visiblePageNumbers={pg.visiblePageNumbers}
-          pageSize={pageSize}
-          pageSizeOptions={[10, 20, 50, 100]}
-          onPageSizeChange={setPageSize}
-          onPageChange={setPage}
-          loading={loading || isRevalidating}
-        />
-      </div>
-
-      <AnimatePresence>
-        {selectedId != null ? (
-          <ApprovalDetail
-            applicationId={selectedId}
-            perms={{ canAdd, canEdit, canDelete }}
-            onClose={() => setSelectedId(null)}
-            onMutated={refreshAfterMutation}
-          />
-        ) : null}
-      </AnimatePresence>
-    </div>
-  );
-}
-
-function StatTile({
-  label,
-  value,
-  tone,
-}: {
-  label: string;
-  value: React.ReactNode;
-  tone?: string;
-}) {
-  return (
-    <div
-      className="rounded-xl px-2.5 sm:px-3 py-2.5 sm:py-3 flex flex-col gap-1 shadow-sm"
-      style={{ backgroundColor: 'color-mix(in oklab, var(--surface) 94%, white 6%)' }}
-    >
-      <span className="text-[9px] sm:text-[10px] font-semibold text-secondary uppercase tracking-wide sm:tracking-widest truncate">
-        {label}
-      </span>
-      <span className="text-lg font-bold leading-tight" style={{ color: tone || 'var(--text)' }}>
-        {value}
-      </span>
-    </div>
-  );
-}
-
-const TABS = ['Overview', 'Approval', 'Charges', 'Contract', 'History'] as const;
+// The contract is recorded on the Approval tab itself (it must exist before
+// Approve), so Level 1 never has to switch tabs to finish.
+const TABS = ['Overview', 'Compliance', 'Approval', 'Charges', 'History'] as const;
 type Tab = (typeof TABS)[number];
 
 type RunFn = (fn: () => Promise<unknown>, successMsg?: string) => Promise<void>;
@@ -686,23 +335,6 @@ export function ApprovalDetail({
           ))}
         </div>
 
-        {!loading && data && a?.approval_status === 'APPROVED' && !data.contract ? (
-          <div
-            className="mx-4 mt-3 rounded-lg border px-3 py-2 text-[12px] flex items-center justify-between gap-3"
-            style={{ borderColor: '#f59e0b55', backgroundColor: '#f59e0b1a', color: 'var(--text)' }}
-          >
-            <span>This application was approved but no contract has been recorded yet.</span>
-            <button
-              type="button"
-              className="rounded-md px-2.5 py-1 text-[11px] font-semibold whitespace-nowrap cursor-pointer"
-              style={{ backgroundColor: '#f59e0b', color: '#1a1200' }}
-              onClick={() => setTab('Contract')}
-            >
-              Record contract
-            </button>
-          </div>
-        ) : null}
-
         <div className="flex-1 overflow-y-auto p-4">
           {loading || !data ? (
             <div className="flex items-center justify-center py-16">
@@ -711,16 +343,140 @@ export function ApprovalDetail({
           ) : tab === 'Overview' ? (
             <OverviewTab data={data} perms={perms} busy={busy} run={run} />
           ) : tab === 'Approval' ? (
-            <ChainTab data={data} perms={perms} busy={busy} run={run} onGoToContract={() => setTab('Contract')} />
+            <div className="flex flex-col gap-4">
+              <section className="flex flex-col gap-2">
+                <div className="text-[11px] font-bold uppercase tracking-wide text-secondary">Contract</div>
+                <ContractTab data={data} canEdit={perms.canEdit} busy={busy} run={run} />
+              </section>
+              <section className="flex flex-col gap-2">
+                <div className="text-[11px] font-bold uppercase tracking-wide text-secondary">Decision</div>
+                <ChainTab data={data} perms={perms} busy={busy} run={run} />
+              </section>
+            </div>
+          ) : tab === 'Compliance' ? (
+            <ComplianceReviewTab applicationId={data.approval.application_id} />
           ) : tab === 'Charges' ? (
             <ChargesTab data={data} perms={perms} busy={busy} run={run} />
-          ) : tab === 'Contract' ? (
-            <ContractTab data={data} canEdit={perms.canEdit} busy={busy} run={run} />
           ) : (
             <HistoryTab data={data} />
           )}
         </div>
       </motion.div>
+    </div>
+  );
+}
+
+/** Read-only look at the locator's requirements for Level 1 before deciding:
+ * what's verified, what's still missing, and the files they uploaded. The
+ * evaluator does the actual verify/reject on the Evaluation/Renewal Queue. */
+type ComplianceRequirement = {
+  id: number;
+  requirement_id: number;
+  requirement_code: string | null;
+  requirement_name: string | null;
+  status: string;
+  remarks: string | null;
+  is_mandatory?: number | boolean;
+};
+type ComplianceDocument = {
+  id: number;
+  file_name: string;
+  original_file_name: string | null;
+  requirement_id: number | null;
+};
+
+const REQ_STATUS_STYLE: Record<string, { bg: string; color: string; border: string }> = {
+  VERIFIED: { bg: 'rgba(16,185,129,.14)', color: '#10b981', border: 'rgba(16,185,129,.38)' },
+  REJECTED: { bg: 'rgba(239,68,68,.14)', color: '#ef4444', border: 'rgba(239,68,68,.38)' },
+  PENDING: { bg: 'rgba(245,158,11,.14)', color: '#f59e0b', border: 'rgba(245,158,11,.38)' },
+};
+
+function ComplianceReviewTab({ applicationId }: { applicationId: number }) {
+  const [data, setData] = useState<{ requirements: ComplianceRequirement[]; documents: ComplianceDocument[] } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    apiFetch(`/api/assessments/${applicationId}`)
+      .then((json) => {
+        if (!cancelled) setData({ requirements: json.data?.requirements || [], documents: json.data?.documents || [] });
+      })
+      .catch((err) => {
+        if (!cancelled) setError((err as Error).message);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [applicationId]);
+
+  if (error) return <div className="text-[12px] text-secondary">{error}</div>;
+  if (!data) {
+    return (
+      <div className="flex items-center justify-center py-16">
+        <Loader2 className="animate-spin text-secondary" />
+      </div>
+    );
+  }
+
+  const docsFor = (requirementId: number) => data.documents.filter((d) => Number(d.requirement_id) === Number(requirementId));
+  const total = data.requirements.length;
+  const verified = data.requirements.filter((r) => r.status === 'VERIFIED').length;
+  const notUploaded = data.requirements.filter((r) => docsFor(r.requirement_id).length === 0).length;
+  const rejected = data.requirements.filter((r) => r.status === 'REJECTED').length;
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="grid grid-cols-3 gap-2 text-[12px]">
+        <InfoCell label="Verified" value={`${verified}/${total}`} />
+        <InfoCell label="Not uploaded" value={String(notUploaded)} />
+        <InfoCell label="Rejected" value={String(rejected)} />
+      </div>
+      {notUploaded > 0 ? (
+        <div
+          className="rounded-lg border px-3 py-2 text-[12px]"
+          style={{ borderColor: '#f59e0b55', backgroundColor: '#f59e0b1a', color: 'var(--text)' }}
+        >
+          The locator hasn't uploaded {notUploaded} requirement{notUploaded === 1 ? '' : 's'} yet.
+        </div>
+      ) : null}
+      <div className="rounded-xl border overflow-hidden" style={{ borderColor: 'var(--border-subtle)' }}>
+        {data.requirements.length === 0 ? (
+          <div className="p-3 text-[12px] text-secondary">No requirements on this application.</div>
+        ) : (
+          data.requirements.map((r) => {
+            const docs = docsFor(r.requirement_id);
+            return (
+              <div key={r.id} className="px-3 py-2.5 border-b last:border-b-0 flex flex-col gap-1" style={{ borderColor: 'var(--border-subtle)' }}>
+                <div className="flex items-start justify-between gap-2">
+                  <div className="text-[12px] font-semibold" style={{ color: 'var(--text)' }}>
+                    {r.requirement_code ? `${r.requirement_code} · ` : ''}
+                    {r.requirement_name || `Requirement #${r.id}`}
+                    {Number(r.is_mandatory) ? <span className="text-secondary font-normal"> · Mandatory</span> : null}
+                  </div>
+                  <Badge label={r.status} styles={REQ_STATUS_STYLE[r.status] || REQ_STATUS_STYLE.PENDING} />
+                </div>
+                {docs.length ? (
+                  <div className="flex flex-wrap gap-x-3 gap-y-1">
+                    {docs.map((d) => (
+                      <button
+                        key={d.id}
+                        type="button"
+                        className="text-[11px] underline text-secondary hover:text-[var(--text)] cursor-pointer"
+                        onClick={() => window.open(`/api/documents/${d.id}/download?view=1`, '_blank')}
+                      >
+                        {d.original_file_name || d.file_name}
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-[11px]" style={{ color: '#f59e0b' }}>Not uploaded yet</div>
+                )}
+                {r.remarks ? <div className="text-[11px] text-secondary">Remarks: {r.remarks}</div> : null}
+              </div>
+            );
+          })
+        )}
+      </div>
     </div>
   );
 }
@@ -756,12 +512,21 @@ function OverviewTab({
   return (
     <div className="flex flex-col gap-4">
       <div className="grid grid-cols-2 gap-2 text-[12px]">
+        <InfoCell label="Evaluator" value={a.evaluator_name || a.evaluator_username || '—'} />
+        <InfoCell label="Review submitted" value={a.review_submitted_at ? fmtDateTime(a.review_submitted_at) : '—'} />
         <InfoCell label="Application status" value={a.application_status} />
         <InfoCell label="Assessment" value={a.assessment_recommendation || '—'} />
         <InfoCell label="Charges assessed" value={peso(a.charges_total)} />
         <InfoCell label="Days in approval" value={a.days_in_approval == null ? '—' : String(a.days_in_approval)} />
         <InfoCell label="Decision" value={a.decision || '—'} />
       </div>
+
+      {a.review_summary ? (
+        <div className="rounded-lg border px-3 py-2 text-[12px]" style={{ borderColor: 'var(--border-subtle)' }}>
+          <div className="text-[10px] uppercase tracking-wider text-secondary mb-1">Evaluator's summary</div>
+          <div className="whitespace-pre-wrap" style={{ color: 'var(--text)' }}>{a.review_summary}</div>
+        </div>
+      ) : null}
 
       {a.assessment_recommendation && a.assessment_recommendation !== 'ENDORSE' ? (
         <div
@@ -795,18 +560,16 @@ function ChainTab({
   perms,
   busy,
   run,
-  onGoToContract,
 }: {
   data: DetailPayload;
   perms: { canAdd: boolean; canEdit: boolean; canDelete: boolean };
   busy: boolean;
   run: RunFn;
-  onGoToContract?: () => void;
 }) {
   const current = data.current_step;
   const latest = data.steps.length ? data.steps[data.steps.length - 1] : null;
-  // New application: the contract comes first (same rule on the server).
-  const needsContract = !data.approval.is_renewal && !data.contract;
+  // The contract comes first, for new applications and renewals alike (same rule on the server).
+  const needsContract = !data.contract;
   const [remarks, setRemarks] = useState('');
   const [overridePrompt, setOverridePrompt] = useState<{ message: string; resolve: (v: boolean) => void } | null>(
     null
@@ -937,20 +700,10 @@ function ChainTab({
 
           {needsContract ? (
             <div
-              className="rounded-lg border px-3 py-2 text-[12px] flex items-center justify-between gap-3"
+              className="rounded-lg border px-3 py-2 text-[12px]"
               style={{ borderColor: '#f59e0b55', backgroundColor: '#f59e0b1a', color: 'var(--text)' }}
             >
-              <span>Record the contract first — Approve unlocks once it's saved.</span>
-              {onGoToContract ? (
-                <button
-                  type="button"
-                  className="rounded-md px-2.5 py-1 text-[11px] font-semibold whitespace-nowrap cursor-pointer"
-                  style={{ backgroundColor: '#f59e0b', color: '#1a1200' }}
-                  onClick={onGoToContract}
-                >
-                  Go to Contract
-                </button>
-              ) : null}
+              Save the contract above first — Approve unlocks once it's saved.
             </div>
           ) : null}
 
@@ -971,6 +724,24 @@ function ChainTab({
               onClick={() => act('RETURN')}
             >
               <RotateCcw size={13} className="inline mr-1" /> Return to locator
+            </button>
+            <button
+              className="rounded-lg px-3 py-1.5 text-[12px] font-semibold disabled:opacity-50"
+              style={{ backgroundColor: 'rgba(59,130,246,.14)', color: '#3b82f6', border: '1px solid rgba(59,130,246,.38)' }}
+              disabled={busy}
+              title="Undo For Approval — the review goes back to the evaluator (the locator isn't notified)"
+              onClick={() =>
+                run(
+                  () =>
+                    apiFetch(`/api/approvals/${data.approval.application_id}/return-to-level2`, {
+                      method: 'POST',
+                      body: JSON.stringify({ note: remarks.trim() || null }),
+                    }),
+                  'Returned to Evaluator'
+                ).then(() => setRemarks(''))
+              }
+            >
+              <RotateCcw size={13} className="inline mr-1" /> Return to Evaluator
             </button>
             <button
               className="rounded-lg px-3 py-1.5 text-[12px] font-semibold disabled:opacity-50"

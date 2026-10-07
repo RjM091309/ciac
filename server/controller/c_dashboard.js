@@ -202,8 +202,16 @@ function daysUntil(dateStr) {
  * (`includePermits`), and contracts only for applications in its own queue
  * (`applicationIds`) — never another officer's records. Defaults (admin):
  * everything. */
-async function buildExpiryAttentionItems(limit, { includePermits = true, applicationIds = null } = {}) {
-  const [permits, contracts] = await Promise.all([includePermits ? Permit.listAll() : [], Contract.listAll()]);
+async function buildExpiryAttentionItems(limit, { includePermits = true, applicationIds = null, proponentIds = null } = {}) {
+  const [allPermits, contracts] = await Promise.all([Permit.listAll(), Contract.listAll()]);
+  // A Level 2 Account Officer only sees their own locators' permits.
+  const permits = includePermits
+    ? allPermits.filter((p) => !proponentIds || proponentIds.has(Number(p.proponent_id)))
+    : [];
+  // A contract whose permit was superseded by an approved renewal isn't due anymore.
+  const renewedAppIds = new Set(
+    allPermits.filter((p) => p.effective_status === "RENEWED" && p.application_id).map((p) => Number(p.application_id))
+  );
 
   const permitItems = permits
     .filter((p) => p.effective_status === "EXPIRING" || p.effective_status === "EXPIRED")
@@ -229,6 +237,7 @@ async function buildExpiryAttentionItems(limit, { includePermits = true, applica
 
   const contractItems = contracts
     .filter((c) => !applicationIds || applicationIds.has(Number(c.application_id)))
+    .filter((c) => !renewedAppIds.has(Number(c.application_id)))
     .map((c) => ({ ...c, _days: daysUntil(c.effective_end) }))
     .filter((c) => c._days !== null && c._days <= EXPIRY_ATTENTION_WINDOW_DAYS)
     .map((c) => ({
@@ -239,7 +248,7 @@ async function buildExpiryAttentionItems(limit, { includePermits = true, applica
       status: c._days < 0 ? "EXPIRED" : "EXPIRING",
       is_expired: c._days < 0,
       days_waiting: Math.abs(c._days),
-      link: `/approval?applicationId=${c.application_id}`,
+      link: "/compliance/permits",
     }));
 
   return [...permitItems, ...contractItems]
@@ -251,8 +260,10 @@ async function buildExpiryAttentionItems(limit, { includePermits = true, applica
  * access — never its name, so renamed and custom roles behave the same.
  * Approval wins when a role has both, same as before. */
 function queueKind(menus) {
-  if (menus.has("approval:queue")) return "approval";
+  // Same split as lib/departments.js: the Evaluation Queue makes a role BDO;
+  // the Approved/Renewal Queue makes it an Account Officer ("approval" view).
   if (menus.has("assessment:queue")) return "assessment";
+  if (menus.has("approval:queue") || menus.has("applications:renewals")) return "approval";
   return null;
 }
 
@@ -263,7 +274,13 @@ function queueKind(menus) {
 function rowLinker(queue, menus) {
   return (applicationId, isRenewal, status) => {
     const isDraft = upper(status) === "DRAFT";
-    if (queue === "approval" && !isDraft) return `/approval?applicationId=${applicationId}`;
+    // Account Officer: a renewal opens on the Renewal Queue; a new
+    // application is theirs only once approved (Approved Queue / Registered Locator).
+    if (queue === "approval" && !isDraft) {
+      if (isRenewal) return menus.has("applications:renewals") ? `/applications/renewals?applicationId=${applicationId}` : null;
+      if (menus.has("approval:queue")) return "/approval";
+      return menus.has("settings:proponents") ? "/applications/proponents" : null;
+    }
     if (queue === "assessment" && !isDraft) return `/assessment?applicationId=${applicationId}`;
     const menu = isRenewal ? "applications:renewals" : "applications:new";
     return menus.has(menu) ? `/applications/${isRenewal ? "renewals" : "new"}?applicationId=${applicationId}` : null;
@@ -307,14 +324,32 @@ async function buildStaffDashboard({ user, sidebarPermissions, widgetPermissions
   const menus = DashboardWidgets.enabledMenus(sidebarPermissions);
   const widgets = DashboardWidgets.resolveVisibility(sidebarPermissions, widgetPermissions);
   const queue = queueKind(menus);
-  const linkFor = rowLinker(queue, menus);
+  let linkFor = rowLinker(queue, menus);
   // Nothing to show (e.g. a role with no menu access yet) — skip every query.
   if (!Object.values(widgets).some(Boolean)) return { view: "overview", widgets };
 
   let isManager = !user;
   let scopeIds = null;
+  let aoProponentIds = null;
+  let aoQueueIds = null;
   if (queue === "approval") {
-    scopeIds = await Approval.listApplicationIdsInQueue(user?.id ?? null);
+    // Account Officer. Level 2: everything for their own locators. Level 1
+    // (or the admin preview): all renewals plus what's waiting in the
+    // Approved Queue for an Account Officer.
+    isManager = !user || (await Assessment.isManager(user));
+    aoQueueIds = new Set((await Approval.listAssignmentQueue()).map((r) => Number(r.application_id)));
+    if (!isManager) {
+      aoProponentIds = new Set((await Proponent.listProponentIdsForAccountOfficer(user.id)).map(Number));
+    }
+    // A new application still waiting for its Account Officer opens the
+    // Approved Queue; once assigned it lives in Registered Locator.
+    const baseLink = linkFor;
+    linkFor = (applicationId, isRenewal, status) =>
+      !isRenewal && upper(status) !== "DRAFT" && !aoQueueIds.has(Number(applicationId))
+        ? menus.has("settings:proponents")
+          ? "/applications/proponents"
+          : null
+        : baseLink(applicationId, isRenewal, status);
   } else if (queue === "assessment" && user) {
     if (await Assessment.isScopedLevel2(user.id, sidebarPermissions)) {
       scopeIds = await Assessment.listApplicationIdsAssignedTo(user.id);
@@ -325,6 +360,8 @@ async function buildStaffDashboard({ user, sidebarPermissions, widgetPermissions
 
   const allApplications = await Workflow.listAllApplicationsWithProgress();
   const applications = allApplications.filter((a) => {
+    if (aoProponentIds) return aoProponentIds.has(Number(a.proponent_id));
+    if (queue === "approval") return Boolean(Number(a.is_renewal)) || aoQueueIds.has(Number(a.id));
     if (scopeIds) return scopeIds.has(Number(a.id));
     // Level 1 Managers keep the new-applications-only list they had
     // before; renewals waiting on them still show in Needs Attention.
@@ -375,16 +412,53 @@ async function buildStaffDashboard({ user, sidebarPermissions, widgetPermissions
     if (queue === "approval") {
       const expiryItems = await buildExpiryAttentionItems(ATTENTION_MAX, {
         includePermits: menus.has("compliance:permits"),
-        applicationIds: scopeIds,
+        applicationIds: aoProponentIds ? new Set(applications.map((a) => Number(a.id))) : null,
+        proponentIds: aoProponentIds,
       });
-      data.attention = [
-        ...expiryItems,
-        ...withLinks(attentionQueue(applications, { statuses: ["FOR_APPROVAL"], limit: ATTENTION_MAX })),
-      ].slice(0, ATTENTION_MAX);
+      const work = [];
+      if (isManager) {
+        // Approved Queue: approved new applications waiting for a Level 2.
+        if (menus.has("approval:queue")) {
+          (await Approval.listAssignmentQueue()).forEach((q) =>
+            work.push({
+              application_id: q.application_id,
+              application_no: q.application_no,
+              proponent_name: q.proponent_name,
+              status: "NEEDS ACCOUNT OFFICER",
+              is_renewal: Boolean(Number(q.is_renewal)),
+              days_waiting: daysSince(q.approved_at),
+              link: "/approval",
+            })
+          );
+        }
+        // Renewals whose review is in (For Approval) or that are For Approval.
+        (await Assessment.listManagerAttention({ renewal: true }))
+          .filter((r) => r.stage === "FOR_RECOMMENDATION")
+          .forEach((r) =>
+            work.push({
+              application_id: r.application_id,
+              application_no: r.application_no,
+              proponent_name: r.proponent_name,
+              status: "FOR APPROVAL",
+              is_renewal: true,
+              days_waiting: daysSince(r.waiting_since),
+              link: `/applications/renewals?applicationId=${r.application_id}`,
+            })
+          );
+      } else {
+        // Level 2: their renewals still to review.
+        work.push(
+          ...withLinks(
+            attentionQueue(applications, { statuses: ["SUBMITTED", "RESUBMITTED", "RETURNED"], isRenewal: true, limit: ATTENTION_MAX })
+          )
+        );
+      }
+      data.attention = [...work.sort((a, b) => b.days_waiting - a.days_waiting), ...expiryItems].slice(0, ATTENTION_MAX);
     } else if (queue === "assessment" && !isManager) {
       data.attention = withLinks(attentionQueue(applications, { statuses: ["SUBMITTED", "RESUBMITTED", "RETURNED"], limit: ATTENTION_MAX }));
     } else if (queue === "assessment") {
-      const rows = await Assessment.listManagerAttention();
+      // The Evaluation Queue (BDO) only works new applications; renewals are the Account Officer's.
+      const rows = await Assessment.listManagerAttention({ renewal: false });
       data.attention = rows
         .map((r) => ({
           application_id: r.application_id,

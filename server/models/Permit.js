@@ -38,9 +38,11 @@ async function normalizeType(v) {
   return raw;
 }
 
-/** Effective status: explicit REVOKED wins, otherwise derived from expiry_date. */
+/** Effective status: explicit REVOKED / RENEWED (superseded by an approved
+ * renewal) wins, otherwise derived from expiry_date. */
 function effectiveStatus(row) {
   if (String(row.status || "").toUpperCase() === "REVOKED") return "REVOKED";
+  if (String(row.status || "").toUpperCase() === "RENEWED") return "RENEWED";
   if (!row.expiry_date) return "VALID";
   const expiry = new Date(row.expiry_date);
   if (Number.isNaN(expiry.getTime())) return "VALID";
