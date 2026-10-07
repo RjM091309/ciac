@@ -6,6 +6,8 @@ import { RequirementGroupTabs, useRequirementGroups } from '../ui/RequirementGro
 import { getStatusBadgeStyles } from '../dashboard/statusBadge';
 import { applicationTypeLabel } from '../../lib/applicationTypes';
 import { noLocatorProfileMessage } from '../../lib/locatorProfile';
+import { useLiveRefresh } from '../../lib/liveData';
+import { ListSkeleton, DetailSkeleton, ThreadSkeleton } from '../ui/PortalSkeletons';
 
 type Navigate = (to: string, opts?: { replace?: boolean }) => void;
 
@@ -141,8 +143,9 @@ function ApplicationsList({ navigate }: { navigate: Navigate }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  // `quiet`: live refresh — keep the list on screen, no spinner.
+  const load = useCallback(async (quiet = false) => {
+    if (!quiet) setLoading(true);
     setError(null);
     try {
       const res = await fetch('/api/proponents/me/applications', { credentials: 'include' });
@@ -150,11 +153,12 @@ function ApplicationsList({ navigate }: { navigate: Navigate }) {
       if (!res.ok) throw new Error(json?.message || 'Failed to load applications');
       setRows(Array.isArray(json.data) ? json.data : []);
     } catch (e: any) {
-      setError(e?.message || 'Failed to load applications');
+      if (!quiet) setError(e?.message || 'Failed to load applications');
     } finally {
       setLoading(false);
     }
   }, []);
+  useLiveRefresh(() => load(true));
 
   useEffect(() => {
     load();
@@ -165,9 +169,7 @@ function ApplicationsList({ navigate }: { navigate: Navigate }) {
   return (
     <div>
       {loading ? (
-        <div className="flex items-center justify-center py-24">
-          <Loader2 className="h-6 w-6 animate-spin opacity-60" style={{ color: 'var(--text)' }} />
-        </div>
+        <ListSkeleton columns={6} rows={4} />
       ) : error ? (
         <div className="glass-card p-4 sm:p-5 !border-transparent" style={{ backgroundColor: 'var(--surface)' }}>
           <EmptyState
@@ -187,7 +189,7 @@ function ApplicationsList({ navigate }: { navigate: Navigate }) {
           />
         </div>
       ) : (
-        <div className="rounded-2xl p-0 sm:p-4 sm:p-5 sm:border sm:border-transparent sm:shadow-[0_1px_2px_0_rgb(0_0_0_/_0.05)] sm:bg-[var(--surface)]">
+        <div className="rounded-2xl p-0 sm:p-4 sm:p-5 sm:border sm:border-transparent sm:shadow-[0_1px_2px_0_rgb(0_0_0_/_0.05)] sm:bg-[var(--surface)] [transition-property:background-color,color] [&_*]:[transition-property:background-color,color]">
           {/* Mobile: card list — a <table> forces horizontal scrolling on narrow screens. */}
           <div className="sm:hidden space-y-2.5">
             {rows.map((app) => {
@@ -236,10 +238,10 @@ function ApplicationsList({ navigate }: { navigate: Navigate }) {
             <table className="min-w-full text-left text-xs">
               <thead>
                 <tr>
-                  {['Application No.', 'Type', 'Track', 'Status', 'Requirements', 'Filed', ''].map((c) => (
+                  {['Application No.', 'Type', 'Track', 'Status', 'Requirements', 'Filed'].map((c) => (
                     <th
                       key={c}
-                      className="px-3 py-2 font-semibold text-[10px] uppercase tracking-widest text-secondary border-b"
+                      className={`px-3 py-2 font-semibold text-[10px] uppercase tracking-widest text-secondary border-b${c === 'Filed' ? ' text-right' : ''}`}
                       style={{ borderColor: 'var(--border-subtle)' }}
                     >
                       {c}
@@ -255,7 +257,7 @@ function ApplicationsList({ navigate }: { navigate: Navigate }) {
                   return (
                     <tr
                       key={app.id}
-                      className="border-b last:border-b-0 cursor-pointer hover:bg-[var(--selected-bg)] transition-colors"
+                      className="border-b last:border-b-0 cursor-pointer hover:bg-[var(--selected-bg)] transition-[background-color]"
                       style={{ borderColor: 'var(--border-subtle)' }}
                       onClick={() => navigate(`/me/applications?applicationId=${app.id}`)}
                     >
@@ -275,8 +277,7 @@ function ApplicationsList({ navigate }: { navigate: Navigate }) {
                           <span className="shrink-0 text-[10px]">{verified}/{total}</span>
                         </div>
                       </td>
-                      <td className="px-3 py-2.5 text-[11px] text-secondary">{fmtDate(app.submitted_at || app.created_at)}</td>
-                      <td className="px-3 py-2.5 text-[11px] text-secondary text-right">View →</td>
+                      <td className="px-3 py-2.5 text-[11px] text-secondary text-right">{fmtDate(app.submitted_at || app.created_at)}</td>
                     </tr>
                   );
                 })}
@@ -320,7 +321,7 @@ function Card({
 }) {
   if (mobileFlat) {
     return (
-      <div className="rounded-2xl p-0 sm:p-4 sm:p-5 sm:border sm:border-transparent sm:shadow-[0_1px_2px_0_rgb(0_0_0_/_0.05)] sm:bg-[var(--surface)]">
+      <div className="rounded-2xl p-0 sm:p-4 sm:p-5 sm:border sm:border-transparent sm:shadow-[0_1px_2px_0_rgb(0_0_0_/_0.05)] sm:bg-[var(--surface)] [transition-property:background-color,color] [&_*]:[transition-property:background-color,color]">
         {children}
       </div>
     );
@@ -447,6 +448,8 @@ function ApplicationDetail({
       /* non-critical */
     }
   }, [applicationId]);
+  // Live: a requirement verified/rejected or a reply — same quiet re-fetch as after an upload.
+  useLiveRefresh(reloadAfterUpload);
 
   async function uploadDoc(file: File) {
     if (!uploadRequirementId) {
@@ -536,9 +539,7 @@ function ApplicationDetail({
     return (
       <div>
         {backButton}
-        <div className="flex items-center justify-center py-24">
-          <Loader2 className="h-6 w-6 animate-spin opacity-60" style={{ color: 'var(--text)' }} />
-        </div>
+        <DetailSkeleton />
       </div>
     );
   }
@@ -586,7 +587,6 @@ function ApplicationDetail({
 
   const status = String(app.status || '').toUpperCase();
   const isDraft = status === 'DRAFT';
-  const isReturned = status === 'RETURNED';
   const reqTotal = requirements.length;
   const reqVerified = requirements.filter((r) => String(r.status).toUpperCase() === 'VERIFIED').length;
   const reqPct = reqTotal > 0 ? Math.round((reqVerified / reqTotal) * 100) : 0;
@@ -623,7 +623,9 @@ function ApplicationDetail({
         </div>
       </div>
 
-      {(isDraft || isReturned) && (
+      {/* Only a draft is submitted from here (there's no "returned to the
+          locator" step any more — staff send reviews back internally). */}
+      {isDraft && (
         <div
           className="rounded-xl px-4 py-3.5 border flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3"
           style={{
@@ -633,14 +635,12 @@ function ApplicationDetail({
         >
           <div className="min-w-0">
             <p className="text-[13px] font-semibold" style={{ color: 'var(--text)' }}>
-              {isDraft ? 'Draft — not yet submitted' : 'Returned — changes requested'}
+              Draft — not yet submitted
             </p>
             <p className="text-[11px] text-secondary mt-0.5">
               {mandatoryMissing > 0
-                ? `Upload the required document${mandatoryMissing === 1 ? '' : 's'} for ${mandatoryMissing} mandatory requirement${mandatoryMissing === 1 ? '' : 's'} before ${isDraft ? 'submitting' : 'resubmitting'}.`
-                : isDraft
-                  ? 'All mandatory documents are attached. You can submit this application.'
-                  : 'Address the remarks in the History tab, then resubmit.'}
+                ? `Upload the required document${mandatoryMissing === 1 ? '' : 's'} for ${mandatoryMissing} mandatory requirement${mandatoryMissing === 1 ? '' : 's'} before submitting.`
+                : 'All mandatory documents are attached. You can submit this application.'}
             </p>
           </div>
           <div className="flex items-center gap-2 shrink-0">
@@ -651,7 +651,7 @@ function ApplicationDetail({
               onClick={submitApplication}
             >
               {busy === 'submit' ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
-              {isDraft ? 'Submit application' : 'Resubmit'}
+              Submit application
             </button>
           </div>
         </div>
@@ -1069,6 +1069,16 @@ function RequirementThreadModal({
   const [sending, setSending] = useState(false);
   const [acking, setAcking] = useState(false);
 
+  // Quiet re-fetch for live updates (a reply from the evaluator), no spinner.
+  useLiveRefresh(async () => {
+    try {
+      const res = await fetch(`/api/applications/requirements/${requirement.id}/comments`, { credentials: 'include' });
+      const json = await res.json().catch(() => ({}));
+      if (res.ok && Array.isArray(json?.data)) setComments(json.data);
+    } catch {
+      /* keep what's shown */
+    }
+  });
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -1150,7 +1160,7 @@ function RequirementThreadModal({
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-4 space-y-3">
+        <div className="flex-1 overflow-y-auto custom-scrollbar p-4 space-y-3">
           {requirement.remarks ? (
             <div className="text-[11px] rounded-lg p-2.5" style={{ backgroundColor: 'color-mix(in oklab, var(--control-bg) 88%, transparent)' }}>
               <span className="font-semibold" style={{ color: 'var(--text)' }}>Latest remarks:</span> {requirement.remarks}
@@ -1158,9 +1168,7 @@ function RequirementThreadModal({
           ) : null}
 
           {loading ? (
-            <div className="flex items-center justify-center py-6 text-secondary text-xs gap-2">
-              <Loader2 size={14} className="animate-spin" /> Loading…
-            </div>
+            <ThreadSkeleton />
           ) : comments.length === 0 ? (
             <div className="text-[11px] text-secondary text-center py-4">No replies yet. Say something below.</div>
           ) : (

@@ -40,6 +40,7 @@ import {
   markNotificationReadRequest,
 } from '../lib/notificationClient';
 import { NOTIFICATIONS_REFRESH_EVENT, requestNotificationsRefresh } from '../lib/notificationRefresh';
+import { announceLiveData } from '../lib/liveData';
 import { requestPermissionsRefresh } from '../lib/permissionsRefresh';
 import { roleDisplayName } from '../lib/roleDisplay';
 import { SESSION_ENDED_EVENT } from '../lib/idleSession';
@@ -56,6 +57,7 @@ type SearchResult = {
   status: string;
   proponent_id: number | null;
   proponent_name: string | null;
+  proponent_ref_no: string | null;
   target_path: string;
 };
 
@@ -335,7 +337,9 @@ export function AppHeader({
         item.actorRole === 'proponent' ||
         item.eventType === 'approval_ready' ||
         item.eventType === 'assessment_assigned' ||
-        item.eventType === 'locator_assigned';
+        item.eventType === 'locator_assigned' ||
+        // Admin: something broke and needs fixing (server lib/systemAlerts.js).
+        item.eventType === 'system';
       if (!isPersistentToastEvent || item.isRead) continue;
       if (openLocatorToastIdsRef.current.has(item.id)) continue;
 
@@ -376,6 +380,8 @@ export function AppHeader({
     const source = new EventSource('/api/notifications/stream', { withCredentials: true });
     const onNotification = () => {
       requestNotificationsRefresh();
+      // Open queues/lists/dashboards re-fetch quietly (lib/liveData.ts).
+      announceLiveData();
     };
     const onPermissions = () => {
       requestPermissionsRefresh();
@@ -697,7 +703,11 @@ export function AppHeader({
                   ) : searchResults.length === 0 ? (
                     <div className="px-3 py-3 text-[11px] text-secondary">No matches.</div>
                   ) : (
-                    searchResults.map((r) => (
+                    searchResults.map((r) => {
+                      // An approved new application opens as its Registered
+                      // Locator record — show the locator's Ref No (LOC-…).
+                      const asLocator = r.target_path === '/applications/proponents' && Boolean(r.proponent_ref_no);
+                      return (
                       <button
                         key={r.id}
                         onClick={() => goToSearchResult(r)}
@@ -705,13 +715,14 @@ export function AppHeader({
                         style={{ borderColor: 'var(--border-subtle)' }}
                       >
                         <div className="font-semibold" style={{ color: 'var(--text)' }}>
-                          {r.application_no}
+                          {asLocator ? r.proponent_ref_no : r.application_no}
                         </div>
                         <div className="text-[10px] text-secondary">
-                          {r.proponent_name || 'Unknown locator'} · {r.status}
+                          {r.proponent_name || 'Unknown locator'} · {asLocator ? 'Registered Locator' : r.status}
                         </div>
                       </button>
-                    ))
+                      );
+                    })
                   )}
                 </div>
               ) : null}

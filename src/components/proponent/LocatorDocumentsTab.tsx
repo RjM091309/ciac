@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { CheckCircle2, Clock3, FileText, Loader2, Trash2, Upload, X, XCircle } from 'lucide-react';
+import { CheckCircle2, ChevronDown, Clock3, FileText, Loader2, Trash2, Upload, X, XCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { ConfirmModal } from '../ui/ConfirmModal';
 import { RequirementGroupTabs, useRequirementGroups } from '../ui/RequirementGroupTabs';
@@ -17,6 +17,7 @@ type RequirementDocRow = {
   is_mandatory: boolean | number | null;
   application_no: string;
   application_type: string | null;
+  application_type_name?: string | null;
   is_renewal: boolean | number | null;
   application_status: string | null;
   application_created_at: string | null;
@@ -74,6 +75,8 @@ const STATUS_STYLE: Record<string, { color: string; bg: string; Icon: typeof Che
   PENDING: { color: '#f59e0b', bg: 'rgba(245,158,11,.15)', Icon: Clock3, label: 'Pending' },
 };
 
+const NOT_UPLOADED = { color: '#f59e0b', bg: 'rgba(245,158,11,.15)', Icon: Clock3, label: 'Not uploaded' };
+
 // Matches the server's documents-only limit (m_upload.js uploadDocumentOnly).
 const MAX_UPLOAD_MB = 50;
 const ALLOWED_EXTENSIONS = ['.pdf', '.doc', '.docx', '.xls', '.xlsx'];
@@ -91,8 +94,9 @@ function fileProblem(file: File): string | null {
   return null;
 }
 
-const TH = 'px-3 py-2 text-left font-semibold uppercase tracking-wide text-[9px] border-b';
-const TD = 'px-3 py-2 border-b align-top';
+// Same table look as the Locator Documents checklist above it.
+const TH = 'px-3 py-2 text-left font-semibold uppercase tracking-widest text-[10px] text-secondary border-b';
+const TD = 'px-3 py-2 text-[11px] border-b align-top';
 const BORDER = { borderColor: 'var(--input-border)' };
 
 function fmtDate(value?: string | null) {
@@ -409,8 +413,13 @@ export function LocatorDocumentsTab({
     proponentId ? uploadsByRequirement.has(o.id) : pending.some((p) => p.requirement_id === String(o.id));
   const uploadedCount = applicable.filter(isUploaded).length;
 
+  // Once the locator has a filed application its requirements live there
+  // (the card below) — the manual checklist would just list them twice.
+  const showChecklist = !proponentId || (rows !== null && !error && groups.length === 0);
+
   return (
     <div className="flex flex-col gap-4">
+      {showChecklist ? (
       <div className="rounded-lg border overflow-hidden" style={BORDER}>
         <div
           className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 border-b"
@@ -538,13 +547,14 @@ export function LocatorDocumentsTab({
           </table>
         </div>
       </div>
+      ) : null}
 
       {!proponentId ? null : error ? (
         <div className="text-xs py-4 text-center" style={{ color: '#ef4444' }}>{error}</div>
       ) : !rows ? (
         <div className="text-xs text-secondary py-4 text-center">Loading application documents…</div>
       ) : !groups.length ? (
-        <div className="text-xs text-secondary py-4 text-center">No filed applications with documents yet.</div>
+        null
       ) : (
         <ApplicationDocuments groups={groups} />
       )}
@@ -576,37 +586,84 @@ function StatusChip({ text, color, bg }: { text: string; color: string; bg: stri
   );
 }
 
+/** Latest application (the current one — usually the newest renewal) open;
+ * earlier ones fold into a "Previous applications" list, one click each to
+ * expand, so the tab doesn't grow with every renewal. */
 function ApplicationDocuments({ groups }: { groups: RequirementDocRow[][] }) {
+  const sorted = useMemo(
+    () => [...groups].sort((a, b) => Number(b[0].application_id) - Number(a[0].application_id)),
+    [groups],
+  );
+  const [openIds, setOpenIds] = useState<Set<number>>(new Set());
+  const [latest, ...previous] = sorted;
+  const toggle = (id: number) =>
+    setOpenIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   return (
     <div className="flex flex-col gap-4">
-      {groups.map((items) => (
-        <ApplicationDocumentsCard key={items[0].application_id} items={items} />
-      ))}
+      <ApplicationDocumentsCard items={latest} />
+      {previous.length ? (
+        <div className="flex flex-col gap-2">
+          <div className="text-[10px] font-semibold uppercase tracking-widest text-secondary">
+            Previous applications ({previous.length})
+          </div>
+          {previous.map((items) => {
+            const id = Number(items[0].application_id);
+            return (
+              <ApplicationDocumentsCard
+                key={id}
+                items={items}
+                collapsed={!openIds.has(id)}
+                onToggle={() => toggle(id)}
+              />
+            );
+          })}
+        </div>
+      ) : null}
     </div>
   );
 }
 
-function ApplicationDocumentsCard({ items }: { items: RequirementDocRow[] }) {
+function ApplicationDocumentsCard({
+  items,
+  collapsed = false,
+  onToggle,
+}: {
+  items: RequirementDocRow[];
+  collapsed?: boolean;
+  onToggle?: () => void;
+}) {
   const head = items[0];
   const verified = items.filter((r) => r.status === 'VERIFIED').length;
   const reqGroups = useRequirementGroups(items);
   return (
     <div className="rounded-lg border overflow-hidden" style={BORDER}>
       <div
-        className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 border-b"
+        className={`flex flex-wrap items-center justify-between gap-2 px-3 py-2 ${collapsed ? '' : 'border-b'} ${onToggle ? 'cursor-pointer select-none' : ''}`}
         style={{ backgroundColor: 'var(--control-bg)', ...BORDER }}
+        onClick={onToggle}
+        role={onToggle ? 'button' : undefined}
+        aria-expanded={onToggle ? !collapsed : undefined}
       >
         <div className="text-xs font-semibold" style={{ color: 'var(--text)' }}>
           {head.application_no}
           <span className="ml-2 font-normal text-secondary">
-            {head.application_type || ''}
-            {head.is_renewal ? ' · Renewal' : ''} · {head.application_status || '—'} · Filed {fmtDate(head.application_created_at)}
+            {head.is_renewal ? 'Renewal' : 'New'} · {head.application_type_name || head.application_type || '—'} · {head.application_status || '—'} · Filed {fmtDate(head.application_created_at)}
           </span>
         </div>
-        <div className="text-[11px] text-secondary tabular-nums">
+        <div className="flex items-center gap-2 text-[11px] text-secondary tabular-nums">
           {verified}/{items.length} verified
+          {onToggle ? (
+            <ChevronDown size={14} className={`transition-transform ${collapsed ? '' : 'rotate-180'}`} />
+          ) : null}
         </div>
       </div>
+      {collapsed ? null : (
+      <>
       {reqGroups.showTabs ? (
         <div className="px-3 pt-2.5 pb-2 border-b" style={BORDER}>
           <RequirementGroupTabs
@@ -623,7 +680,7 @@ function ApplicationDocumentsCard({ items }: { items: RequirementDocRow[] }) {
           <thead>
             <tr>
               {['Requirement', 'Document', 'Uploaded', 'Status', 'Remarks', 'Processed By'].map((h) => (
-                <th key={h} className={TH} style={{ ...BORDER, color: 'var(--text-muted)' }}>
+                <th key={h} className={TH} style={{ borderColor: 'var(--border-subtle)' }}>
                   {h}
                 </th>
               ))}
@@ -631,14 +688,19 @@ function ApplicationDocumentsCard({ items }: { items: RequirementDocRow[] }) {
           </thead>
           <tbody>
             {reqGroups.current.items.map((r) => {
-              const s = STATUS_STYLE[r.status] || STATUS_STYLE.PENDING;
+              // Nothing uploaded yet reads "Not uploaded", not "Pending" review.
+              const s =
+                !r.document_id && r.status === 'PENDING'
+                  ? NOT_UPLOADED
+                  : STATUS_STYLE[r.status] || STATUS_STYLE.PENDING;
+              const cell = { borderColor: 'var(--border-subtle)' };
               return (
-                <tr key={r.id}>
-                  <td className={TD} style={{ ...BORDER, color: 'var(--text)' }}>
+                <tr key={r.id} className="last:[&>td]:border-b-0">
+                  <td className={TD} style={{ ...cell, color: 'var(--text)' }}>
                     {r.requirement_name || r.requirement_code || '—'}
                     {r.is_mandatory ? <span style={{ color: '#ef4444' }}> *</span> : null}
                   </td>
-                  <td className={TD} style={BORDER}>
+                  <td className={TD} style={cell}>
                     {r.document_id ? (
                       <button
                         type="button"
@@ -656,10 +718,10 @@ function ApplicationDocumentsCard({ items }: { items: RequirementDocRow[] }) {
                       <span className="text-secondary">Not uploaded</span>
                     )}
                   </td>
-                  <td className={`${TD} whitespace-nowrap text-secondary`} style={BORDER}>
+                  <td className={`${TD} whitespace-nowrap text-secondary`} style={cell}>
                     {fmtDate(r.uploaded_at)}
                   </td>
-                  <td className={TD} style={BORDER}>
+                  <td className={TD} style={cell}>
                     <span
                       className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold whitespace-nowrap"
                       style={{ color: s.color, backgroundColor: s.bg }}
@@ -668,10 +730,10 @@ function ApplicationDocumentsCard({ items }: { items: RequirementDocRow[] }) {
                       {s.label}
                     </span>
                   </td>
-                  <td className={`${TD} text-secondary`} style={BORDER}>
+                  <td className={`${TD} text-secondary`} style={cell}>
                     {r.remarks || '—'}
                   </td>
-                  <td className={`${TD} whitespace-nowrap`} style={BORDER}>
+                  <td className={`${TD} whitespace-nowrap`} style={cell}>
                     {r.status !== 'PENDING' && r.reviewed_by_name ? (
                       <>
                         <div style={{ color: 'var(--text)' }}>{r.reviewed_by_name}</div>
@@ -687,6 +749,8 @@ function ApplicationDocumentsCard({ items }: { items: RequirementDocRow[] }) {
           </tbody>
         </table>
       </div>
+      </>
+      )}
     </div>
   );
 }

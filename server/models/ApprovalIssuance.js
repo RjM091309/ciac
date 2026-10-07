@@ -62,6 +62,12 @@ async function generateAndAttachContractCertificate(contract, actorId) {
     await Contract.setCertificatePath(contract.id, relativeStoragePath(absPath));
   } catch (error) {
     console.error("Generate contract certificate error:", error);
+    require("../lib/systemAlerts").alertAdmins({
+      key: `contract-certificate-${contract?.id}`,
+      subject: `Contract certificate failed: ${contract?.contract_no || `contract #${contract?.id}`}`,
+      body: "The contract was saved but its certificate PDF couldn't be created. Save the contract again to retry; if it keeps failing, check the server.",
+      applicationId: contract?.application_id ?? null,
+    });
   }
 }
 
@@ -661,6 +667,8 @@ async function settleApproval(approvalId, applicationId, outcome, note, actorId,
   }
 
   if (headerStatus === "APPROVED") {
+    // The contract (saved before Approve) becomes visible to the locator now.
+    await Contract.announceContractToLocator(applicationId);
     const settled = await getApplicationRow(applicationId);
     if (Number(settled?.is_renewal)) {
       // A renewal stays with its Account Officer (no Approved Queue). The

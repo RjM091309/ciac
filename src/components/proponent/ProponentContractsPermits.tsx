@@ -1,7 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { Loader2, ScrollText, ShieldCheck } from 'lucide-react';
+import { ScrollText, ShieldCheck } from 'lucide-react';
 import { EmptyState } from '../ui/EmptyState';
 import { noLocatorProfileMessage } from '../../lib/locatorProfile';
+import { useLiveRefresh } from '../../lib/liveData';
+import { ListSkeleton } from '../ui/PortalSkeletons';
 
 type Navigate = (to: string, opts?: { replace?: boolean }) => void;
 
@@ -69,6 +71,10 @@ export function ProponentContractsPermits({ navigate }: { navigate: Navigate }) 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // Bumped by live updates (a new contract/permit, a renewal) — re-fetches quietly.
+  const [liveTick, setLiveTick] = useState(0);
+  useLiveRefresh(() => setLiveTick((t) => t + 1));
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -93,14 +99,10 @@ export function ProponentContractsPermits({ navigate }: { navigate: Navigate }) 
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [liveTick]);
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center py-24">
-        <Loader2 className="h-6 w-6 animate-spin opacity-60" style={{ color: 'var(--text)' }} />
-      </div>
-    );
+    return <ListSkeleton columns={6} rows={3} />;
   }
 
   if (error) {

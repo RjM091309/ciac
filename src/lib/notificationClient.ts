@@ -24,7 +24,9 @@ function mapNotificationRows(rows: any[], userRole: Role, userId?: number | null
             ? 'assessment'
             : rawCategory === 'locator_assigned'
               ? 'locator_assigned'
-              : 'application_status';
+              : rawCategory === 'system'
+                ? 'system'
+                : 'application_status';
     const applicationId = Number(row?.application_id);
     const hasApplicationId = Number.isFinite(applicationId) && applicationId > 0;
     const requirementId = Number(row?.requirement_id);
@@ -35,7 +37,8 @@ function mapNotificationRows(rows: any[], userRole: Role, userId?: number | null
     // onto the New/Renewal Applications queue. Document and requirement
     // events are raised while an application's compliance is being
     // evaluated, so those deep-link into the Evaluation Queue too.
-    const targetPath = hasApplicationId
+    // A system alert is read in the bell; it doesn't open a page.
+    const targetPath = hasApplicationId && category !== 'system'
       ? userRole === 'proponent'
         ? '/me/applications'
         : category === 'locator_assigned'
@@ -198,6 +201,8 @@ export function getNotificationCategoryLabel(value: string | undefined) {
       return 'New Assignment';
     case 'locator_assigned':
       return 'New Locator';
+    case 'system':
+      return 'System alert';
     case 'contract':
       return 'Contract';
     default:

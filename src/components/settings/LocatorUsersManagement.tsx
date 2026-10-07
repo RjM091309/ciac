@@ -13,6 +13,7 @@ import { RowActionsMenu, type RowActionItem } from '../ui/RowActionsMenu';
 import { useSessionStorageCachedResource } from '../../hooks/useSessionStorageCachedResource';
 import { useControlPanelAccess } from '../../context/ControlPanelAccessContext';
 import { loadProgressForApplications, type ProgressSummary } from '../../lib/applicationProgress';
+import { useLiveRefresh } from '../../lib/liveData';
 
 const MENU_KEY = 'settings:locator-users';
 
@@ -244,6 +245,8 @@ export function LocatorUsersManagement({
       toast.error(message);
     },
   });
+  // Live: re-fetch quietly when something changes for this user (lib/liveData.ts).
+  useLiveRefresh(() => refresh({ showLoading: false }).catch(() => {}));
 
   // Type of Contract decides which requirements get attached when the
   // application is created (see ApplicationWorkflow.createApplication).

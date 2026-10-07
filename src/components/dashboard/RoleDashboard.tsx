@@ -1,9 +1,10 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Loader2 } from 'lucide-react';
 import { Dashboard, type AdminDashboardData } from './Dashboard';
 import { OfficerDashboard, type OfficerDashboardData } from './OfficerDashboard';
 import { ProponentDashboard, type ProponentDashboardData } from './ProponentDashboard';
 import { PERMISSIONS_REFRESH_EVENT } from '../../lib/permissionsRefresh';
+import { useLiveRefresh } from '../../lib/liveData';
+import { DashboardSkeleton } from '../ui/PortalSkeletons';
 
 type Navigate = (to: string, opts?: { replace?: boolean }) => void;
 
@@ -20,6 +21,8 @@ const POLL_INTERVAL_MS = 30_000;
 export function RoleDashboard({ navigate }: { navigate: Navigate }) {
   const [state, setState] = useState<DashboardState>({ status: 'loading' });
   const firstLoad = useRef(true);
+  // Live: re-fetch the dashboard quietly (load() never shows a spinner after the first time).
+  useLiveRefresh(() => load());
 
   const load = useCallback(async () => {
     try {
@@ -56,11 +59,7 @@ export function RoleDashboard({ navigate }: { navigate: Navigate }) {
   }, [load]);
 
   if (state.status === 'loading') {
-    return (
-      <div className="flex items-center justify-center py-24">
-        <Loader2 className="h-6 w-6 animate-spin opacity-60" style={{ color: 'var(--text)' }} />
-      </div>
-    );
+    return <DashboardSkeleton />;
   }
 
   if (state.status === 'officer') return <OfficerDashboard data={state.data} navigate={navigate} />;

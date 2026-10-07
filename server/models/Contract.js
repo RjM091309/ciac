@@ -17,11 +17,11 @@ function toInt(v) {
 async function getLocatorContactByApplicationId(applicationId) {
   const rows = await selectData(
     `
-    SELECT TOP (1) u.email, u.full_name, a.application_no
+    SELECT TOP (1) u.id AS user_id, NULLIF(u.email, '') AS email, u.full_name, a.application_no
     FROM dbo.applications a
     JOIN dbo.proponents p ON p.id = a.proponent_id
     JOIN dbo.users u ON u.id = p.user_id
-    WHERE a.id = @param0 AND u.email IS NOT NULL AND u.email <> ''
+    WHERE a.id = @param0
     `,
     [toInt(applicationId)]
   );
@@ -176,8 +176,23 @@ async function getCertificatePath(id) {
   return rows?.[0]?.certificate_path || null;
 }
 
+/** Whether the locator can see this application's contract yet: only once
+ * it's APPROVED (the contract is saved before Approve, on the approval panel). */
+async function isApplicationApproved(applicationId) {
+  const rows = await selectData(`SELECT TOP (1) status FROM dbo.applications WHERE id = @param0`, [toInt(applicationId)]);
+  return String(rows?.[0]?.status || "").toUpperCase() === "APPROVED";
+}
+
 async function createContractNotifications({ applicationId, contractNo, actorId, isUpdate }) {
   const normalizedContractNo = String(contractNo || "").trim();
+  // Before approval the contract is a draft for staff: the locator hears
+  // about it when the application is approved (announceContractToLocator).
+  const approved = await isApplicationApproved(applicationId);
+  let locatorUserId = null;
+  if (!approved) {
+    const loc = await getLocatorContactByApplicationId(applicationId).catch(() => null);
+    locatorUserId = loc?.user_id ?? null;
+  }
   try {
     await Notification.createApplicationScopedNotifications({
       applicationId,
@@ -185,6 +200,7 @@ async function createContractNotifications({ applicationId, contractNo, actorId,
       eventType: "contract",
       subject: `Contract ${isUpdate ? "updated" : "created"}`,
       body: `Contract ${normalizedContractNo || "record"} was ${isUpdate ? "updated" : "created"} for this application.`,
+      excludeUserIds: locatorUserId ? [locatorUserId] : [],
     });
   } catch (error) {
     console.error("Create contract notifications error:", error);
@@ -193,7 +209,32 @@ async function createContractNotifications({ applicationId, contractNo, actorId,
   // Only email on the initial signing, not every later edit (e.g. attaching
   // the scanned file afterward) — this is the "your business is now under
   // contract" moment the locator actually needs pinged about.
-  if (isUpdate) return;
+  if (isUpdate || !approved) return;
+  await sendContractEmail(applicationId, normalizedContractNo);
+}
+
+/** On Approve: the locator now sees the contract — tell them (in-app + email). */
+async function announceContractToLocator(applicationId) {
+  try {
+    const contract = await getByApplicationId(applicationId);
+    if (!contract) return;
+    const locator = await getLocatorContactByApplicationId(applicationId);
+    if (locator?.user_id) {
+      await Notification.createNotification({
+        userId: locator.user_id,
+        subject: "Contract created",
+        body: `Contract ${contract.contract_no || "record"} was created for this application.`,
+        applicationId,
+        eventType: "contract",
+      });
+    }
+    await sendContractEmail(applicationId, String(contract.contract_no || "").trim());
+  } catch (error) {
+    console.error("Announce contract to locator error:", error);
+  }
+}
+
+async function sendContractEmail(applicationId, normalizedContractNo) {
   try {
     const locator = await getLocatorContactByApplicationId(applicationId);
     if (locator?.email) {
@@ -298,6 +339,8 @@ async function listAll() {
     FROM dbo.contracts c
     INNER JOIN dbo.applications a ON a.id = c.application_id
     LEFT JOIN dbo.proponents p ON p.id = a.proponent_id
+    -- A contract saved on the approval panel counts once it's approved.
+    WHERE a.status = 'APPROVED'
     ORDER BY c.id DESC
     `
   );
@@ -419,6 +462,12 @@ async function syncContractPermit({ applicationId, contractNo, effectiveStart, e
     }
   } catch (error) {
     console.error("Sync contract permit error:", error);
+    require("../lib/systemAlerts").alertAdmins({
+      key: `contract-permit-${applicationId}`,
+      subject: `Contract permit not created: ${contractNo || `application #${applicationId}`}`,
+      body: "The contract was saved but its permit (shown on Renewal Tracking) couldn't be created or updated. Save the contract again to retry.",
+      applicationId,
+    });
   }
 }
 
@@ -514,6 +563,8 @@ async function updateContract(id, { effective_start, effective_end, document_id,
 }
 
 module.exports = {
+  isApplicationApproved,
+  announceContractToLocator,
   ensureSchema,
   getById,
   getByApplicationId,

@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { FileUp, KeyRound, Loader2, LogIn, ShieldCheck, UserPlus, PencilLine } from 'lucide-react';
+import { FileUp, KeyRound, LogIn, ShieldCheck, UserPlus, PencilLine } from 'lucide-react';
 import { EmptyState } from '../ui/EmptyState';
 import { noLocatorProfileMessage } from '../../lib/locatorProfile';
 import { useSiteSettings } from '../../lib/siteSettings';
+import { TimelineSkeleton } from '../ui/PortalSkeletons';
 
 type ActivityRow = {
   id: number;
@@ -70,11 +71,7 @@ export function ProponentActivity() {
   }, []);
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center py-24">
-        <Loader2 className="h-6 w-6 animate-spin opacity-60" style={{ color: 'var(--text)' }} />
-      </div>
-    );
+    return <TimelineSkeleton />;
   }
 
   if (error) {

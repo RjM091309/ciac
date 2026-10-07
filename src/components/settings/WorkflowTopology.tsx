@@ -156,7 +156,6 @@ const SCENARIOS: Scenario[] = [
     loops: [
       { from: 3, to: 2, label: 'Rejected → re-upload', local: true },
       { from: 5, to: 3, label: 'Return to Evaluator' },
-      { from: 5, to: 2, label: 'Return to locator' },
     ],
   },
   {
@@ -233,7 +232,6 @@ const SCENARIOS: Scenario[] = [
     loops: [
       { from: 3, to: 2, label: 'Rejected → re-upload', local: true },
       { from: 4, to: 3, label: 'Return to Evaluator' },
-      { from: 4, to: 2, label: 'Return to locator' },
     ],
   },
 ];

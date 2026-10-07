@@ -475,15 +475,26 @@ async function getProponentById(id) {
       p.industry_code,
       COALESCE(latest_app.application_type, p.industry_code) AS effective_industry_code,
       CASE WHEN latest_app.application_type IS NULL THEN 0 ELSE 1 END AS has_application,
-      CASE WHEN ct.effective_start IS NULL AND ct.effective_end IS NULL AND ct.contract_type_id IS NULL THEN 0 ELSE 1 END AS has_contract
+      CASE WHEN ct.effective_start IS NULL AND ct.effective_end IS NULL AND ct.contract_type_id IS NULL THEN 0 ELSE 1 END AS has_contract,
+      open_ren.application_no AS renewal_application_no,
+      open_ren.status AS renewal_status
     FROM dbo.proponents p
+    -- A renewal that's been started but not yet decided (panel badge).
+    OUTER APPLY (
+      SELECT TOP (1) r.application_no, r.status
+      FROM dbo.applications r
+      WHERE r.proponent_id = p.id AND r.is_renewal = 1
+        AND r.status NOT IN ('APPROVED', 'REJECTED', 'DISAPPROVED')
+      ORDER BY r.id DESC
+    ) open_ren
     LEFT JOIN dbo.users officer ON officer.id = p.account_officer_id
     LEFT JOIN dbo.land_use lu ON lu.id = p.land_use_id
     OUTER APPLY (
       SELECT TOP (1) c.effective_start, c.effective_end, c.contract_type_id
       FROM dbo.contracts c
       INNER JOIN dbo.applications a ON a.id = c.application_id
-      WHERE a.proponent_id = p.id
+      -- Only approved contracts: one saved before Approve doesn't move the term yet.
+      WHERE a.proponent_id = p.id AND a.status = 'APPROVED'
       ORDER BY c.effective_end DESC, c.id DESC
     ) ct
     OUTER APPLY (
@@ -555,6 +566,8 @@ async function getProponentById(id) {
     effective_industry_code: p.effective_industry_code ?? null,
     has_application: Boolean(p.has_application),
     has_contract: Boolean(p.has_contract),
+    renewal_application_no: p.renewal_application_no ?? null,
+    renewal_status: p.renewal_status ?? null,
     properties,
     stockholders,
     contact_persons,
@@ -617,7 +630,7 @@ async function listProponentsForLocatorList({ accountOfficerId = null } = {}) {
       SELECT TOP (1) c.effective_start, c.effective_end
       FROM dbo.contracts c
       INNER JOIN dbo.applications a2 ON a2.id = c.application_id
-      WHERE a2.proponent_id = p.id
+      WHERE a2.proponent_id = p.id AND a2.status = 'APPROVED'
       ORDER BY c.effective_end DESC, c.id DESC
     ) ct
     WHERE p.account_officer_id IS NOT NULL

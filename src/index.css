@@ -178,6 +178,49 @@
     border-color 180ms ease-out;
 }
 
+/* Locator portal content area (AppLayout): white, with three large, faint
+   dots as a decoration in the top-right corner. */
+.locator-canvas {
+  background-color: #ffffff;
+  background-image:
+    radial-gradient(circle, rgb(15 23 42 / 0.06) 0 58px, transparent 59px),
+    radial-gradient(circle, rgb(15 23 42 / 0.05) 0 34px, transparent 35px),
+    radial-gradient(circle, rgb(15 23 42 / 0.04) 0 20px, transparent 21px);
+  background-repeat: no-repeat;
+  background-size: 118px 118px, 70px 70px, 42px 42px;
+  background-position: right 36px top 20px, right 172px top 64px, right 96px top 150px;
+}
+/* Locator mobile bottom nav backing: same white as the page. */
+.locator-backing {
+  background-color: #ffffff;
+}
+.dark .locator-backing {
+  background-color: var(--background);
+}
+.dark .locator-canvas {
+  background-color: var(--background);
+  background-image:
+    radial-gradient(circle, rgb(255 255 255 / 0.05) 0 58px, transparent 59px),
+    radial-gradient(circle, rgb(255 255 255 / 0.04) 0 34px, transparent 35px),
+    radial-gradient(circle, rgb(255 255 255 / 0.035) 0 20px, transparent 21px);
+}
+
+/* Light/dark switch (src/lib/themeSwitch.ts): every element changes colour at
+   once — no per-element transitions while the class flips. With View
+   Transitions the whole screen cross-fades instead. */
+.theme-switching,
+.theme-switching *,
+.theme-switching *::before,
+.theme-switching *::after {
+  transition: none !important;
+}
+
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 260ms;
+  animation-timing-function: ease-out;
+}
+
   /* Pointer on clickable controls; I-beam on typed/search fields. */
   button:not(:disabled),
   [type="button"]:not(:disabled),
@@ -462,6 +505,15 @@ select.input-field:-webkit-autofill:focus {
 .overflow-y-auto {
   -webkit-overflow-scrolling: touch;
   overscroll-behavior-y: contain;
+}
+
+/* Native scrollbars and form controls follow the theme (dark ones in dark
+   mode) wherever a custom scrollbar isn't applied. */
+:root {
+  color-scheme: light;
+}
+:root.dark {
+  color-scheme: dark;
 }
 
 .custom-scrollbar {

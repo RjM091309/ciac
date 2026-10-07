@@ -1,9 +1,10 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Building2, Clock, Loader2, PencilLine } from 'lucide-react';
+import { Building2, Clock, PencilLine } from 'lucide-react';
 import { toast } from 'sonner';
 import { EmptyState } from '../ui/EmptyState';
 import { noLocatorProfileMessage } from '../../lib/locatorProfile';
 import { getSiteSettings, useSiteSettings } from '../../lib/siteSettings';
+import { FormSkeleton } from '../ui/PortalSkeletons';
 
 type ProponentProfileData = {
   id: number;
@@ -133,11 +134,7 @@ export function ProponentProfile() {
   }
 
   if (state.status === 'loading') {
-    return (
-      <div className="flex items-center justify-center py-24">
-        <Loader2 className="h-6 w-6 animate-spin opacity-60" style={{ color: 'var(--text)' }} />
-      </div>
-    );
+    return <FormSkeleton />;
   }
 
   if (state.status === 'no-profile') {

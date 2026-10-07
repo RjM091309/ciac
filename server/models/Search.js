@@ -15,7 +15,7 @@ const BUCKET_MENU_KEYS = {
   in_completed: "settings:proponents",
 };
 
-/** Finds applications by application number or locator business name,
+/** Finds applications by application number, locator Ref No or business name,
  * tagging each row with which queue(s) it would show up in — the caller
  * (c_search.js) keeps only the buckets the requesting role actually has
  * Control Panel sidebar access to. Admins get every bucket, so this never
@@ -34,26 +34,25 @@ async function searchApplications(term) {
       a.status,
       p.id AS proponent_id,
       p.business_name AS proponent_name,
+      p.ref_no AS proponent_ref_no,
       CASE WHEN a.is_renewal = 0 AND a.status <> 'APPROVED' THEN 1 ELSE 0 END AS in_new,
       CASE WHEN a.is_renewal = 1 THEN 1 ELSE 0 END AS in_renewals,
-      CASE WHEN a.is_renewal = 0 AND a.status = 'APPROVED' THEN 1 ELSE 0 END AS in_completed,
+      -- Approved and Account Officer assigned → Registered Locator.
+      CASE WHEN a.is_renewal = 0 AND a.status = 'APPROVED' AND ISNULL(a.awaiting_ao_assignment, 0) = 0 THEN 1 ELSE 0 END AS in_completed,
       CASE
         WHEN asm.id IS NOT NULL AND asm.stage <> 'COMPLETED' THEN 1
         WHEN asm.id IS NULL AND a.status IN ('SUBMITTED', 'RESUBMITTED', 'RETURNED') THEN 1
         ELSE 0
       END AS in_assessment,
-      CASE WHEN ap.id IS NOT NULL OR a.status = 'FOR_APPROVAL' THEN 1 ELSE 0 END AS in_approval,
-      asm.assigned_evaluator_id AS assessment_evaluator_id,
-      COALESCE(
-        (SELECT TOP (1) s.assigned_to FROM dbo.approval_steps s WHERE s.approval_id = ap.id ORDER BY s.id DESC),
-        asm.approver_id
-      ) AS approval_assignee_id
+      -- /approval is the Approved Queue: approved, waiting for an Account
+      -- Officer. (For Approval itself is handled in the Evaluation Queue.)
+      CASE WHEN ISNULL(a.awaiting_ao_assignment, 0) = 1 THEN 1 ELSE 0 END AS in_approval,
+      asm.assigned_evaluator_id AS assessment_evaluator_id
     FROM dbo.applications a
     LEFT JOIN dbo.proponents p ON p.id = a.proponent_id
     LEFT JOIN dbo.application_assessments asm ON asm.application_id = a.id
-    LEFT JOIN dbo.application_approvals ap ON ap.application_id = a.id
     WHERE a.status <> 'DRAFT'
-      AND (a.application_no LIKE @param0 OR p.business_name LIKE @param0)
+      AND (a.application_no LIKE @param0 OR p.business_name LIKE @param0 OR p.ref_no LIKE @param0)
     ORDER BY a.id DESC
     `,
     [like]

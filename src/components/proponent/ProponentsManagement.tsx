@@ -12,6 +12,7 @@ import { EmptyState } from '../ui/EmptyState';
 import { useSessionStorageCachedResource } from '../../hooks/useSessionStorageCachedResource';
 import { useControlPanelAccess } from '../../context/ControlPanelAccessContext';
 import { LocatorDocumentsTab, uploadLocatorDocument, type PendingLocatorDocument } from './LocatorDocumentsTab';
+import { useLiveRefresh } from '../../lib/liveData';
 
 type ProponentRow = {
   id: number;
@@ -70,6 +71,9 @@ type ProponentRow = {
   effective_industry_code?: string | null;
   has_application?: boolean;
   has_contract?: boolean;
+  // Open (undecided) renewal — header badge shows "Renewal in process".
+  renewal_application_no?: string | null;
+  renewal_status?: string | null;
   // "Industry" in the legacy BRIDGE form — the Application Type of this
   // locator's most recently filed application, same source as the Locators
   // List's "business_type" column. Never set directly (no application yet =
@@ -486,6 +490,8 @@ export function ProponentsManagement({
       toast.error(message);
     },
   });
+  // Live: re-fetch quietly when something changes for this user (lib/liveData.ts).
+  useLiveRefresh(() => refresh({ showLoading: false }).catch(() => {}));
 
   const proponents = locatorsData?.proponents ?? [];
   const users = locatorsData?.users ?? [];
@@ -890,6 +896,8 @@ export function ProponentsManagement({
                 has_application: Boolean(data.has_application),
                 effective_industry_code: data.effective_industry_code ?? null,
                 has_contract: Boolean(data.has_contract),
+                renewal_application_no: data.renewal_application_no ?? null,
+                renewal_status: data.renewal_status ?? null,
               }
             : prev,
         );
@@ -1331,6 +1339,19 @@ export function ProponentsManagement({
         headerExtra={(() => {
           // Lease status from the contract terms: Active through End Term
           // (inclusive), Expired after. No badge until a contract exists.
+          // A renewal in progress outranks Active/Expired.
+          if (editing?.renewal_application_no) {
+            return (
+              <span
+                className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold border"
+                style={{ color: '#d97706', backgroundColor: 'rgba(245,158,11,.12)', borderColor: 'rgba(245,158,11,.35)' }}
+                title={`${editing.renewal_application_no} · ${editing.renewal_status || ''}`}
+              >
+                <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: '#f59e0b' }} />
+                Renewal in process
+              </span>
+            );
+          }
           const status = leaseStatus(editing?.end_term);
           if (!status) return null;
           const active = status === 'active';

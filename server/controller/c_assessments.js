@@ -48,6 +48,9 @@ async function ensureDepartment(req, res, applicationId) {
   const app = await Workflow.getApplicationById(applicationId);
   if (!app) return true; // the handler reports the 404
   if (Boolean(Number(app.is_renewal)) === (scope.department === "ao")) return true;
+  console.warn(
+    `[assessments] ${req.method} ${req.originalUrl}: ${req.user?.username} (${scope.department}) denied ${app.application_no} (app ${app.id})`
+  );
   res.status(403).json({
     success: false,
     message: scope.department === "ao" ? "New applications are handled by the BDO." : "Renewals are handled by the Account Officer.",
@@ -321,6 +324,10 @@ exports.updateRequirementStatus = async (req, res) => {
     const { status, remarks } = req.body || {};
     if (!status || !String(status).trim()) {
       return res.status(400).json({ success: false, message: "status is required" });
+    }
+    const nextStatus = String(status).trim().toUpperCase();
+    if ((nextStatus === "VERIFIED" || nextStatus === "REJECTED") && !(await Assessment.hasUploadedDocument(id))) {
+      return res.status(400).json({ success: false, message: "No document uploaded yet — nothing to verify or reject." });
     }
     const row = await Workflow.updateApplicationRequirementStatus(id, {
       status: String(status).trim(),

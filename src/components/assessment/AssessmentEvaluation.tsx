@@ -30,6 +30,7 @@ import { useControlPanelAccess } from '../../context/ControlPanelAccessContext';
 import { useSessionStorageCachedResource } from '../../hooks/useSessionStorageCachedResource';
 import { requestNotificationsRefresh } from '../../lib/notificationRefresh';
 import { ApprovalDetail } from '../approval/ApprovalIssuance';
+import { useLiveRefresh } from '../../lib/liveData';
 
 const MENU_KEY = 'assessment:queue';
 
@@ -554,6 +555,7 @@ export function AssessmentEvaluation({
   // straight to that application's detail drawer, then strip the query params
   // so a refresh/back doesn't re-trigger it.
   const consumedNotificationQueryRef = useRef('');
+  const [deepLinkId, setDeepLinkId] = useState<number | null>(null);
   useEffect(() => {
     if (!navigate) return;
     const search = String(locationSearch || '').trim();
@@ -562,9 +564,18 @@ export function AssessmentEvaluation({
     const rawId = Number(params.get('applicationId') || '');
     if (!Number.isFinite(rawId) || rawId <= 0) return;
     consumedNotificationQueryRef.current = search;
-    setSelectedId(rawId);
     const requestedTab = params.get('tab');
-    setOpenTab(requestedTab && (TABS as readonly string[]).includes(requestedTab) ? (requestedTab as Tab) : undefined);
+    const tab = requestedTab && (TABS as readonly string[]).includes(requestedTab) ? (requestedTab as Tab) : undefined;
+    // An explicit tab means "show me the evaluation"; otherwise open it the
+    // way clicking its row would (e.g. straight to the approval panel once
+    // Level 2 has recommended it) — decided once the queue has loaded.
+    if (tab) {
+      setOpenTab(tab);
+      setSelectedId(rawId);
+    } else {
+      setOpenTab(undefined);
+      setDeepLinkId(rawId);
+    }
     params.delete('applicationId');
     params.delete('notificationId');
     params.delete('focus');
@@ -583,6 +594,8 @@ export function AssessmentEvaluation({
       toast.error((err as Error).message);
     }
   }, [refresh]);
+  // Live: someone else acted (locator upload, assignment, review…) — re-fetch quietly.
+  useLiveRefresh(() => refresh({ showLoading: false }).catch(() => {}));
 
   // "For Approval" (Level 1): one click — if Level 2's review is waiting it's
   // sent for approval on the spot, then the approval panel opens on this same
@@ -619,6 +632,16 @@ export function AssessmentEvaluation({
     else if (canSendForApproval(r)) void openForApproval(r, false);
     else setSelectedId(r.application_id);
   };
+
+  // Deep link (?applicationId=, e.g. a dashboard row): open like a row click.
+  useEffect(() => {
+    if (deepLinkId == null || !data) return;
+    const row = allRows.find((r) => Number(r.application_id) === deepLinkId);
+    setDeepLinkId(null);
+    if (row) openRow(row);
+    else setSelectedId(deepLinkId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deepLinkId, data]);
 
 
   return (
@@ -1087,6 +1110,7 @@ function AssessmentDetail({
     const json = await apiFetch(`/api/assessments/${applicationId}`);
     setData(json.data);
   }, [applicationId]);
+  useLiveRefresh(() => load().catch(() => {}));
 
   useEffect(() => {
     let cancelled = false;
@@ -1256,9 +1280,38 @@ function OverviewTab({
   // evaluator assignment and raw stage buttons must not offer a side door
   // around it (same gate as the Recommendation tab).
   const isClosed = a.stage === 'COMPLETED' || a.stage === 'RETURNED';
+  // Level 1 sent the review back: show their remarks up front so the
+  // evaluator knows why — until the evaluator submits again. (Activity is
+  // newest first.)
+  const lastReviewEvent = data.activity.find((x) => x.action === 'RETURNED_TO_OFFICER' || x.action === 'OFFICER_RECOMMENDED');
+  const returnedNote =
+    (a.stage === 'ASSIGNED' || a.stage === 'IN_REVIEW') && lastReviewEvent?.action === 'RETURNED_TO_OFFICER'
+      ? lastReviewEvent
+      : null;
 
   return (
     <div className="flex flex-col gap-4">
+      {returnedNote ? (
+        <div
+          className="rounded-xl border px-3 py-2.5 text-[12px] flex gap-2.5"
+          style={{ borderColor: 'rgba(245,158,11,.45)', backgroundColor: 'rgba(245,158,11,.10)' }}
+        >
+          <RotateCcw size={15} className="shrink-0 mt-0.5" style={{ color: '#f59e0b' }} />
+          <div className="min-w-0 space-y-0.5">
+            <div className="font-semibold" style={{ color: '#f59e0b' }}>
+              Returned to you by Level 1
+            </div>
+            <div className="whitespace-pre-wrap" style={{ color: 'var(--text)' }}>
+              {returnedNote.detail && returnedNote.detail !== 'Returned from approval'
+                ? returnedNote.detail
+                : 'No remarks were given.'}
+            </div>
+            <div className="text-[10px] text-secondary">
+              {returnedNote.actor_name || returnedNote.actor_username || '—'} · {fmtDateTime(returnedNote.created_at)}
+            </div>
+          </div>
+        </div>
+      ) : null}
       <div className="grid grid-cols-2 gap-2 text-[12px]">
         <InfoCell label="Application status" value={a.application_status} />
         <InfoCell label="Stage" value={STAGE_LABELS[a.stage] || a.stage} />
@@ -1420,20 +1473,6 @@ function ComplianceTab({
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex items-center justify-between gap-2">
-        <div className="text-[11px] text-secondary">
-          Documentary requirements pulled from the application. Add remarks on each document as you review it.
-        </div>
-        {canEditReqs ? (
-          <button
-            className="shrink-0 inline-flex items-center gap-1.5 rounded px-2.5 py-1.5 text-[11px] font-semibold border cursor-pointer"
-            style={{ borderColor: 'var(--border)' }}
-            onClick={() => setAddingRequirement(true)}
-          >
-            <Plus size={13} /> Request additional requirement
-          </button>
-        ) : null}
-      </div>
       {reqGroups.showTabs ? (
         <RequirementGroupTabs
           tabs={reqGroups.tabs}
@@ -1510,23 +1549,31 @@ function ComplianceTab({
                     <button
                       className="rounded px-2 py-1 text-[11px] border cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                       style={{ borderColor: 'var(--border)' }}
-                      disabled={busy || r.status === 'VERIFIED' || r.status === 'REJECTED'}
-                      title={r.status === 'REJECTED' ? 'Waiting for the locator to reupload — this auto-returns to Pending once they do' : undefined}
-                      onClick={() =>
+                      disabled={busy || !hasDocument || r.status === 'VERIFIED' || r.status === 'REJECTED'}
+                      title={
+                        !hasDocument
+                          ? 'No document uploaded yet'
+                          : r.status === 'REJECTED'
+                            ? 'Waiting for the locator to reupload — this auto-returns to Pending once they do'
+                            : undefined
+                      }
+                      onClick={() => {
+                        // Verify takes remarks too (optional), starting from what's already there.
+                        setRejectRemarks(r.remarks || '');
                         setConfirmTarget({
                           id: r.id,
                           status: 'VERIFIED',
                           label: `${r.requirement_code ? `${r.requirement_code} · ` : ''}${r.requirement_name || `Requirement #${r.id}`}`,
                           remarks: r.remarks,
-                        })
-                      }
+                        });
+                      }}
                     >
                       Verify
                     </button>
                     <button
                       className="rounded px-2 py-1 text-[11px] border cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                       style={{ borderColor: 'var(--border)' }}
-                      disabled={busy || r.status === 'REJECTED' || r.status === 'VERIFIED'}
+                      disabled={busy || !hasDocument || r.status === 'REJECTED' || r.status === 'VERIFIED'}
                       onClick={() => {
                         setRejectRemarks('');
                         setConfirmTarget({
@@ -1609,15 +1656,23 @@ function ComplianceTab({
           await setReq(
             confirmTarget.id,
             confirmTarget.status,
-            confirmTarget.status === 'REJECTED' ? rejectRemarks : confirmTarget.remarks ?? undefined
+            rejectRemarks
           );
           setConfirmTarget(null);
           setRejectRemarks('');
         }}
       >
-        {confirmTarget?.status === 'VERIFIED' && confirmTarget.remarks ? (
-          <div className="mt-3 text-[11px] text-secondary">
-            Your remarks on this document will be kept: <span className="italic">"{confirmTarget.remarks}"</span>
+        {confirmTarget?.status === 'VERIFIED' ? (
+          <div className="mt-3">
+            <label className="text-[11px] font-medium text-secondary">Remarks (optional)</label>
+            <textarea
+              autoFocus
+              className="app-input mt-1 resize-none"
+              rows={3}
+              placeholder="Anything to note about this document…"
+              value={rejectRemarks}
+              onChange={(e) => setRejectRemarks(e.target.value)}
+            />
           </div>
         ) : null}
         {confirmTarget?.status === 'REJECTED' ? (
@@ -1680,6 +1735,15 @@ function RequirementThreadModal({ requirement, onClose }: { requirement: Require
   const [message, setMessage] = useState('');
   const [sending, setSending] = useState(false);
 
+  // Quiet re-fetch for live updates (a reply from the locator), no spinner.
+  useLiveRefresh(async () => {
+    try {
+      const json = await apiFetch(`/api/assessments/requirements/${requirement.id}/comments`);
+      setComments(Array.isArray(json.data) ? json.data : []);
+    } catch {
+      /* keep what's shown */
+    }
+  });
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -1734,7 +1798,7 @@ function RequirementThreadModal({ requirement, onClose }: { requirement: Require
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-4 space-y-3">
+        <div className="flex-1 overflow-y-auto custom-scrollbar p-4 space-y-3">
           {loading ? (
             <div className="flex items-center justify-center py-6 text-secondary text-xs gap-2">
               <Loader2 size={14} className="animate-spin" /> Loading…
@@ -1907,6 +1971,12 @@ function RecommendationTab({
   const pendingReq = data.requirements.filter((r) => r.status === 'PENDING').length;
   const rejectedReq = data.requirements.filter((r) => r.status === 'REJECTED').length;
   const allVerified = totalReq > 0 && verifiedReq === totalReq;
+  // Uploaded but not yet verified/rejected — blocks the evaluator's Submit
+  // (same rule on the server). Requirements with no upload don't block.
+  const uploadedReqIds = new Set(data.documents.map((d) => Number(d.requirement_id)).filter(Boolean));
+  const uncheckedUploads = data.requirements.filter(
+    (r) => r.status === 'PENDING' && uploadedReqIds.has(Number(r.requirement_id))
+  ).length;
 
   return (
     <div className="flex flex-col gap-3">
@@ -1963,6 +2033,15 @@ function RecommendationTab({
           />
         ) : officerOpen ? (
           <>
+            {uncheckedUploads > 0 ? (
+              <div
+                className="rounded-lg border px-3 py-2 text-[12px]"
+                style={{ borderColor: '#f59e0b55', backgroundColor: '#f59e0b1a', color: 'var(--text)' }}
+              >
+                Verify or reject the {uncheckedUploads} uploaded requirement{uncheckedUploads === 1 ? '' : 's'} on the
+                Compliance tab first. Requirements the locator hasn't uploaded don't block submitting.
+              </div>
+            ) : null}
             <Field label="Summary / basis">
               <textarea
                 className={cn(inputCls, 'min-h-[70px] resize-y')}
@@ -1974,7 +2053,7 @@ function RecommendationTab({
             <button
               className="rounded-lg px-3 py-2 text-[13px] font-semibold disabled:opacity-50"
               style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
-              disabled={busy || !canEdit}
+              disabled={busy || !canEdit || uncheckedUploads > 0}
               onClick={() =>
                 run(
                   () =>

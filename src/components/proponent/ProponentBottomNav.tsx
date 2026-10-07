@@ -172,7 +172,11 @@ export function ProponentBottomNav({
     >
       {/* Opaque page-colored backing spanning the FAB's full clearance, so
           scrolled content can never show through the notch or beside the FAB. */}
-      <div className="absolute inset-0" style={{ backgroundColor: 'var(--background)' }} />
+      {/* For the locator it matches their white page (index.css .locator-backing). */}
+      <div
+        className={role === 'proponent' ? 'absolute inset-0 locator-backing' : 'absolute inset-0'}
+        style={role === 'proponent' ? undefined : { backgroundColor: 'var(--background)' }}
+      />
 
       {/* Bar background (notched when the Home FAB is shown), pinned to the bottom of the taller wrapper. */}
       <div

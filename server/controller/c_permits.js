@@ -53,6 +53,11 @@ async function generateAndAttachCertificate(permit) {
     await Permit.setCertificatePath(permit.id, relativeStoragePath(absPath));
   } catch (error) {
     console.error("Generate permit certificate error:", error);
+    require("../lib/systemAlerts").alertAdmins({
+      key: `permit-certificate-${permit?.id}`,
+      subject: `Permit certificate failed: ${permit?.permit_no || `permit #${permit?.id}`}`,
+      body: "The permit was saved but its certificate PDF couldn't be created. Save the permit again to retry.",
+    });
   }
 }
 

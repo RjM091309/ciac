@@ -10,6 +10,7 @@ import { TableSkeleton } from '../ui/Skeleton';
 import { EmptyState } from '../ui/EmptyState';
 import { useSessionStorageCachedResource } from '../../hooks/useSessionStorageCachedResource';
 import { useControlPanelAccess } from '../../context/ControlPanelAccessContext';
+import { useLiveRefresh } from '../../lib/liveData';
 
 const MENU_KEY = 'compliance:permits';
 
@@ -192,6 +193,8 @@ export function PermitsManagement({
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : 'Failed to load'),
   });
+  // Live: re-fetch quietly when something changes for this user (lib/liveData.ts).
+  useLiveRefresh(() => refresh({ showLoading: false }).catch(() => {}));
 
   // Renewal Tracking lists only what's due: EXPIRING (within a year) or
   // EXPIRED. VALID, REVOKED and RENEWED (superseded by an approved renewal)
@@ -562,7 +565,7 @@ export function PermitsManagement({
             <table className="min-w-full text-left text-xs">
               <thead>
                 <tr>
-                  {['Locator', 'Type', 'Permit No.', 'Authority', 'Issued', 'Expiry', 'Status', 'Actions'].map((c) => (
+                  {['Tenant', 'Type', 'Permit No.', 'Authority', 'Issued', 'Expiry', 'Status', 'Actions'].map((c) => (
                     <th key={c} className={cn('px-3 py-2 font-semibold text-[10px] uppercase tracking-widest text-secondary border-b', c === 'Actions' && 'text-right pr-2')} style={{ borderColor: 'var(--border-subtle)' }}>
                       {c}
                     </th>

@@ -9,7 +9,8 @@ export type NotificationCategory =
   | 'assessment'
   | 'approval'
   | 'contract'
-  | 'locator_assigned';
+  | 'locator_assigned'
+  | 'system';
 
 export interface NotificationItem {
   id: string;

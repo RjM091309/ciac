@@ -35,6 +35,7 @@ function normalizeEventType(value) {
     raw === "approval_ready" ||
     raw === "assessment_assigned" ||
     raw === "locator_assigned" ||
+    raw === "system" ||
     raw === "contract"
   ) {
     return raw;
@@ -141,6 +142,7 @@ const INTERNAL_EVENT_TYPES = new Set([
   "approval",
   "approval_ready",
   "locator_assigned",
+  "system",
 ]);
 
 /** Level 2 BDO (role has assessment:queue but not approval:queue, not
@@ -207,23 +209,8 @@ async function resolveApplicationRecipients(application, actorId, eventType) {
     if (proponentUserId) recipients.add(proponentUserId);
   }
 
-  // Admins always get every application event — Control Panel exempts them
-  // from per-menu restrictions entirely (see requireMenuAccess bypassing on
-  // role === 'admin'), so they may have no role_sidebar_menu_permissions
-  // rows to match against in the first place.
-  const adminRows = await selectData(
-    `
-    SELECT DISTINCT u.id
-    FROM dbo.users u
-    INNER JOIN dbo.user_roles ur ON ur.user_id = u.id
-    INNER JOIN dbo.roles r ON r.id = ur.role_id
-    WHERE u.is_active = 1 AND LOWER(LTRIM(RTRIM(r.name))) = 'admin'
-    `
-  );
-  for (const row of adminRows) {
-    const userId = toInt(row?.id);
-    if (userId) recipients.add(userId);
-  }
+  // Admins don't get routine application events — only system alerts
+  // (lib/systemAlerts.js). Everyone else below is by department and level.
 
   // Everyone else (Officer, and any custom role — Account Officer,
   // Assessment Officer, whatever gets added later) only gets this

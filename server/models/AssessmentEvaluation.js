@@ -545,6 +545,19 @@ async function getApplicationIdForRequirement(applicationRequirementId) {
   return toInt(rows?.[0]?.application_id);
 }
 
+/** Whether the locator has uploaded a file for this checklist row — there's
+ * nothing to verify or reject until they have. */
+async function hasUploadedDocument(applicationRequirementId) {
+  const rows = await selectData(
+    `SELECT TOP (1) 1 AS ok
+     FROM dbo.application_requirements ar
+     INNER JOIN dbo.documents d ON d.application_id = ar.application_id AND d.requirement_id = ar.requirement_id
+     WHERE ar.id = @param0`,
+    [toInt(applicationRequirementId)]
+  );
+  return rows.length > 0;
+}
+
 async function getAssessmentDetail(applicationId) {
   await ensureSchema();
   const appId = toInt(applicationId);
@@ -835,6 +848,26 @@ async function submitOfficerReview(applicationId, { recommendation, summary, act
   if (!["ASSIGNED", "IN_REVIEW"].includes(asm.stage)) {
     throw businessError("This review has already been submitted to Level 1.");
   }
+  // Everything the locator uploaded must be verified or rejected first.
+  // Requirements with no upload don't block (they can be noted in the remarks).
+  const unchecked = await selectData(
+    `
+    SELECT COUNT(*) AS n
+    FROM dbo.application_requirements ar
+    WHERE ar.application_id = @param0 AND ar.status = 'PENDING'
+      AND EXISTS (
+        SELECT 1 FROM dbo.documents d
+        WHERE d.application_id = ar.application_id AND d.requirement_id = ar.requirement_id
+      )
+    `,
+    [toInt(applicationId)]
+  );
+  const n = Number(unchecked?.[0]?.n || 0);
+  if (n > 0) {
+    throw businessError(
+      `Verify or reject the ${n} uploaded requirement${n === 1 ? "" : "s"} first — the locator's upload${n === 1 ? " hasn't" : "s haven't"} been checked yet.`
+    );
+  }
   // Level 2 submits a summary only; a recommendation is optional (Level 1
   // makes the actual call). Still validated when one is sent.
   const hasRec = recommendation !== undefined && recommendation !== null && String(recommendation).trim() !== "";
@@ -1033,6 +1066,14 @@ async function submitRecommendation(applicationId, { recommendation, summary, ac
   }
 
   const detail = await getAssessmentDetail(applicationId);
+  if (warnings.length) {
+    require("../lib/systemAlerts").alertAdmins({
+      key: `recommendation-${applicationId}`,
+      subject: `Needs fixing: ${detail?.assessment?.application_no || `application #${applicationId}`}`,
+      body: warnings.join(" "),
+      applicationId,
+    });
+  }
   return warnings.length ? { ...detail, warnings } : detail;
 }
 
@@ -1068,6 +1109,7 @@ module.exports = {
   getAssignedEvaluatorId,
   getApplicationIdForCharge,
   getApplicationIdForRequirement,
+  hasUploadedDocument,
   getOrCreateAssessment,
   logRequirementActivity,
   listAssessments,

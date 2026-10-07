@@ -474,6 +474,8 @@ export default function App() {
         expand
         theme="light"
         duration={6000}
+        // An X on every toast so it can be dismissed right away.
+        closeButton
         toastOptions={{
           style: { fontSize: '14px', padding: '14px 16px', lineHeight: 1.45 },
           classNames: { title: 'font-semibold' },

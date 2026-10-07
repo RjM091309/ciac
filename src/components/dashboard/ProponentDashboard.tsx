@@ -6,6 +6,8 @@ import { getStatusBadgeStyles } from './statusBadge';
 import { useControlPanelAccess } from '../../context/ControlPanelAccessContext';
 import { noLocatorProfileMessage } from '../../lib/locatorProfile';
 import { cn } from '../../lib/utils';
+import { applicationTypeLabel } from '../../lib/applicationTypes';
+import { DashboardSkeleton } from '../ui/PortalSkeletons';
 
 type DashboardApplicationRow = {
   id: number;
@@ -113,8 +115,13 @@ export function ProponentDashboard({
   const proponent = data?.proponent ?? null;
   const applications = data?.applications ?? [];
   const stats = data?.stats ?? { total: 0, draft: 0, pending: 0, approved: 0, rejected: 0, returned: 0, requirementsTotal: 0, requirementsVerified: 0 };
-  const { canShowWidget: canShowWidgetForMe } = useControlPanelAccess();
+  const { canShowWidget: canShowWidgetForMe, ready: accessReady } = useControlPanelAccess();
   const canShowWidget = (key: string) => (widgetOverrides ? widgetOverrides[key] ?? true : canShowWidgetForMe(key));
+
+  // Until this role's widget settings arrive every widget would read as
+  // visible, so stat cards etc. flashed in and then vanished. Hold the
+  // skeleton until they're known (the admin preview passes them in).
+  if (!widgetOverrides && !accessReady) return <DashboardSkeleton />;
 
   if (!proponent) {
     return (
@@ -172,7 +179,8 @@ export function ProponentDashboard({
       )}
 
       {canShowWidget('dashboard:table') && (
-      <div className="rounded-2xl p-0 sm:p-4 sm:p-5 sm:border sm:border-transparent sm:shadow-[0_1px_2px_0_rgb(0_0_0_/_0.05)] sm:bg-[var(--surface)]">
+      // No border-color transition inside (it flashed white in dark mode — see ProponentApplications).
+      <div className="rounded-2xl p-0 sm:p-4 sm:p-5 sm:border sm:border-transparent sm:shadow-[0_1px_2px_0_rgb(0_0_0_/_0.05)] sm:bg-[var(--surface)] [transition-property:background-color,color] [&_*]:[transition-property:background-color,color]">
         <h4 className="text-sm font-bold mb-3" style={{ color: 'var(--text)' }}>
           My Applications
         </h4>
@@ -219,8 +227,10 @@ export function ProponentDashboard({
                       </span>
                     </div>
                     <div className="mt-1 flex items-center justify-between gap-2 text-[11px] text-secondary">
-                      <span>{Number(app.is_renewal) ? 'Renewal' : 'New'}</span>
-                      <span>{formatDate(app.submitted_at || app.created_at)}</span>
+                      <span className="truncate">
+                        {applicationTypeLabel(app.application_type)} · {Number(app.is_renewal) ? 'Renewal' : 'New'}
+                      </span>
+                      <span className="shrink-0">{formatDate(app.submitted_at || app.created_at)}</span>
                     </div>
                     <div className="mt-2 flex items-center gap-2">
                       <div
@@ -241,13 +251,25 @@ export function ProponentDashboard({
 
             {/* Tablet/desktop: table. */}
             <div className="hidden sm:block overflow-x-auto">
-              <table className="min-w-full text-left text-xs">
+              {/* Fixed column widths so the columns spread evenly across the card. */}
+              <table className="w-full table-fixed text-left text-xs">
+                <colgroup>
+                  <col style={{ width: '18%' }} />
+                  <col style={{ width: '22%' }} />
+                  <col style={{ width: '10%' }} />
+                  <col style={{ width: '16%' }} />
+                  <col style={{ width: '20%' }} />
+                  <col style={{ width: '14%' }} />
+                </colgroup>
                 <thead>
                   <tr>
-                    {['Application No.', 'Type', 'Status', 'Requirements', 'Submitted'].map((col) => (
+                    {['Application No.', 'Type', 'Track', 'Status', 'Requirements', 'Submitted'].map((col) => (
                       <th
                         key={col}
-                        className="px-3 py-2 font-semibold text-[10px] uppercase tracking-widest text-secondary border-b"
+                        className={cn(
+                          'px-3 py-2 font-semibold text-[10px] uppercase tracking-widest text-secondary border-b',
+                          col === 'Submitted' && 'text-right'
+                        )}
                         style={{ borderColor: 'var(--border-subtle)' }}
                       >
                         {col}
@@ -262,9 +284,28 @@ export function ProponentDashboard({
                     const verified = Number(app.requirements_verified || 0);
                     const pct = total > 0 ? Math.round((verified / total) * 100) : 0;
                     return (
-                      <tr key={app.id} className="border-b last:border-b-0" style={{ borderColor: 'var(--border-subtle)' }}>
-                        <td className="px-3 py-2 text-[11px] font-semibold" style={{ color: 'var(--text)' }}>
+                      <tr
+                        key={app.id}
+                        className={cn(
+                          'border-b last:border-b-0',
+                          navigate && 'cursor-pointer hover:bg-[var(--selected-bg)] transition-[background-color]'
+                        )}
+                        style={{ borderColor: 'var(--border-subtle)' }}
+                        tabIndex={navigate ? 0 : undefined}
+                        onClick={navigate ? () => navigate(`/me/applications?applicationId=${app.id}`) : undefined}
+                        onKeyDown={
+                          navigate
+                            ? (e) => {
+                                if (e.key === 'Enter') navigate(`/me/applications?applicationId=${app.id}`);
+                              }
+                            : undefined
+                        }
+                      >
+                        <td className="px-3 py-2.5 text-[11px] font-semibold truncate" style={{ color: 'var(--text)' }}>
                           {app.application_no}
+                        </td>
+                        <td className="px-3 py-2 text-[11px] text-secondary truncate" title={applicationTypeLabel(app.application_type)}>
+                          {applicationTypeLabel(app.application_type)}
                         </td>
                         <td className="px-3 py-2 text-[11px] text-secondary">
                           {Number(app.is_renewal) ? 'Renewal' : 'New'}
@@ -277,7 +318,7 @@ export function ProponentDashboard({
                             {app.status}
                           </span>
                         </td>
-                        <td className="px-3 py-2 text-[11px] text-secondary w-40">
+                        <td className="px-3 py-2 text-[11px] text-secondary">
                           <div className="flex items-center gap-2">
                             <div
                               className="h-1.5 flex-1 rounded-full overflow-hidden"
@@ -291,7 +332,7 @@ export function ProponentDashboard({
                             <span className="shrink-0 text-[10px]">{verified}/{total}</span>
                           </div>
                         </td>
-                        <td className="px-3 py-2 text-[11px] text-secondary">{formatDate(app.submitted_at || app.created_at)}</td>
+                        <td className="px-3 py-2 text-[11px] text-secondary text-right">{formatDate(app.submitted_at || app.created_at)}</td>
                       </tr>
                     );
                   })}

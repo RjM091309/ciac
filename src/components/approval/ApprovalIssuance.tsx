@@ -19,6 +19,7 @@ import { ConfirmModal } from '../ui/ConfirmModal';
 import { DatePicker, parseYmd, toYmd } from '../ui/DatePicker';
 import { EmptyState } from '../ui/EmptyState';
 import { useControlPanelAccess } from '../../context/ControlPanelAccessContext';
+import { useLiveRefresh } from '../../lib/liveData';
 
 const MENU_KEY = 'approval:queue';
 
@@ -235,6 +236,7 @@ export function ApprovalDetail({
     const json = await apiFetch(`/api/approvals/${applicationId}`);
     setData(json.data);
   }, [applicationId]);
+  useLiveRefresh(() => load().catch(() => {}));
 
   useEffect(() => {
     let cancelled = false;
@@ -716,14 +718,6 @@ function ChainTab({
               onClick={() => act('APPROVE')}
             >
               <CheckCircle2 size={13} className="inline mr-1" /> Approve
-            </button>
-            <button
-              className="rounded-lg px-3 py-1.5 text-[12px] font-semibold disabled:opacity-50"
-              style={{ backgroundColor: 'rgba(245,158,11,.16)', color: '#f59e0b', border: '1px solid rgba(245,158,11,.38)' }}
-              disabled={busy}
-              onClick={() => act('RETURN')}
-            >
-              <RotateCcw size={13} className="inline mr-1" /> Return to locator
             </button>
             <button
               className="rounded-lg px-3 py-1.5 text-[12px] font-semibold disabled:opacity-50"

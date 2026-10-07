@@ -6,6 +6,7 @@ import { ConfirmModal } from '../ui/ConfirmModal';
 import { EmptyState } from '../ui/EmptyState';
 import { TableSkeleton } from '../ui/Skeleton';
 import { requestNotificationsRefresh } from '../../lib/notificationRefresh';
+import { useLiveRefresh } from '../../lib/liveData';
 
 // Approved Queue (/approval) for the Account Officer department. An
 // application (new or renewal) approved by the Level 1 BDO lands here
@@ -85,6 +86,8 @@ export function AccountOfficerAssignment(_props: {
   useEffect(() => {
     void load();
   }, [load]);
+  // Live: a new approval lands here, or another Level 1 assigned one.
+  useLiveRefresh(load);
 
   const visible = useMemo(() => {
     const term = search.trim().toLowerCase();

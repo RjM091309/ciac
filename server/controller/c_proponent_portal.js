@@ -34,9 +34,24 @@ exports.getMyApplicationRequirements = async (req, res) => {
   }
 };
 
+/* The contract (and its permit, certificate and executed file) is saved
+ * on the approval panel before Approve — the locator only sees it once the
+ * application is APPROVED. */
+const isApproved = (application) => String(application?.status || "").toUpperCase() === "APPROVED";
+
+async function approvedApplicationIds(proponentId) {
+  const rows = await Workflow.listApplicationsForProponent(proponentId);
+  return new Set(rows.filter(isApproved).map((a) => Number(a.id)));
+}
+
 exports.getMyApplicationDocuments = async (req, res) => {
   try {
-    const rows = await Workflow.listDocumentsByApplication(req.application.id);
+    let rows = await Workflow.listDocumentsByApplication(req.application.id);
+    if (!isApproved(req.application)) {
+      // Hide the executed contract file uploaded with a not-yet-approved contract.
+      const contract = await Contract.getByApplicationId(req.application.id);
+      if (contract?.document_id) rows = rows.filter((d) => Number(d.id) !== Number(contract.document_id));
+    }
     return res.json({ success: true, data: rows });
   } catch (error) {
     console.error("Get my application documents error:", error);
@@ -121,7 +136,7 @@ exports.getMyApplicationStatusHistory = async (req, res) => {
 
 exports.getMyApplicationContract = async (req, res) => {
   try {
-    const contract = await Contract.getByApplicationId(req.application.id);
+    const contract = isApproved(req.application) ? await Contract.getByApplicationId(req.application.id) : null;
     return res.json({ success: true, data: contract || null });
   } catch (error) {
     console.error("Get my application contract error:", error);
@@ -131,7 +146,7 @@ exports.getMyApplicationContract = async (req, res) => {
 
 exports.getMyApplicationPermits = async (req, res) => {
   try {
-    const rows = await Permit.listByApplication(req.application.id);
+    const rows = isApproved(req.application) ? await Permit.listByApplication(req.application.id) : [];
     return res.json({ success: true, data: rows });
   } catch (error) {
     console.error("Get my application permits error:", error);
@@ -143,7 +158,8 @@ exports.getMyApplicationPermits = async (req, res) => {
 
 exports.listMyContracts = async (req, res) => {
   try {
-    const rows = await Contract.listByProponentId(req.proponent.id);
+    const approved = await approvedApplicationIds(req.proponent.id);
+    const rows = (await Contract.listByProponentId(req.proponent.id)).filter((c) => approved.has(Number(c.application_id)));
     return res.json({ success: true, data: rows });
   } catch (error) {
     console.error("List my contracts error:", error);
@@ -158,7 +174,7 @@ exports.downloadMyContractCertificate = async (req, res) => {
     const contract = await Contract.getById(id);
     if (!contract) return res.status(404).json({ success: false, message: "Contract not found" });
     const application = await Workflow.getApplicationById(contract.application_id);
-    if (!application || Number(application.proponent_id) !== Number(req.proponent.id)) {
+    if (!application || Number(application.proponent_id) !== Number(req.proponent.id) || !isApproved(application)) {
       return res.status(404).json({ success: false, message: "Contract not found" });
     }
     const certificatePath = await Contract.getCertificatePath(id);
@@ -190,7 +206,12 @@ exports.downloadMyContractCertificate = async (req, res) => {
 
 exports.listMyPermits = async (req, res) => {
   try {
-    const rows = await Permit.listByProponent(req.proponent.id);
+    // Permits tied to an application show once it's approved; ones added by
+    // staff without an application always show.
+    const approved = await approvedApplicationIds(req.proponent.id);
+    const rows = (await Permit.listByProponent(req.proponent.id)).filter(
+      (p) => !p.application_id || approved.has(Number(p.application_id))
+    );
     return res.json({ success: true, data: rows });
   } catch (error) {
     console.error("List my permits error:", error);
@@ -204,6 +225,9 @@ exports.downloadMyPermitCertificate = async (req, res) => {
     if (!Number.isFinite(id)) return res.status(400).json({ success: false, message: "Invalid id" });
     const permit = await Permit.getById(id);
     if (!permit || Number(permit.proponent_id) !== Number(req.proponent.id)) {
+      return res.status(404).json({ success: false, message: "Permit not found" });
+    }
+    if (permit.application_id && !isApproved(await Workflow.getApplicationById(permit.application_id))) {
       return res.status(404).json({ success: false, message: "Permit not found" });
     }
     const certificatePath = await Permit.getCertificatePath(id);

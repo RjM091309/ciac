@@ -1774,6 +1774,7 @@ async function listRequirementDocumentsByProponent(proponentId) {
       rc.name AS category_name,
       a.application_no,
       a.application_type,
+      ISNULL(at.name, a.application_type) AS application_type_name,
       a.is_renewal,
       a.status AS application_status,
       a.created_at AS application_created_at,
@@ -1785,6 +1786,7 @@ async function listRequirementDocumentsByProponent(proponentId) {
       d.version AS document_version
     FROM dbo.application_requirements ar
     INNER JOIN dbo.applications a ON a.id = ar.application_id
+    LEFT JOIN dbo.application_types at ON at.code = a.application_type
     INNER JOIN dbo.requirements r ON r.id = ar.requirement_id
     LEFT JOIN dbo.requirement_categories rc ON rc.id = r.category_id
     LEFT JOIN dbo.users u ON u.id = ar.updated_by

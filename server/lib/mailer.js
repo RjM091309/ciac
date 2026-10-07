@@ -53,6 +53,12 @@ async function sendMail({ to, subject, text, html }) {
     console.warn(
       `[mailer] SMTP not configured — email not sent. To: ${to}, Subject: ${subject}\n${text || html || ""}`
     );
+    require("./systemAlerts").alertAdmins({
+      key: "mail-not-configured",
+      throttleMs: 24 * 60 * 60 * 1000,
+      subject: "Emails are not being sent",
+      body: "The SMTP server isn't set up, so emails (locator logins, filing and decision notices, password resets) are not going out. Set it up in Portal Settings → Email.",
+    });
     return { sent: false, reason: "SMTP_NOT_CONFIGURED" };
   }
   try {
@@ -60,6 +66,11 @@ async function sendMail({ to, subject, text, html }) {
     return { sent: true };
   } catch (error) {
     console.error("[mailer] Failed to send email:", error.message || error);
+    require("./systemAlerts").alertAdmins({
+      key: "mail-send-failed",
+      subject: "An email could not be sent",
+      body: `Sending "${subject}" to ${to} failed: ${describeSendError(error)} Check Portal Settings → Email (use Send test email).`,
+    });
     return { sent: false, reason: "SEND_FAILED" };
   }
 }

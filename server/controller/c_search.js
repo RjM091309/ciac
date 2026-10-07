@@ -63,18 +63,9 @@ exports.search = async (req, res) => {
     // door, the applications a Manager assigned to them.
     const level2UserId =
       allowedBuckets.has("in_assessment") && !(await Assessment.isManager(req.user)) ? Number(req.user?.id) : null;
-    // Likewise an Account Officer only finds, through the Approval Queue door,
-    // approvals assigned to them (or still unassigned).
-    const approverId =
-      allowedBuckets.has("in_approval") && String(req.user?.role || "").toLowerCase() !== "admin"
-        ? Number(req.user?.id)
-        : null;
     const rows = allRows.map((row) => {
       let next = row;
       if (level2UserId && Number(row.assessment_evaluator_id) !== level2UserId) next = { ...next, in_assessment: 0 };
-      if (approverId && row.approval_assignee_id != null && Number(row.approval_assignee_id) !== approverId) {
-        next = { ...next, in_approval: 0 };
-      }
       return next;
     });
     const visible = rows.filter((row) =>
@@ -89,6 +80,7 @@ exports.search = async (req, res) => {
       status: row.status,
       proponent_id: row.proponent_id,
       proponent_name: row.proponent_name,
+      proponent_ref_no: row.proponent_ref_no,
       target_path: targetPathFor(row, allowedBuckets),
     }));
 

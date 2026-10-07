@@ -11,6 +11,7 @@ import { MyProfilePanel } from '../components/profile/MyProfilePanel';
 import { LoadingBar } from '../components/ui/LoadingBar';
 import { ControlPanelAccessProvider } from '../context/ControlPanelAccessContext';
 import { cn } from '../lib/utils';
+import { switchTheme } from '../lib/themeSwitch';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 
 export type AppView =
@@ -131,7 +132,7 @@ export function AppLayout({
     const mq = window.matchMedia?.('(prefers-color-scheme: dark)');
     if (!mq) return;
     const onChange = () => {
-      if (themeMode === 'system') setTheme(getSystemTheme());
+      if (themeMode === 'system') switchTheme(() => setTheme(getSystemTheme()));
     };
     mq.addEventListener('change', onChange);
     return () => mq.removeEventListener('change', onChange);
@@ -159,8 +160,10 @@ export function AppLayout({
   const closeSidebar = () => setSidebarCollapsed(true);
   const toggleSidebar = () => setSidebarCollapsed((prev) => !prev);
   const toggleTheme = () => {
-    setThemeMode('manual');
-    setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'));
+    switchTheme(() => {
+      setThemeMode('manual');
+      setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'));
+    });
   };
 
   const muiTheme = useMemo(
@@ -224,6 +227,7 @@ export function AppLayout({
   // Every role gets a persistent bottom tab bar on mobile instead of relying
   // on the hamburger drawer for primary nav.
   const showBottomNav = isMobile;
+  const isLocatorView = (sidebarRoleOverride ?? userRole) === 'proponent';
 
   return (
     <ThemeProvider theme={muiTheme}>
@@ -234,8 +238,15 @@ export function AppLayout({
           // with it showing, the bottom of the scroll area (behind the fixed
           // bottom nav) is pushed off-screen. dvh tracks the visible viewport.
           'h-screen supports-[height:100dvh]:h-dvh overflow-hidden flex flex-col font-sans relative',
+          // Locator portal (or the admin previewing it): the whole page is white,
+          // with three faint dots top right (index.css).
+          isLocatorView && 'locator-canvas',
         )}
-        style={{ backgroundColor: 'var(--background)', color: 'var(--foreground)', transition: 'background-color 220ms ease-out, color 220ms ease-out' }}
+        style={{
+          ...(isLocatorView ? {} : { backgroundColor: 'var(--background)' }),
+          color: 'var(--foreground)',
+          transition: 'background-color 220ms ease-out, color 220ms ease-out',
+        }}
       >
         <LoadingBar />
         <AppHeader

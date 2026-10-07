@@ -5,6 +5,7 @@ import { passwordHint, validatePassword } from '../../lib/passwordPolicy';
 import { bannerHeading, resolveLogo, useSiteSettings } from '../../lib/siteSettings';
 import { getCookieConsent, markCookieConsentRecorded, saveCookieConsent, type CookieConsent as StoredConsent } from '../../lib/cookieConsent';
 import { CookieConsent } from './CookieConsent';
+import { switchTheme } from '../../lib/themeSwitch';
 
 type Enrollment = { otpauthUrl: string; secret: string; qrDataUrl: string };
 
@@ -314,7 +315,9 @@ export function LoginPage(props: {
   const canSubmitReset =
     Boolean(resetNewPassword) && !resetPasswordError && resetNewPassword === confirmResetPassword;
 
-  React.useEffect(() => {
+  // Layout effect so a theme switch (lib/themeSwitch.ts) has the class on the
+  // page before the new view is captured.
+  React.useLayoutEffect(() => {
     if (theme === 'dark') document.documentElement.classList.add('dark');
     else document.documentElement.classList.remove('dark');
     window.localStorage.setItem('theme', theme);
@@ -610,7 +613,7 @@ export function LoginPage(props: {
       </div>
 
       <button
-        onClick={() => setTheme((p) => (p === 'dark' ? 'light' : 'dark'))}
+        onClick={() => switchTheme(() => setTheme((p) => (p === 'dark' ? 'light' : 'dark')))}
         className="fixed top-3 right-3 sm:top-4 sm:right-4 xl:top-6 xl:right-6 p-2.5 sm:p-3 rounded-full control-btn touch-target z-50 backdrop-blur-md"
         // Light mode: white-on-navy over the navy sign-in panel (split layout)
         // or the navy mobile header; dark-on-light over the mobile intro.
