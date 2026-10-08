@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'motion/react';
 import {
   BadgeCheck,
@@ -263,18 +263,54 @@ const SCENARIOS: Scenario[] = [
 // Diagram geometry (SVG user units) — a top-down tree: the steps run down
 // one spine, each step's automatic actions branch off to the right, and the
 // loops back run up the left side.
-const SPINE_X = 330;
-const CARD_W = 260;
 const CARD_H = 78;
 const EDGE_H = 104; // the connector into a card (room for two pills)
 const STEP_H = CARD_H + EDGE_H;
 const START_R = 30;
 const TOP = 12 + START_R * 2;
-const AUTO_X = SPINE_X + CARD_W / 2 + 70; // centre of the "auto" bubbles
-const AUTO_R = 27;
-const LOOP_X = SPINE_X - CARD_W / 2 - 46; // first loop line; more go further left
-const LOOP_GAP = 30;
-const VIEW_W = AUTO_X + AUTO_R + 30;
+
+/** Horizontal geometry. The SVG scales to its container, so on a phone the
+ * wide layout's empty margins would shrink the text to ~6px; the compact
+ * one drops them and narrows the card so the labels stay readable. */
+function layout(compact: boolean) {
+  const CARD_W = compact ? 236 : 260;
+  const LOOP_GAP = compact ? 22 : 30;
+  const loopInset = compact ? 22 : 46; // card edge → first loop line
+  const autoOffset = compact ? 40 : 70; // card edge → centre of the "auto" bubbles
+  const AUTO_R = compact ? 22 : 27;
+  // Room on the left for two loop lines and their vertical pills.
+  const SPINE_X = compact ? loopInset + LOOP_GAP + 14 + CARD_W / 2 : 330;
+  const AUTO_X = SPINE_X + CARD_W / 2 + autoOffset;
+  return {
+    SPINE_X,
+    CARD_W,
+    AUTO_X,
+    AUTO_R,
+    LOOP_X: SPINE_X - CARD_W / 2 - loopInset, // first loop line; more go further left
+    LOOP_GAP,
+    VIEW_W: AUTO_X + AUTO_R + (compact ? 8 : 30),
+    ICON: compact ? 36 : 44,
+    PAD: compact ? 10 : 14,
+  };
+}
+
+const COMPACT_QUERY = '(max-width: 639px)'; // below Tailwind's `sm`
+
+function useCompact() {
+  const [compact, setCompact] = useState(
+    () => typeof window !== 'undefined' && Boolean(window.matchMedia?.(COMPACT_QUERY).matches),
+  );
+  useEffect(() => {
+    const mq = window.matchMedia?.(COMPACT_QUERY);
+    if (!mq) return;
+    const onChange = () => setCompact(mq.matches);
+    onChange();
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
+  return compact;
+}
+
 const ACCENT = '#14b8a6';
 // Not-yet-reached lines/pills and card edges — mixed from the muted text
 // colour so they stay visible on both the light and dark surface.
@@ -355,6 +391,10 @@ export function WorkflowTopology() {
     return () => window.clearTimeout(t);
   }, [playing, step, speed, scn.steps.length]);
 
+  const compact = useCompact();
+  const { SPINE_X, CARD_W, AUTO_X, AUTO_R, LOOP_X, LOOP_GAP, VIEW_W, ICON, PAD } = layout(compact);
+  const detailRef = useRef<HTMLDivElement>(null);
+
   const n = scn.steps.length;
   const height = cardBottom(n - 1) + 24;
   const current = scn.steps[step];
@@ -362,6 +402,12 @@ export function WorkflowTopology() {
   const go = (i: number) => {
     setPlaying(false);
     setStep(i);
+  };
+  /** Tapping a step in the diagram: on a phone its details sit below the
+   * tall diagram, so bring them into view. */
+  const open = (i: number) => {
+    go(i);
+    if (compact) detailRef.current?.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' });
   };
   const StartIcon = scenarioId === 'renewal' ? CalendarClock : UserPlus;
 
@@ -382,7 +428,7 @@ export function WorkflowTopology() {
             </button>
           ))}
         </div>
-        <div className="flex items-center gap-1 ml-auto">
+        <div className="flex flex-wrap items-center gap-1 sm:ml-auto">
           <IconButton label="Previous step" onClick={() => go((step - 1 + n) % n)}>
             <ChevronLeft size={16} />
           </IconButton>
@@ -413,7 +459,7 @@ export function WorkflowTopology() {
 
       <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,640px)_minmax(0,1fr)] gap-4 items-start">
         {/* Diagram — on the page background so the borderless cards float. */}
-        <div className="glass-card p-3 sm:p-4 !border-transparent" style={{ backgroundColor: 'var(--background)' }}>
+        <div className="glass-card p-1.5 sm:p-4 !border-transparent" style={{ backgroundColor: 'var(--background)' }}>
           <svg
             viewBox={`0 0 ${VIEW_W} ${height}`}
             className="block mx-auto"
@@ -482,7 +528,7 @@ export function WorkflowTopology() {
               const cy = top + EDGE_H / 2 + 8;
               const on = i === step;
               return (
-                <g key={`auto-${i}`} onClick={() => go(i)} style={{ cursor: 'pointer' }}>
+                <g key={`auto-${i}`} onClick={() => open(i)} style={{ cursor: 'pointer' }}>
                   <title>{`Step ${i + 1}: ${st.auto.length} automatic action${st.auto.length === 1 ? '' : 's'}`}</title>
                   <path
                     d={`M ${SPINE_X} ${by} H ${AUTO_X} V ${cy - AUTO_R}`}
@@ -577,7 +623,7 @@ export function WorkflowTopology() {
               const color = LANES[st.lane].color;
               const Icon = LANE_ICON[st.lane];
               return (
-                <g key={`card-${i}`} onClick={() => go(i)} style={{ cursor: 'pointer' }}>
+                <g key={`card-${i}`} onClick={() => open(i)} style={{ cursor: 'pointer' }}>
                   {/* Floating: no border, a shadow under the bottom only (tinted
                       with the lane colour on the current step). */}
                   <rect
@@ -593,11 +639,11 @@ export function WorkflowTopology() {
                   />
                   <rect x={x} y={y} width={CARD_W} height={CARD_H} rx={6} fill="var(--surface)" />
                   <foreignObject x={x} y={y} width={CARD_W} height={CARD_H} style={{ pointerEvents: 'none' }}>
-                    <div style={{ height: '100%', display: 'flex', alignItems: 'center', gap: 12, padding: '0 14px', fontFamily: 'inherit' }}>
+                    <div style={{ height: '100%', display: 'flex', alignItems: 'center', gap: PAD - 2, padding: `0 ${PAD}px`, fontFamily: 'inherit' }}>
                       <div
                         style={{
-                          width: 44,
-                          height: 44,
+                          width: ICON,
+                          height: ICON,
                           flexShrink: 0,
                           borderRadius: 8,
                           display: 'flex',
@@ -607,7 +653,7 @@ export function WorkflowTopology() {
                           color,
                         }}
                       >
-                        <Icon size={22} />
+                        <Icon size={ICON / 2} />
                       </div>
                       <div style={{ minWidth: 0, flex: 1 }}>
                         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6 }}>
@@ -676,7 +722,7 @@ export function WorkflowTopology() {
         </div>
 
         {/* Current step + all steps (sticky beside the tall diagram) */}
-        <div className="space-y-4 lg:sticky lg:top-4">
+        <div ref={detailRef} className="space-y-4 scroll-mt-4 lg:sticky lg:top-4">
           <motion.div
             key={`${scenarioId}-${step}`}
             initial={{ opacity: 0, y: 8 }}
