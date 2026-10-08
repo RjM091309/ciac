@@ -269,6 +269,21 @@ exports.updateMine = async (req, res) => {
     } catch (notifyError) {
       console.error("Change request notification error:", notifyError);
     }
+    // …and their Account Officer, who reviews it on Registered Locator.
+    try {
+      const full = await Proponent.getProponentById(current.id);
+      if (full?.account_officer_id) {
+        await Notification.createNotification({
+          userId: full.account_officer_id,
+          subject: `Profile change request: ${current.business_name}`,
+          body: `${current.business_name} (${full.ref_no || "locator"}) asked to change ${Object.keys(payload).length} field(s) of its business profile. Review it on Registered Locator.`,
+          createdBy: req.user?.id ?? null,
+          eventType: "application_status",
+        });
+      }
+    } catch (notifyError) {
+      console.error("Change request staff notification error:", notifyError);
+    }
 
     return res.status(202).json({ success: true, data: request });
   } catch (error) {
@@ -279,10 +294,22 @@ exports.updateMine = async (req, res) => {
 
 // --- Admin review of proponent profile change requests ---
 
+/** Level 2 Account Officers review only their own locators' requests. */
+async function canReviewChangeRequest(req, request) {
+  const me = await accountOfficerScope(req);
+  if (me === null) return true;
+  const p = await Proponent.getProponentById(request.proponent_id);
+  return Number(p?.account_officer_id) === me;
+}
+
 exports.listChangeRequests = async (req, res) => {
   try {
     const status = String(req.query.status || "PENDING").toUpperCase();
-    const rows = await ChangeRequest.listByStatus(status);
+    // A Level 2 Account Officer sees only their own locators' requests.
+    const me = await accountOfficerScope(req);
+    const rows = (await ChangeRequest.listByStatus(status)).filter(
+      (r) => me === null || Number(r.account_officer_id) === me
+    );
     return res.json({ success: true, data: rows });
   } catch (error) {
     console.error("List change requests error:", error);
@@ -297,6 +324,9 @@ exports.approveChangeRequest = async (req, res) => {
 
     const request = await ChangeRequest.getById(id);
     if (!request) return res.status(404).json({ success: false, message: "Change request not found" });
+    if (!(await canReviewChangeRequest(req, request))) {
+      return res.status(403).json({ success: false, message: "You can only review requests for your own locators." });
+    }
     if (request.status !== "PENDING") {
       return res.status(400).json({ success: false, message: "This request has already been reviewed." });
     }
@@ -362,6 +392,9 @@ exports.rejectChangeRequest = async (req, res) => {
 
     const request = await ChangeRequest.getById(id);
     if (!request) return res.status(404).json({ success: false, message: "Change request not found" });
+    if (!(await canReviewChangeRequest(req, request))) {
+      return res.status(403).json({ success: false, message: "You can only review requests for your own locators." });
+    }
     if (request.status !== "PENDING") {
       return res.status(400).json({ success: false, message: "This request has already been reviewed." });
     }

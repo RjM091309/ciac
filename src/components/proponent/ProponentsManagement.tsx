@@ -14,6 +14,23 @@ import { useControlPanelAccess } from '../../context/ControlPanelAccessContext';
 import { LocatorDocumentsTab, uploadLocatorDocument, type PendingLocatorDocument } from './LocatorDocumentsTab';
 import { useLiveRefresh } from '../../lib/liveData';
 
+type ChangeRequestRow = {
+  id: number;
+  proponent_id: number;
+  payload: Record<string, string | null>;
+  current: Record<string, string | null>;
+  created_at: string | null;
+  requested_by_username: string | null;
+};
+
+const CHANGE_FIELD_LABELS: Record<string, string> = {
+  business_name: 'Business name',
+  registration_no: 'Registration no.',
+  tin: 'TIN',
+  address: 'Address',
+  contact_no: 'Contact no.',
+};
+
 type ProponentRow = {
   id: number;
   user_id: number | null;
@@ -523,8 +540,56 @@ export function ProponentsManagement({
       toast.error(message);
     },
   });
+  // Locators' pending profile change requests ("Request changes" on their
+  // portal) — reviewed here. Scoped server-side (a Level 2 AO: own locators).
+  const [changeRequests, setChangeRequests] = useState<ChangeRequestRow[]>([]);
+  const loadChangeRequests = useCallback(() => {
+    fetch(api('/api/proponents/change-requests'), { credentials: 'include' })
+      .then((res) => res.json().then((json) => ({ ok: res.ok, json })))
+      .then(({ ok, json }) => setChangeRequests(ok && Array.isArray(json?.data) ? json.data : []))
+      .catch(() => {});
+  }, []);
+  useEffect(() => {
+    loadChangeRequests();
+  }, [loadChangeRequests]);
+  const pendingRequestFor = useMemo(() => {
+    const map = new Map<number, ChangeRequestRow>();
+    for (const cr of changeRequests) if (!map.has(cr.proponent_id)) map.set(cr.proponent_id, cr);
+    return map;
+  }, [changeRequests]);
+  const [reviewRemarks, setReviewRemarks] = useState('');
+  const [reviewing, setReviewing] = useState<'approve' | 'reject' | null>(null);
+  async function reviewChangeRequest(cr: ChangeRequestRow, action: 'approve' | 'reject') {
+    setReviewing(action);
+    try {
+      const res = await fetch(api(`/api/proponents/change-requests/${cr.id}/${action}`), {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ remarks: reviewRemarks.trim() || null }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.message || 'Could not save the review');
+      toast.success(action === 'approve' ? 'Changes approved — profile updated' : 'Change request declined');
+      setReviewRemarks('');
+      loadChangeRequests();
+      await refresh({ showLoading: false });
+      // Approving changed the profile: reload the open panel with the new values.
+      if (action === 'approve' && editing && editing.id === cr.proponent_id) {
+        const row = (await fetch(api(`/api/proponents/${cr.proponent_id}`), { credentials: 'include' }).then((r) => r.json()))?.data;
+        if (row) openEdit({ ...editing, ...row });
+      }
+    } catch (e: any) {
+      toast.error(e?.message || 'Could not save the review');
+    } finally {
+      setReviewing(null);
+    }
+  }
   // Live: re-fetch quietly when something changes for this user (lib/liveData.ts).
-  useLiveRefresh(() => refresh({ showLoading: false }).catch(() => {}));
+  useLiveRefresh(() => {
+    refresh({ showLoading: false }).catch(() => {});
+    loadChangeRequests();
+  });
 
   const proponents = locatorsData?.proponents ?? [];
   const users = locatorsData?.users ?? [];
@@ -1340,6 +1405,7 @@ export function ProponentsManagement({
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0 flex-1 text-[13px] font-semibold leading-snug break-words" style={{ color: 'var(--text)' }}>
                     {p.business_name}
+                    {pendingRequestFor.has(p.id) ? <ChangeRequestBadge /> : null}
                   </div>
                   <span className="shrink-0 text-[10px] font-semibold text-secondary tabular-nums">{p.ref_no || '—'}</span>
                 </div>
@@ -1408,6 +1474,7 @@ export function ProponentsManagement({
                     </td>
                     <td className="px-3 py-2 text-[11px]" style={{ color: 'var(--text)' }}>
                       {p.business_name}
+                      {pendingRequestFor.has(p.id) ? <ChangeRequestBadge /> : null}
                     </td>
                     <td className="px-3 py-2 text-[11px] text-secondary max-w-[220px] truncate" title={p.address || ''}>
                       {p.address || '-'}
@@ -1519,6 +1586,75 @@ export function ProponentsManagement({
         }
         widthClassName="md:max-w-[75vw]"
       >
+        {editing && pendingRequestFor.has(editing.id) ? (() => {
+          const cr = pendingRequestFor.get(editing.id)!;
+          const fields = Object.keys(cr.payload || {});
+          return (
+            <div
+              className="mb-4 rounded-xl border p-3 sm:p-4"
+              style={{ borderColor: 'rgba(245,158,11,0.35)', backgroundColor: 'rgba(245,158,11,0.07)' }}
+            >
+              <div className="flex flex-wrap items-center gap-2 mb-2">
+                <span className="text-xs font-bold" style={{ color: 'var(--text)' }}>Change request from the locator</span>
+                <span className="text-[11px] text-secondary">
+                  {cr.requested_by_username ? `${cr.requested_by_username} · ` : ''}submitted {fmtDate(cr.created_at)}
+                </span>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-[11px]">
+                  <thead>
+                    <tr className="text-[10px] uppercase tracking-widest text-secondary">
+                      <th className="py-1 pr-3 font-semibold">Field</th>
+                      <th className="py-1 pr-3 font-semibold">Current</th>
+                      <th className="py-1 font-semibold">Requested</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {fields.map((f) => (
+                      <tr key={f} className="align-top">
+                        <td className="py-1 pr-3 text-secondary whitespace-nowrap">{CHANGE_FIELD_LABELS[f] || f}</td>
+                        <td className="py-1 pr-3" style={{ color: 'var(--text)' }}>{cr.current?.[f] || '—'}</td>
+                        <td className="py-1 font-semibold" style={{ color: 'var(--text)' }}>{cr.payload[f] || '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {canEdit ? (
+                <div className="mt-3 flex flex-col sm:flex-row gap-2">
+                  <input
+                    className="app-input flex-1"
+                    placeholder="Remarks for the locator (optional)"
+                    value={reviewRemarks}
+                    onChange={(e) => setReviewRemarks(e.target.value)}
+                  />
+                  <div className="flex gap-2 shrink-0">
+                    <button
+                      type="button"
+                      disabled={reviewing !== null}
+                      onClick={() => void reviewChangeRequest(cr, 'reject')}
+                      className="rounded-lg px-3 py-2 text-xs font-semibold border cursor-pointer disabled:opacity-60"
+                      style={{ borderColor: 'var(--border-subtle)', color: '#ef4444' }}
+                    >
+                      {reviewing === 'reject' ? 'Declining…' : 'Reject'}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={reviewing !== null}
+                      onClick={() => void reviewChangeRequest(cr, 'approve')}
+                      className="rounded-lg px-3 py-2 text-xs font-semibold cursor-pointer disabled:opacity-60"
+                      style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
+                    >
+                      {reviewing === 'approve' ? 'Approving…' : 'Approve changes'}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <p className="mt-2 text-[11px] text-secondary">You can view this request; approving it needs edit access.</p>
+              )}
+            </div>
+          );
+        })() : null}
         {(() => {
           // Same field layout for New and Edit — same grouping/positions as
           // the legacy BRIDGE system's Locator's Information form, one flex
@@ -2514,6 +2650,18 @@ function StatCard({ label, value }: { label: string; value: string }) {
  * button (matches the +/- row buttons) so it can sit in the same vertical
  * stack instead of its own full-width row. Disabled until something in that
  * section changed; the label is only used as the tooltip/title now. */
+function ChangeRequestBadge() {
+  return (
+    <span
+      className="ml-1.5 inline-flex items-center rounded-full px-1.5 py-0.5 text-[9px] font-semibold align-middle whitespace-nowrap"
+      style={{ backgroundColor: 'rgba(245,158,11,0.14)', color: '#d97706' }}
+      title="The locator asked to change their profile — open to review"
+    >
+      Change request
+    </span>
+  );
+}
+
 function SectionSaveBar({
   allowed = true,
   label,

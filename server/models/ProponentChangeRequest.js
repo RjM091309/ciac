@@ -54,6 +54,8 @@ async function createSchema() {
   `);
 }
 
+const { decryptValue } = require("../lib/crypto");
+
 function mapRow(r) {
   if (!r) return null;
   return {
@@ -71,11 +73,13 @@ function mapRow(r) {
     current: {
       business_name: r.cur_business_name ?? null,
       registration_no: r.cur_registration_no ?? null,
-      tin: r.cur_tin ?? null,
+      // Stored encrypted (Proponent.js); shown as the plain TIN.
+      tin: r.cur_tin ? decryptValue(r.cur_tin) : null,
       address: r.cur_address ?? null,
       contact_no: r.cur_contact_no ?? null,
     },
     requested_by_username: r.requested_by_username ?? null,
+    account_officer_id: r.account_officer_id ?? null,
   };
 }
 
@@ -128,6 +132,7 @@ async function listByStatus(status = "PENDING") {
       p.tin AS cur_tin,
       p.address AS cur_address,
       p.contact_no AS cur_contact_no,
+      p.account_officer_id,
       u.username AS requested_by_username
     FROM dbo.proponent_profile_change_requests cr
     LEFT JOIN dbo.proponents p ON p.id = cr.proponent_id

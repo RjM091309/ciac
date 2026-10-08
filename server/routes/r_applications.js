@@ -46,7 +46,8 @@ router.patch("/requirements/:id/acknowledge", requireApplicationsAccess({ allowP
 // viewing their own applications and uploading documents against them.
 router.post("/", requireApplicationsAccess(), controller.create);
 // Permits' "Renew": file + submit the renewal for that permit's locator in one step.
-router.post("/renew-from-permit/:permitId", requireApplicationsAccess(), controller.renewFromPermit);
+// Renew = filing a renewal: the Renewal Queue's Add permission in Control Panel.
+router.post("/renew-from-permit/:permitId", requireMenuAccess("applications:renewals", "add"), controller.renewFromPermit);
 router.patch("/:id/submit", requireApplicationsAccess({ allowProponent: true }), controller.submit);
 // Fixing application_type/is_renewal is staff-only, allowed through the
 // Assessment stage (see Workflow.TYPE_EDITABLE_STATUSES); deleting stays

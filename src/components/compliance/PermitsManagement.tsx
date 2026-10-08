@@ -108,6 +108,8 @@ export function PermitsManagement({
   const canAdd = fullAccess || perm.can_add;
   const canEdit = fullAccess || perm.can_edit;
   const canDelete = fullAccess || perm.can_delete;
+  // Renew files a renewal: the Renewal Queue's Add permission (what the server checks).
+  const canRenew = fullAccess || Boolean(crudPermissions['applications:renewals']?.can_add);
   const [saving, setSaving] = useState(false);
   const [panelOpen, setPanelOpen] = useState(false);
   const [editing, setEditing] = useState<PermitRow | null>(null);
@@ -398,7 +400,7 @@ export function PermitsManagement({
       (p.effective_status === 'EXPIRING' || p.effective_status === 'EXPIRED') && !p.active_renewal_application_id;
     return (
       <>
-        {dueForRenewal && navigate ? (
+        {dueForRenewal && navigate && canRenew ? (
           <button
             className="rounded-md p-1.5 cursor-pointer"
             style={{ color: '#f59e0b' }}
