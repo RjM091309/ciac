@@ -429,7 +429,12 @@ export function ProponentsManagement({
   // other staff role can assign/reassign it from this dropdown.
   // An Account Officer = a role that works the Approved Queue (Control Panel)
   // and isn't a BDO — by permission, not by role name.
-  const { fullAccess: cpFullAccess, sidebarPermissions: cpSidebar } = useControlPanelAccess();
+  const { fullAccess: cpFullAccess, sidebarPermissions: cpSidebar, crudPermissions } = useControlPanelAccess();
+  // Control Panel add/edit for Registered Locator (settings:proponents, the
+  // same key the server checks): without them the buttons aren't shown.
+  const crud = crudPermissions['settings:proponents'] || { can_add: false, can_edit: false, can_delete: false };
+  const canAdd = cpFullAccess || crud.can_add;
+  const canEdit = cpFullAccess || crud.can_edit;
   const isAccountOfficer =
     !cpFullAccess && Boolean(cpSidebar['approval:queue']) && !cpSidebar['assessment:queue'];
   const [saving, setSaving] = useState(false);
@@ -1286,6 +1291,7 @@ export function ProponentsManagement({
             />
           </div>
           </div>
+          {canAdd ? (
           <button
             className="shrink-0 h-9 rounded-lg px-3 text-xs sm:text-sm font-semibold inline-flex items-center gap-1.5 shadow-sm cursor-pointer whitespace-nowrap"
             style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
@@ -1295,6 +1301,7 @@ export function ProponentsManagement({
             <span className="sm:hidden">New</span>
             <span className="hidden sm:inline">New Locator</span>
           </button>
+          ) : null}
         </div>
 
         {isLoading ? (
@@ -1442,11 +1449,12 @@ export function ProponentsManagement({
         onSave={() => void save()}
         saving={saving}
         saveDisabled={!canSubmit}
+        hideSave={editing ? !canEdit : !canAdd}
         saveLabel={editing ? 'Update' : 'Save'}
         headerExtra={(() => {
           // An encoded locator with no portal login yet: offer to create one.
           const loginButton =
-            editing && !editing.user_id ? (
+            editing && !editing.user_id && canEdit ? (
               <button
                 type="button"
                 onClick={() => {
@@ -1832,6 +1840,7 @@ export function ProponentsManagement({
                       extraActions={
                         form.stockholders.length > 0 ? (
                           <SectionSaveBar
+                            allowed={editing ? canEdit : canAdd}
                             label="Save Stockholders"
                             isEditing={Boolean(editing)}
                             dirty={sectionDirty.stockholders}
@@ -1883,6 +1892,7 @@ export function ProponentsManagement({
                         extraActions={
                           form.contact_persons.length > 0 || form.signatories.length > 0 ? (
                             <SectionSaveBar
+                              allowed={editing ? canEdit : canAdd}
                               label="Save Contacts & Signatories"
                               isEditing={Boolean(editing)}
                               dirty={sectionDirty.contacts}
@@ -1965,6 +1975,7 @@ export function ProponentsManagement({
                       </table>
                     </div>
                     <SectionSaveBar
+                      allowed={editing ? canEdit : canAdd}
                       label="Save Investment"
                       isEditing={Boolean(editing)}
                       dirty={sectionDirty.investment}
@@ -1979,6 +1990,7 @@ export function ProponentsManagement({
                     contractTypeId={form.contract_type_id ? Number(form.contract_type_id) : null}
                     pending={pendingDocs}
                     onPendingChange={setPendingDocs}
+                    readOnly={editing ? !canEdit : !canAdd}
                   />
                 ) : activeProfileTab !== 'Profile' ? (
                   <div className="text-xs text-secondary py-8 text-center">{activeProfileTab} — coming soon.</div>
@@ -2301,6 +2313,7 @@ export function ProponentsManagement({
                 </button>
                 {form.properties.length > 0 && (
                   <SectionSaveBar
+                    allowed={editing ? canEdit : canAdd}
                     label="Save Property Schedule"
                     isEditing={Boolean(editing)}
                     dirty={sectionDirty.properties}
@@ -2502,6 +2515,7 @@ function StatCard({ label, value }: { label: string; value: string }) {
  * stack instead of its own full-width row. Disabled until something in that
  * section changed; the label is only used as the tooltip/title now. */
 function SectionSaveBar({
+  allowed = true,
   label,
   isEditing,
   dirty,
@@ -2509,6 +2523,8 @@ function SectionSaveBar({
   disabled,
   onSave,
 }: {
+  /** No edit permission: no save button. */
+  allowed?: boolean;
   label: string;
   isEditing: boolean;
   dirty: boolean;
@@ -2516,6 +2532,7 @@ function SectionSaveBar({
   disabled?: boolean;
   onSave: () => void;
 }) {
+  if (!allowed) return null;
   return (
     <button
       type="button"

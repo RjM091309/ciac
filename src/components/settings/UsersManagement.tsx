@@ -602,7 +602,15 @@ export function UsersManagement({
             User Management List
           </h3>
           <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center">
-            <DepartmentsPanel onChanged={() => refresh({ showLoading: false })} />
+            {/* Control Panel → User Management add/edit/delete decides who can maintain departments. */}
+            {canAdd || canEdit || canDelete ? (
+              <DepartmentsPanel
+                onChanged={() => refresh({ showLoading: false })}
+                canAdd={canAdd}
+                canEdit={canEdit}
+                canDelete={canDelete}
+              />
+            ) : null}
             <RolesPanel onChanged={() => refresh({ showLoading: false })} navigate={navigate} />
             {canAdd ? (
               <button

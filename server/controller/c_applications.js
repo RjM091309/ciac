@@ -139,7 +139,7 @@ exports.getById = async (req, res) => {
     const id = Number(req.params.id);
     if (!Number.isFinite(id)) return res.status(400).json({ success: false, message: "Invalid id" });
     const { application, forbidden } = await loadWithAccess(req, id);
-    if (forbidden) return res.status(403).json({ success: false, message: "Forbidden" });
+    if (forbidden) return res.status(403).json({ success: false, message: "You are not authorized to access this. Please contact the administrator." });
     if (!application) return res.status(404).json({ success: false, message: "Application not found" });
     return res.json({ success: true, data: application });
   } catch (error) {
@@ -347,7 +347,7 @@ exports.submit = async (req, res) => {
     const id = Number(req.params.id);
     if (!Number.isFinite(id)) return res.status(400).json({ success: false, message: "Invalid id" });
     const { forbidden } = await loadWithAccess(req, id);
-    if (forbidden) return res.status(403).json({ success: false, message: "Forbidden" });
+    if (forbidden) return res.status(403).json({ success: false, message: "You are not authorized to access this. Please contact the administrator." });
 
     const row = await Workflow.submitApplication(id, { changed_by: req.user?.id ?? null });
     if (!row) return res.status(404).json({ success: false, message: "Application not found" });
@@ -391,7 +391,7 @@ exports.updateDraft = async (req, res) => {
     const id = Number(req.params.id);
     if (!Number.isFinite(id)) return res.status(400).json({ success: false, message: "Invalid id" });
     const { application, forbidden } = await loadWithAccess(req, id);
-    if (forbidden) return res.status(403).json({ success: false, message: "Forbidden" });
+    if (forbidden) return res.status(403).json({ success: false, message: "You are not authorized to access this. Please contact the administrator." });
     if (!application) return res.status(404).json({ success: false, message: "Application not found" });
 
     const { application_type, is_renewal, proponent_id, contract_type_id } = req.body || {};
@@ -430,7 +430,7 @@ exports.remove = async (req, res) => {
     const id = Number(req.params.id);
     if (!Number.isFinite(id)) return res.status(400).json({ success: false, message: "Invalid id" });
     const { application, forbidden } = await loadWithAccess(req, id);
-    if (forbidden) return res.status(403).json({ success: false, message: "Forbidden" });
+    if (forbidden) return res.status(403).json({ success: false, message: "You are not authorized to access this. Please contact the administrator." });
     if (!application) return res.status(404).json({ success: false, message: "Application not found" });
 
     const result = await Workflow.deleteDraftApplication(id);
@@ -466,7 +466,7 @@ exports.listRequirements = async (req, res) => {
     const applicationId = Number(req.params.id);
     if (!Number.isFinite(applicationId)) return res.status(400).json({ success: false, message: "Invalid application id" });
     const { forbidden, application } = await loadWithAccess(req, applicationId);
-    if (forbidden) return res.status(403).json({ success: false, message: "Forbidden" });
+    if (forbidden) return res.status(403).json({ success: false, message: "You are not authorized to access this. Please contact the administrator." });
     if (!application) return res.status(404).json({ success: false, message: "Application not found" });
     const rows = await Workflow.listApplicationRequirements(applicationId);
     return res.json({ success: true, data: rows });
@@ -537,7 +537,7 @@ exports.listRequirementComments = async (req, res) => {
     const id = Number(req.params.id);
     if (!Number.isFinite(id)) return res.status(400).json({ success: false, message: "Invalid id" });
     const { requirement, forbidden } = await loadRequirementWithAccess(req, id);
-    if (forbidden) return res.status(403).json({ success: false, message: "Forbidden" });
+    if (forbidden) return res.status(403).json({ success: false, message: "You are not authorized to access this. Please contact the administrator." });
     if (!requirement) return res.status(404).json({ success: false, message: "Application requirement not found" });
     const rows = await Workflow.listRequirementComments(id);
     return res.json({ success: true, data: rows });
@@ -556,7 +556,7 @@ exports.addRequirementComment = async (req, res) => {
       return res.status(400).json({ success: false, message: "message is required" });
     }
     const { requirement, forbidden } = await loadRequirementWithAccess(req, id);
-    if (forbidden) return res.status(403).json({ success: false, message: "Forbidden" });
+    if (forbidden) return res.status(403).json({ success: false, message: "You are not authorized to access this. Please contact the administrator." });
     if (!requirement) return res.status(404).json({ success: false, message: "Application requirement not found" });
 
     await Workflow.addRequirementComment({
@@ -580,10 +580,10 @@ exports.acknowledgeRequirement = async (req, res) => {
     const id = Number(req.params.id);
     if (!Number.isFinite(id)) return res.status(400).json({ success: false, message: "Invalid id" });
     const role = String(req.user?.role || "").toLowerCase();
-    if (role !== "proponent") return res.status(403).json({ success: false, message: "Forbidden" });
+    if (role !== "proponent") return res.status(403).json({ success: false, message: "You are not authorized to access this. Please contact the administrator." });
 
     const { requirement, forbidden } = await loadRequirementWithAccess(req, id);
-    if (forbidden) return res.status(403).json({ success: false, message: "Forbidden" });
+    if (forbidden) return res.status(403).json({ success: false, message: "You are not authorized to access this. Please contact the administrator." });
     if (!requirement) return res.status(404).json({ success: false, message: "Application requirement not found" });
 
     const updated = await Workflow.acknowledgeRequirement(id, { acknowledgedBy: req.user?.id ?? null });
@@ -599,7 +599,7 @@ exports.listDocuments = async (req, res) => {
     const applicationId = Number(req.params.id);
     if (!Number.isFinite(applicationId)) return res.status(400).json({ success: false, message: "Invalid application id" });
     const { forbidden, application } = await loadWithAccess(req, applicationId);
-    if (forbidden) return res.status(403).json({ success: false, message: "Forbidden" });
+    if (forbidden) return res.status(403).json({ success: false, message: "You are not authorized to access this. Please contact the administrator." });
     if (!application) return res.status(404).json({ success: false, message: "Application not found" });
     const rows = await Workflow.listDocumentsByApplication(applicationId);
     return res.json({ success: true, data: rows });
@@ -627,7 +627,7 @@ exports.createDocument = async (req, res) => {
     if (forbidden || !application) {
       discardFile();
       return forbidden
-        ? res.status(403).json({ success: false, message: "Forbidden" })
+        ? res.status(403).json({ success: false, message: "You are not authorized to access this. Please contact the administrator." })
         : res.status(404).json({ success: false, message: "Application not found" });
     }
 
@@ -695,7 +695,7 @@ exports.downloadDocument = async (req, res) => {
     if (!document) return res.status(404).json({ success: false, message: "Document not found" });
 
     const { application, forbidden } = await loadWithAccess(req, document.application_id);
-    if (forbidden) return res.status(403).json({ success: false, message: "Forbidden" });
+    if (forbidden) return res.status(403).json({ success: false, message: "You are not authorized to access this. Please contact the administrator." });
 
     const downloadName = document.original_file_name || document.file_name;
     AuditLog.recordFileAccess(req, {
@@ -723,7 +723,7 @@ exports.listStatusHistory = async (req, res) => {
     const applicationId = Number(req.params.id);
     if (!Number.isFinite(applicationId)) return res.status(400).json({ success: false, message: "Invalid application id" });
     const { forbidden, application } = await loadWithAccess(req, applicationId);
-    if (forbidden) return res.status(403).json({ success: false, message: "Forbidden" });
+    if (forbidden) return res.status(403).json({ success: false, message: "You are not authorized to access this. Please contact the administrator." });
     if (!application) return res.status(404).json({ success: false, message: "Application not found" });
     const rows = await Workflow.listApplicationStatusHistory(applicationId);
     return res.json({ success: true, data: rows });

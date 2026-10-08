@@ -5,6 +5,7 @@ const Assessment = require("../models/AssessmentEvaluation");
 const AuditLog = require("../models/AuditLog");
 const { resolveStoredPath } = require("../lib/fileStorage");
 const { publicErrorMessage } = require("../lib/httpError");
+const { checkMenuAllowed } = require("../middleware/m_auth");
 
 function fail(res, error, label) {
   console.error(`${label} error:`, error);
@@ -92,7 +93,11 @@ async function isAccountOfficerLevel1(req) {
 
 exports.assignmentQueue = async (req, res) => {
   try {
-    const canAssign = await isAccountOfficerLevel1(req);
+    // Level 1 and the Approved Queue's Edit permission (what the assign route
+    // checks) — otherwise the page just lists, no Assign controls.
+    const role = String(req.user?.role || "").toLowerCase();
+    const canAssign =
+      (await isAccountOfficerLevel1(req)) && (role === "admin" || (await checkMenuAllowed(role, "approval:queue", "edit")));
     const [rows, officers] = await Promise.all([
       Approval.listAssignmentQueue(),
       canAssign ? Approval.listAssignableAccountOfficers() : Promise.resolve([]),

@@ -131,6 +131,7 @@ export function LocatorDocumentsTab({
   contractTypeId = null,
   pending = [],
   onPendingChange,
+  readOnly = false,
 }: {
   proponentId: number | null;
   // The locator's Type of Contract — the checklist follows the same
@@ -138,6 +139,8 @@ export function LocatorDocumentsTab({
   contractTypeId?: number | null;
   pending?: PendingLocatorDocument[];
   onPendingChange?: (next: PendingLocatorDocument[]) => void;
+  /** No edit permission (Registered Locator): view only — no upload/delete. */
+  readOnly?: boolean;
 }) {
   const [rows, setRows] = useState<RequirementDocRow[] | null>(null);
   const [uploads, setUploads] = useState<UploadedDocRow[]>([]);
@@ -362,7 +365,7 @@ export function LocatorDocumentsTab({
                 <FileText size={14} />
               </button>
             ) : null}
-            {opts.onUpload ? (
+            {opts.onUpload && !readOnly ? (
               opts.rowBusy ? (
                 <Loader2 size={14} className="animate-spin" style={{ color: 'var(--nav-active-bg)' }} />
               ) : (
@@ -379,7 +382,7 @@ export function LocatorDocumentsTab({
                 </button>
               )
             ) : null}
-            {uploaded ? (
+            {uploaded && !readOnly ? (
               <button
                 type="button"
                 onClick={() => setConfirmDelete(uploaded)}

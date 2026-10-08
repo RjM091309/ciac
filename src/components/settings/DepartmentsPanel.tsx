@@ -9,7 +9,18 @@ type Department = { id: number; code: string; name: string; is_active: number | 
 /** Department maintenance (dbo.department, /api/departments) from User
  * Management — the list behind the user form's Department dropdown. Same
  * look and flow as RolesPanel. */
-export function DepartmentsPanel({ onChanged }: { onChanged: () => void }) {
+export function DepartmentsPanel({
+  onChanged,
+  canAdd = true,
+  canEdit = true,
+  canDelete = true,
+}: {
+  onChanged: () => void;
+  /** User Management's Control Panel permissions (same as the server checks). */
+  canAdd?: boolean;
+  canEdit?: boolean;
+  canDelete?: boolean;
+}) {
   const [open, setOpen] = useState(false);
   const [rows, setRows] = useState<Department[]>([]);
   const [loading, setLoading] = useState(false);
@@ -113,9 +124,12 @@ export function DepartmentsPanel({ onChanged }: { onChanged: () => void }) {
         onSave={() => void save()}
         saving={saving}
         saveDisabled={!form.code.trim() || !form.name.trim()}
+        hideSave={editing ? !canEdit : !canAdd}
         saveLabel={editing ? 'Save Changes' : 'Add Department'}
       >
         <div className="space-y-4">
+          {(editing ? canEdit : canAdd) ? (
+          <>
           <div className="grid grid-cols-1 sm:grid-cols-[140px_minmax(0,1fr)] gap-3">
             <div className="space-y-1">
               <div className="text-[11px] font-semibold text-secondary uppercase tracking-widest">Code</div>
@@ -145,6 +159,8 @@ export function DepartmentsPanel({ onChanged }: { onChanged: () => void }) {
               Cancel edit — add a new department instead
             </button>
           )}
+          </>
+          ) : null}
 
           <div className="rounded-lg border" style={{ borderColor: 'var(--border-subtle)' }}>
             {loading ? (
@@ -167,6 +183,7 @@ export function DepartmentsPanel({ onChanged }: { onChanged: () => void }) {
                       <div className="text-[11px] text-secondary truncate">{d.code}</div>
                     </div>
                     <div className="flex items-center gap-1 shrink-0">
+                      {canEdit ? (
                       <button
                         className="p-1.5 rounded-md text-secondary hover:text-[var(--text)] cursor-pointer"
                         onClick={() => startEdit(d)}
@@ -174,7 +191,9 @@ export function DepartmentsPanel({ onChanged }: { onChanged: () => void }) {
                       >
                         <Pencil size={13} />
                       </button>
+                      ) : null}
                       {active ? (
+                        canDelete && (
                         <button
                           className="p-1.5 rounded-md text-secondary hover:text-rose-500 cursor-pointer"
                           onClick={() => setConfirmDeactivateId(d.id)}
@@ -182,7 +201,9 @@ export function DepartmentsPanel({ onChanged }: { onChanged: () => void }) {
                         >
                           <Trash2 size={13} />
                         </button>
+                        )
                       ) : (
+                        canEdit && (
                         <button
                           className="p-1.5 rounded-md text-secondary hover:text-emerald-500 cursor-pointer"
                           onClick={() => void setActive(d.id, true)}
@@ -190,6 +211,7 @@ export function DepartmentsPanel({ onChanged }: { onChanged: () => void }) {
                         >
                           <RotateCcw size={13} />
                         </button>
+                        )
                       )}
                     </div>
                   </div>

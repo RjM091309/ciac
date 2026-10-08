@@ -8,6 +8,8 @@ type SidePanelProps = {
   saving?: boolean;
   saveDisabled?: boolean;
   saveLabel?: string;
+  /** View-only (no edit permission): no Save button. */
+  hideSave?: boolean;
   widthClassName?: string;
   /** Small print shown in the footer, to the left of Cancel/Save (e.g. a
    * "derived automatically" disclaimer) instead of taking up body space. */
@@ -26,6 +28,7 @@ export function SidePanel({
   saving = false,
   saveDisabled = false,
   saveLabel = 'Save',
+  hideSave = false,
   widthClassName = 'max-w-[44rem]',
   footerNote,
   headerExtra,
@@ -102,6 +105,7 @@ export function SidePanel({
                 >
                   Cancel
                 </button>
+{hideSave ? null : (
                 <button
                   className={`rounded-lg px-3 py-2 text-sm font-semibold ${
                     saving || saveDisabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
@@ -112,6 +116,7 @@ export function SidePanel({
                 >
                   {saving ? 'Saving…' : saveLabel}
                 </button>
+                )}
                 </div>
               </div>
               <div className="shrink-0" style={{ height: 'env(safe-area-inset-bottom, 0px)' }} aria-hidden />

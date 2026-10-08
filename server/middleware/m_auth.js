@@ -99,7 +99,7 @@ function requireRole(...allowedRoles) {
     }
     const userRole = String(req.user.role || "").toLowerCase();
     if (!userRole || !normalizedAllowed.includes(userRole)) {
-      return res.status(403).json({ success: false, message: "Forbidden" });
+      return res.status(403).json({ success: false, message: "You are not authorized to access this. Please contact the administrator." });
     }
     return next();
   };
@@ -121,19 +121,19 @@ function requireMenuAccess(menuKey, action = "view") {
     }
     const role = String(req.user.role || "").toLowerCase();
     if (role === "admin") return next();
-    if (role === "proponent") return res.status(403).json({ success: false, message: "Forbidden" });
+    if (role === "proponent") return res.status(403).json({ success: false, message: "You are not authorized to access this. Please contact the administrator." });
 
     try {
       const roleId = await Role.getActiveRoleIdByName(req.user.role);
       if (!roleId) {
-        return res.status(403).json({ success: false, message: "Forbidden" });
+        return res.status(403).json({ success: false, message: "You are not authorized to access this. Please contact the administrator." });
       }
       const allowed =
         action === "view"
           ? await ControlPanelPermission.isSidebarVisible(roleId, menuKey)
           : await ControlPanelPermission.hasCrudPermission(roleId, menuKey, action);
       if (!allowed) {
-        return res.status(403).json({ success: false, message: "Forbidden" });
+        return res.status(403).json({ success: false, message: "You are not authorized to access this. Please contact the administrator." });
       }
       return next();
     } catch (error) {
@@ -176,7 +176,7 @@ function requireApprovalAccess(action = "view") {
         const Assessment = require("../models/AssessmentEvaluation");
         if (await Assessment.isManager(req.user)) return next();
       }
-      return res.status(403).json({ success: false, message: "Forbidden" });
+      return res.status(403).json({ success: false, message: "You are not authorized to access this. Please contact the administrator." });
     } catch (error) {
       console.error("Approval access check failed:", error);
       return res.status(500).json({ success: false, message: "Internal server error" });
@@ -200,7 +200,7 @@ function requireAssessmentAccess(action = "view") {
       (await checkMenuAllowed(role, menuKey, "view")) && (action === "view" || (await checkMenuAllowed(role, menuKey, action)));
     try {
       if ((await allowed("assessment:queue")) || (await allowed("applications:renewals"))) return next();
-      return res.status(403).json({ success: false, message: "Forbidden" });
+      return res.status(403).json({ success: false, message: "You are not authorized to access this. Please contact the administrator." });
     } catch (error) {
       console.error("Assessment access check failed:", error);
       return res.status(500).json({ success: false, message: "Internal server error" });
@@ -224,7 +224,7 @@ function requireAnyMenuAccess(menuKeys, action = "view") {
       for (const menuKey of menuKeys) {
         if (await checkMenuAllowed(role, menuKey, action)) return next();
       }
-      return res.status(403).json({ success: false, message: "Forbidden" });
+      return res.status(403).json({ success: false, message: "You are not authorized to access this. Please contact the administrator." });
     } catch (error) {
       console.error("Any-menu access check failed:", error);
       return res.status(500).json({ success: false, message: "Internal server error" });
@@ -261,7 +261,7 @@ function requireApplicationsAccess({ allowProponent = false } = {}) {
       for (const menuKey of APPLICATION_ACCESS_MENU_KEYS) {
         if (await checkMenuAllowed(role, menuKey, "view")) return next();
       }
-      return res.status(403).json({ success: false, message: "Forbidden" });
+      return res.status(403).json({ success: false, message: "You are not authorized to access this. Please contact the administrator." });
     } catch (error) {
       console.error("Applications access check failed:", error);
       return res.status(500).json({ success: false, message: "Internal server error" });
@@ -326,7 +326,7 @@ function requireUserMenuAccess(action = "view") {
 
       for (const menuKey of menuKeys) {
         if (!(await checkMenuAllowed(role, menuKey, action))) {
-          return res.status(403).json({ success: false, message: "Forbidden" });
+          return res.status(403).json({ success: false, message: "You are not authorized to access this. Please contact the administrator." });
         }
       }
       return next();
@@ -363,7 +363,7 @@ function requireStaffRole(req, res, next) {
     return res.status(401).json({ success: false, message: "Access token required" });
   }
   if (String(req.user.role || "").toLowerCase() === "proponent") {
-    return res.status(403).json({ success: false, message: "Forbidden" });
+    return res.status(403).json({ success: false, message: "You are not authorized to access this. Please contact the administrator." });
   }
   return next();
 }
@@ -387,7 +387,7 @@ async function requireProponentSelf(req, res, next) {
   const isProponent =
     String(req.user.role || "").toLowerCase() === "proponent" || (await Role.userHasRoleName(req.user.id, "proponent"));
   if (!isProponent) {
-    return res.status(403).json({ success: false, message: "Forbidden" });
+    return res.status(403).json({ success: false, message: "You are not authorized to access this. Please contact the administrator." });
   }
   try {
     const proponent = await Proponent.getProponentByUserId(req.user.id);
@@ -412,7 +412,7 @@ async function requireProponentSelf(req, res, next) {
  */
 async function requireOwnApplication(req, res, next) {
   if (!req.proponent) {
-    return res.status(403).json({ success: false, message: "Forbidden" });
+    return res.status(403).json({ success: false, message: "You are not authorized to access this. Please contact the administrator." });
   }
   const id = Number(req.params.id);
   if (!Number.isFinite(id)) {
