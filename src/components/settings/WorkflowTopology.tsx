@@ -1,11 +1,25 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { motion } from 'motion/react';
-import { ChevronLeft, ChevronRight, Pause, Play, RotateCcw } from 'lucide-react';
+import {
+  BadgeCheck,
+  Briefcase,
+  Building2,
+  CalendarClock,
+  ChevronLeft,
+  ChevronRight,
+  Cpu,
+  Pause,
+  Play,
+  RotateCcw,
+  UserCheck,
+  UserPlus,
+} from 'lucide-react';
 import { cn } from '../../lib/utils';
 
-// Workflow Topology (System Settings, admin only): an animated swimlane map
-// of how an application moves through the system — who acts at each step,
-// what status it ends in, and where the loops go back to. Static content that
+// Workflow Topology (System Settings, admin only): an animated top-down map
+// (network-topology style) of how an application moves through the system —
+// who acts at each step, what status it ends in, what the system does on its
+// own, and where the loops go back to. Static content that
 // mirrors the server workflow (see .claude/skills/ciac-project/SKILL.md).
 
 type LaneId = 'bdo2' | 'bdo1' | 'locator' | 'ao1' | 'ao2' | 'system';
@@ -95,31 +109,39 @@ const SCENARIOS: Scenario[] = [
       {
         lane: 'bdo2',
         title: 'Verify / reject documents',
-        auto: ["Records the decision and remarks per requirement.", "Tells the locator when a requirement is rejected, so they can re-upload."],
+        auto: ["Records the decision and remarks per requirement.", "Keeps Verify / Reject locked until the locator has uploaded a file.", "Tells the locator when a requirement is rejected, so they can re-upload."],
         status: 'IN_REVIEW',
         where: 'Evaluation Queue · Compliance',
-        details: ['Verify or reject each requirement, with remarks and a discussion thread with the locator.'],
+        details: [
+          'Verify or reject each uploaded requirement, with remarks and a discussion thread with the locator.',
+          'Nothing to verify until the locator uploads it.',
+        ],
         notifies: 'The locator, when a requirement is rejected',
       },
       {
         lane: 'bdo2',
         title: 'Submit review',
-        auto: ["Moves the stage to FOR_RECOMMENDATION.", "Tells Level 1 the review is waiting."],
+        auto: ["Blocks the submit while any uploaded requirement is still unchecked (Pending).", "Moves the stage to FOR_RECOMMENDATION.", "Tells Level 1 the review is waiting."],
         status: 'FOR_RECOMMENDATION',
         where: 'Evaluation Queue · Recommendation',
-        details: ['Summary only. Requirements still to follow can be noted in the remarks.'],
+        details: [
+          'Summary only. Every uploaded requirement must be verified or rejected first.',
+          'Requirements still to follow (not uploaded yet) can be noted in the remarks.',
+        ],
         notifies: 'BDO Level 1',
       },
       {
         lane: 'bdo1',
         title: 'For Approval → contract → Approve',
-        auto: ["Starts the approval and assigns it to that Level 1.", "Saving the contract generates the contract number, renders the certificate PDF and creates the contract permit.", "Keeps Approve locked until the contract exists.", "On Approve: status APPROVED and the locator is emailed the decision. A new application is queued for an Account Officer; a renewal marks the old permit RENEWED."],
+        auto: ["Starts the approval and assigns it to that Level 1.", "Saving the contract generates the contract number, renders the certificate PDF and creates the contract permit — hidden from the locator, Registered Locator and Renewal Tracking until approved.", "Keeps Approve locked until the contract exists; asks to confirm if mandatory requirements aren’t all verified (to follow).", "On Approve: status APPROVED; the locator is emailed the decision and now sees the contract and permit. A new application is queued for an Account Officer; a renewal marks the old permit RENEWED."],
         status: 'FOR_APPROVAL → APPROVED',
         where: 'Evaluation Queue · approval panel',
         details: [
           'Clicking the row sends it For Approval and opens the approval panel.',
           'Compliance tab to review what the locator uploaded; Approval tab: save the contract, then Approve.',
           'Approve stays locked until the contract is saved. Saving it creates the contract permit.',
+          'The locator sees the contract only after Approve.',
+          'Approving with mandatory requirements still unverified needs a confirmation (requirements to follow).',
         ],
         notifies: 'Account Officer Level 1 (pop-up)',
       },
@@ -150,6 +172,7 @@ const SCENARIOS: Scenario[] = [
         details: [
           'The locator now appears in Registered Locator; a Level 2 Account Officer sees only their own locators.',
           'The contract permit counts down to expiry — it shows on Renewal Tracking once expiring.',
+          'The locator can still upload requirements that were to follow.',
         ],
       },
     ],
@@ -184,6 +207,7 @@ const SCENARIOS: Scenario[] = [
           'Files and submits the renewal for that permit\'s locator — no form.',
           'Account Officers only; a Level 2 only for their own locators. One open renewal at a time.',
           'Goes straight to the locator\'s own Account Officer — no BDO, no assigning step.',
+          'Registered Locator shows "Renewal in process" until it\'s decided.',
         ],
         notifies: 'The locator (email: renewal filed)',
       },
@@ -208,7 +232,7 @@ const SCENARIOS: Scenario[] = [
       {
         lane: 'ao1',
         title: 'For Approval → contract → Approve',
-        auto: ["Starts the approval and assigns it to that Level 1.", "Saving the contract generates the contract number, renders the certificate PDF and creates the contract permit.", "Keeps Approve locked until the contract exists.", "On Approve: status APPROVED and the locator is emailed the decision. A new application is queued for an Account Officer; a renewal marks the old permit RENEWED."],
+        auto: ["Starts the approval and assigns it to that Level 1.", "Saving the contract generates the contract number, renders the certificate PDF and creates the contract permit — hidden from the locator, Registered Locator and Renewal Tracking until approved.", "Keeps Approve locked until the contract exists; asks to confirm if mandatory requirements aren’t all verified (to follow).", "On Approve: status APPROVED; the locator is emailed the decision and now sees the contract and permit. A new application is queued for an Account Officer; a renewal marks the old permit RENEWED."],
         status: 'FOR_APPROVAL → APPROVED',
         where: 'Renewal Queue · approval panel',
         details: [
@@ -224,7 +248,7 @@ const SCENARIOS: Scenario[] = [
         where: 'Registered Locator · Renewal Tracking',
         details: [
           'The old contract permit becomes RENEWED and drops off Renewal Tracking.',
-          'The locator keeps its one Registered Locator row, now with the new contract and term.',
+          'The locator keeps its one Registered Locator row, now with the new contract and term (only once approved).',
           'The renewal does not go to the Approved Queue.',
         ],
       },
@@ -236,59 +260,80 @@ const SCENARIOS: Scenario[] = [
   },
 ];
 
-// Diagram geometry (SVG user units).
-const LABEL_W = 150;
-const COL_W = 182;
-const LANE_H = 100;
-const NODE_W = 160;
-const NODE_H = 70;
-const PAD = 18;
+// Diagram geometry (SVG user units) — a top-down tree: the steps run down
+// one spine, each step's automatic actions branch off to the right, and the
+// loops back run up the left side.
+const SPINE_X = 330;
+const CARD_W = 260;
+const CARD_H = 78;
+const EDGE_H = 104; // the connector into a card (room for two pills)
+const STEP_H = CARD_H + EDGE_H;
+const START_R = 30;
+const TOP = 12 + START_R * 2;
+const AUTO_X = SPINE_X + CARD_W / 2 + 70; // centre of the "auto" bubbles
+const AUTO_R = 27;
+const LOOP_X = SPINE_X - CARD_W / 2 - 46; // first loop line; more go further left
+const LOOP_GAP = 30;
+const VIEW_W = AUTO_X + AUTO_R + 30;
+const ACCENT = '#14b8a6';
+// Not-yet-reached lines/pills and card edges — mixed from the muted text
+// colour so they stay visible on both the light and dark surface.
+const INACTIVE = 'color-mix(in oklab, var(--text-muted, #94a3b8) 45%, transparent)';
 
 const SPEEDS = { Slow: 4200, Normal: 2800, Fast: 1600 } as const;
 type Speed = keyof typeof SPEEDS;
 
-const colOf = (scn: Scenario, i: number) => scn.steps[i].col ?? i;
-const edgesOf = (scn: Scenario): [number, number][] =>
-  scn.edges ?? scn.steps.slice(0, -1).map((_, i) => [i, i + 1] as [number, number]);
-/** The arrow the token travels into step `i` (from the previous step when there is one). */
-const incomingEdge = (scn: Scenario, i: number) => {
-  const into = edgesOf(scn).filter(([, to]) => to === i);
-  return into.find(([from]) => from === i - 1) ?? into[0] ?? null;
+const LANE_ICON: Record<LaneId, typeof Briefcase> = {
+  bdo2: Briefcase,
+  bdo1: Briefcase,
+  locator: Building2,
+  ao1: UserCheck,
+  ao2: UserCheck,
+  system: Cpu,
 };
 
-function nodeCenter(scn: Scenario, i: number) {
-  const laneIndex = scn.lanes.indexOf(scn.steps[i].lane);
-  return { x: LABEL_W + PAD + colOf(scn, i) * COL_W + NODE_W / 2, y: laneIndex * LANE_H + LANE_H / 2 };
+const cardTop = (i: number) => TOP + EDGE_H + i * STEP_H;
+const cardBottom = (i: number) => cardTop(i) + CARD_H;
+
+/** Rough label width (SVG text isn't measured) for the pill behind it. */
+const pillWidth = (text: string, fontSize = 11) =>
+  Math.round([...text].reduce((w, ch) => w + (/[A-Z_]/.test(ch) ? 0.7 : 0.55), 0) * fontSize) + 22;
+
+function Pill({ x, y, text, on, color = ACCENT }: { x: number; y: number; text: string; on: boolean; color?: string }) {
+  const w = pillWidth(text);
+  return (
+    <g>
+      <rect
+        x={x - w / 2}
+        y={y - 10}
+        width={w}
+        height={20}
+        rx={10}
+        fill="var(--surface)"
+        stroke={on ? color : INACTIVE}
+        strokeWidth={1.5}
+        style={{ transition: 'stroke .4s' }}
+      />
+      <text x={x} y={y + 4} textAnchor="middle" fontSize={11} fontWeight={600} fill={on ? 'var(--text)' : 'var(--text-muted, #94a3b8)'}>
+        {text}
+      </text>
+    </g>
+  );
 }
 
-/** Orthogonal path from step a's right edge to step b's left edge. */
-function edgePath(scn: Scenario, a: number, b: number) {
-  const p = nodeCenter(scn, a);
-  const q = nodeCenter(scn, b);
-  const x1 = p.x + NODE_W / 2;
-  const x2 = q.x - NODE_W / 2;
-  const mx = (x1 + x2) / 2;
-  return `M ${x1} ${p.y} H ${mx} V ${q.y} H ${x2}`;
-}
-
-/** A local loop: from the side of `from`'s card, straight up/down to the
- * level of `to`, then into `to`'s right edge (just below the forward edge). */
-function localLoopPath(scn: Scenario, loop: Loop) {
-  const p = nodeCenter(scn, loop.from);
-  const q = nodeCenter(scn, loop.to);
-  const x = p.x - NODE_W / 2 + 22;
-  const down = q.y > p.y;
-  const y1 = down ? p.y + NODE_H / 2 : p.y - NODE_H / 2;
-  const y2 = q.y + (down ? -12 : 12);
-  return { d: `M ${x} ${y1} V ${y2} H ${q.x + NODE_W / 2}`, labelX: x - 6, labelY: (y1 + y2) / 2 };
-}
-
-/** Loop back from `from` to `to`, arcing below the lanes. */
-function loopPath(scn: Scenario, loop: Loop, offset: number) {
-  const p = nodeCenter(scn, loop.from);
-  const q = nodeCenter(scn, loop.to);
-  const bottom = scn.lanes.length * LANE_H + 14 + offset;
-  return `M ${p.x} ${p.y + NODE_H / 2} V ${bottom} H ${q.x} V ${q.y + NODE_H / 2}`;
+/** Dots flowing along a line toward where it leads (like traffic on a
+ * network map). Static at the start of the line when motion is reduced. */
+function FlowDots({ path, reduceMotion, count = 2, dur = 1.8 }: { path: string; reduceMotion: boolean; count?: number; dur?: number }) {
+  if (reduceMotion) return null;
+  return (
+    <g style={{ pointerEvents: 'none' }}>
+      {Array.from({ length: count }).map((_, k) => (
+        <circle key={k} r={3.5} fill={ACCENT} stroke="var(--surface)" strokeWidth={1.5}>
+          <animateMotion dur={`${dur}s`} begin={`${(-dur * k) / count}s`} repeatCount="indefinite" path={path} />
+        </circle>
+      ))}
+    </g>
+  );
 }
 
 export function WorkflowTopology() {
@@ -298,7 +343,7 @@ export function WorkflowTopology() {
   const [playing, setPlaying] = useState(true);
   const [speed, setSpeed] = useState<Speed>('Normal');
   const reduceMotion =
-    typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    typeof window !== 'undefined' && Boolean(window.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
 
   useEffect(() => {
     setStep(0);
@@ -310,11 +355,15 @@ export function WorkflowTopology() {
     return () => window.clearTimeout(t);
   }, [playing, step, speed, scn.steps.length]);
 
-  const cols = Math.max(...scn.steps.map((_, i) => colOf(scn, i))) + 1;
-  const width = LABEL_W + PAD * 2 + cols * COL_W - (COL_W - NODE_W);
-  const height = scn.lanes.length * LANE_H + 14 + scn.loops.filter((l) => !l.local).length * 22 + 20;
+  const n = scn.steps.length;
+  const height = cardBottom(n - 1) + 24;
   const current = scn.steps[step];
   const lane = LANES[current.lane];
+  const go = (i: number) => {
+    setPlaying(false);
+    setStep(i);
+  };
+  const StartIcon = scenarioId === 'renewal' ? CalendarClock : UserPlus;
 
   return (
     <div className="space-y-4">
@@ -334,13 +383,13 @@ export function WorkflowTopology() {
           ))}
         </div>
         <div className="flex items-center gap-1 ml-auto">
-          <IconButton label="Previous step" onClick={() => { setPlaying(false); setStep((s) => (s - 1 + scn.steps.length) % scn.steps.length); }}>
+          <IconButton label="Previous step" onClick={() => go((step - 1 + n) % n)}>
             <ChevronLeft size={16} />
           </IconButton>
           <IconButton label={playing ? 'Pause' : 'Play'} onClick={() => setPlaying((p) => !p)} primary>
             {playing ? <Pause size={16} /> : <Play size={16} />}
           </IconButton>
-          <IconButton label="Next step" onClick={() => { setPlaying(false); setStep((s) => (s + 1) % scn.steps.length); }}>
+          <IconButton label="Next step" onClick={() => go((step + 1) % n)}>
             <ChevronRight size={16} />
           </IconButton>
           <IconButton label="Restart" onClick={() => { setStep(0); setPlaying(true); }}>
@@ -362,355 +411,354 @@ export function WorkflowTopology() {
         </div>
       </div>
 
-      {/* Diagram */}
-      <div className="glass-card p-3 sm:p-4 !border-transparent" style={{ backgroundColor: 'var(--surface)' }}>
-        <div className="overflow-x-auto">
+      <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,640px)_minmax(0,1fr)] gap-4 items-start">
+        {/* Diagram — on the page background so the borderless cards float. */}
+        <div className="glass-card p-3 sm:p-4 !border-transparent" style={{ backgroundColor: 'var(--background)' }}>
           <svg
-            viewBox={`0 0 ${width} ${height}`}
-            className="block"
-            style={{ minWidth: Math.min(width, 980), width: '100%', height: 'auto' }}
+            viewBox={`0 0 ${VIEW_W} ${height}`}
+            className="block mx-auto"
+            style={{ width: '100%', maxWidth: VIEW_W, height: 'auto' }}
             role="img"
             aria-label={`${scn.label} workflow: ${scn.steps.map((s) => s.title).join(', then ')}`}
           >
             <defs>
-              {/* Card shadow: offset downward so the card looks lifted off the lane. */}
-              <filter id="wf-card-shadow" x="-10%" y="-10%" width="120%" height="140%">
-                <feDropShadow dx="0" dy="4" stdDeviation="3" floodColor="#0f172a" floodOpacity="0.16" />
+              {/* Soft blur for the shadow shapes drawn under cards and bubbles. */}
+              <filter id="wf-float" x="-30%" y="-100%" width="160%" height="300%">
+                <feGaussianBlur stdDeviation="5" />
               </filter>
               <marker id="wf-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
                 <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--text-muted, #94a3b8)" />
               </marker>
-              <marker id="wf-arrow-active" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-                <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--text)" />
+              <marker id="wf-arrow-loop" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                <path d="M 0 0 L 10 5 L 0 10 z" fill="#f59e0b" />
               </marker>
             </defs>
 
-            {/* Lanes */}
-            {scn.lanes.map((id, i) => (
-              <g key={id}>
-                <rect
-                  x={0}
-                  y={i * LANE_H + 3}
-                  width={width}
-                  height={LANE_H - 6}
-                  rx={12}
-                  fill={LANES[id].color}
-                  fillOpacity={current.lane === id ? 0.12 : 0.05}
-                  style={{ transition: 'fill-opacity .4s' }}
-                />
-                <rect x={10} y={i * LANE_H + LANE_H / 2 - 14} width={4} height={28} rx={2} fill={LANES[id].color} />
-                <text x={22} y={i * LANE_H + LANE_H / 2 - 2} fontSize={13} fontWeight={700} fill="var(--text)">
-                  {LANES[id].label}
-                </text>
-                <text x={22} y={i * LANE_H + LANE_H / 2 + 14} fontSize={11} fill="var(--text-muted, #94a3b8)">
-                  {LANES[id].sub}
-                </text>
-              </g>
-            ))}
+            {/* Start node */}
+            <g onClick={() => go(0)} style={{ cursor: 'pointer' }}>
+              <circle cx={SPINE_X} cy={12 + START_R} r={START_R} fill={ACCENT} />
+              <foreignObject x={SPINE_X - 14} y={12 + START_R - 14} width={28} height={28} style={{ pointerEvents: 'none' }}>
+                <StartIcon size={28} color="#fff" strokeWidth={1.8} />
+              </foreignObject>
+              <circle cx={SPINE_X + START_R * 0.72} cy={12 + START_R * 1.72} r={10} fill="var(--surface)" />
+              <foreignObject x={SPINE_X + START_R * 0.72 - 9} y={12 + START_R * 1.72 - 9} width={18} height={18} style={{ pointerEvents: 'none' }}>
+                <BadgeCheck size={18} color={ACCENT} fill="var(--surface)" />
+              </foreignObject>
+            </g>
 
-            {/* Forward edges */}
-            {edgesOf(scn).map(([from, to]) => {
-              const done = to <= step && from < step;
+            {/* Connectors into each card, with who acts and the status as pills */}
+            {scn.steps.map((st, i) => {
+              const y1 = i === 0 ? TOP : cardBottom(i - 1);
+              const y2 = cardTop(i);
+              const reached = i <= step;
+              const color = LANES[st.lane].color;
+              const laneText = `${LANES[st.lane].label}${st.lane === 'system' ? '' : ` · ${LANES[st.lane].sub.replace('Level ', 'L')}`}`;
               return (
-                <path
-                  key={`e${from}-${to}`}
-                  d={edgePath(scn, from, to)}
-                  fill="none"
-                  stroke={done ? 'var(--text)' : 'var(--text-muted, #94a3b8)'}
-                  strokeOpacity={done ? 0.85 : 0.45}
-                  strokeWidth={done ? 2 : 1.5}
-                  markerEnd={`url(#${done ? 'wf-arrow-active' : 'wf-arrow'})`}
-                  style={{ transition: 'stroke .4s, stroke-opacity .4s' }}
-                />
+                <g key={`edge-${i}`}>
+                  <line
+                    x1={SPINE_X}
+                    y1={y1}
+                    x2={SPINE_X}
+                    y2={y2}
+                    stroke={reached ? ACCENT : INACTIVE}
+                    strokeWidth={2}
+                    style={{ transition: 'stroke .4s' }}
+                  />
+                  {reached ? <FlowDots path={`M ${SPINE_X} ${y1} V ${y2}`} reduceMotion={reduceMotion} /> : null}
+                  <Pill x={SPINE_X} y={y1 + (y2 - y1) / 2 - 12} text={laneText} on={i === step} color={color} />
+                  {st.status ? (
+                    <Pill x={SPINE_X} y={y1 + (y2 - y1) / 2 + 14} text={st.status} on={i === step} color={color} />
+                  ) : null}
+                </g>
               );
             })}
 
-            {/* Loops back */}
-            {scn.loops.map((loop, idx) => {
-              const active = step === loop.from;
-              if (loop.local) {
-                const { d, labelX, labelY } = localLoopPath(scn, loop);
-                return (
-                  <g key={`l${idx}`}>
-                    <path
-                      d={d}
-                      fill="none"
-                      stroke={active ? '#ef4444' : 'var(--text-muted, #94a3b8)'}
-                      strokeOpacity={active ? 0.95 : 0.45}
-                      strokeWidth={1.5}
-                      strokeDasharray="5 5"
-                      markerEnd="url(#wf-arrow)"
-                      style={{ transition: 'stroke .4s' }}
-                    >
-                      {active && !reduceMotion ? (
-                        <animate attributeName="stroke-dashoffset" from="20" to="0" dur="0.8s" repeatCount="indefinite" />
-                      ) : null}
-                    </path>
-                    <text x={labelX} y={labelY} textAnchor="end" fontSize={10.5} fill={active ? '#ef4444' : 'var(--text-muted, #94a3b8)'}>
-                      ↺ {loop.label}
-                    </text>
-                  </g>
-                );
-              }
-              const k = scn.loops.filter((l) => !l.local).indexOf(loop);
-              const d = loopPath(scn, loop, k * 22);
-              const p = nodeCenter(scn, loop.to);
-              const q = nodeCenter(scn, loop.from);
-              const y = scn.lanes.length * LANE_H + 14 + k * 22;
+            {/* Each step's automatic actions: a bubble branching off to the right */}
+            {scn.steps.map((st, i) => {
+              if (!st.auto?.length) return null;
+              // Branches off the connector into this step, beside its pills.
+              const top = i === 0 ? TOP : cardBottom(i - 1);
+              const by = top + 18;
+              const cy = top + EDGE_H / 2 + 8;
+              const on = i === step;
               return (
-                <g key={`l${idx}`}>
+                <g key={`auto-${i}`} onClick={() => go(i)} style={{ cursor: 'pointer' }}>
+                  <title>{`Step ${i + 1}: ${st.auto.length} automatic action${st.auto.length === 1 ? '' : 's'}`}</title>
                   <path
-                    d={d}
+                    d={`M ${SPINE_X} ${by} H ${AUTO_X} V ${cy - AUTO_R}`}
+                    fill="none"
+                    stroke={on || i < step ? ACCENT : INACTIVE}
+                    strokeWidth={2}
+                    style={{ transition: 'stroke .4s' }}
+                  />
+                  {on || i < step ? (
+                    <FlowDots path={`M ${SPINE_X} ${by} H ${AUTO_X} V ${cy - AUTO_R}`} reduceMotion={reduceMotion} dur={2.2} />
+                  ) : (
+                    <>
+                      <circle cx={SPINE_X} cy={by} r={3.5} fill={INACTIVE} />
+                      <circle cx={AUTO_X} cy={by} r={3.5} fill={INACTIVE} />
+                    </>
+                  )}
+                  {/* Floating: no border, a shadow under the bottom only. */}
+                  <ellipse
+                    cx={AUTO_X}
+                    cy={cy + AUTO_R - 2}
+                    rx={AUTO_R * 0.8}
+                    ry={5}
+                    fill={on ? ACCENT : '#0f172a'}
+                    opacity={on ? 0.45 : 0.22}
+                    filter="url(#wf-float)"
+                  />
+                  <circle cx={AUTO_X} cy={cy} r={AUTO_R} fill="var(--surface)" />
+                  <foreignObject x={AUTO_X - 18} y={cy - 15} width={36} height={18} style={{ pointerEvents: 'none' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 2, color: 'var(--text)', fontSize: 11, fontWeight: 700 }}>
+                      <Cpu size={13} />
+                      {st.auto.length}
+                    </div>
+                  </foreignObject>
+                  <text x={AUTO_X} y={cy + 13} textAnchor="middle" fontSize={9.5} fill="var(--text-muted, #94a3b8)">
+                    Auto
+                  </text>
+                </g>
+              );
+            })}
+
+            {/* Loops back: dashed, up the left side */}
+            {scn.loops.map((loop, k) => {
+              const x = LOOP_X - k * LOOP_GAP;
+              const yFrom = cardTop(loop.from) + CARD_H / 2;
+              const yTo = cardTop(loop.to) + CARD_H / 2 + (k % 2 ? -10 : 10);
+              const left = SPINE_X - CARD_W / 2;
+              const active = step === loop.from;
+              const text = `↺ ${loop.label}`;
+              const w = pillWidth(text, 10.5);
+              const midY = (yFrom + yTo) / 2;
+              return (
+                <g key={`loop-${k}`}>
+                  <path
+                    d={`M ${left} ${yFrom} H ${x} V ${yTo} H ${left}`}
                     fill="none"
                     stroke={active ? '#f59e0b' : 'var(--text-muted, #94a3b8)'}
-                    strokeOpacity={active ? 0.95 : 0.4}
+                    strokeOpacity={active ? 1 : 0.5}
                     strokeWidth={1.5}
                     strokeDasharray="5 5"
-                    markerEnd="url(#wf-arrow)"
+                    markerEnd={`url(#${active ? 'wf-arrow-loop' : 'wf-arrow'})`}
                     style={{ transition: 'stroke .4s' }}
                   >
                     {active && !reduceMotion ? (
                       <animate attributeName="stroke-dashoffset" from="20" to="0" dur="0.8s" repeatCount="indefinite" />
                     ) : null}
                   </path>
-                  <text x={(p.x + q.x) / 2} y={y - 4} textAnchor="middle" fontSize={10.5} fill={active ? '#f59e0b' : 'var(--text-muted, #94a3b8)'}>
-                    ↺ {loop.label}
-                  </text>
+                  {/* Vertical pill on the line so it fits the narrow margin. */}
+                  <g transform={`rotate(-90 ${x} ${midY})`}>
+                    <rect
+                      x={x - w / 2}
+                      y={midY - 9}
+                      width={w}
+                      height={18}
+                      rx={9}
+                      fill="var(--surface)"
+                      stroke={active ? '#f59e0b' : INACTIVE}
+                    />
+                    <text x={x} y={midY + 4} textAnchor="middle" fontSize={10.5} fontWeight={600} fill={active ? '#f59e0b' : 'var(--text-muted, #94a3b8)'}>
+                      {text}
+                    </text>
+                  </g>
                 </g>
               );
             })}
 
-            {/* Nodes */}
-            {scn.steps.map((s, i) => {
-              const c = nodeCenter(scn, i);
+            {/* Step cards */}
+            {scn.steps.map((st, i) => {
+              const y = cardTop(i);
+              const x = SPINE_X - CARD_W / 2;
               const isCurrent = i === step;
               const done = i < step;
-              const color = LANES[s.lane].color;
+              const color = LANES[st.lane].color;
+              const Icon = LANE_ICON[st.lane];
               return (
-                <g
-                  key={`n${i}`}
-                  onClick={() => { setPlaying(false); setStep(i); }}
-                  style={{ cursor: 'pointer' }}
-                >
+                <g key={`card-${i}`} onClick={() => go(i)} style={{ cursor: 'pointer' }}>
+                  {/* Floating: no border, a shadow under the bottom only (tinted
+                      with the lane colour on the current step). */}
                   <rect
-                    x={c.x - NODE_W / 2}
-                    y={c.y - NODE_H / 2}
-                    width={NODE_W}
-                    height={NODE_H}
-                    rx={0}
-                    filter="url(#wf-card-shadow)"
-                    fill="var(--surface)"
-                    stroke={isCurrent || done ? color : 'var(--border-subtle, #cbd5e1)'}
-                    strokeWidth={isCurrent ? 2 : 1.2}
+                    x={x + 12}
+                    y={y + CARD_H - 12}
+                    width={CARD_W - 24}
+                    height={14}
+                    rx={7}
+                    fill={isCurrent ? color : '#0f172a'}
+                    opacity={isCurrent ? 0.5 : 0.2}
+                    filter="url(#wf-float)"
+                    style={{ transition: 'fill .4s, opacity .4s' }}
                   />
-                  <circle cx={c.x - NODE_W / 2 + 13} cy={c.y - NODE_H / 2 + 13} r={9} fill={done || isCurrent ? color : 'var(--control-bg)'} />
-                  <text
-                    x={c.x - NODE_W / 2 + 13}
-                    y={c.y - NODE_H / 2 + 17}
-                    textAnchor="middle"
-                    fontSize={10}
-                    fontWeight={700}
-                    fill={done || isCurrent ? '#fff' : 'var(--text-muted, #94a3b8)'}
-                  >
-                    {i + 1}
-                  </text>
-                  {/* HTML inside the card so the browser wraps/clamps the text
-                      (SVG text doesn't wrap and was spilling out of the card). */}
-                  <foreignObject
-                    x={c.x - NODE_W / 2 + 26}
-                    y={c.y - NODE_H / 2 + 5}
-                    width={NODE_W - 32}
-                    height={NODE_H - 10}
-                    style={{ pointerEvents: 'none' }}
-                  >
-                    <div
-                      style={{
-                        height: '100%',
-                        display: 'flex',
-                        flexDirection: 'column',
-                        justifyContent: 'space-between',
-                        fontFamily: 'inherit',
-                      }}
-                    >
+                  <rect x={x} y={y} width={CARD_W} height={CARD_H} rx={6} fill="var(--surface)" />
+                  <foreignObject x={x} y={y} width={CARD_W} height={CARD_H} style={{ pointerEvents: 'none' }}>
+                    <div style={{ height: '100%', display: 'flex', alignItems: 'center', gap: 12, padding: '0 14px', fontFamily: 'inherit' }}>
                       <div
-                        title={s.title}
                         style={{
-                          fontSize: 11,
-                          fontWeight: 600,
-                          lineHeight: '14px',
-                          color: 'var(--text)',
-                          display: '-webkit-box',
-                          WebkitLineClamp: 2,
-                          WebkitBoxOrient: 'vertical',
-                          overflow: 'hidden',
-                          wordBreak: 'break-word',
+                          width: 44,
+                          height: 44,
+                          flexShrink: 0,
+                          borderRadius: 8,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          backgroundColor: `color-mix(in oklab, ${color} 14%, transparent)`,
+                          color,
                         }}
                       >
-                        {s.title}
+                        <Icon size={22} />
                       </div>
-                      {s.status ? (
+                      <div style={{ minWidth: 0, flex: 1 }}>
+                        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6 }}>
+                          <span
+                            style={{
+                              width: 7,
+                              height: 7,
+                              marginTop: 5,
+                              borderRadius: 999,
+                              flexShrink: 0,
+                              backgroundColor: done || isCurrent ? ACCENT : INACTIVE,
+                            }}
+                          />
+                          <span
+                            title={st.title}
+                            style={{
+                              fontSize: 13,
+                              fontWeight: 600,
+                              lineHeight: '16px',
+                              color: 'var(--text)',
+                              display: '-webkit-box',
+                              WebkitLineClamp: 2,
+                              WebkitBoxOrient: 'vertical',
+                              overflow: 'hidden',
+                              wordBreak: 'break-word',
+                            }}
+                          >
+                            {st.title}
+                          </span>
+                        </div>
                         <div
-                          title={s.status}
+                          title={st.where}
                           style={{
-                            fontSize: 9.5,
-                            fontWeight: 600,
-                            lineHeight: '12px',
-                            color,
-                            whiteSpace: 'nowrap',
+                            marginTop: 4,
+                            fontSize: 11,
+                            lineHeight: '14px',
+                            color: 'var(--text-muted, #94a3b8)',
                             overflow: 'hidden',
                             textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
                           }}
                         >
-                          {s.status}
+                          {st.where}
                         </div>
-                      ) : null}
+                      </div>
                     </div>
                   </foreignObject>
+                  {/* Step number, like the badge on a device card */}
+                  <circle cx={x + CARD_W - 12} cy={y + 12} r={9} fill={done || isCurrent ? color : 'var(--control-bg)'} />
+                  <text x={x + CARD_W - 12} y={y + 15.5} textAnchor="middle" fontSize={10} fontWeight={700} fill={done || isCurrent ? '#fff' : 'var(--text-muted, #94a3b8)'}>
+                    {i + 1}
+                  </text>
                 </g>
               );
             })}
 
-            {/* System lane: a ⚙ chip under every step the system also acts on */}
-            {scn.lanes.includes('system')
-              ? scn.steps.map((st, i) => {
-                  if (!st.auto?.length || st.lane === 'system') return null;
-                  // Steps sharing a column (happening together) get their chips side by side.
-                  const peers = scn.steps
-                    .map((_, j) => j)
-                    .filter((j) => colOf(scn, j) === colOf(scn, i) && scn.steps[j].auto?.length && scn.steps[j].lane !== 'system');
-                  const cx = nodeCenter(scn, i).x + (peers.indexOf(i) - (peers.length - 1) / 2) * 66;
-                  const cy = scn.lanes.indexOf('system') * LANE_H + LANE_H / 2;
-                  const on = i === step;
-                  return (
-                    <g key={`auto${i}`} onClick={() => { setPlaying(false); setStep(i); }} style={{ cursor: 'pointer' }}>
-                      <title>{`Step ${i + 1}: ${st.auto.length} automatic action${st.auto.length === 1 ? '' : 's'}`}</title>
-                      <rect
-                        x={cx - 30}
-                        y={cy - 13}
-                        width={60}
-                        height={26}
-                        rx={13}
-                        fill={on ? LANES.system.color : 'var(--surface)'}
-                        stroke={LANES.system.color}
-                        strokeOpacity={on ? 1 : 0.6}
-                        strokeDasharray={on ? undefined : '3 3'}
-                        style={{ transition: 'fill .3s' }}
-                      />
-                      <text x={cx} y={cy + 4} textAnchor="middle" fontSize={11} fontWeight={700} fill={on ? '#fff' : 'var(--text)'}>
-                        ⚙ {st.auto.length}
-                      </text>
-                    </g>
-                  );
-                })
-              : null}
-
-            {/* The moving token: travels the edge into the current step */}
-            {incomingEdge(scn, step) ? (
-              <circle key={`tok-${scenarioId}-${step}`} r={7} fill={lane.color} stroke="var(--surface)" strokeWidth={2}>
-                <animateMotion
-                  dur={reduceMotion ? '0.01s' : '1.1s'}
-                  fill="freeze"
-                  path={edgePath(scn, incomingEdge(scn, step)![0], incomingEdge(scn, step)![1])}
-                />
-              </circle>
-            ) : (
-              <circle
-                key={`tok-${scenarioId}-start`}
-                cx={nodeCenter(scn, 0).x - NODE_W / 2}
-                cy={nodeCenter(scn, 0).y}
-                r={7}
-                fill={lane.color}
-                stroke="var(--surface)"
-                strokeWidth={2}
+            {/* The moving token: travels down the connector into the current step */}
+            <circle key={`tok-${scenarioId}-${step}`} r={6} fill={lane.color} stroke="var(--surface)" strokeWidth={2}>
+              <animateMotion
+                dur={reduceMotion ? '0.01s' : '1s'}
+                fill="freeze"
+                path={`M ${SPINE_X} ${step === 0 ? TOP : cardBottom(step - 1)} V ${cardTop(step) - 6}`}
               />
-            )}
+            </circle>
           </svg>
         </div>
-      </div>
 
-      {/* Current step */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <motion.div
-          key={`${scenarioId}-${step}`}
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.25 }}
-          className="glass-card p-4 !border-transparent lg:col-span-2 space-y-2"
-          style={{ backgroundColor: 'var(--surface)' }}
-        >
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-[11px] font-bold uppercase tracking-widest text-secondary">
-              Step {step + 1} of {scn.steps.length}
-            </span>
-            <span
-              className="rounded-full px-2 py-0.5 text-[11px] font-semibold"
-              style={{ backgroundColor: `color-mix(in oklab, ${lane.color} 16%, transparent)`, color: lane.color }}
-            >
-              {lane.label} · {lane.sub}
-            </span>
-          </div>
-          <div className="text-[16px] font-bold" style={{ color: 'var(--text)' }}>{current.title}</div>
-          {current.status ? (
-            <div className="text-[12px]">
-              <span className="text-secondary">Status: </span>
-              <span className="font-semibold" style={{ color: 'var(--text)' }}>{current.status}</span>
+        {/* Current step + all steps (sticky beside the tall diagram) */}
+        <div className="space-y-4 lg:sticky lg:top-4">
+          <motion.div
+            key={`${scenarioId}-${step}`}
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.25 }}
+            className="glass-card p-4 !border-transparent space-y-2"
+            style={{ backgroundColor: 'var(--surface)' }}
+          >
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-[11px] font-bold uppercase tracking-widest text-secondary">
+                Step {step + 1} of {n}
+              </span>
+              <span
+                className="rounded-full px-2 py-0.5 text-[11px] font-semibold"
+                style={{ backgroundColor: `color-mix(in oklab, ${lane.color} 16%, transparent)`, color: lane.color }}
+              >
+                {lane.label} · {lane.sub}
+              </span>
             </div>
-          ) : null}
-          <div className="text-[12px]">
-            <span className="text-secondary">Where: </span>
-            <span className="font-semibold" style={{ color: 'var(--text)' }}>{current.where}</span>
-          </div>
-          <ul className="list-disc pl-5 space-y-1 text-[12.5px]" style={{ color: 'var(--text)' }}>
-            {current.details.map((d) => (
-              <li key={d}>{d}</li>
-            ))}
-          </ul>
-          {current.notifies ? (
-            <div className="text-[12px]">
-              <span className="text-secondary">Notifies: </span>
-              <span style={{ color: 'var(--text)' }}>{current.notifies}</span>
-            </div>
-          ) : null}
-          {current.auto?.length ? (
-            <div
-              className="rounded-lg border px-3 py-2 mt-1"
-              style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'color-mix(in oklab, #94a3b8 8%, transparent)' }}
-            >
-              <div className="text-[11px] font-bold uppercase tracking-widest text-secondary mb-1">⚙ System does automatically</div>
-              <ul className="list-disc pl-5 space-y-0.5 text-[12px]" style={{ color: 'var(--text)' }}>
-                {current.auto.map((a) => (
-                  <li key={a}>{a}</li>
-                ))}
-              </ul>
-            </div>
-          ) : null}
-        </motion.div>
-
-        <div className="glass-card p-4 !border-transparent" style={{ backgroundColor: 'var(--surface)' }}>
-          <div className="text-[11px] font-bold uppercase tracking-widest text-secondary mb-2">{scn.label} steps</div>
-          <ol className="space-y-1">
-            {scn.steps.map((s, i) => (
-              <li key={s.title}>
-                <button
-                  type="button"
-                  onClick={() => { setPlaying(false); setStep(i); }}
-                  className="w-full text-left flex items-center gap-2 rounded-lg px-2 py-1.5 text-[12px] cursor-pointer transition-colors"
-                  style={i === step ? { backgroundColor: 'var(--control-bg)' } : undefined}
-                >
-                  <span className="h-2 w-2 rounded-full shrink-0" style={{ backgroundColor: LANES[s.lane].color, opacity: i <= step ? 1 : 0.35 }} />
-                  <span className={cn('truncate', i === step ? 'font-semibold' : 'text-secondary')} style={i === step ? { color: 'var(--text)' } : undefined}>
-                    {i + 1}. {s.title}
-                  </span>
-                </button>
-              </li>
-            ))}
-          </ol>
-          <div className="mt-3 pt-3 border-t text-[11px] text-secondary space-y-1" style={{ borderColor: 'var(--border-subtle)' }}>
-            {scn.loops.map((l) => (
-              <div key={l.label}>
-                <span style={{ color: '#f59e0b' }}>↺</span> {l.label}: step {l.from + 1} → step {l.to + 1}
+            <div className="text-[16px] font-bold" style={{ color: 'var(--text)' }}>{current.title}</div>
+            {current.status ? (
+              <div className="text-[12px]">
+                <span className="text-secondary">Status: </span>
+                <span className="font-semibold" style={{ color: 'var(--text)' }}>{current.status}</span>
               </div>
-            ))}
+            ) : null}
+            <div className="text-[12px]">
+              <span className="text-secondary">Where: </span>
+              <span className="font-semibold" style={{ color: 'var(--text)' }}>{current.where}</span>
+            </div>
+            <ul className="list-disc pl-5 space-y-1 text-[12.5px]" style={{ color: 'var(--text)' }}>
+              {current.details.map((d) => (
+                <li key={d}>{d}</li>
+              ))}
+            </ul>
+            {current.notifies ? (
+              <div className="text-[12px]">
+                <span className="text-secondary">Notifies: </span>
+                <span style={{ color: 'var(--text)' }}>{current.notifies}</span>
+              </div>
+            ) : null}
+            {current.auto?.length ? (
+              <div
+                className="rounded-lg border px-3 py-2 mt-1"
+                style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'color-mix(in oklab, #94a3b8 8%, transparent)' }}
+              >
+                <div className="text-[11px] font-bold uppercase tracking-widest text-secondary mb-1">⚙ System does automatically</div>
+                <ul className="list-disc pl-5 space-y-0.5 text-[12px]" style={{ color: 'var(--text)' }}>
+                  {current.auto.map((a) => (
+                    <li key={a}>{a}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+          </motion.div>
+
+          <div className="glass-card p-4 !border-transparent" style={{ backgroundColor: 'var(--surface)' }}>
+            <div className="text-[11px] font-bold uppercase tracking-widest text-secondary mb-2">{scn.label} steps</div>
+            <ol className="space-y-1">
+              {scn.steps.map((s, i) => (
+                <li key={s.title}>
+                  <button
+                    type="button"
+                    onClick={() => go(i)}
+                    className="w-full text-left flex items-center gap-2 rounded-lg px-2 py-1.5 text-[12px] cursor-pointer transition-colors"
+                    style={i === step ? { backgroundColor: 'var(--control-bg)' } : undefined}
+                  >
+                    <span className="h-2 w-2 rounded-full shrink-0" style={{ backgroundColor: LANES[s.lane].color, opacity: i <= step ? 1 : 0.35 }} />
+                    <span className={cn('truncate', i === step ? 'font-semibold' : 'text-secondary')} style={i === step ? { color: 'var(--text)' } : undefined}>
+                      {i + 1}. {s.title}
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ol>
+            <div className="mt-3 pt-3 border-t text-[11px] text-secondary space-y-1" style={{ borderColor: 'var(--border-subtle)' }}>
+              {scn.loops.map((l) => (
+                <div key={l.label}>
+                  <span style={{ color: '#f59e0b' }}>↺</span> {l.label}: step {l.from + 1} → step {l.to + 1}
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       </div>

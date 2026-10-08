@@ -545,19 +545,6 @@ async function getApplicationIdForRequirement(applicationRequirementId) {
   return toInt(rows?.[0]?.application_id);
 }
 
-/** Whether the locator has uploaded a file for this checklist row — there's
- * nothing to verify or reject until they have. */
-async function hasUploadedDocument(applicationRequirementId) {
-  const rows = await selectData(
-    `SELECT TOP (1) 1 AS ok
-     FROM dbo.application_requirements ar
-     INNER JOIN dbo.documents d ON d.application_id = ar.application_id AND d.requirement_id = ar.requirement_id
-     WHERE ar.id = @param0`,
-    [toInt(applicationRequirementId)]
-  );
-  return rows.length > 0;
-}
-
 async function getAssessmentDetail(applicationId) {
   await ensureSchema();
   const appId = toInt(applicationId);
@@ -1109,7 +1096,6 @@ module.exports = {
   getAssignedEvaluatorId,
   getApplicationIdForCharge,
   getApplicationIdForRequirement,
-  hasUploadedDocument,
   getOrCreateAssessment,
   logRequirementActivity,
   listAssessments,

@@ -41,6 +41,8 @@ async function searchApplications(term) {
       CASE WHEN a.is_renewal = 0 AND a.status = 'APPROVED' AND ISNULL(a.awaiting_ao_assignment, 0) = 0 THEN 1 ELSE 0 END AS in_completed,
       CASE
         WHEN asm.id IS NOT NULL AND asm.stage <> 'COMPLETED' THEN 1
+        -- For Approval is decided from the Evaluation Queue (Level 1).
+        WHEN a.status = 'FOR_APPROVAL' THEN 1
         WHEN asm.id IS NULL AND a.status IN ('SUBMITTED', 'RESUBMITTED', 'RETURNED') THEN 1
         ELSE 0
       END AS in_assessment,

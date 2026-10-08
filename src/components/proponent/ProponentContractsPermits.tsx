@@ -90,8 +90,11 @@ export function ProponentContractsPermits({ navigate }: { navigate: Navigate }) 
         if (!pRes.ok) throw new Error(pJson?.message || 'Failed to load permits');
         setContracts(Array.isArray(cJson.data) ? cJson.data : []);
         setPermits(Array.isArray(pJson.data) ? pJson.data : []);
+        setError(null);
       } catch (e: any) {
-        if (!cancelled) setError(e?.message || 'Failed to load');
+        // A failed background (live) refresh keeps what's on screen; only the
+        // first load shows the error page.
+        if (!cancelled && liveTick === 0) setError(e?.message || 'Failed to load');
       } finally {
         if (!cancelled) setLoading(false);
       }

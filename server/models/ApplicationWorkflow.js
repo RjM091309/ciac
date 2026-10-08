@@ -1364,6 +1364,19 @@ async function updateApplicationRequirementStatus(id, { status, remarks, updated
       { status: 400 }
     );
   }
+  // Nothing to verify or reject until the locator has uploaded a file.
+  if (nextStatus === "VERIFIED" || nextStatus === "REJECTED") {
+    const uploaded = await selectData(
+      `SELECT TOP (1) 1 AS ok
+       FROM dbo.application_requirements ar
+       INNER JOIN dbo.documents d ON d.application_id = ar.application_id AND d.requirement_id = ar.requirement_id
+       WHERE ar.id = @param0`,
+      [toInt(id)]
+    );
+    if (!uploaded.length) {
+      throw Object.assign(new Error("No document uploaded yet — nothing to verify or reject."), { status: 400 });
+    }
+  }
 
   await ensureSchema();
   await Notification.ensureSchema();

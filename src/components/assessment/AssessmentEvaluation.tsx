@@ -9,7 +9,6 @@ import {
   FileText,
   Loader2,
   MessageSquare,
-  Plus,
   RotateCcw,
   Search,
   Send,
@@ -633,15 +632,16 @@ export function AssessmentEvaluation({
     else setSelectedId(r.application_id);
   };
 
-  // Deep link (?applicationId=, e.g. a dashboard row): open like a row click.
+  // Deep link (?applicationId=, e.g. a dashboard row): open like a row click
+  // — decided on the fresh queue, not the session cache painted first.
   useEffect(() => {
-    if (deepLinkId == null || !data) return;
+    if (deepLinkId == null || !data || isLoading || isRevalidating) return;
     const row = allRows.find((r) => Number(r.application_id) === deepLinkId);
     setDeepLinkId(null);
     if (row) openRow(row);
     else setSelectedId(deepLinkId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [deepLinkId, data]);
+  }, [deepLinkId, data, isLoading, isRevalidating]);
 
 
   return (
@@ -1440,7 +1440,6 @@ function ComplianceTab({
   const [threadRequirement, setThreadRequirement] = useState<RequirementRow | null>(null);
   const [remarksTarget, setRemarksTarget] = useState<{ id: number; label: string } | null>(null);
   const [remarksDraft, setRemarksDraft] = useState('');
-  const [addingRequirement, setAddingRequirement] = useState(false);
   // Sub-tabs per Requirement Category (shared with the locator portal and
   // the Registered Locator Documents tab).
   const reqGroups = useRequirementGroups(data.requirements);
@@ -1620,17 +1619,6 @@ function ComplianceTab({
 
       {threadRequirement ? (
         <RequirementThreadModal requirement={threadRequirement} onClose={() => setThreadRequirement(null)} />
-      ) : null}
-
-      {addingRequirement ? (
-        <AddCustomRequirementModal
-          applicationId={data.assessment.application_id}
-          onClose={() => setAddingRequirement(false)}
-          onAdded={() => {
-            setAddingRequirement(false);
-            void run(async () => {}, 'Requirement requested');
-          }}
-        />
       ) : null}
 
       <ConfirmModal
@@ -1846,98 +1834,6 @@ function RequirementThreadModal({ requirement, onClose }: { requirement: Require
             aria-label="Send reply"
           >
             {sending ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/** Attaches a one-off requirement to just this application, outside the
- * pre-seeded catalog checklist (e.g. "please also submit an updated fire
- * safety certificate") — see Workflow.addCustomRequirementToApplication. */
-function AddCustomRequirementModal({
-  applicationId,
-  onClose,
-  onAdded,
-}: {
-  applicationId: number;
-  onClose: () => void;
-  onAdded: () => void;
-}) {
-  const [name, setName] = useState('');
-  const [description, setDescription] = useState('');
-  const [isMandatory, setIsMandatory] = useState(true);
-  const [saving, setSaving] = useState(false);
-
-  async function submit() {
-    const trimmed = name.trim();
-    if (!trimmed || saving) return;
-    setSaving(true);
-    try {
-      await apiFetch(`/api/assessments/${applicationId}/requirements/custom`, {
-        method: 'POST',
-        body: JSON.stringify({ name: trimmed, description: description.trim() || null, is_mandatory: isMandatory }),
-      });
-      onAdded();
-    } catch (err) {
-      toast.error((err as Error).message);
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }} onClick={onClose}>
-      <div
-        className="w-full max-w-md rounded-2xl p-4 space-y-3"
-        style={{ backgroundColor: 'var(--surface)', border: '1px solid var(--border)' }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-start justify-between gap-2">
-          <div className="text-sm font-semibold">Request additional requirement</div>
-          <button onClick={onClose} className="cursor-pointer" aria-label="Close">
-            <X size={18} />
-          </button>
-        </div>
-        <p className="text-[11px] text-secondary">
-          Attaches a one-off item to this application's checklist only — it won't appear on any other application.
-        </p>
-        <div>
-          <label className="text-[11px] font-medium text-secondary">Name *</label>
-          <input
-            autoFocus
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="e.g. Updated Fire Safety Certificate"
-            className="app-input mt-1"
-          />
-        </div>
-        <div>
-          <label className="text-[11px] font-medium text-secondary">Description</label>
-          <textarea
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            rows={3}
-            placeholder="Optional details for the locator"
-            className="app-input mt-1 resize-none"
-          />
-        </div>
-        <label className="flex items-center gap-2 text-[11px] text-secondary">
-          <input type="checkbox" checked={isMandatory} onChange={(e) => setIsMandatory(e.target.checked)} />
-          Mandatory
-        </label>
-        <div className="flex items-center justify-end gap-2 pt-1">
-          <button className="rounded px-3 py-1.5 text-[12px] border cursor-pointer" style={{ borderColor: 'var(--border)' }} onClick={onClose}>
-            Cancel
-          </button>
-          <button
-            className="rounded px-3 py-1.5 text-[12px] font-semibold cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-            style={{ backgroundColor: 'var(--nav-active-bg, #111827)', color: 'var(--nav-active-text, #fff)' }}
-            disabled={saving || !name.trim()}
-            onClick={submit}
-          >
-            {saving ? 'Sending…' : 'Send request'}
           </button>
         </div>
       </div>

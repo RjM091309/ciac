@@ -14,7 +14,8 @@ async function alertAdmins({ key, subject, body, applicationId = null, throttleM
     const k = String(key || subject);
     const now = Date.now();
     if (lastSent.has(k) && now - lastSent.get(k) < throttleMs) return;
-    lastSent.set(k, now);
+    // Forget alerts older than a day so the map doesn't grow forever.
+    for (const [old, at] of lastSent) if (now - at > 24 * 60 * 60 * 1000) lastSent.delete(old);
 
     // Lazy: models require the mailer, which reports through here.
     const { selectData } = require("../config/database");
@@ -35,6 +36,8 @@ async function alertAdmins({ key, subject, body, applicationId = null, throttleM
         eventType: "system",
       });
     }
+    // Throttle only once it actually went out — a failed attempt retries next time.
+    lastSent.set(k, now);
   } catch (error) {
     console.error("System alert error:", error);
   }

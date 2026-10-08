@@ -187,7 +187,9 @@ async function createContractNotifications({ applicationId, contractNo, actorId,
   const normalizedContractNo = String(contractNo || "").trim();
   // Before approval the contract is a draft for staff: the locator hears
   // about it when the application is approved (announceContractToLocator).
-  const approved = await isApplicationApproved(applicationId);
+  // A failed lookup counts as not approved (no locator notice), never a 500
+  // on a contract that's already saved.
+  const approved = await isApplicationApproved(applicationId).catch(() => false);
   let locatorUserId = null;
   if (!approved) {
     const loc = await getLocatorContactByApplicationId(applicationId).catch(() => null);

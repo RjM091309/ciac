@@ -325,10 +325,6 @@ exports.updateRequirementStatus = async (req, res) => {
     if (!status || !String(status).trim()) {
       return res.status(400).json({ success: false, message: "status is required" });
     }
-    const nextStatus = String(status).trim().toUpperCase();
-    if ((nextStatus === "VERIFIED" || nextStatus === "REJECTED") && !(await Assessment.hasUploadedDocument(id))) {
-      return res.status(400).json({ success: false, message: "No document uploaded yet — nothing to verify or reject." });
-    }
     const row = await Workflow.updateApplicationRequirementStatus(id, {
       status: String(status).trim(),
       remarks: remarks ?? null,

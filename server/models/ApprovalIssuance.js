@@ -527,6 +527,9 @@ async function actOnStep(stepId, { action, remarks, actorId, override_unverified
   const act = pick(action, STEP_ACTIONS);
   if (!act) throw new Error("Invalid action");
   if (act === "ENDORSE") throw new Error("Use the endorse action for endorsements");
+  // Returning to the locator was removed from the workflow; Level 1 uses
+  // Return to Evaluator (returnToLevel2) instead.
+  if (act === "RETURN") throw businessError("Use Return to Evaluator to send this back.");
 
   const stepRows = await selectData(`SELECT * FROM dbo.approval_steps WHERE id = @param0`, [toInt(stepId)]);
   const step = stepRows?.[0];
@@ -667,8 +670,6 @@ async function settleApproval(approvalId, applicationId, outcome, note, actorId,
   }
 
   if (headerStatus === "APPROVED") {
-    // The contract (saved before Approve) becomes visible to the locator now.
-    await Contract.announceContractToLocator(applicationId);
     const settled = await getApplicationRow(applicationId);
     if (Number(settled?.is_renewal)) {
       // A renewal stays with its Account Officer (no Approved Queue). The
@@ -686,6 +687,14 @@ async function settleApproval(approvalId, applicationId, outcome, note, actorId,
   }
 
   await logActivity(approvalId, `APPROVAL_${headerStatus}`, note ? note.slice(0, 200) : null, actorId);
+
+  // The contract (saved before Approve) becomes visible to the locator now.
+  // Not awaited: a slow mail server mustn't hold up the Approve request.
+  if (headerStatus === "APPROVED") {
+    Contract.announceContractToLocator(applicationId).catch((error) =>
+      console.error("Announce contract to locator error:", error)
+    );
+  }
 
   // RETURNED is the routine "an approver kicked it back" outcome, not a
   // real decision — the Assessment Officer redoing their recommendation is
