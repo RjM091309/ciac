@@ -5,6 +5,7 @@ const Permit = require("../models/Permit");
 const ActivityLog = require("../models/ActivityLog");
 const AuditLog = require("../models/AuditLog");
 const { relativeStoragePath, resolveStoredPath } = require("../lib/fileStorage");
+const { placeApplicationUpload } = require("../lib/locatorFolders");
 const { publicErrorMessage } = require("../lib/httpError");
 
 // All handlers below assume requireProponentSelf (req.proponent) has run, and
@@ -86,12 +87,15 @@ exports.uploadMyApplicationDocument = async (req, res) => {
       return res.status(400).json({ success: false, message: "This requirement is already verified." });
     }
 
+    // Filed under the locator's folder: locators/<Ref No>/<APP-…>/
+    const storedPath = await placeApplicationUpload(req.file.path, req.application.id);
+    req.file.path = storedPath; // so a failed save below cleans up the moved file
     const document = await Workflow.createDocument({
       application_id: req.application.id,
       requirement_id: requirementId,
       file_name: req.file.filename,
       original_file_name: req.file.originalname,
-      storage_path: relativeStoragePath(req.file.path),
+      storage_path: relativeStoragePath(storedPath),
       content_type: req.file.mimetype,
       file_size_bytes: req.file.size,
       created_by: req.user?.id ?? null,

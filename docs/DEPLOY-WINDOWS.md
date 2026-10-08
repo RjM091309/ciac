@@ -240,6 +240,17 @@ For a temporary plain-HTTP period (e.g. staff training before the certificate is
 
 Schema changes apply themselves on startup. Unused old tables listed in `server/config/legacyTables.js` are dropped on startup too, so take the regular DB backup before updating. A release note will say if a one-off script in `server/scripts/` must be run.
 
+### One-off: uploads into one folder per locator
+
+New uploads are filed under `STORAGE_DIR\locators\<Ref No>\` (`APP-…`, `REN-…`, `contracts`, `permits`, `documents`). Files uploaded before that update stay in the old folders (`1`, `2`, `contracts`, `documents`) and keep working. To move them too, after the update (step 6), back up `STORAGE_DIR` and the database, then in `C:\ciac\server`:
+
+```
+node scripts\migrate-uploads-to-locator-folders.js            (dry run: lists what would move)
+node scripts\migrate-uploads-to-locator-folders.js --apply
+```
+
+`--apply` writes a log to `STORAGE_DIR\locators\_migration-<time>.json`; `--rollback <that file>` moves everything back. Running it again is safe (files already moved are skipped).
+
 ## Troubleshooting
 
 | Symptom | Likely cause |

@@ -17,6 +17,7 @@ const Role = require("./Role");
 const ApplicationType = require("./ApplicationType");
 const { renderContractCertificate } = require("../lib/contractCertificate");
 const { STORAGE_ROOT, relativeStoragePath } = require("../lib/fileStorage");
+const { locatorDir, folderName } = require("../lib/locatorFolders");
 
 // Tags a deliberate business-rule rejection with .status = 400 so the
 // controller's fail() helper reports it as a client error instead of a 500
@@ -55,7 +56,12 @@ async function generateAndAttachContractCertificate(contract, actorId) {
       approvedByName: approver?.full_name || approver?.username || null,
       approvedByPosition: titleCaseRoleName(approver?.roles?.[0]?.name) || null,
     });
-    const dir = path.join(STORAGE_ROOT, "contracts", String(contract.id));
+    // locators/<Ref No>/contracts/<contract no>/ (or the old flat folder
+    // when the application has no locator).
+    const dir =
+      (application?.proponent_id &&
+        (await locatorDir(application.proponent_id, "contracts", folderName(contract.contract_no, String(contract.id))))) ||
+      path.join(STORAGE_ROOT, "contracts", String(contract.id));
     fs.mkdirSync(dir, { recursive: true });
     const absPath = path.join(dir, "certificate.pdf");
     fs.writeFileSync(absPath, pdfBuffer);

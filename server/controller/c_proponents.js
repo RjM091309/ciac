@@ -14,6 +14,7 @@ const ProponentDocument = require("../models/ProponentDocument");
 const fs = require("fs");
 const path = require("path");
 const { resolveStoredPath, relativeStoragePath, contentDisposition } = require("../lib/fileStorage");
+const { placeLocatorUpload } = require("../lib/locatorFolders");
 const { publicErrorMessage } = require("../lib/httpError");
 const Assessment = require("../models/AssessmentEvaluation");
 const { checkMenuAllowed } = require("../middleware/m_auth");
@@ -474,13 +475,16 @@ exports.uploadDocument = async (req, res) => {
       return res.status(400).json({ success: false, message: "Select a document type or enter a document name." });
     }
 
+    // Filed under the locator's folder: locators/<Ref No>/documents/
+    const storedPath = await placeLocatorUpload(req.file.path, id);
+    req.file.path = storedPath; // so a failed save below cleans up the moved file
     const row = await ProponentDocument.create({
       proponent_id: id,
       requirement_id: requirementId,
       document_name: documentName,
       file_name: req.file.filename,
       original_file_name: req.file.originalname,
-      storage_path: relativeStoragePath(req.file.path),
+      storage_path: relativeStoragePath(storedPath),
       content_type: req.file.mimetype,
       file_size_bytes: req.file.size,
       created_by: req.user?.id ?? null,

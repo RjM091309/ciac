@@ -10,6 +10,7 @@ const AuditLog = require("../models/AuditLog");
 const { diffChanges } = require("../lib/auditDiff");
 const { renderPermitCertificate } = require("../lib/permitCertificate");
 const { STORAGE_ROOT, relativeStoragePath, resolveStoredPath } = require("../lib/fileStorage");
+const { locatorDir, folderName } = require("../lib/locatorFolders");
 const { publicErrorMessage } = require("../lib/httpError");
 
 /** Title-cases a stored role name ("ASSESSMENT OFFICER" -> "Assessment
@@ -46,7 +47,11 @@ async function generateAndAttachCertificate(permit) {
       approvedByName: approver?.full_name || approver?.username || null,
       approvedByPosition: titleCaseRoleName(approver?.roles?.[0]?.name) || null,
     });
-    const dir = path.join(STORAGE_ROOT, "permits", String(permit.id));
+    // locators/<Ref No>/permits/<permit no>/
+    const dir =
+      (permit.proponent_id &&
+        (await locatorDir(permit.proponent_id, "permits", folderName(permit.permit_no, String(permit.id))))) ||
+      path.join(STORAGE_ROOT, "permits", String(permit.id));
     fs.mkdirSync(dir, { recursive: true });
     const absPath = path.join(dir, "certificate.pdf");
     fs.writeFileSync(absPath, pdfBuffer);

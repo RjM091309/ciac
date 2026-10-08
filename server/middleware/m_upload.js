@@ -9,7 +9,9 @@ const { STORAGE_ROOT, MAX_DOCUMENT_MB } = require("../lib/fileStorage");
 // mimetype are kept in the documents table row so downloads can restore them.
 // Under the same STORAGE_ROOT as portal uploads (honours STORAGE_DIR), so
 // resolveStoredPath() accepts these files for download.
-const UPLOAD_ROOT = path.join(STORAGE_ROOT, "documents");
+// Landing folder only: the controller files each upload under the locator's
+// folder right after (lib/locatorFolders.js).
+const UPLOAD_ROOT = path.join(STORAGE_ROOT, "incoming");
 fs.mkdirSync(UPLOAD_ROOT, { recursive: true });
 
 const ALLOWED_MIME = new Set([

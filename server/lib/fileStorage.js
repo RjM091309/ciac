@@ -26,15 +26,17 @@ function ensureDir(dir) {
   return dir;
 }
 
-function appDir(applicationId) {
-  const id = String(Number(applicationId) || "misc");
-  return ensureDir(path.join(STORAGE_ROOT, id));
+// Uploads land here first; the controller then files them under the
+// locator's folder (lib/locatorFolders.js). One that couldn't be moved still
+// works from here — its stored path points at it.
+function incomingDir() {
+  return ensureDir(path.join(STORAGE_ROOT, "incoming"));
 }
 
 const storage = multer.diskStorage({
   destination(req, file, cb) {
     try {
-      cb(null, appDir(req.params.id));
+      cb(null, incomingDir());
     } catch (err) {
       cb(err);
     }
@@ -73,7 +75,8 @@ function handleUpload(req, res, next) {
 /** Absolute path on disk for a stored document row's storage_path. */
 function resolveStoredPath(storagePath) {
   if (!storagePath) return null;
-  // Stored as "<applicationId>/<filename>" relative to STORAGE_ROOT.
+  // Stored relative to STORAGE_ROOT, e.g. "locators/LOC-…/APP-…/<filename>"
+  // (older rows: "<applicationId>/<filename>").
   const resolved = path.resolve(STORAGE_ROOT, storagePath);
   if (!resolved.startsWith(STORAGE_ROOT + path.sep) && resolved !== STORAGE_ROOT) return null;
   return resolved;

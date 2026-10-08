@@ -13,6 +13,7 @@ const { sendTempPasswordEmail } = require("./c_users");
 const { publicErrorMessage } = require("../lib/httpError");
 const { departmentOf, aoLevel2Id } = require("../lib/departments");
 const { resolveStoredPath, relativeStoragePath } = require("../lib/fileStorage");
+const { placeApplicationUpload } = require("../lib/locatorFolders");
 
 /** A locator account created via Locator Accounts with a business profile
  * starts PENDING (see c_users.js's exports.create) — no login access, no
@@ -635,12 +636,15 @@ exports.createDocument = async (req, res) => {
       }
     }
 
+    // Filed under the locator's folder: locators/<Ref No>/<APP-…>/
+    const storedPath = await placeApplicationUpload(req.file.path, applicationId);
+    req.file.path = storedPath; // so a failed save below cleans up the moved file
     const row = await Workflow.createDocument({
       application_id: applicationId,
       requirement_id: requirementId,
       file_name: req.file.filename,
       original_file_name: req.file.originalname,
-      storage_path: relativeStoragePath(req.file.path), // relative, like portal uploads — survives moving STORAGE_DIR
+      storage_path: relativeStoragePath(storedPath), // relative, like portal uploads — survives moving STORAGE_DIR
       content_type: req.file.mimetype,
       file_size_bytes: req.file.size,
       created_by: req.user?.id ?? null,
