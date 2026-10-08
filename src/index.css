@@ -308,6 +308,29 @@
   transition-property: background-color, color;
 }
 
+/* Unlayered on purpose: inside @layer base these would lose to .glass-card. */
+/* Floating cards (locator portal, like the Workflow Topology cards): no
+   border, a soft shadow under the bottom edge only — the negative spread
+   keeps it off the top and sides. */
+:root {
+  /* Like the Workflow Topology cards: a soft pool of shadow ~14px under
+     the card (offset > spread keeps it below, blur ≈ spread keeps the sides
+     to a hairline). */
+  --float-shadow: 0 18px 16px -14px rgb(15 23 42 / 0.32), 0 4px 6px -5px rgb(15 23 42 / 0.12);
+}
+.dark {
+  --float-shadow: 0 18px 16px -14px rgb(0 0 0 / 0.9), 0 4px 6px -5px rgb(0 0 0 / 0.6);
+}
+.float-card {
+  border-color: transparent !important;
+  box-shadow: var(--float-shadow) !important;
+}
+.locator-canvas main .glass-card {
+  border-color: transparent;
+  box-shadow: var(--float-shadow);
+}
+
+
 /* Balanced reflow row (see src/lib/balancedColumns.ts): children wrap into
    --bal-cols-* columns per breakpoint and every row's cards grow to fill it,
    so a row of however many visible widgets never leaves an empty gap — a
@@ -833,4 +856,42 @@ input[type='week']:not(:disabled)::-webkit-calendar-picker-indicator {
   .content {
     padding: 0.75rem;
   }
+}
+
+/* Logo loader after sign-in (src/components/ui/LogoLoader.tsx). */
+.logo-loader .ll-draw {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: ll-draw 0.75s cubic-bezier(0.45, 0, 0.2, 1) forwards;
+}
+.logo-loader .ll-rise {
+  transform-box: fill-box;
+  transform-origin: 50% 100%;
+  transform: scaleY(0);
+  animation: ll-rise 0.55s cubic-bezier(0.2, 0.8, 0.3, 1) forwards;
+}
+.logo-loader .ll-dots span {
+  width: 6px;
+  height: 6px;
+  border-radius: 9999px;
+  background-color: var(--text-muted);
+  animation: ll-dot 1s ease-in-out infinite;
+}
+.logo-loader .ll-dots span:nth-child(2) { animation-delay: 0.15s; }
+.logo-loader .ll-dots span:nth-child(3) { animation-delay: 0.3s; }
+.dark .logo-loader .ll-logo { filter: invert(1); }
+/* Reduced motion: the finished logo, no build-up. */
+.logo-loader-static .ll-draw,
+.logo-loader-static .ll-rise,
+.logo-loader-static .ll-dots span {
+  animation: none;
+  stroke-dashoffset: 0;
+  transform: none;
+  opacity: 1;
+}
+@keyframes ll-draw { to { stroke-dashoffset: 0; } }
+@keyframes ll-rise { to { transform: scaleY(1); } }
+@keyframes ll-dot {
+  0%, 100% { opacity: 0.25; transform: translateY(0); }
+  50% { opacity: 1; transform: translateY(-3px); }
 }

@@ -235,6 +235,8 @@ export function AppHeader({
   // or "Clear all") can be reconciled back to state, and so a 15s poll
   // doesn't stack a duplicate toast for one that's already showing.
   const openLocatorToastIdsRef = useRef<Map<string, string | number>>(new Map());
+  // Toasts the user closed (X) this page session — not re-popped by the poll.
+  const dismissedToastIdsRef = useRef<Set<string>>(new Set());
   // sonner keeps an updated-in-place toast (same id) pinned at its ORIGINAL
   // array position rather than moving it to the front — so the "Clear all"
   // summary would visually "climb" up the stack as toasts around it got
@@ -296,6 +298,9 @@ export function AppHeader({
 
   function dismissLocatorEventToast(notificationId: string) {
     openLocatorToastIdsRef.current.delete(notificationId);
+    // Closed by hand: don't pop it again on the 15s poll — a still-unread
+    // workflow notification comes back only on the next page load.
+    dismissedToastIdsRef.current.add(notificationId);
     syncLocatorEventsClearAllToast();
   }
 
@@ -342,6 +347,7 @@ export function AppHeader({
         item.eventType === 'system';
       if (!isPersistentToastEvent || item.isRead) continue;
       if (openLocatorToastIdsRef.current.has(item.id)) continue;
+      if (dismissedToastIdsRef.current.has(item.id)) continue;
 
       const toastId = toast(item.title, {
         description: item.message,
@@ -352,7 +358,12 @@ export function AppHeader({
           item.targetPath && item.applicationId
             ? { label: 'View', onClick: () => handleNotificationClick(item) }
             : undefined,
-        onDismiss: () => dismissLocatorEventToast(item.id),
+        onDismiss: () => {
+          dismissLocatorEventToast(item.id);
+          // A system alert has nothing to act on in a page — closing it is
+          // the acknowledgment, so it's marked read and stays gone.
+          if (item.eventType === 'system') markOneAsRead(item.id);
+        },
       });
       openLocatorToastIdsRef.current.set(item.id, toastId);
     }

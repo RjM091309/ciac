@@ -1,6 +1,6 @@
 ---
 name: ciac-project
-description: Overview, run/dev, build, and deploy instructions for the CIAC system (3CORE) — a React/Vite frontend + Express/MSSQL backend — plus the Locator → BDO assessment (Level 2 → Level 1, who approves via "For Approval") → Approved Queue (Account Officer Level 1 assigns a Level 2) → Registered Locator workflow, permits/expiration/renewal (statuses, draft/submit/activation rules, who does what). Use when running, building, deploying, or navigating this repo, or when working on application filing/assessment/approval/permit logic.
+description: Overview, run/dev, build, and deploy instructions for the CIAC system (3CORE) — a React/Vite frontend + Express/MSSQL backend — plus the Locator → BDO assessment (Level 2 → Level 1, who approves via "For Approval") → Approved Queue (Account Officer Level 1 assigns a Level 2) → Registered Locator workflow, the Account-Officer-only renewal loop, permits/expiration (statuses, draft/submit/activation rules, who does what), and the per-locator upload folders. Use when running, building, deploying, or navigating this repo, or when working on application filing/assessment/approval/permit logic.
 ---
 
 # CIAC System (3CORE)
@@ -20,29 +20,34 @@ src/                    Frontend (Vite root)
   App.tsx               Custom router (VIEW_TO_PATH), lazy-loaded pages, auth state
   layout/AppLayout.tsx  Staff shell (AppSidebar/AppHeader); AppView type
   components/
-    applications/       ApplicationsWorkflow (filing), Requirements (+ Requirement Categories drawer)
-    assessment/         AssessmentEvaluation (/assessment)
-    approval/           ApprovalIssuance (/approval)
-    compliance/         PermitsManagement (permits, expiry, renewal), ComplianceInspections
+    applications/       ApplicationsWorkflow (filing), Requirements (+ Requirement Categories drawer),
+                        RenewalTracking (= Renewal Queue: AssessmentEvaluation with track="renewal")
+    assessment/         AssessmentEvaluation (/assessment; `track` prop new|renewal)
+    approval/           ApprovalIssuance (exports ApprovalDetail, the approval panel), AccountOfficerAssignment (/approval = Approved Queue)
+    compliance/         PermitsManagement (Renewal Tracking: expiring/expired permits + Renew), ComplianceInspections
     proponent/          Locator portal pages + ProponentsManagement (staff locator list)
     dashboard/          RoleDashboard, OfficerDashboard, ProponentDashboard, PreviewDashboard, AttentionCard
     reports/            ReportsAnalytics
     FileMaintenance/    lookup tables (Application Types, Account Officers, Building, Land Use, Type of Contract, Departments)
-    settings/           UsersManagement, LocatorUsersManagement, RolesPanel, ControlPanelManagement, AuditLog, PortalSettings
+    settings/           UsersManagement, LocatorUsersManagement, RolesPanel, ControlPanelManagement, AuditLog, PortalSettings,
+                        WorkflowTopology (admin-only animated map of both flows — static content, update it when the flow changes)
+    ui/PortalSkeletons  loading skeletons used instead of spinners
   config/landingConfig.ts  per-view dashboard copy/stats registry
   context/ControlPanelAccessContext.tsx  per-role menu permissions on the client
-  lib/                  notificationClient (SSE), idleSession, passwordPolicy, etc.
+  lib/                  notificationClient (SSE), liveData (useLiveRefresh: pages re-fetch on SSE events + tab focus),
+                        themeSwitch (View Transitions), idleSession, passwordPolicy, etc.
 server/                 Backend (separate npm workspace, CommonJS)
   app.js                bootstrap: helmet, CORS allowlist, CSRF origin guard, JWT attach, routes, ensureSchema steps
   routes/r_*.js         one router per resource, mounted in routes/routes.js under /api/*
   controller/c_*.js     matches each router
   models/               raw-SQL models; most own an idempotent ensureSchema(), memoized once per process (`schemaReady` promise)
-  middleware/           m_auth.js (guards), m_csrf.js (Origin check), m_upload.js (multer, 15 MB, mimetype allowlist, extension taken from the mimetype)
-  lib/                  totp, mailer, notificationStream (SSE), fileStorage (+ contentDisposition), certificate renderers, auditDiff,
-                        httpError (publicErrorMessage), uploadCheck (magic-byte check after multer)
+  middleware/           m_auth.js (guards), m_csrf.js (Origin check), m_upload.js (multer, 50 MB = MAX_DOCUMENT_MB, mimetype allowlist, extension taken from the mimetype)
+  lib/                  totp, mailer, notificationStream (SSE), fileStorage (+ contentDisposition), locatorFolders (per-locator upload folders),
+                        departments (departmentOf: bdo | ao | admin), systemAlerts (the only admin notifications), certificate renderers,
+                        auditDiff, httpError (publicErrorMessage), uploadCheck (magic-byte check after multer)
   config/cache.js       node-cache `remember()` — role ids + Control Panel permissions (30s TTL, invalidated on save)
   sql/, scripts/        one-off SQL files and migration/backfill/import scripts (run manually)
-  uploads/              uploaded documents (gitignored, runtime data)
+  uploads/              uploaded documents (gitignored, runtime data; layout under "Notes / gotchas → Storage")
 docs/                   SYSTEM-GUIDE.md, PROCESS-MODULES.md (last updated 2026-09-09 — may lag the code)
 ```
 
@@ -71,9 +76,10 @@ docs/                   SYSTEM-GUIDE.md, PROCESS-MODULES.md (last updated 2026-0
 - Staff dashboard widgets (Account Officer / Assessment Officer / Viewer / custom roles): `server/lib/dashboardWidgets.js` is the single catalog: widget keys, the menus that make a role eligible, and visibility (default on; a stat card also needs its `dashboard:stats` parent). `c_dashboard.js` `buildStaffDashboard` only computes and sends eligible and enabled widgets, and Control Panel only shows toggles for eligible ones. A new widget needs an entry there, a data branch in `buildStaffDashboard`, and rendering in `OfficerDashboard.tsx`. Shared widget cards live in `src/components/dashboard/widgets.tsx`, and reflowing rows use `.balanced-row` + `src/lib/balancedColumns.ts`.
 - Two departments, each with a **per-user Level 1 / Level 2** (`users.assessment_level` = 1 → Level 1, else Level 2; set in User Management's "Level" field, shown for roles with `assessment:queue` or `approval:queue`; the users table shows e.g. `BDO-L1`, `ACCOUNT OFFICER-L2`). `getUserLevel`/`isManager` in `server/models/AssessmentEvaluation.js`; admin counts as Level 1.
   - **BDO** (`assessment:queue`; replaced ASSESSMENT OFFICER — `server/scripts/migrate-assessment-officer-to-bdo.js` for an existing DB): Level 2 creates locator accounts/applications and evaluates only what's assigned; Level 1 sees all, assigns, and approves. The evaluator picker lists Level 2 only (no Level 1, no admins).
-  - **Account Officer** (`approval:queue`): Level 1 assigns a Level 2 from the Approved Queue; Level 2 sees only their own locators in Registered Locator.
+  - **Account Officer** (`applications:renewals` / `approval:queue`): Level 1 assigns a Level 2 from the Approved Queue; Level 2 sees only their own locators in Registered Locator. Renewals belong to the Account Officer only — the BDO never sees them (`ensureDepartment` in `c_assessments.js`: a BDO gets 403 on a renewal, an AO on a new application).
   - Keep `approval:queue` OFF for the BDO role, or BDO Level 2 loses its assignment scoping (`isScopedLevel2`).
 - Level 2 BDO visibility: an application is hidden from them (lists, detail, notifications) until it's assigned to them, except their own unsubmitted DRAFTs. The locator never gets staff-only events (`INTERNAL_EVENT_TYPES` in `Notification.js`). An assignment sends the evaluator a pop-up (`assessment_assigned`); a reupload of a rejected requirement says "re-uploaded" with the rejection remarks.
+- Admins are **not** routine notification recipients. They get only system alerts (`lib/systemAlerts.js` `alertAdmins`: failed email, certificate or contract-permit failures…), throttled per key for 30 min (only after a successful send).
 
 ## Ports & proxy
 
@@ -112,7 +118,7 @@ Backend (`server/.env`): `PORT`, `NODE_ENV`, `JWT_SECRET`, `FRONTEND_URL` (/`FRO
 
 ## Application workflow
 
-**High-level:** BDO Level 2 creates Locator Account + application → BDO Level 1 assigns a BDO Level 2 → Locator uploads → BDO Level 2 reviews and submits → BDO Level 1 "For Approval" (contract, then Approve) → Approved Queue → Account Officer Level 1 assigns a Level 2 → Registered Locator → Permits/expiry → Renewal (same loop).
+**High-level:** BDO Level 2 creates Locator Account + application → BDO Level 1 assigns a BDO Level 2 → Locator uploads → BDO Level 2 reviews and submits → BDO Level 1 "For Approval" (contract, then Approve) → Approved Queue → Account Officer Level 1 assigns a Level 2 → Registered Locator → Permits/expiry → Renewal (Account Officer ↔ locator only, no BDO, no Approved Queue).
 
 **Application statuses** (`APPLICATION_STATUSES`, `server/models/ApplicationWorkflow.js`): `DRAFT, SUBMITTED, RESUBMITTED, RETURNED, REJECTED, FOR_APPROVAL, DISAPPROVED, APPROVED`. (`UNDER_REVIEW` was removed 2026-09-25 — nothing ever set it.)
 
@@ -129,27 +135,32 @@ Backend (`server/.env`): `PORT`, `NODE_ENV`, `JWT_SECRET`, `FRONTEND_URL` (/`FRO
 
 **Stage 3 — Assessment** (`AssessmentEvaluation.tsx`, `/assessment`, `assessment:queue`). This is a two-tier review with its own `stage`: `UNASSIGNED → ASSIGNED → IN_REVIEW → FOR_RECOMMENDATION → COMPLETED` (or `RETURNED`).
 - Level 1 assigns a Level 2 evaluator (`PATCH /:id/assign`). Level 2 only see and act on their own assignments (`ensureCanAct`).
-- Compliance tab: verify or reject each requirement. Verify stays disabled on a REJECTED requirement until a reupload resets it. Each document has evaluator **Remarks** (`PATCH /requirements/:id/remarks`, no status change or notification, locked once COMPLETED/RETURNED) and a comment thread shared with the Locator. Ad-hoc one-off requirements (`POST /:id/requirements/custom`, `is_ad_hoc=1`) survive a type-change rebuild. Assessment charges can be added.
+- Compliance tab: verify or reject each requirement (Verify takes optional remarks). **Verify/Reject need an uploaded file** — the buttons are disabled and `Workflow.updateApplicationRequirementStatus` refuses (400) when the row has no document, on every route. Verify stays disabled on a REJECTED requirement until a reupload resets it. Each document has evaluator **Remarks** (`PATCH /requirements/:id/remarks`, no status change or notification, locked once COMPLETED/RETURNED) and a comment thread shared with the Locator. Ad-hoc one-off requirements (`POST /:id/requirements/custom`, `is_ad_hoc=1`) still exist in the API, but the UI button was removed on purpose (not needed). Assessment charges can be added.
 - The old **Findings tab and "Return to Locator" were removed** (commit e533090). Per-document remarks replace them.
-- Level 2 submits their review (`POST /:id/officer-review`, summary only; a recommendation is optional) → stage FOR_RECOMMENDATION. The Step 2 card is hidden until then.
+- Level 2 submits their review (`POST /:id/officer-review`, summary only; a recommendation is optional) → stage FOR_RECOMMENDATION. It's refused while any **uploaded** requirement is still PENDING (unchecked); requirements not uploaded yet ("to follow") don't block it. The Overview shows the remarks when Level 1 returned it.
 - Level 1 then either sends it back (`POST /:id/return-to-officer` → IN_REVIEW) or clicks **For Approval** (see below). The older `POST /:id/recommendation` (ENDORSE to a chosen Account Officer / DISAPPROVE) still exists in the API but the UI no longer uses it.
 - Once decided, it's locked until an admin reopens it (`PATCH /:id/reopen`). Reopening is refused once Approval reached APPROVED/DISAPPROVED.
 
 **For Approval → Approved Queue → Registered Locator (new and renewal):** BDO Level 2 files → BDO Level 1 assigns a BDO Level 2 → locator uploads → BDO Level 2 submits a summary (no recommendation) → BDO Level 1 clicks **For Approval** on the /assessment row (`POST /api/assessments/:id/for-approval`, `sendForApproval`): application FOR_APPROVAL, approval assigned to that Level 1, and the Approval panel (`ApprovalDetail`, exported from `ApprovalIssuance.tsx`) opens on /assessment for charges, contract and the final decision. Approval routes use `requireApprovalAccess` (approval:queue, or assessment:queue + Level 1). APPROVED → /approval (`AccountOfficerAssignment.tsx`, `GET /api/approvals/assignment-queue`) lists it UNASSIGNED; Level 1 Account Officer assigns a Level 2 (`proponents.account_officer_id`, `locator_assigned` notification) → it leaves /approval and appears in Registered Locator, which only lists locators with an account officer (a Level 2 Account Officer sees only theirs, `requireOwnLocator`). Renewals (REN-…) follow the same loop; the Approved Queue is driven by `applications.awaiting_ao_assignment` (set on APPROVED, cleared on assign), and assigning on a renewal just updates the locator's existing Registered Locator row (one row per locator; type/lease term come from the latest APPROVED application/contract). The contract must be recorded before Approve (`actOnStep`). /approval is titled "Approved Queue".
 
 **Stage 4 — Approval panel** (`ApprovalDetail` in `ApprovalIssuance.tsx`, opened from /assessment). A **single-level** approval (Levels 2/3 removed in 20afca8; old data migrated by `server/scripts/migrate-approval-single-level.js`); the panel shows no step list, just the decision form or the decision.
-- One pending step, assigned to the Level 1 BDO who clicked For Approval; only they (or admin) may act (`ensureApprovalAccess`).
-- Actions `APPROVE` / `DISAPPROVE` / `RETURN` are final. The compare-and-swap on `decision = 'PENDING'` prevents double decisions.
-  - APPROVE requires a recorded contract, and every mandatory requirement verified unless `override_unverified` is passed.
-  - RETURN sets the application to RETURNED and auto-reopens the assessment so the officer can redo it.
+- One pending step, assigned to the Level 1 who clicked For Approval; only they (or admin) may act (`ensureApprovalAccess`).
+- Tabs: Overview, Compliance (read-only review of the uploads), Approval (Contract section, then Decision), Charges, History.
+- Decisions: `APPROVE` / `DISAPPROVE` are final; **Return to Evaluator** (`POST /api/approvals/:id/return-to-level2`) sends it back to Level 2 with remarks. `RETURN` (back to the locator) is gone from the workflow — `actOnStep` refuses it. The compare-and-swap on `decision = 'PENDING'` prevents double decisions.
+  - APPROVE requires a saved contract. Unverified mandatory requirements need `override_unverified` — the UI asks "approve anyway?" (requirements to follow); the override is logged.
+  - On APPROVED: a new application gets `awaiting_ao_assignment = 1` (Approved Queue); a renewal marks the locator's older CONTRACT permits `RENEWED`. Then `Contract.announceContractToLocator` notifies/emails the locator — not awaited, so slow SMTP can't hold up Approve.
+- **The contract stays hidden from the locator until APPROVED** (saved before Approve = staff draft): portal contract/permit/certificate endpoints and the executed contract file in Documents filter on `status = 'APPROVED'` (`c_proponent_portal.js`), contract notifications before approval skip the locator and send no email (`createContractNotifications`). Staff-side lists do the same: Renewal Tracking (`Permit.listAll`), dashboard expiry items (`Contract.listAll`) and Registered Locator Start/End/Lease Term (`Proponent.js` contract OUTER APPLYs) count only APPROVED applications' contracts/permits — a disapproved application's permit never shows.
 - Issuances (`APPROVAL_ORDER`, `NOTICE_OF_AWARD`, `CONTRACT`, `PERMIT`, `OTHER`), charges, and the Contract tab (`PUT /:id/contract`) live here. The next contract number comes from `GET /:id/contract/next-number`, and the certificate PDF is rendered on save.
-- Clicking a row on the Applications page always opens `/assessment?tab=Compliance`, never Approval.
+- Deep links `/assessment?applicationId=…` (or `/applications/renewals?…`) open like a row click once the fresh queue has loaded (not the session cache): straight to the approval panel when it's awaiting this Level 1's approval; with `&tab=` (e.g. Locator Accounts → `tab=Compliance`) always the evaluation drawer.
 - `PATCH /api/applications/:id/status` is an admin-only escape hatch. It skips the document check and Approval routing, so it's not a substitute for the real flow.
 
 **Stage 5 — Permits, expiry & renewal** (`PermitsManagement.tsx`, `compliance:permits`, `server/models/Permit.js`).
 - Issuing a contract auto-creates or syncs a permit of reserved type `CONTRACT`. Other permit types are the active `PERMITS` Compliance Requirements (`GET /api/permits/types`).
 - Effective status is derived: `REVOKED` if revoked, otherwise from `expiry_date`: `EXPIRED` (past), `EXPIRING` (within `EXPIRING_WINDOW_DAYS` = 365), else `VALID`. The UI adds "this month / next 90 days / overdue" filters, and dashboards show them through `AttentionCard`.
-- Renewal: a renewal application (`is_renewal=1`, optional `renewed_from_permit_id`) links back to the expiring permit. The permit row shows "Renewal filed: <application_no>", linking to `/applications/renewals?applicationId=…`.
+- Renewal Tracking (`/compliance/permits`) lists only EXPIRING/EXPIRED permits. **Renew** (one confirmation, `POST /api/applications/renew-from-permit/:permitId`) files and submits a REN-… application copying type/contract type from the latest APPROVED application, `renewed_from_permit_id` set, assigned straight to the locator's own Level 2 Account Officer. Rules (`assertFilingAllowed`): only a Registered Locator (has an Account Officer), one open renewal at a time; Account Officers only (a Level 2 for their own locators).
+- The renewal then runs in the Renewal Queue (`/applications/renewals`): locator uploads → AO Level 2 verifies and submits → AO Level 1 row click = For Approval → contract → Approve. Registered Locator keeps one row per locator; its header badge shows **Renewal in process** while a renewal is undecided (`renewal_application_no` from `getProponentById`).
+- **Existing locators encoded by hand** (Registered Locator → New Locator, `POST /api/proponents`, `is_manual_registration=1`, no application): Start/End Term are typed in (`proponents.manual_start_term/_end_term`, editable only while `term_editable` = no approved contract; an approved contract's dates always win) and synced to a CONTRACT permit `LEASE-<Ref No>` with no application (`syncEncodedLeasePermit` in `c_proponents.js`), so it shows on Renewal Tracking. Renew needs a portal login (header button "Portal login" → `POST /api/proponents/:id/login`, PENDING until the renewal is filed) and uses the encoded Industry / Type of Contract when there's no approved application. Approving that renewal marks the LEASE permit RENEWED like any old contract permit. `GET /api/proponents/duplicates` warns on same name/TIN before saving. `proponents.user_id` is nullable (ensureSchema relaxes old NOT NULL databases); the edit form never changes `user_id`.
+- The locator may keep uploading after APPROVED (requirements "to follow"); a VERIFIED requirement can't be re-uploaded.
 
 **Compliance & Inspections** (`ComplianceInspections.tsx`, `/api/inspections`, `compliance:inspections`). The page is modelled on the legacy BRIDGE compliance screen.
 - Compliance Requirements (`dbo.compliance_requirements`, `/api/compliance-requirements`) are one list in three categories: `COMPLIANCE`, `PERMITS` and `PERFORMANCE`. It replaces the old Inspection Types and Compliance Types. It is managed from its own tab under the same `compliance:inspections` permission. A requirement's code is fixed once created.
@@ -172,6 +183,9 @@ Backend (`server/.env`): `PORT`, `NODE_ENV`, `JWT_SECRET`, `FRONTEND_URL` (/`FRO
 - `msnodesqlv8` runs on libuv's threadpool, so `server/app.js` sets `UV_THREADPOOL_SIZE=16` before any require. Keep that line first, or parallel page loads hit "Query timeout expired".
 - `vite.config.ts` `optimizeDeps.include` lists the MUI date-picker modules on purpose, to avoid stale-chunk errors after lazy routes load. Don't remove them.
 - Error responses: controllers send `publicErrorMessage(error)` (`server/lib/httpError.js`), never raw `error.message`. Plain `new Error("…")` messages and errors with a 4xx `.status` reach the client; DB, system and runtime errors become a generic message (the real one is only in the server log). So throw user-facing validation errors as plain `Error`.
-- Storage: both upload paths write under `STORAGE_ROOT` (`STORAGE_DIR` or `server/uploads`) and save `storage_path` relative to it. Older staff uploads have absolute paths; `resolveStoredPath` handles both. A rejected upload deletes its file. Inspection "documents" are text references only; there's no file upload there.
+- Storage: every upload lands in `STORAGE_ROOT/incoming/` (multer), then the controller files it with `lib/locatorFolders.js` into one folder per locator, named by Ref No: `locators/<LOC-…>/<APP-…|REN-…>/` (requirement uploads), `contracts/<contract no>/certificate.pdf`, `permits/<permit no>/certificate.pdf`, `documents/` (staff Locator Documents tab). Paths are saved relative to `STORAGE_ROOT` (`STORAGE_DIR` or `server/uploads`; prod `C:\bridgeplus\ciac-data\uploads`). Older rows (`<applicationId>/…`, `contracts/<id>/…`, `documents/…`) still resolve; `server/scripts/migrate-uploads-to-locator-folders.js` (dry run, `--apply`, `--rollback <log>`) moves them — already run on dev and prod (2026-10-08). File names stay random (the original name is in the DB row). A rejected upload deletes its file. Inspection "documents" are text references only; there's no file upload there.
 - Uploads: both upload paths (`m_upload.js` for staff, `fileStorage.handleUpload` for the portal) run `verifyUploadedFile` from `lib/uploadCheck.js`. A new allowed mimetype needs a signature in `SIGNATURES` there, or every upload of it is rejected.
+- Registered Locator → Documents tab (`LocatorDocumentsTab.tsx`): once the locator has a filed application only the application cards show (the manual "Locator Documents" checklist is for New Locator / no-application locators); the latest application is open, earlier ones fold under "Previous applications".
+- Global search (`models/Search.js`): matches application no, business name and locator Ref No; an approved new application with an Account Officer opens as its Registered Locator (shows `LOC-…`); FOR_APPROVAL counts as Evaluation Queue.
+- Live refresh: pages call `useLiveRefresh` (`src/lib/liveData.ts`), re-fetching when an SSE notification arrives or the tab regains focus. A failed background refresh keeps what's on screen.
 - Permission caching: anything that writes `role_*_permissions` or `roles` outside `ControlPanelPermission.set*` / `Role.*` must clear `config/cache.js`, or the change can take up to 30s to apply.

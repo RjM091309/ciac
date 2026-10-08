@@ -167,7 +167,7 @@ export function ProponentProfile() {
         className="relative overflow-hidden rounded-2xl px-4 py-5 sm:px-6 sm:py-6 !border-transparent"
         style={{
           backgroundColor: 'var(--surface)',
-          boxShadow: '0 6px 16px rgba(0,0,0,0.12), 0 0 0 1px color-mix(in oklab, var(--border-subtle) 70%, transparent)',
+          boxShadow: 'var(--float-shadow)',
         }}
       >
         <div className="pointer-events-none absolute -top-32 -right-32 h-80 w-80 rounded-full bg-blue-600/30 blur-[100px]" />
@@ -287,11 +287,10 @@ export function ProponentProfile() {
               <Field label="Registration No." value={p.registration_no} />
               <Field label="TIN" value={p.tin} />
               <Field label="Contact No." value={p.contact_no} />
+              <div className="col-span-2">
+                <Field label="Address" value={p.address} />
+              </div>
             </div>
-          </div>
-
-          <div className="glass-card p-4 sm:p-5 !border-transparent" style={{ backgroundColor: 'var(--surface)' }}>
-            <Field label="Address" value={p.address} />
           </div>
         </>
       )}

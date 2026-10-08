@@ -39,6 +39,17 @@ const PERMIT_TYPE_LABELS: Record<string, string> = {
   AUTHORITY_TO_OPERATE: 'Authority to Operate',
 };
 
+const FLOAT_ITEM: React.CSSProperties = { backgroundColor: 'var(--surface)', boxShadow: 'var(--float-shadow)' };
+
+function MobileField({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div className="min-w-0">
+      <div className="text-[9px] font-semibold uppercase tracking-widest text-secondary">{label}</div>
+      <div className="text-[11px] truncate" style={{ color: 'var(--text)' }}>{value}</div>
+    </div>
+  );
+}
+
 const PERMIT_STATUS_STYLE: Record<string, { bg: string; color: string }> = {
   VALID: { bg: 'rgba(16,185,129,0.12)', color: '#10b981' },
   EXPIRING: { bg: 'rgba(245,158,11,0.14)', color: '#f59e0b' },
@@ -53,10 +64,12 @@ function fmtDate(value: string | null) {
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
+// Tablet/desktop: one floating card holding a table. Phones: no outer card —
+// each row is its own floating card (same as My Applications).
 function Card({ title, icon: Icon, children }: { title: string; icon: any; children: React.ReactNode }) {
   return (
-    <div className="glass-card p-4 sm:p-5 !border-transparent" style={{ backgroundColor: 'var(--surface)' }}>
-      <div className="flex items-center gap-2 mb-4">
+    <div className="rounded-2xl p-0 sm:p-5 sm:bg-[var(--surface)] sm:[box-shadow:var(--float-shadow)]">
+      <div className="flex items-center gap-2 mb-3 sm:mb-4">
         <Icon size={16} style={{ color: 'var(--text)' }} />
         <h4 className="text-sm font-bold" style={{ color: 'var(--text)' }}>{title}</h4>
       </div>
@@ -126,7 +139,37 @@ export function ProponentContractsPermits({ navigate }: { navigate: Navigate }) 
         {contracts.length === 0 ? (
           <EmptyState title="No contracts yet" description="No executed lease contracts are on record for your business." />
         ) : (
-          <div className="overflow-x-auto">
+          <>
+          <div className="sm:hidden space-y-3">
+            {contracts.map((c) => (
+              <div key={c.id} className="rounded-xl p-3 space-y-2.5" style={FLOAT_ITEM}>
+                <div className="flex items-start justify-between gap-2">
+                  <div className="text-[12px] font-semibold break-words" style={{ color: 'var(--text)' }}>{c.contract_no}</div>
+                  <button
+                    className="shrink-0 text-[11px] underline text-secondary cursor-pointer"
+                    onClick={() => navigate(`/me/applications?applicationId=${c.application_id}`)}
+                  >
+                    {c.application_no || `#${c.application_id}`}
+                  </button>
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                  <MobileField label="Issued" value={fmtDate(c.issue_date)} />
+                  <MobileField label="Effective" value={fmtDate(c.effective_start)} />
+                  <MobileField label="Expires" value={fmtDate(c.effective_end)} />
+                </div>
+                {c.has_certificate ? (
+                  <button
+                    className="w-full rounded-lg px-2 py-1.5 text-[11px] font-semibold border cursor-pointer"
+                    style={{ borderColor: 'var(--border-subtle)', color: 'var(--text)' }}
+                    onClick={() => window.open(`/api/proponents/me/contracts/${c.id}/certificate?view=1`, '_blank')}
+                  >
+                    View Contract
+                  </button>
+                ) : null}
+              </div>
+            ))}
+          </div>
+          <div className="hidden sm:block overflow-x-auto">
             <table className="min-w-full text-left text-xs">
               <thead>
                 <tr>
@@ -168,6 +211,7 @@ export function ProponentContractsPermits({ navigate }: { navigate: Navigate }) 
               </tbody>
             </table>
           </div>
+          </>
         )}
       </Card>
 
@@ -175,7 +219,42 @@ export function ProponentContractsPermits({ navigate }: { navigate: Navigate }) 
         {permits.length === 0 ? (
           <EmptyState title="No permits yet" description="No permits are on record for your business." />
         ) : (
-          <div className="overflow-x-auto">
+          <>
+          <div className="sm:hidden space-y-3">
+            {permits.map((p) => {
+              const s = PERMIT_STATUS_STYLE[p.effective_status] || PERMIT_STATUS_STYLE.REVOKED;
+              return (
+                <div key={p.id} className="rounded-xl p-3 space-y-2.5" style={FLOAT_ITEM}>
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="text-[12px] font-semibold break-words" style={{ color: 'var(--text)' }}>{p.permit_no}</div>
+                      <div className="text-[11px] text-secondary">
+                        {PERMIT_TYPE_LABELS[p.permit_type] || p.permit_type}
+                        {p.issuing_authority ? ` · ${p.issuing_authority}` : ''}
+                      </div>
+                    </div>
+                    <span className="shrink-0 inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold" style={{ backgroundColor: s.bg, color: s.color }}>
+                      {p.effective_status}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <MobileField label="Issued" value={fmtDate(p.issue_date)} />
+                    <MobileField label="Expiry" value={fmtDate(p.expiry_date)} />
+                  </div>
+                  {p.has_certificate ? (
+                    <button
+                      className="w-full rounded-lg px-2 py-1.5 text-[11px] font-semibold border cursor-pointer"
+                      style={{ borderColor: 'var(--border-subtle)', color: 'var(--text)' }}
+                      onClick={() => window.open(`/api/proponents/me/permits/${p.id}/certificate?view=1`, '_blank')}
+                    >
+                      View Certificate
+                    </button>
+                  ) : null}
+                </div>
+              );
+            })}
+          </div>
+          <div className="hidden sm:block overflow-x-auto">
             <table className="min-w-full text-left text-xs">
               <thead>
                 <tr>
@@ -218,6 +297,7 @@ export function ProponentContractsPermits({ navigate }: { navigate: Navigate }) 
               </tbody>
             </table>
           </div>
+          </>
         )}
       </Card>
     </div>

@@ -19,6 +19,10 @@ const { publicErrorMessage } = require("../lib/httpError");
 const Assessment = require("../models/AssessmentEvaluation");
 const { checkMenuAllowed } = require("../middleware/m_auth");
 const { getters: site } = require("../lib/siteSettings");
+const Permit = require("../models/Permit");
+const User = require("../models/User");
+const Role = require("../models/Role");
+const { generateTempPassword } = require("../lib/password");
 
 /** "", null, undefined -> null; otherwise the id as a number (NaN passes through and is rejected below). */
 function toNullableId(value) {
@@ -571,6 +575,164 @@ exports.deleteDocument = async (req, res) => {
   }
 };
 
+// ---- Existing locators encoded by hand (no application in this system) ----
+
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/** Start/End Term from the form: both or neither (null = clear). */
+function readLeaseTerm(body) {
+  const raw = (v) => (v === undefined ? undefined : String(v || "").trim() || null);
+  const start = raw(body?.start_term);
+  const end = raw(body?.end_term);
+  if (start === undefined && end === undefined) return { sent: false };
+  if (!start !== !end) return { error: "Enter both the Start Term and the End Term (or neither)." };
+  if (start && (!DATE_RE.test(start) || !DATE_RE.test(end))) return { error: "Start/End Term must be dates." };
+  if (start && end < start) return { error: "End Term can't be before Start Term." };
+  return { sent: true, start, end };
+}
+
+/** An encoded locator's lease term → its CONTRACT permit (no application),
+ * so it counts down on Renewal Tracking and can be renewed like any other.
+ * Once the locator has an approved contract that one rules instead (an
+ * approved renewal marks this permit RENEWED, see settleApproval). */
+async function syncEncodedLeasePermit(proponentId, actorId) {
+  try {
+    const p = await Proponent.getProponentById(proponentId);
+    if (!p || p.has_contract) return;
+    const existing = (await Permit.listByProponent(proponentId)).find(
+      (x) => x.permit_type === "CONTRACT" && !x.application_id
+    );
+    if (!p.manual_end_term) {
+      if (existing) await Permit.deactivate(existing.id, actorId);
+      return;
+    }
+    const payload = {
+      permit_type: "CONTRACT",
+      permit_no: `LEASE-${p.ref_no || p.id}`,
+      issuing_authority: "CIAC",
+      issue_date: p.manual_start_term,
+      expiry_date: p.manual_end_term,
+      remarks: "Lease term encoded on Registered Locator",
+    };
+    if (existing) await Permit.update(existing.id, { ...payload, updated_by: actorId });
+    else await Permit.create({ ...payload, proponent_id: proponentId, application_id: null, created_by: actorId });
+  } catch (error) {
+    console.error("Sync encoded lease permit error:", error);
+    require("../lib/systemAlerts").alertAdmins({
+      key: `lease-permit-${proponentId}`,
+      subject: "Encoded lease term not on Renewal Tracking",
+      body: "A locator's Start/End Term was saved but its permit couldn't be created or updated. Save the locator again to retry.",
+    });
+  }
+}
+
+/** Saves the typed Start/End Term — only while there's no approved contract. */
+async function applyLeaseTerm(proponentId, term, actorId) {
+  if (!term?.sent) return;
+  const current = await Proponent.getProponentById(proponentId);
+  if (!current || current.has_contract) return; // the contract's dates rule
+  await Proponent.setManualLeaseTerm(proponentId, { start_term: term.start, end_term: term.end });
+  await syncEncodedLeasePermit(proponentId, actorId);
+}
+
+const normalizeName = (v) => String(v || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+const normalizeTin = (v) => String(v || "").replace(/\D+/g, "");
+
+/** GET /api/proponents/duplicates?business_name=&tin=&excludeId= — locators
+ * that look like the same business (same name ignoring case/punctuation, or
+ * same TIN), so encoding an existing locator twice gets a warning. */
+exports.findDuplicates = async (req, res) => {
+  try {
+    const name = normalizeName(req.query?.business_name);
+    const tin = normalizeTin(req.query?.tin);
+    const excludeId = Number(req.query?.excludeId) || null;
+    if (!name && tin.length < 9) return res.json({ success: true, data: [] });
+    const rows = (await Proponent.listProponents())
+      .filter((p) => Number(p.id) !== excludeId)
+      .filter((p) => (name && normalizeName(p.business_name) === name) || (tin.length >= 9 && normalizeTin(p.tin) === tin))
+      .slice(0, 5)
+      .map((p) => ({
+        id: p.id,
+        ref_no: p.ref_no,
+        business_name: p.business_name,
+        match: name && normalizeName(p.business_name) === name ? "name" : "tin",
+      }));
+    return res.json({ success: true, data: rows });
+  } catch (error) {
+    console.error("Find duplicate locators error:", error);
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
+  }
+};
+
+/** POST /api/proponents/:id/login — gives an encoded locator (no login yet)
+ * a portal account, linked to this same record (no second locator). It
+ * starts PENDING like any new locator: the login and temporary password are
+ * emailed when their first application or renewal is filed. */
+exports.createLogin = async (req, res) => {
+  let createdUserId = null;
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ success: false, message: "Invalid id" });
+    const proponent = await Proponent.getProponentById(id);
+    if (!proponent) return res.status(404).json({ success: false, message: "Locator not found" });
+    if (proponent.user_id) return res.status(409).json({ success: false, message: "This locator already has a login." });
+
+    const username = String(req.body?.username || "").trim();
+    const email = String(req.body?.email || "").trim();
+    const fullName = String(req.body?.full_name || "").trim() || null;
+    if (!username) return res.status(400).json({ success: false, message: "Username is required.", field: "username" });
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return res.status(400).json({ success: false, message: "Enter a valid email.", field: "email" });
+    }
+    if (!(await User.isFieldAvailable("username", username))) {
+      return res.status(409).json({ success: false, message: "That username is already taken.", field: "username" });
+    }
+    if (!(await User.isFieldAvailable("email", email))) {
+      return res.status(409).json({ success: false, message: "That email is already in use.", field: "email" });
+    }
+    const roleId = await Role.getActiveRoleIdByName("proponent");
+    if (!roleId) return res.status(500).json({ success: false, message: "The Locator role is missing." });
+
+    const user = await User.createUser({
+      username,
+      email,
+      full_name: fullName,
+      password: generateTempPassword(), // placeholder; replaced on activation
+      is_active: 0,
+      role_id: roleId,
+      status: "PENDING",
+    });
+    createdUserId = user?.id ?? null;
+    if (!createdUserId || !(await Proponent.linkUser(id, createdUserId))) {
+      throw new Error("Couldn't link the login to this locator.");
+    }
+
+    await AuditLog.record({
+      actorId: req.user?.id,
+      actorUsername: req.user?.username,
+      action: "LOCATOR_LOGIN_CREATED",
+      entityType: "proponent",
+      entityId: id,
+      details: { business_name: proponent.business_name, username, email },
+      req,
+    });
+    return res.status(201).json({
+      success: true,
+      data: { user_id: createdUserId, username, email, status: "PENDING" },
+      message: "Login created — pending. It's emailed to the locator when their renewal is filed.",
+    });
+  } catch (error) {
+    console.error("Create locator login error:", error);
+    // Don't leave an unlinked account behind.
+    if (createdUserId) {
+      await require("../config/database")
+        .updateData(`DELETE FROM dbo.user_roles WHERE user_id = @param0; DELETE FROM dbo.users WHERE id = @param0`, [createdUserId])
+        .catch(() => {});
+    }
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
+  }
+};
+
 exports.create = async (req, res) => {
   try {
     const {
@@ -637,6 +799,8 @@ exports.create = async (req, res) => {
 
     const classification = await readClassification(req.body);
     if (classification.error) return res.status(400).json({ success: false, message: classification.error });
+    const leaseTerm = readLeaseTerm(req.body);
+    if (leaseTerm.error) return res.status(400).json({ success: false, message: leaseTerm.error });
 
     const row = await Proponent.createProponent({
       user_id,
@@ -696,6 +860,7 @@ exports.create = async (req, res) => {
         contract_type_id: classification.contractTypeId,
         industry_code: classification.industryCode,
       });
+      await applyLeaseTerm(row.id, leaseTerm, req.user?.id ?? null);
     }
     await AuditLog.record({
       actorId: req.user?.id,
@@ -866,10 +1031,14 @@ exports.update = async (req, res) => {
     const landUseId = land_use_id === undefined ? undefined : toNullableId(land_use_id);
     const lookupError = await unknownLookup(landUseId, () => LandUse.listLandUses(), "land use");
     if (lookupError) return res.status(400).json({ success: false, message: lookupError });
+    const leaseTerm = readLeaseTerm(req.body);
+    if (leaseTerm.error) return res.status(400).json({ success: false, message: leaseTerm.error });
 
     const before = await Proponent.getProponentById(id);
     const row = await Proponent.updateProponent(id, {
-      user_id,
+      // The portal login is linked only through POST /:id/login — never
+      // changed or cleared by this form.
+      user_id: undefined,
       business_name,
       registration_no,
       tin,
@@ -932,6 +1101,7 @@ exports.update = async (req, res) => {
       if (classification.error) return res.status(400).json({ success: false, message: classification.error });
       await Proponent.setManualClassification(id, { industry_code: classification.industryCode });
     }
+    await applyLeaseTerm(id, leaseTerm, req.user?.id ?? null);
     const refreshed = await Proponent.getProponentById(id);
 
     await AuditLog.record({

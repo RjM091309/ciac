@@ -6,6 +6,7 @@ const Notification = require("../models/Notification");
 const ActivityLog = require("../models/ActivityLog");
 const Workflow = require("../models/ApplicationWorkflow");
 const ApplicationType = require("../models/ApplicationType");
+const Department = require("../models/Department");
 const { updateData } = require("../config/database");
 const { validatePasswordStrength, generateTempPassword } = require("../lib/password");
 const { sendMail } = require("../lib/mailer");
@@ -47,6 +48,7 @@ async function userAuditSnapshot(id) {
     is_active: Boolean(user.is_active),
     role: (user.roles || []).map((r) => r.name).join(", ") || null,
     assessment_level: user.assessment_level === 1 ? "Level 1" : "Level 2",
+    department: user.department_name ?? null,
     business_name: proponent?.business_name ?? null,
     address: proponent?.address ?? null,
     lease_address: proponent?.lease_address ?? null,
@@ -167,6 +169,32 @@ exports.getById = async (req, res) => {
   }
 };
 
+/** department_id from the form: undefined = leave alone, empty = none,
+ * otherwise an active department from File Maintenance → Departments. */
+async function readDepartmentId(value, currentId = null) {
+  if (value === undefined) return { value: undefined };
+  if (value === null || value === "") return { value: null };
+  const id = Number(value);
+  // Keeping the user's current one is fine even if it was deactivated since.
+  if (currentId != null && id === Number(currentId)) return { value: id };
+  const dept = Number.isFinite(id) ? await Department.getDepartmentById(id) : null;
+  if (!dept || !dept.is_active) return { error: "Unknown department" };
+  return { value: id };
+}
+
+/** GET /api/users/departments — the Department dropdown on User Management
+ * (active departments only), readable with User Management access instead
+ * of the File Maintenance menu. */
+exports.listDepartmentOptions = async (req, res) => {
+  try {
+    const rows = (await Department.listDepartments()).filter((d) => d.is_active);
+    return res.json({ success: true, data: rows.map((d) => ({ id: d.id, code: d.code, name: d.name })) });
+  } catch (error) {
+    console.error("List department options error:", error);
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
+  }
+};
+
 exports.create = async (req, res) => {
   try {
     const {
@@ -178,6 +206,7 @@ exports.create = async (req, res) => {
       is_active,
       role_id,
       assessment_level,
+      department_id,
       business_name,
       address,
       lease_address,
@@ -189,6 +218,8 @@ exports.create = async (req, res) => {
     if (land_use_id && !(await isKnownLandUse(land_use_id))) {
       return res.status(400).json({ success: false, message: "Unknown land use" });
     }
+    const department = await readDepartmentId(department_id);
+    if (department.error) return res.status(400).json({ success: false, message: department.error, field: "department_id" });
     if (!isValidLeaseTerm(proposed_lease_term_years)) {
       return res.status(400).json({ success: false, message: "Proposed lease term must be a number of years (more than 0, up to 99)." });
     }
@@ -236,6 +267,7 @@ exports.create = async (req, res) => {
       role_id,
       status: isDeferredLocator ? "PENDING" : "ACTIVE",
       assessment_level,
+      department_id: department.value,
     });
 
     // Create the linked proponent record now so it's pickable from the New
@@ -505,6 +537,7 @@ exports.update = async (req, res) => {
       is_active,
       role_id,
       assessment_level,
+      department_id,
       business_name,
       address,
       lease_address,
@@ -516,6 +549,8 @@ exports.update = async (req, res) => {
     if (land_use_id && !(await isKnownLandUse(land_use_id))) {
       return res.status(400).json({ success: false, message: "Unknown land use" });
     }
+    const department = await readDepartmentId(department_id, (await User.getUserById(id))?.department_id);
+    if (department.error) return res.status(400).json({ success: false, message: department.error, field: "department_id" });
     if (!isValidLeaseTerm(proposed_lease_term_years)) {
       return res.status(400).json({ success: false, message: "Proposed lease term must be a number of years (more than 0, up to 99)." });
     }
@@ -536,6 +571,7 @@ exports.update = async (req, res) => {
       is_active,
       role_id,
       assessment_level,
+      department_id: department.value,
     });
     if (!row) return res.status(404).json({ success: false, message: "User not found" });
 

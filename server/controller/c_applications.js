@@ -174,14 +174,31 @@ exports.renewFromPermit = async (req, res) => {
     const Permit = require("../models/Permit");
     const permit = await Permit.getById(Number(req.params.permitId));
     if (!permit) return res.status(404).json({ success: false, message: "Permit not found" });
+    const proponent = await Proponent.getProponentById(permit.proponent_id);
+    // The locator uploads the renewal requirements in the portal — an
+    // encoded locator needs a login first (Registered Locator → Login).
+    if (!proponent?.user_id) {
+      return res.status(400).json({
+        success: false,
+        message: "This locator has no portal login yet. Create it on Registered Locator (Login) first, then renew.",
+      });
+    }
+    // Type and Type of Contract come from the latest approved application;
+    // an existing locator encoded by hand has none, so its own encoded
+    // Industry / Type of Contract are used instead.
     const latest = await Workflow.getLatestApprovedApplication(permit.proponent_id);
-    if (!latest) {
-      return res.status(400).json({ success: false, message: "This locator has no approved application to renew." });
+    const applicationType = latest?.application_type || proponent.industry_code || null;
+    const contractTypeId = latest ? latest.contract_type_id ?? null : proponent.contract_type_id ?? null;
+    if (!applicationType) {
+      return res.status(400).json({
+        success: false,
+        message: "Set this locator's Industry on Registered Locator first — the renewal needs it.",
+      });
     }
     req.body = {
       proponent_id: permit.proponent_id,
-      application_type: latest.application_type,
-      contract_type_id: latest.contract_type_id ?? null,
+      application_type: applicationType,
+      contract_type_id: contractTypeId,
       is_renewal: 1,
       save_as_draft: false,
       renewed_from_permit_id: permit.id,

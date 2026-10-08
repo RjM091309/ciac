@@ -10,6 +10,12 @@ const authController = require("../controller/c_auth");
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   limit: 20,
+  // Only failed attempts count: a whole office signs in from one IP (and a
+  // sign-in with an authenticator is two requests), so counting successful
+  // ones locked real users out while testing.
+  skipSuccessfulRequests: true,
+  // The "now enter your code" step after a correct password counts as a success.
+  requestWasSuccessful: (req, res) => res.statusCode < 400 || Boolean(res.locals.loginChallenge),
   standardHeaders: true,
   legacyHeaders: false,
   message: { success: false, message: "Too many login attempts from this device. Please try again later." },

@@ -31,6 +31,7 @@ router.get("/", requireAnyMenuAccess(USER_MENU_KEYS, "view"), usersController.li
 // Live "already taken" check while a create/edit form is filled in —
 // declared before "/:id" so "check-availability" isn't swallowed as an id.
 router.get("/check-availability", requireAnyMenuAccess(USER_MENU_KEYS, "view"), usersController.checkAvailability);
+router.get("/departments", requireAnyMenuAccess(USER_MENU_KEYS, "view"), usersController.listDepartmentOptions);
 router.get("/:id", requireUserMenuAccess("view"), usersController.getById);
 router.post("/", requireUserMenuAccess("add"), usersController.create);
 // Locator Accounts' merged create flow (account + business profile +

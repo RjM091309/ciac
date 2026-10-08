@@ -140,7 +140,7 @@ export function ProponentDashboard({
         className="relative overflow-hidden rounded-2xl px-4 py-5 sm:px-6 sm:py-6 !border-transparent"
         style={{
           backgroundColor: 'var(--surface)',
-          boxShadow: '0 6px 16px rgba(0,0,0,0.12), 0 0 0 1px color-mix(in oklab, var(--border-subtle) 70%, transparent)',
+          boxShadow: 'var(--float-shadow)',
         }}
       >
         <div className="pointer-events-none absolute -top-32 -right-32 h-80 w-80 rounded-full bg-blue-600/30 blur-[100px]" />
@@ -180,7 +180,7 @@ export function ProponentDashboard({
 
       {canShowWidget('dashboard:table') && (
       // No border-color transition inside (it flashed white in dark mode — see ProponentApplications).
-      <div className="rounded-2xl p-0 sm:p-4 sm:p-5 sm:border sm:border-transparent sm:shadow-[0_1px_2px_0_rgb(0_0_0_/_0.05)] sm:bg-[var(--surface)] [transition-property:background-color,color] [&_*]:[transition-property:background-color,color]">
+      <div className="rounded-2xl p-0 sm:p-4 sm:p-5 sm:border sm:border-transparent sm:[box-shadow:var(--float-shadow)] sm:bg-[var(--surface)] [transition-property:background-color,color] [&_*]:[transition-property:background-color,color]">
         <h4 className="text-sm font-bold mb-3" style={{ color: 'var(--text)' }}>
           My Applications
         </h4>
@@ -210,9 +210,9 @@ export function ProponentDashboard({
                       navigate && 'cursor-pointer active:brightness-95',
                     )}
                     style={{
-                      borderColor: 'var(--border-subtle)',
+                      borderColor: 'transparent',
                       backgroundColor: 'var(--surface)',
-                      boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
+                      boxShadow: 'var(--float-shadow)',
                     }}
                   >
                     <div className="flex items-center justify-between gap-2">

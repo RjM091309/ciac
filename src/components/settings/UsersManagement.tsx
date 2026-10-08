@@ -11,6 +11,7 @@ import { Skeleton, TableSkeleton } from '../ui/Skeleton';
 import { EmptyState } from '../ui/EmptyState';
 import { useSessionStorageCachedResource } from '../../hooks/useSessionStorageCachedResource';
 import { RolesPanel } from './RolesPanel';
+import { DepartmentsPanel } from './DepartmentsPanel';
 import { passwordHint, validatePassword } from '../../lib/passwordPolicy';
 import { useSiteSettings } from '../../lib/siteSettings';
 import { roleDisplayName } from '../../lib/roleDisplay';
@@ -45,11 +46,17 @@ type UserRow = {
   roles: { id: number; name: string; description?: string | null }[];
   /** 1 = Level 1 (manager), 2 = Level 2 (evaluator). */
   assessment_level?: number;
+  /** File Maintenance → Departments (dbo.department). */
+  department_id?: number | null;
+  department_name?: string | null;
 };
+
+type Department = { id: number; code: string | null; name: string };
 
 type UsersRolesData = {
   users: UserRow[];
   roles: Role[];
+  departments: Department[];
 };
 
 function api(path: string) {
@@ -88,14 +95,17 @@ export function UsersManagement({
   const [page, setPage] = useState(1);
 
   const { data: usersRoles, isLoading, isRevalidating, refresh } = useSessionStorageCachedResource<UsersRolesData>({
-    cacheKey: 'ciac.users_roles.v2',
+    cacheKey: 'ciac.users_roles.v3',
     ttlMs: 5 * 60 * 1000, // 5 minutes
     fetcher: async () => {
       setError(null);
-      const [uRes, rRes] = await Promise.all([
+      const [uRes, rRes, dRes] = await Promise.all([
         fetch(api('/api/users'), { credentials: 'include' }),
         fetch(api('/api/roles'), { credentials: 'include' }),
+        fetch(api('/api/users/departments'), { credentials: 'include' }),
       ]);
+      // Departments only fill a dropdown — the page still works without them.
+      const dJson = await dRes.json().catch(() => ({}));
 
       const uJson = await uRes.json();
       const rJson = await rRes.json();
@@ -110,6 +120,7 @@ export function UsersManagement({
           totp_enabled: Number(u?.totp_enabled) ? 1 : 0,
         })),
         roles: rJson.data || [],
+        departments: dRes.ok && Array.isArray(dJson?.data) ? dJson.data : [],
       };
     },
     onError: (e) => {
@@ -138,6 +149,7 @@ export function UsersManagement({
     password: '',
     role_id: '',
     assessment_level: '2',
+    department_id: '',
   });
 
   const stats = useMemo(() => {
@@ -201,6 +213,15 @@ export function UsersManagement({
     return Boolean(role?.has_assessment_queue || role?.has_approval_queue);
   };
   const showAssessmentLevel = roleHasAssessment(form.role_id);
+  const departmentOptions = useMemo(() => {
+    const list = usersRoles?.departments ?? [];
+    const opts = list.map((d) => ({ value: String(d.id), label: d.name }));
+    // A user still on a department that was deactivated since keeps showing it.
+    if (editing?.department_id && !list.some((d) => d.id === editing.department_id)) {
+      opts.push({ value: String(editing.department_id), label: editing.department_name || `Department #${editing.department_id}` });
+    }
+    return opts;
+  }, [usersRoles?.departments, editing]);
   const levelOptions = [
     { value: '1', label: 'Level 1 (manager — sees all, assigns)' },
     { value: '2', label: 'Level 2 (works on what is assigned to them)' },
@@ -233,6 +254,7 @@ export function UsersManagement({
     const originalRoleId = editing.roles?.[0]?.id ? String(editing.roles[0].id) : roles[0]?.id ? String(roles[0].id) : '';
 
     const originalLevel = String(editing.assessment_level === 1 ? 1 : 2);
+    const originalDepartment = editing.department_id != null ? String(editing.department_id) : '';
 
     const hasChanged =
       username !== originalUsername ||
@@ -240,10 +262,11 @@ export function UsersManagement({
       fullName !== originalFullName ||
       roleId !== originalRoleId ||
       form.assessment_level !== originalLevel ||
+      form.department_id !== originalDepartment ||
       Boolean(password);
 
     return hasChanged;
-  }, [editing, form.email, form.full_name, form.password, form.role_id, form.username, form.assessment_level, roles, passwordError]);
+  }, [editing, form.email, form.full_name, form.password, form.role_id, form.username, form.assessment_level, form.department_id, roles, passwordError]);
 
   useEffect(() => {
     setPage(1);
@@ -262,6 +285,7 @@ export function UsersManagement({
       password: '',
       role_id: roles[0]?.id ? String(roles[0].id) : '',
       assessment_level: '2',
+      department_id: '',
     });
     setIsCreateOpen(true);
   }
@@ -276,6 +300,7 @@ export function UsersManagement({
       password: '',
       role_id: u.roles?.[0]?.id ? String(u.roles[0].id) : roles[0]?.id ? String(roles[0].id) : '',
       assessment_level: String(u.assessment_level === 1 ? 1 : 2),
+      department_id: u.department_id != null ? String(u.department_id) : '',
     });
   }
 
@@ -288,6 +313,7 @@ export function UsersManagement({
         email: form.email.trim(),
         full_name: form.full_name.trim() || null,
         role_id: form.role_id ? Number(form.role_id) : null,
+        department_id: form.department_id ? Number(form.department_id) : null,
       };
       if (form.password.trim()) payload.password = form.password;
       if (showAssessmentLevel) payload.assessment_level = Number(form.assessment_level);
@@ -576,6 +602,7 @@ export function UsersManagement({
             User Management List
           </h3>
           <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center">
+            <DepartmentsPanel onChanged={() => refresh({ showLoading: false })} />
             <RolesPanel onChanged={() => refresh({ showLoading: false })} navigate={navigate} />
             {canAdd ? (
               <button
@@ -784,6 +811,16 @@ export function UsersManagement({
               />
             </Field>
           ) : null}
+          <Field label="Department" className="sm:col-span-2">
+            <AppSelect
+              options={departmentOptions}
+              value={form.department_id}
+              onChange={(value) => setForm((p) => ({ ...p, department_id: value || '' }))}
+              placeholder="Select department..."
+              isClearable
+              isDisabled={saving}
+            />
+          </Field>
           <Field label="Username">
             <input
               className="app-input"

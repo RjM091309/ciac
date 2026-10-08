@@ -301,10 +301,13 @@ async function listUsers() {
       u.full_name,
       u.is_active,
       u.assessment_level,
+      u.department_id,
+      d.name AS department_name,
       u.created_at,
       u.updated_at,
       u.password_hash
     FROM users u
+    LEFT JOIN dbo.department d ON d.id = u.department_id
     ORDER BY u.id DESC
     `
   );
@@ -324,6 +327,8 @@ async function listUsers() {
     is_active: u.is_active,
     is_locked: Boolean(u.locked_until && new Date(u.locked_until).getTime() > now),
     assessment_level: normalizeAssessmentLevel(u.assessment_level),
+    department_id: u.department_id ?? null,
+    department_name: u.department_name ?? null,
     created_at: u.created_at ?? null,
     updated_at: u.updated_at ?? null,
     roles: rolesMap.get(u.id) || [],
@@ -346,9 +351,12 @@ async function getUserById(id) {
       u.full_name,
       u.is_active,
       u.assessment_level,
+      u.department_id,
+      d.name AS department_name,
       u.created_at,
       u.updated_at
     FROM users u
+    LEFT JOIN dbo.department d ON d.id = u.department_id
     WHERE u.id = @param0
     `,
     [id]
@@ -379,6 +387,8 @@ async function getUserById(id) {
     is_active: user.is_active,
     is_locked: Boolean(user.locked_until && new Date(user.locked_until).getTime() > Date.now()),
     assessment_level: normalizeAssessmentLevel(user.assessment_level),
+    department_id: user.department_id ?? null,
+    department_name: user.department_name ?? null,
     created_at: user.created_at ?? null,
     updated_at: user.updated_at ?? null,
     roles: roles.map((r) => ({ id: r.id, name: r.name, description: r.description ?? null })),
@@ -395,6 +405,7 @@ async function createUser({
   role_id,
   status = "ACTIVE",
   assessment_level,
+  department_id,
 }) {
   const active = is_active ? 1 : 0;
   const roleId = toInt(role_id);
@@ -433,6 +444,9 @@ async function createUser({
   }
   if (newId && assessment_level !== undefined) {
     await setAssessmentLevel(newId, assessment_level);
+  }
+  if (newId && department_id) {
+    await updateData(`UPDATE users SET department_id = @param1 WHERE id = @param0`, [newId, toInt(department_id)]);
   }
   return await getUserById(newId);
 }
@@ -554,7 +568,7 @@ async function setUserPrimaryRole(userId, roleId) {
   );
 }
 
-async function updateUser(id, { username, email, phone, full_name, password, is_active, role_id, assessment_level }) {
+async function updateUser(id, { username, email, phone, full_name, password, is_active, role_id, assessment_level, department_id }) {
   const includePhone = await hasPhoneColumn();
   const sets = [];
   const params = [];
@@ -574,6 +588,8 @@ async function updateUser(id, { username, email, phone, full_name, password, is_
   }
   if (is_active !== undefined) pushSet("is_active = ?", is_active ? 1 : 0);
   if (assessment_level !== undefined) pushSet("assessment_level = ?", normalizeAssessmentLevel(assessment_level));
+  // null/"" = no department (toInt would turn null into 0).
+  if (department_id !== undefined) pushSet("department_id = ?", department_id ? toInt(department_id) : null);
 
   if (sets.length) {
     const query = `

@@ -414,8 +414,11 @@ export function LocatorDocumentsTab({
   const uploadedCount = applicable.filter(isUploaded).length;
 
   // Once the locator has a filed application its requirements live there
-  // (the card below) — the manual checklist would just list them twice.
-  const showChecklist = !proponentId || (rows !== null && !error && groups.length === 0);
+  // (the card below) — the manual checklist would just list them twice,
+  // unless it holds files of its own.
+  // Files staff already uploaded here (e.g. an encoded existing locator that
+  // later renewed) keep showing.
+  const showChecklist = !proponentId || (rows !== null && !error && (groups.length === 0 || uploads.length > 0));
 
   return (
     <div className="flex flex-col gap-4">

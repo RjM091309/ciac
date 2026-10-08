@@ -180,8 +180,10 @@ async function listAll() {
      LEFT JOIN dbo.contracts c ON c.application_id = p.application_id
      -- A contract permit appears once its application is approved (one saved
      -- before Approve, or on a disapproved application, never does).
-     WHERE p.application_id IS NULL
-        OR EXISTS (SELECT 1 FROM dbo.applications pa WHERE pa.id = p.application_id AND pa.status = 'APPROVED')
+     -- Deleted (deactivated) permits never show.
+     WHERE p.is_active = 1
+       AND (p.application_id IS NULL
+        OR EXISTS (SELECT 1 FROM dbo.applications pa WHERE pa.id = p.application_id AND pa.status = 'APPROVED'))
      ORDER BY p.id DESC`
   );
   return rows.map((r) => mapRow(r, { proponent_name: r.proponent_name ?? null }));

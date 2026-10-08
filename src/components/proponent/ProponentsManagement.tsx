@@ -74,6 +74,11 @@ type ProponentRow = {
   // Open (undecided) renewal — header badge shows "Renewal in process".
   renewal_application_no?: string | null;
   renewal_status?: string | null;
+  // No approved contract yet (an existing locator encoded by hand): Start/End
+  // Term are typed in and kept in manual_* (see Proponent.setManualLeaseTerm).
+  term_editable?: boolean;
+  manual_start_term?: string | null;
+  manual_end_term?: string | null;
   // "Industry" in the legacy BRIDGE form — the Application Type of this
   // locator's most recently filed application, same source as the Locators
   // List's "business_type" column. Never set directly (no application yet =
@@ -291,6 +296,26 @@ function leaseStatus(endTerm?: string | null): LeaseStatus | null {
   return end.getTime() >= Date.now() ? 'active' : 'expired';
 }
 
+/** Same as the server's formatLeaseTerm (models/Proponent.js): "1Y-2M-3D". */
+function formatLeaseTerm(start?: string | null, end?: string | null): string | null {
+  if (!start || !end) return null;
+  const s = new Date(start);
+  const e = new Date(end);
+  if (Number.isNaN(s.getTime()) || Number.isNaN(e.getTime()) || e < s) return null;
+  let years = e.getFullYear() - s.getFullYear();
+  let months = e.getMonth() - s.getMonth();
+  let days = e.getDate() - s.getDate();
+  if (days < 0) {
+    months -= 1;
+    days += new Date(e.getFullYear(), e.getMonth(), 0).getDate();
+  }
+  if (months < 0) {
+    years -= 1;
+    months += 12;
+  }
+  return `${years}Y-${months}M-${days}D`;
+}
+
 // Live thousand-separator formatting for currency-amount inputs (Capital
 // Stock, Advance Lease Payment/Security Deposit/Performance Security,
 // property schedule Rate/MGL) — strips everything but digits and a single
@@ -352,6 +377,9 @@ const BLANK_PROFILE_FORM = {
   account_officer_id: '',
   sec_registration_date: '',
   date_signed: '',
+  // Encoded lease term (only while there's no approved contract).
+  start_term: '',
+  end_term: '',
   grace_period: '',
   is_sublease: false,
   sub_pgro: '',
@@ -581,6 +609,44 @@ export function ProponentsManagement({
   // Industry is derived from the latest filed application once one exists;
   // before that (New Locator / manual registration) it's picked here.
   const industryDerived = Boolean(editing?.has_application);
+  // Start/End Term are typed in for a new locator, or one with no approved
+  // contract yet (encoded existing locator); otherwise the contract's dates show.
+  const termEditable = !editing || Boolean(editing.term_editable);
+  const [duplicateMatches, setDuplicateMatches] = useState<
+    { id: number; ref_no: string | null; business_name: string; match: 'name' | 'tin' }[]
+  >([]);
+  // Portal login for an encoded locator that has none (POST /:id/login).
+  const [loginOpen, setLoginOpen] = useState(false);
+  const [loginForm, setLoginForm] = useState({ username: '', email: '', full_name: '' });
+  const [loginSaving, setLoginSaving] = useState(false);
+  async function createLogin() {
+    if (!editing) return;
+    setLoginSaving(true);
+    try {
+      const res = await fetch(api(`/api/proponents/${editing.id}/login`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          username: loginForm.username.trim(),
+          email: loginForm.email.trim(),
+          full_name: loginForm.full_name.trim() || null,
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.message || 'Could not create the login');
+      const userId = Number(json?.data?.user_id);
+      setEditing((prev) => (prev ? { ...prev, user_id: userId } : prev));
+      setForm((prev) => ({ ...prev, user_id: String(userId) }));
+      setLoginOpen(false);
+      toast.success(json?.message || 'Login created');
+      await refresh({ showLoading: false });
+    } catch (e: any) {
+      toast.error(e?.message || 'Could not create the login');
+    } finally {
+      setLoginSaving(false);
+    }
+  }
 
   // Snapshot of the form once an edit's profile has finished loading. canSubmit only
   // compared the top few fields, so changing anything else (account officer,
@@ -846,6 +912,8 @@ export function ProponentsManagement({
           account_officer_id: data.account_officer_id != null ? String(data.account_officer_id) : '',
           sec_registration_date: toDateInputValue(data.sec_registration_date),
           date_signed: toDateInputValue(data.date_signed),
+          start_term: toDateInputValue(data.manual_start_term),
+          end_term: toDateInputValue(data.manual_end_term),
           grace_period: data.grace_period || '',
           is_sublease: Boolean(data.is_sublease),
           sub_pgro: data.sub_pgro || '',
@@ -898,6 +966,9 @@ export function ProponentsManagement({
                 has_contract: Boolean(data.has_contract),
                 renewal_application_no: data.renewal_application_no ?? null,
                 renewal_status: data.renewal_status ?? null,
+                term_editable: Boolean(data.term_editable),
+                manual_start_term: data.manual_start_term ?? null,
+                manual_end_term: data.manual_end_term ?? null,
               }
             : prev,
         );
@@ -980,12 +1051,42 @@ export function ProponentsManagement({
     }
   }
 
-  async function save() {
+  async function save(skipDuplicateCheck = false) {
     // Registered Locator only lists locators with an Account Officer (an
     // Account Officer's own new locator defaults to them on the server).
     if (!isAccountOfficer && !form.account_officer_id.trim()) {
       toast.error("Choose the locator's Account Officer.");
       return;
+    }
+    if (termEditable) {
+      if (!form.start_term !== !form.end_term) {
+        toast.error('Enter both the Start Term and the End Term (or neither).');
+        return;
+      }
+      if (form.start_term && form.end_term < form.start_term) {
+        toast.error("End Term can't be before Start Term.");
+        return;
+      }
+    }
+    // Same business already encoded? Warn before saving a second one.
+    if (!skipDuplicateCheck) {
+      const name = form.business_name.trim();
+      const tin = form.tin.trim();
+      const changed = !editing || name !== (editing.business_name || '').trim() || tin !== (editing.tin || '').trim();
+      if (changed && (name || tin)) {
+        try {
+          const q = new URLSearchParams({ business_name: name, tin });
+          if (editing) q.set('excludeId', String(editing.id));
+          const res = await fetch(api(`/api/proponents/duplicates?${q}`), { credentials: 'include' });
+          const json = await res.json().catch(() => ({}));
+          if (res.ok && Array.isArray(json?.data) && json.data.length) {
+            setDuplicateMatches(json.data);
+            return;
+          }
+        } catch {
+          // The check is only a warning — never block saving on it.
+        }
+      }
     }
     setSaving(true);
     setError(null);
@@ -1043,6 +1144,12 @@ export function ProponentsManagement({
       // otherwise to the locator's own fallback column (manual registration).
       payload.contract_type_id = form.contract_type_id ? Number(form.contract_type_id) : null;
       if (!industryDerived) payload.industry_code = form.industry_code || null;
+      // Encoded lease term — only while there's no approved contract (its
+      // dates rule after that; the server ignores these then too).
+      if (termEditable) {
+        payload.start_term = form.start_term || null;
+        payload.end_term = form.end_term || null;
+      }
 
       if (!payload.business_name) throw new Error('Business name is required');
 
@@ -1332,11 +1439,28 @@ export function ProponentsManagement({
         title={editing ? 'Locator Information' : 'New Locator'}
         subtitle="Locators master table"
         onClose={() => setIsCreateOpen(false)}
-        onSave={save}
+        onSave={() => void save()}
         saving={saving}
         saveDisabled={!canSubmit}
         saveLabel={editing ? 'Update' : 'Save'}
         headerExtra={(() => {
+          // An encoded locator with no portal login yet: offer to create one.
+          const loginButton =
+            editing && !editing.user_id ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setLoginForm({ username: '', email: '', full_name: '' });
+                  setLoginOpen(true);
+                }}
+                className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold border cursor-pointer"
+                style={{ color: 'var(--text)', borderColor: 'var(--border-subtle)' }}
+                title="This locator has no portal login yet — needed before a renewal"
+              >
+                <Plus size={12} /> Portal login
+              </button>
+            ) : null;
+          const badge = (() => {
           // Lease status from the contract terms: Active through End Term
           // (inclusive), Expired after. No badge until a contract exists.
           // A renewal in progress outranks Active/Expired.
@@ -1369,6 +1493,13 @@ export function ProponentsManagement({
               {active ? 'Active' : 'Expired'}
             </span>
           );
+          })();
+          return loginButton || badge ? (
+            <div className="flex items-center gap-2">
+              {loginButton}
+              {badge}
+            </div>
+          ) : null;
         })()}
         footerNote={
           editing ? (
@@ -1585,28 +1716,53 @@ export function ProponentsManagement({
               <div className="sm:col-span-2 flex-[1.2] min-w-0 flex gap-1.5">
                 <div className="flex-1 min-w-0">
                   <Field compact label="Start Term">
-                    <div className="app-form-control app-form-control-sm p-0 overflow-hidden flex items-stretch">
-                      <input
-                        className="flex-1 min-w-0 border-0 bg-transparent outline-none px-2 py-1"
-                        style={{ color: 'var(--text)' }}
-                        value={fmtDate(editing?.start_term)}
-                        disabled
-                        readOnly
+                    {termEditable ? (
+                      // Existing locator with no contract here yet: its current lease.
+                      <DatePicker
+                        mode="single"
+                        fullWidth
+                        boxed
+                        placeholder="Select date"
+                        value={dateInputToDate(form.start_term)}
+                        onChange={(d) => setForm((p) => ({ ...p, start_term: dateToDateInputValue(d) }))}
                       />
-                    </div>
+                    ) : (
+                      <div className="app-form-control app-form-control-sm p-0 overflow-hidden flex items-stretch">
+                        <input
+                          className="flex-1 min-w-0 border-0 bg-transparent outline-none px-2 py-1"
+                          style={{ color: 'var(--text)' }}
+                          value={fmtDate(editing?.start_term)}
+                          title="From the approved contract"
+                          disabled
+                          readOnly
+                        />
+                      </div>
+                    )}
                   </Field>
                 </div>
                 <div className="flex-1 min-w-0">
                   <Field compact label="End Term">
-                    <div className="app-form-control app-form-control-sm p-0 overflow-hidden flex items-stretch">
-                      <input
-                        className="flex-1 min-w-0 border-0 bg-transparent outline-none px-2 py-1"
-                        style={{ color: 'var(--text)' }}
-                        value={fmtDate(editing?.end_term)}
-                        disabled
-                        readOnly
+                    {termEditable ? (
+                      <DatePicker
+                        mode="single"
+                        fullWidth
+                        boxed
+                        placeholder="Select date"
+                        value={dateInputToDate(form.end_term)}
+                        onChange={(d) => setForm((p) => ({ ...p, end_term: dateToDateInputValue(d) }))}
                       />
-                    </div>
+                    ) : (
+                      <div className="app-form-control app-form-control-sm p-0 overflow-hidden flex items-stretch">
+                        <input
+                          className="flex-1 min-w-0 border-0 bg-transparent outline-none px-2 py-1"
+                          style={{ color: 'var(--text)' }}
+                          value={fmtDate(editing?.end_term)}
+                          title="From the approved contract"
+                          disabled
+                          readOnly
+                        />
+                      </div>
+                    )}
                   </Field>
                 </div>
                 <div className="flex-1 min-w-0">
@@ -1618,7 +1774,7 @@ export function ProponentsManagement({
                       <input
                         className="flex-1 min-w-0 border-0 bg-transparent outline-none px-2 py-1"
                         style={{ color: 'var(--text)' }}
-                        value={editing?.lease_term || '—'}
+                        value={(termEditable ? formatLeaseTerm(form.start_term, form.end_term) : editing?.lease_term) || '—'}
                         disabled
                         readOnly
                       />
@@ -2272,6 +2428,55 @@ export function ProponentsManagement({
           }
         }}
       />
+
+      {/* Same business already encoded? */}
+      <ConfirmModal
+        open={duplicateMatches.length > 0}
+        title="This locator may already exist"
+        description={`Already in the system: ${duplicateMatches
+          .map((m) => `${m.ref_no || `#${m.id}`} ${m.business_name} (same ${m.match === 'tin' ? 'TIN' : 'name'})`)
+          .join('; ')}. Save anyway?`}
+        confirmText="Save anyway"
+        loading={saving}
+        onCancel={() => setDuplicateMatches([])}
+        onConfirm={() => {
+          setDuplicateMatches([]);
+          void save(true);
+        }}
+      />
+
+      {/* Portal login for an encoded locator */}
+      <ConfirmModal
+        open={loginOpen}
+        title="Create portal login"
+        description="For this existing locator. It stays pending: the login and a temporary password are emailed to the locator when their renewal is filed."
+        confirmText="Create login"
+        loading={loginSaving}
+        confirmDisabled={!loginForm.username.trim() || !loginForm.email.trim()}
+        onCancel={() => setLoginOpen(false)}
+        onConfirm={() => void createLogin()}
+      >
+        <div className="space-y-2 pt-1">
+          {(
+            [
+              ['username', 'Username'],
+              ['email', 'Email'],
+              ['full_name', 'Contact name (optional)'],
+            ] as const
+          ).map(([key, label]) => (
+            <label key={key} className="block">
+              <span className="block text-[10px] font-semibold uppercase tracking-widest text-secondary mb-1">{label}</span>
+              <input
+                className="app-form-control app-form-control-sm w-full"
+                type={key === 'email' ? 'email' : 'text'}
+                autoComplete="off"
+                value={loginForm[key]}
+                onChange={(e) => setLoginForm((p) => ({ ...p, [key]: e.target.value }))}
+              />
+            </label>
+          ))}
+        </div>
+      </ConfirmModal>
     </div>
   );
 }

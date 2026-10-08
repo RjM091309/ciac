@@ -189,7 +189,7 @@ function ApplicationsList({ navigate }: { navigate: Navigate }) {
           />
         </div>
       ) : (
-        <div className="rounded-2xl p-0 sm:p-4 sm:p-5 sm:border sm:border-transparent sm:shadow-[0_1px_2px_0_rgb(0_0_0_/_0.05)] sm:bg-[var(--surface)] [transition-property:background-color,color] [&_*]:[transition-property:background-color,color]">
+        <div className="rounded-2xl p-0 sm:p-4 sm:p-5 sm:border sm:border-transparent sm:[box-shadow:var(--float-shadow)] sm:bg-[var(--surface)] [transition-property:background-color,color] [&_*]:[transition-property:background-color,color]">
           {/* Mobile: card list — a <table> forces horizontal scrolling on narrow screens. */}
           <div className="sm:hidden space-y-2.5">
             {rows.map((app) => {
@@ -204,9 +204,9 @@ function ApplicationsList({ navigate }: { navigate: Navigate }) {
                   onClick={() => navigate(`/me/applications?applicationId=${app.id}`)}
                   className="rounded-xl border p-3 cursor-pointer active:brightness-95"
                   style={{
-                    borderColor: 'var(--border-subtle)',
+                    borderColor: 'transparent',
                     backgroundColor: 'var(--surface)',
-                    boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
+                    boxShadow: 'var(--float-shadow)',
                   }}
                 >
                   <div className="flex items-center justify-between gap-2">
@@ -321,7 +321,7 @@ function Card({
 }) {
   if (mobileFlat) {
     return (
-      <div className="rounded-2xl p-0 sm:p-4 sm:p-5 sm:border sm:border-transparent sm:shadow-[0_1px_2px_0_rgb(0_0_0_/_0.05)] sm:bg-[var(--surface)] [transition-property:background-color,color] [&_*]:[transition-property:background-color,color]">
+      <div className="rounded-2xl p-0 sm:p-4 sm:p-5 sm:border sm:border-transparent sm:[box-shadow:var(--float-shadow)] sm:bg-[var(--surface)] [transition-property:background-color,color] [&_*]:[transition-property:background-color,color]">
         {children}
       </div>
     );
@@ -602,7 +602,7 @@ function ApplicationDetail({
         className="rounded-2xl px-4 py-4 sm:px-5 sm:py-5 !border-transparent flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3"
         style={{
           backgroundColor: 'var(--surface)',
-          boxShadow: '0 6px 16px rgba(0,0,0,0.12), 0 0 0 1px color-mix(in oklab, var(--border-subtle) 70%, transparent)',
+          boxShadow: 'var(--float-shadow)',
         }}
       >
         <div className="min-w-0">
@@ -735,9 +735,9 @@ function ApplicationDetail({
                       key={r.id}
                       className="rounded-xl border p-3"
                       style={{
-                        borderColor: 'var(--border-subtle)',
+                        borderColor: 'transparent',
                         backgroundColor: 'var(--surface)',
-                        boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
+                        boxShadow: 'var(--float-shadow)',
                       }}
                     >
                       <div className="flex items-start justify-between gap-2">
@@ -982,9 +982,9 @@ function ApplicationDetail({
                       key={p.id}
                       className="rounded-xl border p-3"
                       style={{
-                        borderColor: 'var(--border-subtle)',
+                        borderColor: 'transparent',
                         backgroundColor: 'var(--surface)',
-                        boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
+                        boxShadow: 'var(--float-shadow)',
                       }}
                     >
                       <div className="flex items-start justify-between gap-2">

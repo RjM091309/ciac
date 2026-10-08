@@ -4,6 +4,7 @@ import { AppLayout, AppView } from './layout/AppLayout';
 import { SubHeader, type DashboardPreviewRole } from './components/SubHeader';
 import { FileCheck, FolderTree, ShieldCheck, Users, Loader2, Search, BarChart3, Settings2 } from 'lucide-react';
 import { LoginPage } from './components/auth/LoginPage';
+import { LogoLoader } from './components/ui/LogoLoader';
 import { PageSkeleton } from './components/ui/PageSkeleton';
 import { Toaster } from 'sonner';
 import { useIdleSession } from './lib/idleSession';
@@ -220,6 +221,7 @@ export default function App() {
   }, [authState]);
   // Shown on the login screen after an automatic sign-out (idle timeout).
   const [loginNotice, setLoginNotice] = useState<string | null>(null);
+  const [showLogoLoader, setShowLogoLoader] = useState(false);
   const [view, setView] = useState<AppView>('dashboard');
   const [proponentView, setProponentView] = useState<ProponentView>('dashboard');
   const [dashboardPreviewRole, setDashboardPreviewRole] = useState<DashboardPreviewRole>('admin');
@@ -452,6 +454,9 @@ export default function App() {
           setUser({ id: u.id, username: u.username, role: normalizeRole(u.role), roleName: String(u.role || '') });
           setAuthState('authed');
           setLoginNotice(null);
+          // Animated logo while the dashboard loads behind it (sign-in only,
+          // not on a page refresh).
+          setShowLogoLoader(true);
           navigate('/dashboard');
         }}
       />
@@ -460,6 +465,7 @@ export default function App() {
 
   return (
     <>
+      {showLogoLoader ? <LogoLoader onDone={() => setShowLogoLoader(false)} /> : null}
       {/* expand: sonner collapses multiple simultaneous toasts into a stack
           with only the front one fully visible (rest peek behind until
           hovered). theme: always light (light green/red richColors toasts),

@@ -89,8 +89,9 @@ export function MobileMenuSheet({
             aria-modal="true"
             aria-label="Menu"
             className="relative flex flex-col rounded-t-3xl border-t max-h-[88%]"
+            // Page-background sheet so the floating tiles/cards stand out.
             style={{
-              backgroundColor: 'var(--surface)',
+              backgroundColor: 'var(--background)',
               borderColor: 'var(--border-subtle)',
               boxShadow: '0 -12px 32px rgba(0,0,0,0.3)',
             }}
@@ -126,13 +127,13 @@ export function MobileMenuSheet({
                 onClick={onOpenSettings}
                 aria-label={profileMode ? 'Open My Profile' : 'Open account settings'}
                 className="group w-full flex items-center gap-3 rounded-2xl px-3 py-3 text-left cursor-pointer transition-opacity active:opacity-80"
-                style={{ backgroundColor: 'var(--control-bg)' }}
+                style={{ backgroundColor: 'var(--surface)', boxShadow: 'var(--float-shadow)' }}
               >
                 <UserAvatar
                   version={profile?.avatar_version}
                   name={name}
                   className="h-10 w-10 text-sm font-bold"
-                  style={{ backgroundColor: 'var(--surface)', color: 'var(--text)' }}
+                  style={{ backgroundColor: 'var(--control-bg)', color: 'var(--text)' }}
                 />
                 <div className="flex-1 min-w-0">
                   <div className="text-sm font-bold truncate" style={{ color: 'var(--text)' }}>
@@ -143,7 +144,7 @@ export function MobileMenuSheet({
                 <span
                   aria-hidden
                   className="h-9 w-9 shrink-0 inline-flex items-center justify-center rounded-full text-[var(--text-muted)] group-hover:text-[var(--text)]"
-                  style={{ backgroundColor: 'var(--surface)' }}
+                  style={{ backgroundColor: 'var(--control-bg)' }}
                 >
                   {profileMode ? <UserRound size={16} /> : <Settings size={16} />}
                 </span>
@@ -158,9 +159,6 @@ export function MobileMenuSheet({
   );
 }
 
-/** Outline for the sheet's transparent boxes — from the text colour so it
- * shows on both the light and dark sheet surface. */
-const SHEET_OUTLINE = 'color-mix(in oklab, var(--text) 12%, transparent)';
 
 export function SheetSection({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -171,8 +169,10 @@ export function SheetSection({ title, children }: { title: string; children: Rea
   );
 }
 
+/** Two columns for 2 or 4 tiles (no lone tile on the last row), else three. */
 export function SheetTileGrid({ children }: { children: React.ReactNode }) {
-  return <div className="grid grid-cols-3 gap-2.5">{children}</div>;
+  const count = React.Children.toArray(children).filter(Boolean).length;
+  return <div className={cn('grid gap-2.5', count === 2 || count === 4 ? 'grid-cols-2' : 'grid-cols-3')}>{children}</div>;
 }
 
 /** Icon tile for a top-level destination. */
@@ -192,15 +192,20 @@ export function SheetTile({
       type="button"
       onClick={onClick}
       aria-current={active ? 'page' : undefined}
-      className="flex flex-col items-center justify-center gap-2 rounded-2xl border px-1.5 py-4 cursor-pointer transition-colors"
-      // Transparent tile with a hairline outline; only the active one is filled.
+      className="flex flex-col items-center justify-center gap-2 rounded-2xl px-1.5 py-3.5 cursor-pointer transition-colors active:scale-[0.98]"
+      // Floating tile (no border, shadow under it); the active one is filled.
       style={{
-        backgroundColor: active ? 'var(--nav-active-bg)' : 'transparent',
-        borderColor: active ? 'var(--nav-active-bg)' : SHEET_OUTLINE,
+        backgroundColor: active ? 'var(--nav-active-bg)' : 'var(--surface)',
+        boxShadow: 'var(--float-shadow)',
         color: active ? 'var(--nav-active-text)' : 'var(--text)',
       }}
     >
-      <Icon size={20} strokeWidth={2} />
+      <span
+        className="h-9 w-9 inline-flex items-center justify-center rounded-xl"
+        style={{ backgroundColor: active ? 'color-mix(in oklab, var(--nav-active-text) 14%, transparent)' : 'var(--control-bg)' }}
+      >
+        <Icon size={18} strokeWidth={2} />
+      </span>
       <span className="text-[11px] font-semibold leading-tight text-center line-clamp-2">{label}</span>
     </button>
   );
@@ -255,7 +260,7 @@ export function SheetRow({
 
 export function SheetRowGroup({ children }: { children: React.ReactNode }) {
   return (
-    <div className="rounded-2xl border p-1 flex flex-col gap-0.5" style={{ backgroundColor: 'transparent', borderColor: SHEET_OUTLINE }}>
+    <div className="rounded-2xl p-1 flex flex-col gap-0.5" style={{ backgroundColor: 'var(--surface)', boxShadow: 'var(--float-shadow)' }}>
       {children}
     </div>
   );

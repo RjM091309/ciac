@@ -267,6 +267,35 @@ async function createSchema() {
     IF COL_LENGTH('dbo.proponents', 'industry_code') IS NULL
       ALTER TABLE dbo.proponents ADD industry_code NVARCHAR(50) NULL;
   `);
+  // A locator encoded on Registered Locator has no portal login (user_id)
+  // until one is created for it — some databases were made with user_id
+  // NOT NULL, which made every New Locator save fail. Relax it once; the
+  // index and foreign key are dropped and put back around the change.
+  await updateSchema(`
+    IF EXISTS (
+      SELECT 1 FROM sys.columns
+      WHERE object_id = OBJECT_ID('dbo.proponents') AND name = 'user_id' AND is_nullable = 0
+    )
+    BEGIN
+      BEGIN TRANSACTION;
+      IF EXISTS (SELECT 1 FROM sys.foreign_keys WHERE name = 'FK_proponents_user' AND parent_object_id = OBJECT_ID('dbo.proponents'))
+        ALTER TABLE dbo.proponents DROP CONSTRAINT FK_proponents_user;
+      IF EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_proponents_user_id' AND object_id = OBJECT_ID('dbo.proponents'))
+        DROP INDEX IX_proponents_user_id ON dbo.proponents;
+      ALTER TABLE dbo.proponents ALTER COLUMN user_id INT NULL;
+      CREATE INDEX IX_proponents_user_id ON dbo.proponents(user_id);
+      ALTER TABLE dbo.proponents ADD CONSTRAINT FK_proponents_user FOREIGN KEY (user_id) REFERENCES dbo.users(id);
+      COMMIT TRANSACTION;
+    END;
+  `);
+  // Lease term of an existing locator encoded by hand (no contract in this
+  // system yet). Same rule as above: an approved contract always wins.
+  await updateSchema(`
+    IF COL_LENGTH('dbo.proponents', 'manual_start_term') IS NULL
+      ALTER TABLE dbo.proponents ADD manual_start_term DATE NULL;
+    IF COL_LENGTH('dbo.proponents', 'manual_end_term') IS NULL
+      ALTER TABLE dbo.proponents ADD manual_end_term DATE NULL;
+  `);
   await ensureLookupLinks();
   await migrateLegacyPlaintextTin();
   await backfillMissingRefNos();
@@ -467,8 +496,12 @@ async function getProponentById(id) {
       p.created_at,
       p.updated_at,
       p.is_active,
-      ct.effective_start AS start_term,
-      ct.effective_end AS end_term,
+      -- An approved contract's dates win; an encoded locator's own term otherwise.
+      COALESCE(ct.effective_start, p.manual_start_term) AS start_term,
+      COALESCE(ct.effective_end, p.manual_end_term) AS end_term,
+      p.manual_start_term,
+      p.manual_end_term,
+      p.is_manual_registration,
       COALESCE(ct.contract_type_id, latest_app.contract_type_id, p.contract_type_id) AS contract_type_id,
       toctype.name AS contract_type_name,
       COALESCE(apptype.name, manual_apptype.name) AS business_type,
@@ -566,6 +599,11 @@ async function getProponentById(id) {
     effective_industry_code: p.effective_industry_code ?? null,
     has_application: Boolean(p.has_application),
     has_contract: Boolean(p.has_contract),
+    // Start/End Term can be typed in only while there's no approved contract.
+    term_editable: !p.has_contract,
+    manual_start_term: p.manual_start_term ?? null,
+    manual_end_term: p.manual_end_term ?? null,
+    is_manual_registration: Boolean(p.is_manual_registration),
     renewal_application_no: p.renewal_application_no ?? null,
     renewal_status: p.renewal_status ?? null,
     properties,
@@ -612,8 +650,8 @@ async function listProponentsForLocatorList({ accountOfficerId = null } = {}) {
       p.created_at,
       creator.full_name AS encoded_by,
       COALESCE(apptype.name, manual_apptype.name) AS business_type,
-      ct.effective_start AS start_term,
-      ct.effective_end AS end_term
+      COALESCE(ct.effective_start, p.manual_start_term) AS start_term,
+      COALESCE(ct.effective_end, p.manual_end_term) AS end_term
     FROM dbo.proponents p
     LEFT JOIN dbo.users creator ON creator.id = p.created_by
     -- One row per locator: an approved renewal updates it (type here, lease
@@ -811,6 +849,27 @@ async function setManualClassification(id, { contract_type_id, industry_code } =
     const code = industry_code ? String(industry_code).trim().slice(0, 50) : null;
     await updateData(`UPDATE dbo.proponents SET industry_code = @param1 WHERE id = @param0`, [toInt(id), code || null]);
   }
+}
+
+/** Saves an encoded locator's lease term (null clears it). The caller
+ * checks there's no approved contract first. */
+async function setManualLeaseTerm(id, { start_term, end_term }) {
+  await ensureSchema();
+  await updateData(
+    `UPDATE dbo.proponents SET manual_start_term = @param1, manual_end_term = @param2 WHERE id = @param0`,
+    [toInt(id), start_term || null, end_term || null]
+  );
+}
+
+/** Links a portal login to a locator that doesn't have one yet. Returns
+ * false if it already had one (nothing changed). */
+async function linkUser(id, userId) {
+  await ensureSchema();
+  const result = await updateData(
+    `UPDATE dbo.proponents SET user_id = @param1, updated_at = SYSUTCDATETIME() WHERE id = @param0 AND user_id IS NULL`,
+    [toInt(id), toInt(userId)]
+  );
+  return Number(result?.rowsAffected?.[0] ?? 0) > 0;
 }
 
 async function updateProponent(
@@ -1126,6 +1185,8 @@ module.exports = {
   listProponents,
   listProponentsForLocatorList,
   setManualClassification,
+  setManualLeaseTerm,
+  linkUser,
   getProponentById,
   getProponentByUserId,
   createProponent,

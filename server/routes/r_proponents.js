@@ -58,7 +58,10 @@ router.get("/document-requirements", requireMenuAccess(MENU_KEY, "view"), propon
 router.get("/industries", requireMenuAccess(MENU_KEY, "view"), proponentsController.listIndustryOptions);
 // Also used by Locator Accounts' New Locator Account form.
 router.get("/land-uses", requireAnyMenuAccess([MENU_KEY, "settings:locator-users"], "view"), proponentsController.listLandUseOptions);
+// Before "/:id" so it isn't read as an id.
+router.get("/duplicates", requireMenuAccess(MENU_KEY, "view"), proponentsController.findDuplicates);
 router.get("/:id", requireMenuAccess(MENU_KEY, "view"), proponentsController.requireOwnLocator, proponentsController.getById);
+router.post("/:id/login", requireMenuAccess(MENU_KEY, "edit"), proponentsController.requireOwnLocator, proponentsController.createLogin);
 router.get("/:id/documents", requireMenuAccess(MENU_KEY, "view"), proponentsController.requireOwnLocator, proponentsController.getDocuments);
 router.post(
   "/:id/documents",

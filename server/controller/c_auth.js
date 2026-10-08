@@ -72,6 +72,8 @@ exports.login = async (req, res) => {
           req,
         });
       }
+      // Same first prompts don't count toward the per-IP login limit either (r_auth.js).
+      if (isInitialPrompt) res.locals.loginChallenge = true;
       // 503 for maintenance mode: the sign-in itself was fine, the portal is closed.
       return res.status(result.maintenance ? 503 : 401).json({
         success: false,

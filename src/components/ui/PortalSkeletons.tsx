@@ -5,7 +5,7 @@ import { Skeleton, TableSkeleton } from './Skeleton';
 // spinner): the layout appears at once and fills in, so nothing jumps.
 
 const card = 'rounded-2xl p-4 sm:p-5';
-const cardStyle: React.CSSProperties = { backgroundColor: 'var(--surface)', boxShadow: '0 1px 2px 0 rgb(0 0 0 / 0.05)' };
+const cardStyle: React.CSSProperties = { backgroundColor: 'var(--surface)', boxShadow: 'var(--float-shadow)' };
 
 /** A titled list: table on tablet/desktop, stacked cards on phones. */
 export function ListSkeleton({ columns = 6, rows = 4 }: { columns?: number; rows?: number }) {
