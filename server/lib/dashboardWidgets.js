@@ -31,6 +31,8 @@ const WIDGETS = [
   { key: "dashboard:stats:rejected", label: "Rejected", parent: STATS_PARENT, requiresAnyMenu: [] },
   { key: "dashboard:stats:returned", label: "Returned", parent: STATS_PARENT, requiresAnyMenu: [] },
   { key: "dashboard:stats:requirements", label: "Requirements Verified", parent: STATS_PARENT, requiresAnyMenu: [] },
+  // Registered Locators (Account Officer: all for Level 1, their own for Level 2).
+  { key: "dashboard:stats:locators", label: "Locators", parent: STATS_PARENT, requiresAnyMenu: ["approval:queue", "applications:renewals"] },
   { key: "dashboard:attention", label: "Needs Attention", group: "work", requiresAnyMenu: QUEUE_MENUS },
   { key: "dashboard:table", label: "Applications Table", group: "work", requiresAnyMenu: APPLICATION_MENUS },
   { key: "dashboard:status-chart", label: "Status Breakdown", group: "insights", requiresAnyMenu: [] },
@@ -60,10 +62,11 @@ function isEligible(widget, menus) {
 
 /**
  * Map of widget key -> visible, for a role. A widget is visible only when the
- * role is eligible for it AND it isn't turned off. Every widget defaults to on
- * (no saved row = visible): hiding a card is a display choice, and a new
- * widget shouldn't silently vanish for every role until an admin revisits
- * Control Panel. A child card is also hidden whenever its parent is off.
+ * role is eligible for it AND it isn't turned off. A role whose widgets were
+ * never saved (e.g. a new custom role) starts clean — every widget off until
+ * an admin turns them on in Control Panel. Once saved, a widget with no row
+ * (added to the catalog later) defaults to on, so it doesn't silently vanish.
+ * A child card is also hidden whenever its parent is off.
  * A role with no menu access at all sees no widgets.
  */
 function resolveVisibility(sidebarRows, widgetRows) {
@@ -72,9 +75,10 @@ function resolveVisibility(sidebarRows, widgetRows) {
   // configured yet) gets nothing — fail closed, like every other permission.
   if (menus.size === 0) return Object.fromEntries(WIDGETS.map((w) => [w.key, false]));
   const saved = new Map((widgetRows || []).map((r) => [String(r.widget_key), isEnabledRow(r)]));
+  const fallback = saved.size > 0;
   const visible = {};
   for (const w of WIDGETS) {
-    visible[w.key] = isEligible(w, menus) && (saved.get(w.key) ?? true);
+    visible[w.key] = isEligible(w, menus) && (saved.get(w.key) ?? fallback);
   }
   for (const w of WIDGETS) {
     if (w.parent && !visible[w.parent]) visible[w.key] = false;

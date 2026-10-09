@@ -895,3 +895,10 @@ input[type='week']:not(:disabled)::-webkit-calendar-picker-indicator {
   0%, 100% { opacity: 0.25; transform: translateY(0); }
   50% { opacity: 1; transform: translateY(-3px); }
 }
+
+/* A view-only form (<fieldset disabled>): native fields are locked by the
+   browser; react-select's control is a div, so stop it opening as well. */
+fieldset:disabled .app-select__control,
+fieldset:disabled .app-select__indicators {
+  pointer-events: none;
+}

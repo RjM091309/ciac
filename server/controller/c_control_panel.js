@@ -137,7 +137,14 @@ exports.getMyMenuCrudPermissions = async (req, res) => {
     }
     const roleId = await Role.getActiveRoleIdByName(roleName);
     if (!roleId) return res.json({ success: true, fullAccess: false, data: [] });
-    const rows = await ControlPanelPermission.getMenuCrudPermissions(roleId);
+    // Same rule as the API guards: a hidden menu grants no Add/Edit/Delete,
+    // whatever flags were left saved on it.
+    const visible = new Set(
+      (await ControlPanelPermission.getSidebarPermissions(roleId))
+        .filter((r) => Number(r.is_enabled) === 1 || r.is_enabled === true)
+        .map((r) => String(r.menu_key))
+    );
+    const rows = (await ControlPanelPermission.getMenuCrudPermissions(roleId)).filter((r) => visible.has(String(r.menu_key)));
     return res.json({ success: true, fullAccess: false, data: rows });
   } catch (error) {
     console.error("Get my menu CRUD permissions error:", error);

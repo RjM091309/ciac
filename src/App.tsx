@@ -6,6 +6,7 @@ import { FileCheck, FolderTree, ShieldCheck, Users, Loader2, Search, BarChart3, 
 import { LoginPage } from './components/auth/LoginPage';
 import { LogoLoader } from './components/ui/LogoLoader';
 import { PageSkeleton } from './components/ui/PageSkeleton';
+import { ControlPanelAccessPreview, useControlPanelAccess, type CrudPermissionMap } from './context/ControlPanelAccessContext';
 import { Toaster } from 'sonner';
 import { useIdleSession } from './lib/idleSession';
 import { setMyProfile } from './lib/myProfile';
@@ -55,6 +56,42 @@ function RedirectToLocatorAccounts({ navigate }: { navigate: (to: string, opts?:
 
 /** Sends a page this account may not open (e.g. an admin-only one reached by
  * typing its URL) somewhere it can. */
+/** A page opened by URL (not the sidebar) still needs its menu turned on in
+ * Control Panel — otherwise back to the dashboard, same as the sidebar. */
+function MenuGate({
+  menuKey,
+  navigate,
+  children,
+}: {
+  menuKey: string;
+  navigate: (to: string, opts?: { replace?: boolean }) => void;
+  children: React.ReactNode;
+}) {
+  const { ready, fullAccess, sidebarPermissions } = useControlPanelAccess();
+  if (fullAccess || sidebarPermissions[menuKey]) return <>{children}</>;
+  if (!ready) return <PageSkeleton />;
+  return <RedirectTo to="/dashboard" navigate={navigate} />;
+}
+
+/** Admin previewing a staff role: pages follow that role's menus and
+ * Add/Edit/Delete instead of the admin's full access. */
+function PreviewAccess({
+  sidebarPermissions,
+  crudPermissions,
+  children,
+}: {
+  sidebarPermissions: Record<string, boolean> | null;
+  crudPermissions: CrudPermissionMap;
+  children: React.ReactNode;
+}) {
+  if (!sidebarPermissions) return <>{children}</>;
+  return (
+    <ControlPanelAccessPreview sidebarPermissions={sidebarPermissions} crudPermissions={crudPermissions}>
+      {children}
+    </ControlPanelAccessPreview>
+  );
+}
+
 function RedirectTo({ to, navigate }: { to: string; navigate: (to: string, opts?: { replace?: boolean }) => void }) {
   useEffect(() => {
     navigate(to, { replace: true });
@@ -230,6 +267,7 @@ export default function App() {
   // permissions — otherwise the admin's own full sidebar keeps showing
   // underneath the preview, which is what made the preview feel fake.
   const [previewSidebarPermissions, setPreviewSidebarPermissions] = useState<Record<string, boolean> | null>(null);
+  const [previewCrudPermissions, setPreviewCrudPermissions] = useState<CrudPermissionMap>({});
   // The Locator preview's sidebar clicks stay local to this sub-view instead
   // of driving the admin's own `view`/URL — those self-service screens are
   // scoped to a real locator's own record server-side, so there's no route
@@ -270,6 +308,7 @@ export default function App() {
 
   useEffect(() => {
     setPreviewProponentView('dashboard');
+    setPreviewCrudPermissions({});
     if (dashboardPreviewRole === 'admin') {
       setPreviewSidebarPermissions(null);
       return;
@@ -287,6 +326,12 @@ export default function App() {
           map[String(row.menu_key)] = Number(row.is_enabled) === 1 || row.is_enabled === true;
         });
         setPreviewSidebarPermissions(map);
+        const crud: CrudPermissionMap = {};
+        (json?.crudPermissions || []).forEach((row: any) => {
+          const on = (v: unknown) => Number(v) === 1 || v === true;
+          crud[String(row.menu_key)] = { can_add: on(row.can_add), can_edit: on(row.can_edit), can_delete: on(row.can_delete) };
+        });
+        setPreviewCrudPermissions(crud);
       })
       .catch(() => {
         if (!cancelled) setPreviewSidebarPermissions({});
@@ -574,6 +619,14 @@ export default function App() {
             transition={{ duration: 0.25, ease: [0.22, 0.8, 0.35, 1] }}
             className="h-full"
           >
+            <PreviewAccess
+              sidebarPermissions={
+                !isProponent && dashboardPreviewRole !== 'admin' && dashboardPreviewRole !== 'proponent'
+                  ? previewSidebarPermissions
+                  : null
+              }
+              crudPermissions={previewCrudPermissions}
+            >
             <Suspense fallback={<PageSkeleton />}>
               {isProponent ? (
                 proponentView === 'me:profile' ? (
@@ -601,7 +654,9 @@ export default function App() {
                 ) : (
                   <PreviewDashboard role={dashboardPreviewRole} navigate={navigate} />
                 )
-              ) : view === 'settings:users' ? (
+              ) : (
+                <MenuGate menuKey={view} navigate={navigate}>
+              {view === 'settings:users' ? (
                 <UsersManagement navigate={navigate} />
               ) : view === 'settings:locator-users' ? (
                 <LocatorUsersManagement locationSearch={locationSearch} navigate={navigate} />
@@ -644,7 +699,10 @@ export default function App() {
               ) : (
                 <SectionLanding view={view} />
               )}
+                </MenuGate>
+              )}
             </Suspense>
+            </PreviewAccess>
           </motion.div>
         </AnimatePresence>
       </AppLayout>

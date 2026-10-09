@@ -303,6 +303,10 @@ export function ControlPanelManagement({ locationSearch }: { locationSearch?: st
   const [sidebarPermissions, setSidebarPermissions] = useState<SidebarPermissionMap>({});
   const [crudPermissions, setCrudPermissions] = useState<CrudPermissionMap>({});
   const [widgetPermissions, setWidgetPermissions] = useState<WidgetPermissionMap>({});
+  // A role whose widgets were never saved (e.g. a new custom role) starts
+  // clean — every widget off, same as the server. Once saved, a widget with
+  // no row (one added to the catalog later) defaults to on.
+  const [widgetDefault, setWidgetDefault] = useState(true);
   const [saved, setSaved] = useState<{ sidebar: SidebarPermissionMap; crud: CrudPermissionMap; widgets: WidgetPermissionMap }>({
     sidebar: {},
     crud: {},
@@ -354,11 +358,11 @@ export function ControlPanelManagement({ locationSearch }: { locationSearch?: st
       can_edit: Boolean(map[item.key]?.can_edit),
       can_delete: Boolean(map[item.key]?.can_delete),
     }));
-  // Missing key = visible (fail-open) — written back explicitly so "no row
-  // yet" and "explicitly on" agree. Ineligible widgets keep their saved
+  // Missing key = widgetDefault — written back explicitly so "no row yet"
+  // and the saved value agree. Ineligible widgets keep their saved
   // preference for if the role later gains the menus they need.
   const widgetPayload = (map: WidgetPermissionMap) =>
-    catalog.map((w) => ({ widget_key: w.key, is_enabled: map[w.key] ?? true }));
+    catalog.map((w) => ({ widget_key: w.key, is_enabled: map[w.key] ?? widgetDefault }));
 
   const menusDirty =
     JSON.stringify(sidebarPayload(sidebarPermissions)) !== JSON.stringify(sidebarPayload(saved.sidebar)) ||
@@ -446,6 +450,7 @@ export function ControlPanelManagement({ locationSearch }: { locationSearch?: st
         });
         const widgets: WidgetPermissionMap = {};
         wRows.forEach((row) => (widgets[String(row.widget_key)] = isOn(row.is_enabled)));
+        setWidgetDefault(wRows.length > 0);
         setSidebarPermissions(sidebar);
         setCrudPermissions(crud);
         setWidgetPermissions(widgets);
@@ -555,7 +560,7 @@ export function ControlPanelManagement({ locationSearch }: { locationSearch?: st
     if (w.parent && !isEligible(byKey.get(w.parent))) return false;
     return w.requiresAnyMenu.length === 0 || w.requiresAnyMenu.some((m) => enabledMenus.has(m));
   };
-  const widgetOn = (key: string) => widgetPermissions[key] ?? true;
+  const widgetOn = (key: string) => widgetPermissions[key] ?? widgetDefault;
   const setWidget = (key: string, next: boolean) => setWidgetPermissions((prev) => ({ ...prev, [key]: next }));
 
   const topWidgets = catalog.filter((w) => !w.parent);

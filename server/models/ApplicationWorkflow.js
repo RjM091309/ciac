@@ -616,6 +616,8 @@ async function listAllApplicationsWithProgress() {
       a.id,
       a.proponent_id,
       p.business_name AS proponent_name,
+      -- Set once the locator has an Account Officer (a Registered Locator, LOC-…).
+      p.account_officer_id AS proponent_account_officer_id,
       a.application_no,
       a.application_type,
       a.is_renewal,
@@ -1995,13 +1997,22 @@ async function getApplicationTurnaroundStats(applicationIds = null) {
     ) ${applicationIdFilter("h.application_id", applicationIds)}
   `);
 
+  // ROW_NUMBER() comes back as a BIGINT, which the driver hands over as a
+  // string ("1") — compare as numbers, or nothing ever counts as completed.
+  // The clock starts at the first submit (time spent as a draft isn't
+  // processing time), falling back to the first recorded status.
   const byApp = new Map();
   for (const row of completedRows) {
-    if (!byApp.has(row.application_id)) byApp.set(row.application_id, { first: null, last: null });
+    if (!byApp.has(row.application_id)) byApp.set(row.application_id, { first: null, firstSubmit: null, last: null });
     const bucket = byApp.get(row.application_id);
-    if (row.rn_asc === 1) bucket.first = row.changed_at;
-    if (row.rn_desc === 1) bucket.last = row.changed_at;
+    if (Number(row.rn_asc) === 1) bucket.first = row.changed_at;
+    if (Number(row.rn_desc) === 1) bucket.last = row.changed_at;
+    if (String(row.to_status).toUpperCase() === "SUBMITTED") {
+      const t = new Date(row.changed_at).getTime();
+      if (bucket.firstSubmit === null || t < new Date(bucket.firstSubmit).getTime()) bucket.firstSubmit = row.changed_at;
+    }
   }
+  for (const bucket of byApp.values()) if (bucket.firstSubmit) bucket.first = bucket.firstSubmit;
 
   const durationsDays = [];
   for (const { first, last } of byApp.values()) {
@@ -2010,7 +2021,7 @@ async function getApplicationTurnaroundStats(applicationIds = null) {
     if (Number.isFinite(ms) && ms >= 0) durationsDays.push(ms / (1000 * 60 * 60 * 24));
   }
   const avgTurnaroundDays = durationsDays.length
-    ? Math.round((durationsDays.reduce((a, b) => a + b, 0) / durationsDays.length) * 10) / 10
+    ? Math.round((durationsDays.reduce((a, b) => a + b, 0) / durationsDays.length) * 10000) / 10000
     : null;
 
   const openRows = await selectData(`
@@ -2023,9 +2034,9 @@ async function getApplicationTurnaroundStats(applicationIds = null) {
     .map((r) => (r.created_at ? (now - new Date(r.created_at).getTime()) / (1000 * 60 * 60 * 24) : null))
     .filter((v) => v != null && Number.isFinite(v));
   const avgOpenAgeDays = openAges.length
-    ? Math.round((openAges.reduce((a, b) => a + b, 0) / openAges.length) * 10) / 10
+    ? Math.round((openAges.reduce((a, b) => a + b, 0) / openAges.length) * 10000) / 10000
     : null;
-  const oldestOpenDays = openAges.length ? Math.round(Math.max(...openAges) * 10) / 10 : null;
+  const oldestOpenDays = openAges.length ? Math.round(Math.max(...openAges) * 10000) / 10000 : null;
 
   return {
     avgTurnaroundDays,

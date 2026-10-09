@@ -459,6 +459,8 @@ export function ProponentsManagement({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<ProponentRow | null>(null);
+  // No Add/Edit right for this panel (new vs. existing locator) = view only.
+  const formLocked = editing ? !canEdit : !canAdd;
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   // Documents picked on the Documents tab while creating a New Locator —
   // uploaded once the POST returns the new locator's id.
@@ -1671,6 +1673,10 @@ export function ProponentsManagement({
           // straight off `editing` (blank for a not-yet-created locator).
           return (
           <div className="flex flex-col gap-3">
+            {/* View-only (no Add/Edit right): every field is locked, not just
+                the Save button hidden. Documents stays outside so files can
+                still be opened. */}
+            <fieldset disabled={formLocked} style={{ display: 'contents' }}>
             {/* Row 1 and Row 2 share this exact column template (same track sizes, same gap,
                 same column count) so their edges line up vertically — Row 2 nests
                 Principal/Lease Address and TIN/SEC/Ref inside their own cells rather than
@@ -1944,6 +1950,7 @@ export function ProponentsManagement({
                 Sub-Lease
               </label>
             </div>
+            </fieldset>
 
             {/* Folder-tab strip mirroring the legacy BRIDGE system's Locator's
                 Information form — only Profile has content built out so far. */}
@@ -1961,7 +1968,7 @@ export function ProponentsManagement({
               </div>
             </div>
             <div className="contents">
-              <div className="content">
+              <fieldset disabled={formLocked && activeProfileTab !== 'Documents'} className="content min-w-0">
                 {activeProfileTab === 'Stockholders Information' ? (
                   <div className="flex flex-col gap-3">
                     <RowsEditor<StockholderRow>
@@ -2545,7 +2552,7 @@ export function ProponentsManagement({
 
                   </div>
                 )}
-              </div>
+              </fieldset>
             </div>
           </div>
           );

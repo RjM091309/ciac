@@ -249,7 +249,14 @@ const APPLICATION_ACCESS_MENU_KEYS = ["applications:new", "applications:renewals
  * hasStaffApplicationAccess() there — so it survives a rename and extends
  * to any future custom staff role automatically.
  */
-function requireApplicationsAccess({ allowProponent = false } = {}) {
+// Changes (action other than "view") also accept Locator Accounts, which
+// continues/submits a locator's draft application.
+const APPLICATION_CHANGE_MENU_KEYS = [...APPLICATION_ACCESS_MENU_KEYS, "settings:locator-users"];
+
+/** `action` "add"/"edit"/"delete": staff also need that Control Panel right
+ * (on any applications-adjacent menu) — seeing the menu alone is view only. */
+function requireApplicationsAccess({ allowProponent = false, action = "view" } = {}) {
+  const menuKeys = action === "view" ? APPLICATION_ACCESS_MENU_KEYS : APPLICATION_CHANGE_MENU_KEYS;
   return async function applicationsAccessGuard(req, res, next) {
     if (!req.user) {
       return res.status(401).json({ success: false, message: "Access token required" });
@@ -258,8 +265,8 @@ function requireApplicationsAccess({ allowProponent = false } = {}) {
     if (role === "admin") return next();
     if (allowProponent && role === "proponent") return next();
     try {
-      for (const menuKey of APPLICATION_ACCESS_MENU_KEYS) {
-        if (await checkMenuAllowed(role, menuKey, "view")) return next();
+      for (const menuKey of menuKeys) {
+        if (await checkMenuAllowed(role, menuKey, action)) return next();
       }
       return res.status(403).json({ success: false, message: "You are not authorized to access this. Please contact the administrator." });
     } catch (error) {

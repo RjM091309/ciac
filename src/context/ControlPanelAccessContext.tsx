@@ -146,6 +146,25 @@ export function ControlPanelAccessProvider({ children }: { children: React.React
   return <ControlPanelAccessContext.Provider value={value}>{children}</ControlPanelAccessContext.Provider>;
 }
 
+/** Admin previewing another staff role: the pages inside behave as that
+ * role (its menus and Add/Edit/Delete), not as the admin's full access. */
+export function ControlPanelAccessPreview({
+  sidebarPermissions,
+  crudPermissions,
+  children,
+}: {
+  sidebarPermissions: Record<string, boolean>;
+  crudPermissions: CrudPermissionMap;
+  children: React.ReactNode;
+}) {
+  const outer = useContext(ControlPanelAccessContext);
+  const value = useMemo(
+    () => ({ ...outer, ready: true, fullAccess: false, sidebarPermissions, crudPermissions }),
+    [outer, sidebarPermissions, crudPermissions]
+  );
+  return <ControlPanelAccessContext.Provider value={value}>{children}</ControlPanelAccessContext.Provider>;
+}
+
 export function useControlPanelAccess() {
   return useContext(ControlPanelAccessContext);
 }

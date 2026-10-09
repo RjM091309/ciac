@@ -510,8 +510,9 @@ export function AssessmentEvaluation({
     String(r.application_status || '').toUpperCase() === 'FOR_APPROVAL' &&
     r.recommendation === 'ENDORSE' &&
     (fullAccess || (level.userId != null && Number(r.approver_id) === level.userId));
+  // Sending is a change (POST for-approval) — view only just opens the row.
   const canSendForApproval = (r: AssessmentRow) =>
-    isManager && r.stage === 'FOR_RECOMMENDATION' && !r.recommendation;
+    canEdit && isManager && r.stage === 'FOR_RECOMMENDATION' && !r.recommendation;
 
   const rows = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -1618,7 +1619,7 @@ function ComplianceTab({
       )}
 
       {threadRequirement ? (
-        <RequirementThreadModal requirement={threadRequirement} onClose={() => setThreadRequirement(null)} />
+        <RequirementThreadModal requirement={threadRequirement} canReply={canEdit} onClose={() => setThreadRequirement(null)} />
       ) : null}
 
       <ConfirmModal
@@ -1717,7 +1718,16 @@ function ComplianceTab({
 
 /** Per-requirement reply thread — proxies to the same comments workflow the
  * Locator's own portal reads/posts, so both sides see the same messages. */
-function RequirementThreadModal({ requirement, onClose }: { requirement: RequirementRow; onClose: () => void }) {
+function RequirementThreadModal({
+  requirement,
+  canReply,
+  onClose,
+}: {
+  requirement: RequirementRow;
+  /** No Edit right = read the thread only. */
+  canReply: boolean;
+  onClose: () => void;
+}) {
   const [comments, setComments] = useState<RequirementComment[]>([]);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState('');
@@ -1816,6 +1826,7 @@ function RequirementThreadModal({ requirement, onClose }: { requirement: Require
           )}
         </div>
 
+        {canReply ? (
         <div className="p-3 border-t flex items-center gap-2" style={{ borderColor: 'var(--border)' }}>
           <input
             value={message}
@@ -1836,6 +1847,7 @@ function RequirementThreadModal({ requirement, onClose }: { requirement: Require
             {sending ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
           </button>
         </div>
+        ) : null}
       </div>
     </div>
   );

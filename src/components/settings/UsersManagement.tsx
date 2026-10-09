@@ -611,7 +611,8 @@ export function UsersManagement({
                 canDelete={canDelete}
               />
             ) : null}
-            <RolesPanel onChanged={() => refresh({ showLoading: false })} navigate={navigate} />
+            {/* Roles are created/changed by administrators only (the API refuses everyone else). */}
+            {fullAccess ? <RolesPanel onChanged={() => refresh({ showLoading: false })} navigate={navigate} /> : null}
             {canAdd ? (
               <button
                 className="inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-semibold shadow-sm cursor-pointer whitespace-nowrap"

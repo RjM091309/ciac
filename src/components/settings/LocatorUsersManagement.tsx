@@ -1654,9 +1654,11 @@ export function LocatorUsersManagement({
         onSave={() => saveContinueDraft(true)}
         saving={continuingDraftSaving}
         saveLabel="Submit Application"
+        hideSave={!canEdit}
       >
         {continuingDraft ? (
-          <>
+          // No Edit right = view the draft only.
+          <fieldset disabled={!canEdit} style={{ display: 'contents' }}>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <Field label="Username" error={continuingDraftFieldErrors.username}>
                 <input
@@ -1799,6 +1801,7 @@ export function LocatorUsersManagement({
               </div>
             </div>
 
+            {canEdit ? (
             <button
               type="button"
               className="mt-4 w-full rounded-lg border px-3 py-2 text-[12px] font-semibold disabled:opacity-50 cursor-pointer"
@@ -1808,7 +1811,8 @@ export function LocatorUsersManagement({
             >
               Save Draft (don't submit yet)
             </button>
-          </>
+            ) : null}
+          </fieldset>
         ) : null}
       </SidePanel>
 

@@ -492,6 +492,15 @@ function defaultAttentionTarget(item: AttentionItem) {
   return `/applications/${item.is_renewal ? 'renewals' : 'new'}?applicationId=${item.application_id}`;
 }
 
+/** Days as a short duration: minutes under an hour ("25m"), hours under a
+ * day ("3h"), else days ("2.5d"). */
+function formatDuration(days: number) {
+  const minutes = Math.round(days * 24 * 60);
+  if (minutes < 60) return minutes < 1 ? '<1m' : `${minutes}m`;
+  if (days < 1) return `${Math.round(days * 24)}h`;
+  return `${Math.round(days * 10) / 10}d`;
+}
+
 export function AttentionCard({
   items,
   navigate,
@@ -529,7 +538,8 @@ export function AttentionCard({
       </div>
       <p className="text-[10px] text-secondary mb-3">{description}</p>
 
-      {items.length > 0 && (
+      {/* Always shown (All (0) when empty) so every dashboard's card looks the same. */}
+      {(
         <div className="flex flex-wrap items-center gap-1.5 mb-3">
           {chips.map((chip) => {
             const activeChip = filter === chip.key;
@@ -774,7 +784,7 @@ export function PerformanceCard({ turnaround, className }: { turnaround: Turnaro
         <div>
           <span className="text-[10px] font-bold text-secondary uppercase tracking-widest">Avg. Turnaround</span>
           <p className="text-xl font-bold" style={{ color: 'var(--text)' }}>
-            {turnaround?.avgTurnaroundDays != null ? `${turnaround.avgTurnaroundDays}d` : '—'}
+            {turnaround?.avgTurnaroundDays != null ? formatDuration(turnaround.avgTurnaroundDays) : '—'}
           </p>
           <p className="text-[10px] text-secondary">across {turnaround?.completedCount ?? 0} decided applications</p>
         </div>
@@ -789,7 +799,7 @@ export function PerformanceCard({ turnaround, className }: { turnaround: Turnaro
           <div className="text-right">
             <span className="text-[10px] font-bold text-secondary uppercase tracking-widest">Oldest Open</span>
             <p className="text-sm font-bold" style={{ color: 'var(--text)' }}>
-              {turnaround?.oldestOpenDays != null ? `${turnaround.oldestOpenDays}d` : '—'}
+              {turnaround?.oldestOpenDays != null ? formatDuration(turnaround.oldestOpenDays) : '—'}
             </p>
           </div>
         </div>

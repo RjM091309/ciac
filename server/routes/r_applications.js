@@ -38,23 +38,23 @@ router.get("/:id/status-history", requireApplicationsAccess({ allowProponent: tr
 // ownership enforced in the controller (loadRequirementWithAccess), same
 // pattern as the application-level routes above.
 router.get("/requirements/:id/comments", requireApplicationsAccess({ allowProponent: true }), controller.listRequirementComments);
-router.post("/requirements/:id/comments", requireApplicationsAccess({ allowProponent: true }), controller.addRequirementComment);
-router.patch("/requirements/:id/acknowledge", requireApplicationsAccess({ allowProponent: true }), controller.acknowledgeRequirement);
+router.post("/requirements/:id/comments", requireApplicationsAccess({ allowProponent: true, action: "edit" }), controller.addRequirementComment);
+router.patch("/requirements/:id/acknowledge", requireApplicationsAccess({ allowProponent: true, action: "edit" }), controller.acknowledgeRequirement);
 
 // Filing a new application is staff-only now (Assessment Officer creates it
 // on the locator's behalf) — a locator's only self-service actions are
 // viewing their own applications and uploading documents against them.
-router.post("/", requireApplicationsAccess(), controller.create);
+router.post("/", requireApplicationsAccess({ action: "add" }), controller.create);
 // Permits' "Renew": file + submit the renewal for that permit's locator in one step.
 // Renew = filing a renewal: the Renewal Queue's Add permission in Control Panel.
 router.post("/renew-from-permit/:permitId", requireMenuAccess("applications:renewals", "add"), controller.renewFromPermit);
-router.patch("/:id/submit", requireApplicationsAccess({ allowProponent: true }), controller.submit);
+router.patch("/:id/submit", requireApplicationsAccess({ allowProponent: true, action: "edit" }), controller.submit);
 // Fixing application_type/is_renewal is staff-only, allowed through the
 // Assessment stage (see Workflow.TYPE_EDITABLE_STATUSES); deleting stays
 // DRAFT-only (see Workflow.deleteDraftApplication).
-router.patch("/:id", requireApplicationsAccess(), controller.updateDraft);
-router.delete("/:id", requireApplicationsAccess(), controller.remove);
-router.post("/documents", requireApplicationsAccess({ allowProponent: true }), upload.single("file"), verifyUploadedFile, controller.createDocument);
+router.patch("/:id", requireApplicationsAccess({ action: "edit" }), controller.updateDraft);
+router.delete("/:id", requireApplicationsAccess({ action: "delete" }), controller.remove);
+router.post("/documents", requireApplicationsAccess({ allowProponent: true, action: "edit" }), upload.single("file"), verifyUploadedFile, controller.createDocument);
 router.get("/documents/:id/file", requireApplicationsAccess({ allowProponent: true }), controller.downloadDocument);
 
 module.exports = router;

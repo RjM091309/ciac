@@ -178,10 +178,14 @@ async function isSidebarVisible(roleId, menuKey) {
 
 const CRUD_ACTION_COLUMNS = { add: "can_add", edit: "can_edit", delete: "can_delete" };
 
-/** Fail-closed: a menu with no saved row for this role is treated as no permission. */
+/** Fail-closed: a menu with no saved row for this role is treated as no
+ * permission. The menu itself must be visible too — turning a menu off in
+ * Control Panel keeps its old Add/Edit/Delete flags saved, and those must
+ * not still grant changes through the API. */
 async function hasCrudPermission(roleId, menuKey, action) {
   const column = CRUD_ACTION_COLUMNS[action];
   if (!column) return false;
+  if (!(await isSidebarVisible(roleId, menuKey))) return false;
   const row = (await getMenuCrudPermissions(roleId)).find((r) => r.menu_key === menuKey);
   if (!row) return false;
   return Number(row[column]) === 1;

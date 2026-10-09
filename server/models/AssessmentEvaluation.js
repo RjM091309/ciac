@@ -492,14 +492,17 @@ async function listManagerAttention({ renewal } = {}) {
       a.application_no,
       p.business_name AS proponent_name,
       a.is_renewal,
+      a.status,
       ISNULL(asm.stage, 'UNASSIGNED') AS stage,
-      CASE WHEN asm.stage = 'FOR_RECOMMENDATION'
+      CASE WHEN asm.stage = 'FOR_RECOMMENDATION' OR a.status = 'FOR_APPROVAL'
         THEN ISNULL(asm.officer_recommended_at, asm.updated_at)
         ELSE ISNULL(a.submitted_at, a.created_at) END AS waiting_since
     FROM dbo.applications a
     LEFT JOIN dbo.proponents p ON p.id = a.proponent_id
     LEFT JOIN dbo.application_assessments asm ON asm.application_id = a.id
     WHERE (asm.stage = 'FOR_RECOMMENDATION'
+       -- Sent For Approval and waiting on Level 1's decision.
+       OR a.status = 'FOR_APPROVAL'
        OR (ISNULL(asm.stage, 'UNASSIGNED') = 'UNASSIGNED' AND a.status IN ('SUBMITTED', 'RESUBMITTED')))
       ${track ? `AND ${track}` : ""}
   `);

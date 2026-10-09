@@ -8,6 +8,7 @@ const Contract = require("../models/Contract");
 const Permit = require("../models/Permit");
 const ActivityLog = require("../models/ActivityLog");
 const DashboardWidgets = require("../lib/dashboardWidgets");
+const { selectData } = require("../config/database");
 const { publicErrorMessage } = require("../lib/httpError");
 
 /** The admin previewing "what Officer/Proponent sees" is still an admin —
@@ -311,6 +312,7 @@ const STAT_FIELDS = {
   "dashboard:stats:rejected": ["rejected"],
   "dashboard:stats:returned": ["returned"],
   "dashboard:stats:requirements": ["requirementsTotal", "requirementsVerified"],
+  "dashboard:stats:locators": ["locators"],
 };
 
 /**
@@ -379,7 +381,28 @@ async function buildStaffDashboard({ user, sidebarPermissions, widgetPermissions
   });
   // An overview role sees everything, so its aggregates need no id filter.
   const scopedIds = queue ? applications.map((a) => a.id) : null;
-  const summary = summarize(applications);
+  // Processing Performance measures the department's own work: for an
+  // Account Officer that's renewals only — a new application (and the
+  // Approved Queue's) was processed by the BDO. Level 2 = their own
+  // assignments/locators, Level 1 = the whole department.
+  // The same goes for the stat cards, status breakdown, pipeline and
+  // requirements overview: an Account Officer's numbers are their renewals.
+  // (Their table still lists the approved locators too.)
+  // A BDO's are new applications until the locator is registered (approved
+  // and given an Account Officer — LOC-…); then it's no longer theirs.
+  const isRegistered = (a) =>
+    !Number(a.is_renewal) && upper(a.status) === "APPROVED" && a.proponent_account_officer_id != null;
+  const workApplications =
+    queue === "approval"
+      ? applications.filter((a) => Number(a.is_renewal))
+      : queue === "assessment"
+        ? applications.filter((a) => !isRegistered(a))
+        : applications;
+  // History-type widgets (pipeline, performance, requirements) keep every
+  // application the department handled.
+  const historyApplications = queue === "approval" ? workApplications : applications;
+  const performanceIds = queue === "approval" ? historyApplications.map((a) => a.id) : scopedIds;
+  const summary = summarize(workApplications);
 
   // Drives the dashboard's heading/wording, e.g. a read-only overview role
   // never sees "assigned to you".
@@ -388,6 +411,14 @@ async function buildStaffDashboard({ user, sidebarPermissions, widgetPermissions
   const data = { view, widgets };
 
   if (widgets["dashboard:stats"]) {
+    // Account Officer: their Registered Locators (Level 2 = their own).
+    if (widgets["dashboard:stats:locators"] && queue === "approval") {
+      summary.locators = aoProponentIds
+        ? aoProponentIds.size
+        : Number((await selectData(
+            `SELECT COUNT(1) AS n FROM dbo.proponents WHERE is_active = 1 AND account_officer_id IS NOT NULL`
+          ))?.[0]?.n || 0);
+    }
     const stats = {};
     for (const [key, fields] of Object.entries(STAT_FIELDS)) {
       if (widgets[key]) fields.forEach((f) => { stats[f] = summary[f]; });
@@ -400,11 +431,11 @@ async function buildStaffDashboard({ user, sidebarPermissions, widgetPermissions
     data.statusBreakdown = { pending, approved, disapproved, rejected, returned };
   }
 
-  if (widgets["dashboard:pipeline"]) data.trends = buildTrends(applications);
+  if (widgets["dashboard:pipeline"]) data.trends = buildTrends(historyApplications);
 
   const [turnaround, categoryCompletion] = await Promise.all([
-    widgets["dashboard:performance"] ? Workflow.getApplicationTurnaroundStats(scopedIds) : null,
-    widgets["dashboard:requirements"] ? Workflow.getRequirementCompletionByCategory(scopedIds) : null,
+    widgets["dashboard:performance"] ? Workflow.getApplicationTurnaroundStats(performanceIds) : null,
+    widgets["dashboard:requirements"] ? Workflow.getRequirementCompletionByCategory(performanceIds) : null,
   ]);
   if (turnaround) data.turnaround = turnaround;
   if (categoryCompletion) {
@@ -413,7 +444,10 @@ async function buildStaffDashboard({ user, sidebarPermissions, widgetPermissions
   }
 
   if (widgets["dashboard:table"]) {
-    data.applications = applications.map((a) => ({ ...a, link: linkFor(a.id, Boolean(Number(a.is_renewal)), a.status) }));
+    // BDO: registered locators (LOC-…) leave the table too; an Account
+    // Officer's table keeps listing their approved locators.
+    const tableApplications = queue === "assessment" ? workApplications : applications;
+    data.applications = tableApplications.map((a) => ({ ...a, link: linkFor(a.id, Boolean(Number(a.is_renewal)), a.status) }));
   }
 
   if (widgets["dashboard:attention"]) {
@@ -440,9 +474,10 @@ async function buildStaffDashboard({ user, sidebarPermissions, widgetPermissions
             })
           );
         }
-        // Renewals whose review is in (For Approval) or that are For Approval.
+        // Renewals whose review is in, or already sent For Approval and
+        // waiting on Level 1's decision.
         (await Assessment.listManagerAttention({ renewal: true }))
-          .filter((r) => r.stage === "FOR_RECOMMENDATION")
+          .filter((r) => r.stage === "FOR_RECOMMENDATION" || String(r.status).toUpperCase() === "FOR_APPROVAL")
           .forEach((r) =>
             work.push({
               application_id: r.application_id,
@@ -454,6 +489,14 @@ async function buildStaffDashboard({ user, sidebarPermissions, widgetPermissions
               link: `/applications/renewals?applicationId=${r.application_id}`,
             })
           );
+        // …and every other renewal still in process (with a Level 2 for
+        // review), so Level 1 sees the same open work the admin does.
+        const listed = new Set(work.map((w) => Number(w.application_id)));
+        withLinks(
+          attentionQueue(applications, { statuses: ["SUBMITTED", "RESUBMITTED", "RETURNED"], isRenewal: true, limit: ATTENTION_MAX })
+        )
+          .filter((a) => !listed.has(Number(a.application_id)))
+          .forEach((a) => work.push(a));
       } else {
         // Level 2: their renewals still to review.
         work.push(
@@ -468,16 +511,28 @@ async function buildStaffDashboard({ user, sidebarPermissions, widgetPermissions
     } else if (queue === "assessment") {
       // The Evaluation Queue (BDO) only works new applications; renewals are the Account Officer's.
       const rows = await Assessment.listManagerAttention({ renewal: false });
+      const listed = new Set(rows.map((r) => Number(r.application_id)));
+      // …plus new applications still in review with a Level 2, so Level 1
+      // sees the same open work the admin does.
+      const inReview = withLinks(
+        attentionQueue(applications, { statuses: ["SUBMITTED", "RESUBMITTED", "RETURNED"], isRenewal: false, limit: ATTENTION_MAX })
+      ).filter((a) => !listed.has(Number(a.application_id)));
       data.attention = rows
         .map((r) => ({
           application_id: r.application_id,
           application_no: r.application_no,
           proponent_name: r.proponent_name,
-          status: r.stage === "FOR_RECOMMENDATION" ? "AWAITING RECOMMENDATION" : "NEEDS ASSIGNMENT",
+          status:
+            String(r.status).toUpperCase() === "FOR_APPROVAL"
+              ? "FOR APPROVAL"
+              : r.stage === "FOR_RECOMMENDATION"
+                ? "AWAITING RECOMMENDATION"
+                : "NEEDS ASSIGNMENT",
           is_renewal: Boolean(Number(r.is_renewal)),
           days_waiting: daysSince(r.waiting_since),
           link: `/assessment?applicationId=${r.application_id}`,
         }))
+        .concat(inReview)
         .sort((a, b) => b.days_waiting - a.days_waiting)
         .slice(0, ATTENTION_MAX);
     }
@@ -610,12 +665,17 @@ exports.getPreview = async (req, res) => {
     if (!role || !role.is_active) {
       return res.status(400).json({ success: false, message: "Unknown preview role" });
     }
-    const [widgetPermissions, sidebarPermissions] = await Promise.all([
+    const [widgetPermissions, sidebarPermissions, crudRows] = await Promise.all([
       ControlPanelPermission.getDashboardWidgetPermissions(roleId),
       ControlPanelPermission.getSidebarPermissions(roleId),
+      ControlPanelPermission.getMenuCrudPermissions(roleId),
     ]);
+    // The previewed pages' Add/Edit/Delete buttons follow this role too — only
+    // on menus it can see, same rule as the API guards.
+    const visibleMenus = new Set(sidebarPermissions.filter((r) => Number(r.is_enabled) === 1 || r.is_enabled === true).map((r) => String(r.menu_key)));
+    const crudPermissions = crudRows.filter((r) => visibleMenus.has(String(r.menu_key)));
     const data = await buildStaffDashboard({ user: null, sidebarPermissions, widgetPermissions });
-    return res.json({ success: true, role: "officer", widgetPermissions, sidebarPermissions, data });
+    return res.json({ success: true, role: "officer", widgetPermissions, sidebarPermissions, crudPermissions, data });
   } catch (error) {
     console.error("Get dashboard preview error:", error);
     return res.status(500).json({ success: false, message: publicErrorMessage(error) });

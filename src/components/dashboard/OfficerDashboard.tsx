@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Ban, ClipboardList, FileCheck, FileText, Inbox, LayoutDashboard, ListChecks, RotateCcw, XCircle } from 'lucide-react';
+import { Ban, Building2, ClipboardList, FileCheck, FileText, Inbox, LayoutDashboard, ListChecks, RotateCcw, XCircle } from 'lucide-react';
 import { EmptyState } from '../ui/EmptyState';
 import { getStatusBadgeStyles } from './statusBadge';
 import { cn } from '../../lib/utils';
@@ -56,6 +56,7 @@ export type OfficerDashboardData = {
     returned: number;
     requirementsTotal: number;
     requirementsVerified: number;
+    locators: number;
   }>;
   attention?: AttentionItem[];
   statusBreakdown?: StatusBreakdown;
@@ -76,7 +77,7 @@ const VIEW_COPY: Record<
     table: 'Renewals & Approved Locators',
     tableEmpty: 'No renewals or locators to show right now.',
     attention: 'Renewals and locators waiting on you, plus permits and contracts nearing expiry',
-    totalLabel: 'Total',
+    totalLabel: 'Total Renewals',
   },
   'assessment-officer': {
     title: 'My Assigned Applications',
@@ -92,7 +93,7 @@ const VIEW_COPY: Record<
     table: 'New Applications',
     tableEmpty: 'No new applications yet.',
     attention: 'Reviews awaiting your recommendation, and applications to assign',
-    totalLabel: 'Total Applications',
+    totalLabel: 'New Applications',
   },
   overview: {
     title: 'Applications Overview',
@@ -147,6 +148,7 @@ export function OfficerDashboard({ data, navigate }: { data: OfficerDashboardDat
       value: `${stats.requirementsVerified ?? 0}/${stats.requirementsTotal ?? 0}`,
       icon: ListChecks,
     },
+    { key: 'dashboard:stats:locators', label: 'Locators', value: stats.locators ?? 0, icon: Building2 },
   ].filter((c) => show('dashboard:stats') && show(c.key));
 
   // Needs Attention and Quick Tasks sit side by side on wide screens;
@@ -158,7 +160,7 @@ export function OfficerDashboard({ data, navigate }: { data: OfficerDashboardDat
   const insightCards: React.ReactNode[] = [];
   if (showAttention) {
     workCards.push(
-      <AttentionCard key="attention" items={data?.attention ?? []} navigate={navigate} title="Needs Your Attention" description={copy.attention} />
+      <AttentionCard key="attention" items={data?.attention ?? []} navigate={navigate} description={copy.attention} />
     );
   }
   if (showAttention && show('dashboard:quick-tasks')) workCards.push(<QuickTasksCard key="tasks" />);
