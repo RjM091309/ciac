@@ -63,6 +63,7 @@ type UsersRolesData = {
   // business and application it created together.
   companyByUserId: Record<number, string>;
   applicationByUserId: Record<number, { id: number; application_no: string; application_type: string; status: string; contract_type_id: number | null }>;
+  statusRefByUserId?: Record<number, string>;
 };
 
 function api(path: string) {
@@ -157,7 +158,7 @@ export function LocatorUsersManagement({
   const [page, setPage] = useState(1);
 
   const { data: usersRoles, isLoading, isRevalidating, refresh } = useSessionStorageCachedResource<UsersRolesData>({
-    cacheKey: 'ciac.users_roles.v1',
+    cacheKey: 'ciac.users_roles.v2',
     ttlMs: 5 * 60 * 1000, // 5 minutes — shares the cache key with UsersManagement since it's the same underlying data
     fetcher: async () => {
       setError(null);
@@ -194,15 +195,31 @@ export function LocatorUsersManagement({
       // to at most one proponent and at most one application. Built here
       // once (rather than searched per row) since this page can list
       // hundreds of accounts.
+      const applicationRows: any[] = aRes.ok && Array.isArray(aJson?.data) ? aJson.data : [];
+      // A renewal still being decided: the locator shows by its REN number.
+      const openRenewalByProponentId = new Map<number, string>();
+      for (const a of applicationRows) {
+        if (a?.proponent_id == null || !Number(a.is_renewal)) continue;
+        if (['APPROVED', 'DISAPPROVED', 'REJECTED'].includes(String(a.status || '').toUpperCase())) continue;
+        openRenewalByProponentId.set(Number(a.proponent_id), String(a.application_no || ''));
+      }
       const proponentIdByUserId = new Map<number, number>();
       const companyByUserId: Record<number, string> = {};
+      // Registered Locator (an Account Officer is assigned): shown by its LOC Ref No.
+      const statusRefByUserId: Record<number, string> = {};
       for (const p of proponentRows) {
         if (p?.user_id == null) continue;
         proponentIdByUserId.set(Number(p.user_id), Number(p.id));
         companyByUserId[Number(p.user_id)] = String(p.business_name || '');
+        // One code that says where the locator is: its own Ref No — LOC-… once
+        // registered, read as REN-… (same number) while a renewal is in
+        // process — otherwise its NEW-/APP- application number.
+        if (p.account_officer_id && p.ref_no) {
+          const ref = String(p.ref_no);
+          statusRefByUserId[Number(p.user_id)] = openRenewalByProponentId.has(Number(p.id)) ? ref.replace(/^LOC-/, 'REN-') : ref;
+        }
       }
 
-      const applicationRows: any[] = aRes.ok && Array.isArray(aJson?.data) ? aJson.data : [];
       const applicationByProponentId = new Map<
         number,
         { id: number; application_no: string; application_type: string; status: string; contract_type_id: number | null }
@@ -237,6 +254,7 @@ export function LocatorUsersManagement({
         applicationTypes,
         companyByUserId,
         applicationByUserId,
+        statusRefByUserId,
       };
     },
     onError: (e) => {
@@ -279,6 +297,7 @@ export function LocatorUsersManagement({
   const applicationTypeOptions = usersRoles?.applicationTypes ?? [];
   const companyByUserId = usersRoles?.companyByUserId ?? {};
   const applicationByUserId = usersRoles?.applicationByUserId ?? {};
+  const statusRefByUserId = usersRoles?.statusRefByUserId ?? {};
   const applicationTypeNameByCode = useMemo(
     () => Object.fromEntries(applicationTypeOptions.map((t) => [t.code, t.name])),
     [applicationTypeOptions]
@@ -405,10 +424,13 @@ export function LocatorUsersManagement({
         (u.username || '').toLowerCase().includes(q) ||
         (u.full_name || '').toLowerCase().includes(q) ||
         (u.email || '').toLowerCase().includes(q) ||
+        // Company and its code (NEW-/APP-, LOC- or REN-, as shown in the list).
+        (companyByUserId[u.id] || '').toLowerCase().includes(q) ||
+        (statusRefByUserId[u.id] || applicationByUserId[u.id]?.application_no || '').toLowerCase().includes(q) ||
         statusStr.includes(q)
       );
     });
-  }, [userRows, searchQuery, statusFilterCodes, hasBusinessFilter, activeBusinessUserIds]);
+  }, [userRows, searchQuery, statusFilterCodes, hasBusinessFilter, activeBusinessUserIds, companyByUserId, statusRefByUserId, applicationByUserId]);
 
   useEffect(() => {
     const search = String(locationSearch || '').trim();
@@ -918,6 +940,8 @@ export function LocatorUsersManagement({
   // DRAFT is the one exception: Assessment excludes drafts entirely, so
   // that click opens the Continue Draft panel instead.
   function goToApplication(u: UserRow, app: { id: number; application_no: string; application_type: string; status: string; contract_type_id: number | null }) {
+    // Registered locators (LOC/REN) belong to their Account Officer — no way in from here.
+    if (statusRefByUserId[u.id]) return;
     if (app.status === 'DRAFT') {
       setContinuingDraft({
         id: app.id,
@@ -1276,14 +1300,23 @@ export function LocatorUsersManagement({
                     {applicationByUserId[u.id] ? (
                       <button
                         type="button"
-                        className="w-full text-left cursor-pointer rounded-md -mx-1.5 -my-1 px-1.5 py-1 transition-colors hover:bg-[var(--control-bg)] active:bg-[var(--selected-bg)]"
+                        // Registered (LOC/REN): the Account Officer's now — not opened from here.
+                        disabled={Boolean(statusRefByUserId[u.id])}
+                        className={`w-full text-left rounded-md -mx-1.5 -my-1 px-1.5 py-1 transition-colors ${
+                          statusRefByUserId[u.id]
+                            ? 'cursor-default'
+                            : 'cursor-pointer hover:bg-[var(--control-bg)] active:bg-[var(--selected-bg)]'
+                        }`}
                         onClick={() => goToApplication(u, applicationByUserId[u.id])}
                       >
                         <div className="text-[12px] font-semibold break-words" style={{ color: 'var(--text)' }}>
                           {companyByUserId[u.id]}
                         </div>
                         <div className="mt-0.5 flex items-center gap-1.5 flex-wrap">
-                          <span className="text-[11px] text-secondary">{applicationByUserId[u.id].application_no}</span>
+                          {/* NEW-/APP- while in process; the LOC Ref No once registered. */}
+                          <span className="text-[11px] text-secondary">
+                            {statusRefByUserId[u.id] || applicationByUserId[u.id].application_no}
+                          </span>
                           <span
                             className="inline-flex items-center rounded-full border px-1.5 py-0.5 text-[9px] font-medium"
                             style={{ borderColor: 'var(--border-subtle)', color: 'var(--text-muted)' }}
@@ -1346,11 +1379,20 @@ export function LocatorUsersManagement({
                         applicationByUserId[u.id] ? (
                           <button
                             type="button"
-                            className="text-left cursor-pointer rounded-md -mx-1.5 -my-1 px-1.5 py-1 transition-colors hover:bg-[var(--control-bg)] active:bg-[var(--selected-bg)]"
+                            // Registered (LOC/REN): the Account Officer's now — not opened from here.
+                            disabled={Boolean(statusRefByUserId[u.id])}
+                            className={`text-left rounded-md -mx-1.5 -my-1 px-1.5 py-1 transition-colors ${
+                              statusRefByUserId[u.id]
+                                ? 'cursor-default'
+                                : 'cursor-pointer hover:bg-[var(--control-bg)] active:bg-[var(--selected-bg)]'
+                            }`}
                             onClick={() => goToApplication(u, applicationByUserId[u.id])}
                           >
                             <div className="font-semibold" style={{ color: 'var(--text)' }}>{companyByUserId[u.id]}</div>
-                            <div className="mt-0.5 text-secondary">{applicationByUserId[u.id].application_no}</div>
+                            {/* NEW-/APP- while in process; LOC- once registered; REN- while renewing. */}
+                            <div className="mt-0.5 text-secondary">
+                              {statusRefByUserId[u.id] || applicationByUserId[u.id].application_no}
+                            </div>
                           </button>
                         ) : (
                           <div style={{ color: 'var(--text)' }}>{companyByUserId[u.id]}</div>

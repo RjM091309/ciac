@@ -1,4 +1,4 @@
-const { selectData, insertData, updateSchema } = require("../config/database");
+const { selectData, insertData, updateData, updateSchema } = require("../config/database");
 
 // TOR items 10-12: a single append-only trail for security-relevant events
 // across the app (logins, account changes, permission changes), distinct
@@ -56,6 +56,29 @@ async function createSchema() {
     IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_audit_logs_action' AND object_id = OBJECT_ID('dbo.audit_logs'))
       CREATE INDEX IX_audit_logs_action ON dbo.audit_logs(action);
   `);
+  // Country of the IP (lib/geoip.js, offline): "PH", "LAN" (office network)…
+  await updateSchema(`
+    IF COL_LENGTH('dbo.audit_logs', 'country_code') IS NULL
+      ALTER TABLE dbo.audit_logs ADD country_code NVARCHAR(3) NULL;
+  `);
+  backfillCountries().catch((error) => console.error("Audit log country backfill failed:", error.message));
+}
+
+/** Older entries (recorded before the Country column): look each distinct IP
+ * up once. Runs in the background at startup; a no-op once everything's set. */
+async function backfillCountries() {
+  const { countryCode } = require("../lib/geoip");
+  const ips = await selectData(
+    `SELECT DISTINCT TOP (5000) ip_address FROM dbo.audit_logs WHERE country_code IS NULL AND ip_address IS NOT NULL`
+  );
+  for (const { ip_address } of ips) {
+    const code = countryCode(normalizeIp(ip_address));
+    if (!code) continue;
+    await updateData(`UPDATE dbo.audit_logs SET country_code = @param1 WHERE ip_address = @param0 AND country_code IS NULL`, [
+      ip_address,
+      code,
+    ]);
+  }
 }
 
 // The schema checks only need to run once per process, not on every write.
@@ -81,6 +104,9 @@ function normalizeIp(ip) {
 }
 
 function toIntOrNull(v) {
+  // null/"" mean "none" (Number(null) is 0 — no such user, which broke the
+  // user_id foreign key for system actions such as renewal reminders).
+  if (v === null || v === undefined || v === "") return null;
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
 }
@@ -113,9 +139,9 @@ async function record({
     await insertData(
       `
       INSERT INTO dbo.audit_logs
-        (user_id, actor_username, action, entity_type, entity_id, metadata_json, ip_address, user_agent, session_id, created_at)
+        (user_id, actor_username, action, entity_type, entity_id, metadata_json, ip_address, user_agent, session_id, country_code, created_at)
       VALUES
-        (@param0, @param1, @param2, @param3, @param4, @param5, @param6, @param7, @param8, SYSUTCDATETIME())
+        (@param0, @param1, @param2, @param3, @param4, @param5, @param6, @param7, @param8, @param9, SYSUTCDATETIME())
       `,
       [
         toIntOrNull(actorId),
@@ -127,6 +153,7 @@ async function record({
         ip,
         ua ? String(ua).slice(0, 512) : null,
         sid ? String(sid).slice(0, 36) : null,
+        require("../lib/geoip").countryCode(ip),
       ]
     );
   } catch (error) {
@@ -211,7 +238,7 @@ function escapeLike(value) {
 }
 
 /** WHERE clause shared by the page listing and the CSV export. */
-async function buildWhere({ q, qActions, user, action, category, entityType, entityId, session, from, to } = {}) {
+async function buildWhere({ q, qActions, user, action, category, entityType, entityId, session, from, to, country } = {}) {
   const where = [];
   const params = [];
   // Every "?" in a fragment refers to the same value.
@@ -272,6 +299,11 @@ async function buildWhere({ q, qActions, user, action, category, entityType, ent
     if (id != null) push("entity_id = ?", id);
   }
   if (session) push("session_id = ?", session);
+  // Country: "abroad" = a known country other than the Philippines; "LAN" =
+  // office network; "unknown" = no country; else an ISO code like "US".
+  if (country === "abroad") where.push("country_code IS NOT NULL AND country_code NOT IN ('PH', 'LAN')");
+  else if (country === "unknown") where.push("country_code IS NULL");
+  else if (country && /^[A-Z]{2,3}$/.test(country)) push("country_code = ?", country);
   if (from) push("created_at >= ?", from);
   if (to) push("created_at <= ?", to);
 
@@ -291,11 +323,13 @@ function mapRow(r) {
     ip_address: normalizeIp(r.ip_address),
     user_agent: r.user_agent ?? null,
     session_id: r.session_id ?? null,
+    country_code: r.country_code ?? null,
+    country: require("../lib/geoip").countryName(r.country_code ?? null),
     created_at: r.created_at,
   };
 }
 
-const SELECT_COLUMNS = `id, user_id AS actor_id, actor_username, action, entity_type, entity_id, metadata_json, ip_address, user_agent, session_id, created_at`;
+const SELECT_COLUMNS = `id, user_id AS actor_id, actor_username, action, entity_type, entity_id, metadata_json, ip_address, user_agent, session_id, country_code, created_at`;
 
 async function list(filters = {}) {
   await ensureSchema();

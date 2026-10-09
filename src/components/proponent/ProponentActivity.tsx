@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { FileUp, KeyRound, LogIn, ShieldCheck, UserPlus, PencilLine } from 'lucide-react';
+import { BellRing, FileUp, KeyRound, LogIn, ShieldCheck, UserPlus, PencilLine } from 'lucide-react';
 import { EmptyState } from '../ui/EmptyState';
 import { noLocatorProfileMessage } from '../../lib/locatorProfile';
 import { useSiteSettings } from '../../lib/siteSettings';
@@ -25,6 +25,7 @@ const ACTION_META: Record<string, { label: string; icon: any; color: string }> =
   PROFILE_CHANGE_APPROVED: { label: 'Profile change approved', icon: PencilLine, color: '#10b981' },
   PROFILE_CHANGE_REJECTED: { label: 'Profile change declined', icon: PencilLine, color: '#ef4444' },
   DOCUMENT_UPLOADED: { label: 'Document uploaded', icon: FileUp, color: '#06b6d4' },
+  RENEWAL_REMINDER_SENT: { label: 'Renewal reminder from {org}', icon: BellRing, color: '#f59e0b' },
 };
 
 function fmt(value: string | null) {
@@ -41,6 +42,9 @@ function detail(row: ActivityRow): string | null {
   if (row.action === 'PROFILE_CHANGE_APPROVED' && Array.isArray(m.fields)) return `Fields: ${m.fields.join(', ')}`;
   if (row.action === 'PROFILE_CHANGE_REJECTED' && m.remarks) return m.remarks;
   if (row.action === 'ACCOUNT_REJECTED' && m.note) return m.note;
+  if (row.action === 'RENEWAL_REMINDER_SENT' && m.permit_no) {
+    return `Contract ${m.permit_no}${Number(m.reminder) > 1 ? ` · follow-up #${Number(m.reminder)}` : ''}`;
+  }
   return null;
 }
 

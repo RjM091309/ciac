@@ -1,6 +1,8 @@
 const { selectData, insertData, updateSchema } = require("../config/database");
 
 function toInt(v) {
+  // null/"" mean "none" (Number(null) would be 0, e.g. for system entries).
+  if (v === null || v === undefined || v === "") return null;
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
 }

@@ -354,6 +354,9 @@ exports.cancelTotpSetup = async (req, res) => {
 
 exports.disableTotp = async (req, res) => {
   try {
+    if (!require("../lib/siteSettings").getters.allow2faOptOut()) {
+      return fail(res, 403, "Two-factor authentication is required for all accounts. It can't be turned off.");
+    }
     const record = await User.getTotpRecord(req.user.id);
     if (!record) return fail(res, 404, "Account not found");
     if (!(record.totp_enabled === 1 && record.totp_secret)) return res.json({ success: true, data: { totp_enabled: 0 } });

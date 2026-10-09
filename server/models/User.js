@@ -240,6 +240,13 @@ async function createSchema() {
     IF COL_LENGTH('dbo.users', 'totp_opt_out') IS NULL
       ALTER TABLE dbo.users ADD totp_opt_out BIT NOT NULL CONSTRAINT DF_users_totp_opt_out DEFAULT (0);
   `);
+  // When the password was last set — for Portal Settings' password expiry.
+  // Existing accounts start counting from now (WITH VALUES), new ones from creation.
+  await updateSchema(`
+    IF COL_LENGTH('dbo.users', 'password_changed_at') IS NULL
+      ALTER TABLE dbo.users ADD password_changed_at DATETIME2(3) NULL
+        CONSTRAINT DF_users_password_changed_at DEFAULT (SYSUTCDATETIME()) WITH VALUES;
+  `);
 
   // user_roles
   await updateSchema(`
@@ -584,6 +591,7 @@ async function updateUser(id, { username, email, phone, full_name, password, is_
   let passwordChanged = false;
   if (password !== undefined && password !== "") {
     pushSet("password_hash = ?", await hashPasswordIfNeeded(password));
+    sets.push("password_changed_at = SYSUTCDATETIME()");
     passwordChanged = true;
   }
   if (is_active !== undefined) pushSet("is_active = ?", is_active ? 1 : 0);
@@ -889,7 +897,7 @@ async function setPasswordAndClearMustChange(userId, plainPassword) {
   await updateData(
     `
       UPDATE users
-      SET password_hash = @param1, must_change_password = 0, updated_at = GETDATE()
+      SET password_hash = @param1, must_change_password = 0, password_changed_at = SYSUTCDATETIME(), updated_at = GETDATE()
       WHERE id = @param0
     `,
     [userId, await hashPasswordIfNeeded(plainPassword)]
@@ -911,7 +919,7 @@ async function changeOwnPassword(userId, plainPassword) {
   await updateData(
     `
       UPDATE users
-      SET password_hash = @param1, updated_at = GETDATE()
+      SET password_hash = @param1, password_changed_at = SYSUTCDATETIME(), updated_at = GETDATE()
       WHERE id = @param0
     `,
     [userId, await hashPasswordIfNeeded(plainPassword)]
@@ -968,6 +976,7 @@ async function completePasswordReset(userId, plainPassword) {
     `
       UPDATE users
       SET password_hash = @param1,
+          password_changed_at = SYSUTCDATETIME(),
           must_change_password = 0,
           token_version = token_version + 1,
           password_reset_token_hash = NULL,

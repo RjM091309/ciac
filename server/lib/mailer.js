@@ -47,7 +47,7 @@ function withSignature({ text, html }) {
  * dev/test without real SMTP credentials. Returns whether the mail actually
  * went out, so a caller can tell the admin if delivery didn't happen.
  */
-async function sendMail({ to, subject, text, html }) {
+async function sendMail({ to, cc, subject, text, html }) {
   const config = siteSettings.mailConfig();
   if (!config.configured) {
     console.warn(
@@ -62,7 +62,14 @@ async function sendMail({ to, subject, text, html }) {
     return { sent: false, reason: "SMTP_NOT_CONFIGURED" };
   }
   try {
-    await currentTransporter(config).sendMail({ from: config.from, replyTo: config.replyTo, to, subject, ...withSignature({ text, html }) });
+    await currentTransporter(config).sendMail({
+      from: config.from,
+      replyTo: config.replyTo,
+      to,
+      ...(cc ? { cc } : {}),
+      subject,
+      ...withSignature({ text, html }),
+    });
     return { sent: true };
   } catch (error) {
     console.error("[mailer] Failed to send email:", error.message || error);

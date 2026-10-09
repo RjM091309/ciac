@@ -444,6 +444,8 @@ async function listProponents({ approvedOnly = false } = {}) {
     created_at: p.created_at ?? null,
     updated_at: p.updated_at ?? null,
     is_active: p.is_active,
+    // Set once an Account Officer is assigned = a Registered Locator.
+    account_officer_id: p.account_officer_id ?? null,
     // Locator's own login email/name (not the business itself) — used by
     // the New Application picker to show who'll receive the activation
     // email, and account_status ("PENDING" = created but not yet activated,
@@ -651,9 +653,18 @@ async function listProponentsForLocatorList({ accountOfficerId = null } = {}) {
       creator.full_name AS encoded_by,
       COALESCE(apptype.name, manual_apptype.name) AS business_type,
       COALESCE(ct.effective_start, p.manual_start_term) AS start_term,
-      COALESCE(ct.effective_end, p.manual_end_term) AS end_term
+      COALESCE(ct.effective_end, p.manual_end_term) AS end_term,
+      open_ren.application_no AS renewal_application_no
     FROM dbo.proponents p
     LEFT JOIN dbo.users creator ON creator.id = p.created_by
+    -- A renewal still being decided (shown as REN-… next to the LOC Ref No).
+    OUTER APPLY (
+      SELECT TOP (1) r.application_no
+      FROM dbo.applications r
+      WHERE r.proponent_id = p.id AND r.is_renewal = 1
+        AND r.status NOT IN ('APPROVED', 'REJECTED', 'DISAPPROVED')
+      ORDER BY r.id DESC
+    ) open_ren
     -- One row per locator: an approved renewal updates it (type here, lease
     -- term from its contract below). A renewal still in review doesn't.
     OUTER APPLY (
@@ -692,6 +703,7 @@ async function listProponentsForLocatorList({ accountOfficerId = null } = {}) {
     start_term: p.start_term ?? null,
     end_term: p.end_term ?? null,
     lease_term: formatLeaseTerm(p.start_term, p.end_term),
+    renewal_application_no: p.renewal_application_no ?? null,
   }));
 }
 

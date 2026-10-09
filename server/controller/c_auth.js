@@ -125,6 +125,22 @@ exports.login = async (req, res) => {
       sessionId: result.session?.id,
       req,
     });
+    // Signed in from outside the Philippines: tell the admins (system alert,
+    // at most once a day per account and country).
+    try {
+      const { countryCode, countryName } = require("../lib/geoip");
+      const cc = countryCode(AuditLog.normalizeIp(req.ip));
+      if (cc && cc !== "PH" && cc !== "LAN") {
+        require("../lib/systemAlerts").alertAdmins({
+          key: `login-abroad-${result.user?.id}-${cc}`,
+          throttleMs: 24 * 60 * 60 * 1000,
+          subject: `Sign-in from ${countryName(cc)}: ${result.user?.username}`,
+          body: `${result.user?.username} signed in from ${countryName(cc)} (IP ${AuditLog.normalizeIp(req.ip)}). If this wasn't expected, revoke their sessions in User Management and reset the password.`,
+        });
+      }
+    } catch (error) {
+      console.error("Sign-in country check failed:", error.message);
+    }
     // Cookie / activity-logging consent from the login page notice — the
     // client sends it until one successful login has recorded it.
     const consent = req.body?.consent;

@@ -149,6 +149,8 @@ type LocatorDynamicRow = {
   end_term: string | null;
   lease_term: string | null;
   encoded_by: string | null;
+  /** A renewal still being decided — the Ref No then shows as REN-… (same number). */
+  renewal_application_no?: string | null;
 };
 
 type DisplayRow = ProponentRow & LocatorDynamicRow;
@@ -605,6 +607,7 @@ export function ProponentsManagement({
         end_term: d?.end_term ?? null,
         lease_term: d?.lease_term ?? null,
         encoded_by: d?.encoded_by ?? null,
+        renewal_application_no: d?.renewal_application_no ?? null,
       };
     });
   }, [proponents, locatorsData?.dynamic]);
@@ -827,6 +830,7 @@ export function ProponentsManagement({
       const statusStr = p.is_active === 1 ? 'active' : 'inactive';
       return (
         (p.ref_no || '').toLowerCase().includes(q) ||
+        String(displayRef(p)).toLowerCase().includes(q) ||
         (p.business_name || '').toLowerCase().includes(q) ||
         (p.tin || '').toLowerCase().includes(q) ||
         (p.registration_no || '').toLowerCase().includes(q) ||
@@ -1407,7 +1411,7 @@ export function ProponentsManagement({
                     {p.business_name}
                     {pendingRequestFor.has(p.id) ? <ChangeRequestBadge /> : null}
                   </div>
-                  <span className="shrink-0 text-[10px] font-semibold text-secondary tabular-nums">{p.ref_no || '—'}</span>
+                  <span className="shrink-0 text-[10px] font-semibold text-secondary tabular-nums">{displayRef(p)}</span>
                 </div>
                 {p.address ? <div className="mt-0.5 text-[11px] text-secondary break-words line-clamp-2">{p.address}</div> : null}
                 {p.business_type ? (
@@ -1470,7 +1474,7 @@ export function ProponentsManagement({
                     onClick={() => openEdit(p)}
                   >
                     <td className="px-3 py-2 text-[11px] whitespace-nowrap" style={{ color: 'var(--text)' }}>
-                      {p.ref_no || '—'}
+                      {displayRef(p)}
                     </td>
                     <td className="px-3 py-2 text-[11px]" style={{ color: 'var(--text)' }}>
                       {p.business_name}
@@ -2650,6 +2654,13 @@ function StatCard({ label, value }: { label: string; value: string }) {
  * button (matches the +/- row buttons) so it can sit in the same vertical
  * stack instead of its own full-width row. Disabled until something in that
  * section changed; the label is only used as the tooltip/title now. */
+/** The locator's own Ref No; while a renewal is in process its prefix reads
+ * REN instead of LOC (same number), so it's clear at a glance it's renewing. */
+function displayRef(p: { ref_no: string | null; renewal_application_no?: string | null }) {
+  if (!p.ref_no) return '—';
+  return p.renewal_application_no ? p.ref_no.replace(/^LOC-/, 'REN-') : p.ref_no;
+}
+
 function ChangeRequestBadge() {
   return (
     <span

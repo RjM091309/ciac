@@ -42,7 +42,7 @@ export type PublicSiteSettings = {
     favicon: { url: string | null; type: string };
   };
   /** authenticator_name: the label new 2FA setups get in the authenticator app. */
-  security: { idle_timeout_minutes: number; password_min_length: number; authenticator_name: string };
+  security: { idle_timeout_minutes: number; password_min_length: number; authenticator_name: string; allow_2fa_opt_out?: boolean };
   /** The notice shown before the first sign-in (Portal Settings → Security). */
   cookie_notice: { title: string; message: string; accept_label: string; decline_label: string; decline_url: string };
   banner: { title: string; message: string; level: 'info' | 'warning' | 'critical'; ends_at: string | null } | null;

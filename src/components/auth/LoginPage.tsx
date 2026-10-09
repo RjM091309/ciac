@@ -800,7 +800,7 @@ export function LoginPage(props: {
               {step === 'enroll'
                 ? 'Add this account to your authenticator app to finish signing in.'
                 : step === 'forceChangePassword'
-                  ? 'Your password was reset by an administrator. Choose a new one to continue.'
+                  ? 'Your password needs to be changed (reset by an administrator, or it has expired). Choose a new one to continue.'
                   : step === 'forgotEmail'
                     ? "Enter the email on your account and we'll send you a link to reset your password."
                     : step === 'forgotSent'

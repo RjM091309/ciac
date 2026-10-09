@@ -218,6 +218,10 @@ initializeDatabase()
     // Closes sessions that expired or were revoked without a sign-out, and
     // logs each one to the audit trail (see models/UserSession.js).
     UserSession.startSweeper();
+    // Emails locators whose lease contract is due for renewal (about 6 months left).
+    require("./lib/renewalReminders").start();
+    // Deletes audit log entries past the retention set in Portal Settings (0 = keep forever).
+    require("./lib/auditRetention").start();
   })
   .catch(() => {
     // If DB is down, you can still view login page.

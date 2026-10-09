@@ -1,7 +1,7 @@
 const AuditLog = require("../models/AuditLog");
 const { publicErrorMessage } = require("../lib/httpError");
 
-const FILTER_KEYS = ["q", "qActions", "user", "action", "category", "entityType", "entityId", "session", "from", "to"];
+const FILTER_KEYS = ["q", "qActions", "user", "action", "category", "entityType", "entityId", "session", "from", "to", "country"];
 // qActions is a comma-separated list of action codes, so it gets more room.
 const MAX_LENGTH = { qActions: 2000 };
 

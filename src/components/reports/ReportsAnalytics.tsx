@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowDown, ArrowUp, ArrowUpDown, Download, FileSpreadsheet, FileText, RotateCcw, Search, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, ArrowUpDown, Download, FileSpreadsheet, FileText, Loader2, RotateCcw, Search, X } from 'lucide-react';
 import { motion } from 'motion/react';
 import { toast } from 'sonner';
 import {
@@ -336,6 +336,11 @@ export function ReportsAnalytics({ navigate }: { navigate?: (to: string, opts?: 
   const [overview, setOverview] = useState<Overview | null>(null);
   const [rows, setRows] = useState<AppRow[]>([]);
   const [loading, setLoading] = useState(true);
+  // Skeletons only on the first load; a filter change keeps the current
+  // numbers on screen (dimmed) until the new ones arrive — no flashing.
+  const [hasLoaded, setHasLoaded] = useState(false);
+  const initialLoading = loading && !hasLoaded;
+  const refreshing = loading && hasLoaded;
   const [exporting, setExporting] = useState<'pdf' | 'csv' | null>(null);
 
   const [search, setSearch] = useState('');
@@ -404,7 +409,13 @@ export function ReportsAnalytics({ navigate }: { navigate?: (to: string, opts?: 
   useEffect(() => {
     const params = new URLSearchParams();
     if (dateFrom) params.set('dateFrom', dateFrom.toISOString());
-    if (dateTo) params.set('dateTo', dateTo.toISOString());
+    // The whole "to" day counts: the picker gives its midnight, so send the
+    // end of that (local) day — otherwise the last day was left out.
+    if (dateTo) {
+      const end = new Date(dateTo);
+      end.setHours(23, 59, 59, 999);
+      params.set('dateTo', end.toISOString());
+    }
     if (typeFilter) params.set('applicationType', typeFilter);
     if (statusFilter) params.set('status', statusFilter);
     if (renewalFilter) params.set('isRenewal', renewalFilter);
@@ -422,6 +433,7 @@ export function ReportsAnalytics({ navigate }: { navigate?: (to: string, opts?: 
         if (!appsJson?.success) throw new Error(appsJson?.message || 'Failed to load applications list');
         setOverview(overviewJson.data);
         setRows(appsJson.data || []);
+        setHasLoaded(true);
         setPage(1);
       })
       .catch((e) => {
@@ -667,12 +679,15 @@ export function ReportsAnalytics({ navigate }: { navigate?: (to: string, opts?: 
 
       doc.setTextColor(0);
       doc.setFontSize(10);
+      // Counted from the rows in this file (search included), so the summary
+      // always matches the table below it.
+      const countStatus = (st: string) => sortedRows.filter((r) => r.status === st).length;
       const summaryLine = [
-        `Total: ${overview?.total_applications ?? 0}`,
-        `Approved: ${overview?.applications_by_status?.APPROVED ?? 0}`,
-        `For Approval: ${overview?.applications_by_status?.FOR_APPROVAL ?? 0}`,
-        `Returned: ${overview?.applications_by_status?.RETURNED ?? 0}`,
-        `Disapproved: ${overview?.applications_by_status?.DISAPPROVED ?? 0}`,
+        `Total: ${sortedRows.length}`,
+        `Approved: ${countStatus('APPROVED')}`,
+        `For Approval: ${countStatus('FOR_APPROVAL')}`,
+        `Returned: ${countStatus('RETURNED')}`,
+        `Disapproved: ${countStatus('DISAPPROVED')}`,
       ].join('   |   ');
       doc.text(summaryLine, 14, 30);
 
@@ -759,6 +774,11 @@ export function ReportsAnalytics({ navigate }: { navigate?: (to: string, opts?: 
 
           {/* Phones: three equal buttons across the full width. */}
           <div className="grid grid-cols-3 gap-2 sm:flex sm:items-center [&>button]:justify-center [&>button]:whitespace-nowrap [&>button]:px-2 sm:[&>button]:px-3">
+            {refreshing ? (
+              <span className="hidden sm:inline-flex items-center gap-1.5 text-[11px] text-secondary" role="status">
+                <Loader2 size={13} className="animate-spin" /> Updating…
+              </span>
+            ) : null}
             <button
               type="button"
               onClick={resetFilters}
@@ -772,7 +792,7 @@ export function ReportsAnalytics({ navigate }: { navigate?: (to: string, opts?: 
             <button
               type="button"
               onClick={exportCsv}
-              disabled={exporting !== null || sortedRows.length === 0}
+              disabled={exporting !== null || refreshing || sortedRows.length === 0}
               className={cn(
                 'inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-[11px] font-semibold border cursor-pointer',
                 (exporting !== null || sortedRows.length === 0) && 'opacity-50 cursor-not-allowed'
@@ -785,7 +805,7 @@ export function ReportsAnalytics({ navigate }: { navigate?: (to: string, opts?: 
             <button
               type="button"
               onClick={exportPdf}
-              disabled={exporting !== null || sortedRows.length === 0}
+              disabled={exporting !== null || refreshing || sortedRows.length === 0}
               className={cn(
                 'inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-[11px] font-semibold shadow-sm cursor-pointer',
                 (exporting !== null || sortedRows.length === 0) && 'opacity-50 cursor-not-allowed'
@@ -800,44 +820,44 @@ export function ReportsAnalytics({ navigate }: { navigate?: (to: string, opts?: 
       </div>
 
       <div className="grid grid-cols-3 lg:grid-cols-6 gap-2 sm:gap-4">
-        <StatTile loading={loading}
+        <StatTile loading={initialLoading}
           label="Total Applications"
           value={overview?.total_applications ?? '—'}
           onClick={() => drillToStatus('')}
           title="Show all statuses in the table below"
         />
-        <StatTile loading={loading}
+        <StatTile loading={initialLoading}
           label="Approved"
           value={overview?.applications_by_status?.APPROVED ?? 0}
           tone="#10b981"
           onClick={() => drillToStatus('APPROVED')}
           title="Filter the table to Approved applications"
         />
-        <StatTile loading={loading}
+        <StatTile loading={initialLoading}
           label="For Approval"
           value={overview?.applications_by_status?.FOR_APPROVAL ?? 0}
           tone="#3b82f6"
           onClick={() => drillToStatus('FOR_APPROVAL')}
           title="Filter the table to applications For Approval"
         />
-        <StatTile loading={loading}
+        <StatTile loading={initialLoading}
           label="Returned"
           value={overview?.applications_by_status?.RETURNED ?? 0}
           tone="#f59e0b"
           onClick={() => drillToStatus('RETURNED')}
           title="Filter the table to Returned applications"
         />
-        <StatTile loading={loading}
+        <StatTile loading={initialLoading}
           label="Disapproved / Rejected"
           value={(overview?.applications_by_status?.DISAPPROVED ?? 0) + (overview?.applications_by_status?.REJECTED ?? 0)}
           tone="#ef4444"
         />
-        <StatTile loading={loading} label="Contracts Issued" value={overview?.contracts_issued ?? '—'} />
+        <StatTile loading={initialLoading} label="Contracts Issued" value={overview?.contracts_issued ?? '—'} />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <ChartCard title="Applications by Status">
-          {loading ? (
+          {initialLoading ? (
             <StatusSkeleton />
           ) : hasStatusData ? (
             <StatusSplit counts={statusCounts} onPick={drillToStatus} />
@@ -847,7 +867,7 @@ export function ReportsAnalytics({ navigate }: { navigate?: (to: string, opts?: 
         </ChartCard>
 
         <ChartCard title="Applications by Type">
-          {loading ? (
+          {initialLoading ? (
             <TypeSkeleton />
           ) : typeTiles.tiles.length === 0 ? (
             <ChartEmpty />
@@ -912,7 +932,7 @@ export function ReportsAnalytics({ navigate }: { navigate?: (to: string, opts?: 
             </div>
           }
         >
-          {loading ? (
+          {initialLoading ? (
             <TrendSkeleton />
           ) : trendSeries.length === 0 ? (
             <ChartEmpty />
@@ -928,25 +948,25 @@ export function ReportsAnalytics({ navigate }: { navigate?: (to: string, opts?: 
         </h3>
 
         <div className="grid grid-cols-3 lg:grid-cols-6 gap-2 sm:gap-4">
-          <StatTile loading={loading} label="Total Permits" value={overview ? totalPermits : '—'} />
-          <StatTile loading={loading} label="Valid Permits" value={overview?.permits_by_status?.VALID ?? 0} tone={PERMIT_STATUS_TONE.VALID.color} />
-          <StatTile loading={loading} label="Expiring Permits" value={overview?.permits_by_status?.EXPIRING ?? 0} tone={PERMIT_STATUS_TONE.EXPIRING.color} />
-          <StatTile loading={loading} label="Expired Permits" value={overview?.permits_by_status?.EXPIRED ?? 0} tone={PERMIT_STATUS_TONE.EXPIRED.color} />
-          <StatTile loading={loading} label="Total Inspections" value={overview ? totalInspections : '—'} />
-          <StatTile loading={loading} label="Failed Inspections" value={overview?.inspections_by_result?.FAILED ?? 0} tone={INSPECTION_RESULT_TONE.FAILED.color} />
+          <StatTile loading={initialLoading} label="Total Permits" value={overview ? totalPermits : '—'} />
+          <StatTile loading={initialLoading} label="Valid Permits" value={overview?.permits_by_status?.VALID ?? 0} tone={PERMIT_STATUS_TONE.VALID.color} />
+          <StatTile loading={initialLoading} label="Expiring Permits" value={overview?.permits_by_status?.EXPIRING ?? 0} tone={PERMIT_STATUS_TONE.EXPIRING.color} />
+          <StatTile loading={initialLoading} label="Expired Permits" value={overview?.permits_by_status?.EXPIRED ?? 0} tone={PERMIT_STATUS_TONE.EXPIRED.color} />
+          <StatTile loading={initialLoading} label="Total Inspections" value={overview ? totalInspections : '—'} />
+          <StatTile loading={initialLoading} label="Failed Inspections" value={overview?.inspections_by_result?.FAILED ?? 0} tone={INSPECTION_RESULT_TONE.FAILED.color} />
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           <ChartCard title="Permits by Status">
-            <ProportionRibbon loading={loading} items={permitStatusChartData} toneMap={PERMIT_STATUS_TONE} />
+            <ProportionRibbon loading={initialLoading} items={permitStatusChartData} toneMap={PERMIT_STATUS_TONE} />
           </ChartCard>
 
           <ChartCard title="Inspections by Status">
-            <ProportionRibbon loading={loading} items={inspectionStatusChartData} toneMap={INSPECTION_STATUS_TONE} />
+            <ProportionRibbon loading={initialLoading} items={inspectionStatusChartData} toneMap={INSPECTION_STATUS_TONE} />
           </ChartCard>
 
           <ChartCard title="Inspections by Result">
-            <ProportionRibbon loading={loading} items={inspectionResultChartData} toneMap={INSPECTION_RESULT_TONE} />
+            <ProportionRibbon loading={initialLoading} items={inspectionResultChartData} toneMap={INSPECTION_RESULT_TONE} />
           </ChartCard>
         </div>
       </div>
@@ -982,7 +1002,7 @@ export function ReportsAnalytics({ navigate }: { navigate?: (to: string, opts?: 
           </div>
         </div>
 
-        {loading ? (
+        {initialLoading ? (
           <TableSkeleton columns={6} rows={6} />
         ) : sortedRows.length === 0 ? (
           <EmptyState

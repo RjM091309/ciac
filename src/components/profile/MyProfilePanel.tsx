@@ -7,6 +7,7 @@ import { Skeleton } from '../ui/Skeleton';
 import { NoAutofillPasswordInput } from '../ui/NoAutofillPasswordInput';
 import { loadMyProfile, patchMyProfile, setMyProfile, useMyProfile, type MyProfile } from '../../lib/myProfile';
 import { roleDisplayName } from '../../lib/roleDisplay';
+import { getSiteSettings } from '../../lib/siteSettings';
 import { PhotoEditorModal } from './PhotoEditorModal';
 
 // My Profile (staff): the signed-in user's own account. Opened from the
@@ -383,10 +384,13 @@ function TwoFactorCard({ profile }: { profile: MyProfile }) {
                 <Smartphone size={13} />
                 Move to a new phone
               </SmallButton>
-              <SmallButton tone="danger" onClick={() => setStep({ kind: 'verify', intent: 'disable' })}>
-                <ShieldOff size={13} />
-                Turn off
-              </SmallButton>
+              {/* Hidden when Portal Settings requires 2FA for everyone. */}
+              {getSiteSettings().security.allow_2fa_opt_out !== false ? (
+                <SmallButton tone="danger" onClick={() => setStep({ kind: 'verify', intent: 'disable' })}>
+                  <ShieldOff size={13} />
+                  Turn off
+                </SmallButton>
+              ) : null}
             </>
           ) : (
             <SmallButton tone="primary" onClick={() => setStep({ kind: 'password' })} disabled={busy}>

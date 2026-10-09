@@ -5,10 +5,13 @@ const ComplianceRequirement = require("./ComplianceRequirement");
 // this exact type whenever a contract is issued (see keepContractPermitInSync
 // there); it is not one of the configurable Compliance Requirements.
 const RESERVED_PERMIT_TYPE = "CONTRACT";
-// A permit/contract needs at least a year's runway for renewal to be
-// processed in time — flag it as EXPIRING once less than 12 months remain,
-// not just in the final weeks.
-const EXPIRING_WINDOW_DAYS = 365;
+// About 6 months: a permit/contract shows as EXPIRING (and on Renewal
+// Tracking) once it's this close to its expiry.
+// Set in Portal Settings → Renewals ("Expiring window", in months; default 6).
+function expiringWindowDays() {
+  const months = require("../lib/siteSettings").getters.renewals().expiringWindowMonths || 6;
+  return Math.round(months * 30.44);
+}
 
 function toInt(v) {
   if (v === null || v === undefined || v === "") return null;
@@ -49,7 +52,7 @@ function effectiveStatus(row) {
   const now = new Date();
   const days = (expiry.getTime() - now.getTime()) / (1000 * 60 * 60 * 24);
   if (days < 0) return "EXPIRED";
-  if (days <= EXPIRING_WINDOW_DAYS) return "EXPIRING";
+  if (days <= expiringWindowDays()) return "EXPIRING";
   return "VALID";
 }
 
@@ -115,18 +118,19 @@ const SELECT_COLS = `
   p.issuing_authority, p.issue_date, p.expiry_date, p.status, p.document_id,
   p.remarks, p.is_active, p.created_by, p.updated_by, p.created_at, p.updated_at,
   p.certificate_path,
-  -- Renewal Tracking: whether a renewal application already exists for this
-  -- permit (a REJECTED/DISAPPROVED attempt doesn't count, so the permit is
-  -- still renewable again) — lets Permits Management show "Renew" only when
-  -- there truly isn't one in flight yet, and link to it when there is.
+  -- Renewal Tracking: the locator's renewal still being decided, if any. A
+  -- renewal belongs to the locator (one open at a time), whichever permit it
+  -- was filed from; decided ones (approved/rejected/disapproved) don't count.
   (
     SELECT TOP (1) a.id FROM dbo.applications a
-    WHERE a.renewed_from_permit_id = p.id AND a.status NOT IN ('REJECTED', 'DISAPPROVED')
+    WHERE a.proponent_id = p.proponent_id AND a.is_renewal = 1
+      AND a.status NOT IN ('APPROVED', 'REJECTED', 'DISAPPROVED')
     ORDER BY a.id DESC
   ) AS active_renewal_application_id,
   (
     SELECT TOP (1) a.application_no FROM dbo.applications a
-    WHERE a.renewed_from_permit_id = p.id AND a.status NOT IN ('REJECTED', 'DISAPPROVED')
+    WHERE a.proponent_id = p.proponent_id AND a.is_renewal = 1
+      AND a.status NOT IN ('APPROVED', 'REJECTED', 'DISAPPROVED')
     ORDER BY a.id DESC
   ) AS active_renewal_application_no,
   -- The application type that originally produced this permit, if on record
@@ -302,7 +306,7 @@ module.exports = {
   listPermitTypes,
   ensureSchema,
   effectiveStatus,
-  EXPIRING_WINDOW_DAYS,
+  expiringWindowDays,
   listAll,
   listByProponent,
   listByApplication,

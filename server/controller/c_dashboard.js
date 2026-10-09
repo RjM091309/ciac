@@ -121,9 +121,12 @@ function buildTrends(applications) {
 
 // System-wide overview for the admin dashboard: real counts instead of mock data.
 function summarizeAdmin(applications, proponents) {
-  const totalApplications = applications.length;
-  const newApplications = applications.filter((a) => !Number(a.is_renewal)).length;
-  const renewalApplications = applications.filter((a) => Number(a.is_renewal)).length;
+  // Applications still in process: once decided (approved — the locator is
+  // then registered — disapproved or rejected) they leave this count.
+  const open = applications.filter((a) => !["APPROVED", "DISAPPROVED", "REJECTED"].includes(upper(a.status)));
+  const totalApplications = open.length;
+  const newApplications = open.filter((a) => !Number(a.is_renewal)).length;
+  const renewalApplications = open.filter((a) => Number(a.is_renewal)).length;
 
   const statusBreakdown = summarize(applications);
 
@@ -136,7 +139,8 @@ function summarizeAdmin(applications, proponents) {
 
   return {
     totals: {
-      registeredBusinesses: proponents.filter((p) => Number(p.is_active)).length,
+      // Same as Registered Locator: active locators with an Account Officer.
+      registeredBusinesses: proponents.filter((p) => Number(p.is_active) && p.account_officer_id).length,
       totalBusinesses: proponents.length,
       totalApplications,
       newApplications,
@@ -177,8 +181,8 @@ function attentionQueue(
 }
 
 // Shares Permit.js's window so a permit and a contract are flagged "about to
-// expire" on the same timeline (currently: less than 12 months left).
-const EXPIRY_ATTENTION_WINDOW_DAYS = Permit.EXPIRING_WINDOW_DAYS;
+// expire" on the same timeline (currently: about 6 months left).
+const expiryAttentionWindowDays = () => Permit.expiringWindowDays();
 
 // The "Needs Attention" card now carries a Critical/Warning filter on the
 // frontend, so it needs every expiring/overdue item — not just the top few —
@@ -214,7 +218,8 @@ async function buildExpiryAttentionItems(limit, { includePermits = true, applica
   );
 
   const permitItems = permits
-    .filter((p) => p.effective_status === "EXPIRING" || p.effective_status === "EXPIRED")
+    // A permit whose renewal is already filed is in the Renewal Queue instead.
+    .filter((p) => (p.effective_status === "EXPIRING" || p.effective_status === "EXPIRED") && !p.active_renewal_application_id)
     .map((p) => {
       const days = daysUntil(p.expiry_date);
       return {
@@ -235,11 +240,15 @@ async function buildExpiryAttentionItems(limit, { includePermits = true, applica
       };
     });
 
+  // …nor while a renewal for it is already filed (it's in the Renewal Queue).
+  const renewingAppIds = new Set(
+    allPermits.filter((p) => p.active_renewal_application_id && p.application_id).map((p) => Number(p.application_id))
+  );
   const contractItems = contracts
     .filter((c) => !applicationIds || applicationIds.has(Number(c.application_id)))
-    .filter((c) => !renewedAppIds.has(Number(c.application_id)))
+    .filter((c) => !renewedAppIds.has(Number(c.application_id)) && !renewingAppIds.has(Number(c.application_id)))
     .map((c) => ({ ...c, _days: daysUntil(c.effective_end) }))
-    .filter((c) => c._days !== null && c._days <= EXPIRY_ATTENTION_WINDOW_DAYS)
+    .filter((c) => c._days !== null && c._days <= expiryAttentionWindowDays())
     .map((c) => ({
       kind: "contract",
       application_id: c.application_id,

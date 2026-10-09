@@ -190,12 +190,20 @@ async function loginViaDatabase(username, password, totpCode, newPassword) {
   // set their own password, right after proving they know the temp one,
   // before a session is issued. Checked ahead of TOTP: no point asking for a
   // 6-digit code tied to a password that's about to be replaced anyway.
-  if (Number(row.must_change_password) === 1) {
+  // Portal Settings → Security "Password expiry (days)" (0 = never): an
+  // expired password goes through the same set-a-new-password step.
+  const expiryDays = Number(siteSettings.passwordExpiryDays() || 0);
+  const changedAt = row.password_changed_at ? new Date(row.password_changed_at).getTime() : null;
+  const passwordExpired = expiryDays > 0 && changedAt !== null && Date.now() - changedAt > expiryDays * 86400000;
+  if (Number(row.must_change_password) === 1 || passwordExpired) {
     if (!newPassword) {
       return {
         success: false,
         mustChangePassword: true,
-        message: "Your password was reset by an administrator. Set a new password to continue.",
+        message:
+          Number(row.must_change_password) === 1
+            ? "Your password was reset by an administrator. Set a new password to continue."
+            : `Your password is more than ${expiryDays} days old. Set a new password to continue.`,
       };
     }
     const passwordError = validatePasswordStrength(newPassword);
@@ -242,7 +250,8 @@ async function loginViaDatabase(username, password, totpCode, newPassword) {
         }
         return { success: false, mfaRequired: true, reason: "invalid_mfa_code", userId: id, message: "Invalid authenticator code. Try again." };
       }
-    } else if (Number(row.totp_opt_out) !== 1) {
+    } else if (Number(row.totp_opt_out) !== 1 || !siteSettings.allow2faOptOut()) {
+      // (An earlier opt-out no longer counts once Portal Settings stops allowing it.)
       // First-time enrollment. Reuse any pending secret so a re-submit doesn't
       // invalidate a QR the user already scanned; mint one otherwise.
       let secret = null;

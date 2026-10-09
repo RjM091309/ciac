@@ -198,11 +198,15 @@ export function PermitsManagement({
   // Live: re-fetch quietly when something changes for this user (lib/liveData.ts).
   useLiveRefresh(() => refresh({ showLoading: false }).catch(() => {}));
 
-  // Renewal Tracking lists only what's due: EXPIRING (within a year) or
+  // Renewal Tracking lists only what's due: EXPIRING (within 6 months) or
   // EXPIRED. VALID, REVOKED and RENEWED (superseded by an approved renewal)
-  // permits stay off this list.
+  // permits stay off this list, and so does one whose renewal was already
+  // filed — that's in the Renewal Queue now.
   const permits = useMemo(
-    () => (data?.permits ?? []).filter((p) => p.effective_status === 'EXPIRING' || p.effective_status === 'EXPIRED'),
+    () =>
+      (data?.permits ?? []).filter(
+        (p) => (p.effective_status === 'EXPIRING' || p.effective_status === 'EXPIRED') && !p.active_renewal_application_id
+      ),
     [data?.permits]
   );
   useEffect(() => {
@@ -378,19 +382,6 @@ export function PermitsManagement({
         ) : (
           <span className="text-[10px] text-secondary">{days}d left</span>
         )}
-        {p.active_renewal_application_no ? (
-          <button
-            className="text-[10px] font-semibold underline decoration-dotted cursor-pointer"
-            style={{ color: '#3b82f6' }}
-            onClick={(e) => {
-              e.stopPropagation();
-              navigate?.(`/applications/renewals?applicationId=${p.active_renewal_application_id}`);
-            }}
-            title="Go to this renewal application"
-          >
-            Renewal filed: {p.active_renewal_application_no}
-          </button>
-        ) : null}
       </div>
     );
   }
@@ -504,7 +495,7 @@ export function PermitsManagement({
         {isLoading ? (
           <TableSkeleton columns={7} rows={5} />
         ) : filtered.length === 0 ? (
-          <EmptyState title="Nothing due for renewal" description="Permits and contracts show up here once they are expiring (within a year) or expired." />
+          <EmptyState title="Nothing due for renewal" description="Permits and contracts show up here once they are expiring (within 6 months) or expired." />
         ) : (
           <>
           {/* Phones: stacked cards instead of an 8-column table */}

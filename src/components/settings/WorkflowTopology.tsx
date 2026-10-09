@@ -72,7 +72,7 @@ const SCENARIOS: Scenario[] = [
       {
         lane: 'bdo2',
         title: 'Create locator + application',
-        auto: ["Generates the application number (APP-year-…).", "Seeds the requirements checklist for the industry type and type of contract.", "Refuses a second application for the same locator.", "On submit: activates the locator’s login and emails a temporary password; emails them that the application was filed."],
+        auto: ["Generates the application number (NEW-year-…; older ones are APP-year-…).", "Seeds the requirements checklist for the industry type and type of contract.", "Refuses a second application for the same locator.", "On submit: activates the locator’s login and emails a temporary password; emails them that the application was filed."],
         status: 'SUBMITTED',
         where: 'Locator Accounts',
         details: [
@@ -166,12 +166,13 @@ const SCENARIOS: Scenario[] = [
       {
         lane: 'ao2',
         title: 'Registered Locator',
-        auto: ["Adds the locator to Registered Locator (one row), with the lease term from the contract.", "Scopes it so a Level 2 Account Officer sees only their own locators.", "Counts the permit down to expiry; within a year it shows on Renewal Tracking and in Needs Attention."],
+        auto: ["Adds the locator to Registered Locator (one row), with the lease term from the contract; from now on it's shown by its LOC-… Ref No (also on Locator Accounts).", "Scopes it so a Level 2 Account Officer sees only their own locators.", "Counts the permit down to expiry; within 6 months it shows on Renewal Tracking and in Needs Attention.", "At 6 months left, emails the locator to renew (and tells the Account Officer), then a follow-up every month until the renewal is filed — each one logged."],
         status: 'One row per locator',
         where: 'Registered Locator',
         details: [
           'The locator now appears in Registered Locator; a Level 2 Account Officer sees only their own locators.',
-          'The contract permit counts down to expiry — it shows on Renewal Tracking once expiring.',
+          'The contract permit counts down to expiry — it shows on Renewal Tracking once expiring (6 months left).',
+          'The locator gets a renewal reminder email then, and monthly after that, until the renewal is filed.',
           'The locator can still upload requirements that were to follow.',
         ],
       },
@@ -189,11 +190,11 @@ const SCENARIOS: Scenario[] = [
       {
         lane: 'system',
         title: 'Permit expiring / expired',
-        auto: ["Works out each permit’s status from its expiry date (Valid / Expiring within a year / Expired).", "Lists only expiring and expired permits on Renewal Tracking; flags them in Needs Attention."],
+        auto: ["Works out each permit’s status from its expiry date (Valid / Expiring within 6 months / Expired).", "Lists only expiring and expired permits on Renewal Tracking; flags them in Needs Attention.", "Emails the locator a renewal reminder at 6 months left, then monthly (logged in the Audit Log and the locator's activity)."],
         status: 'EXPIRING · EXPIRED',
         where: 'Renewal Tracking',
         details: [
-          'Renewal Tracking lists only expiring (within a year) and expired permits and contracts.',
+          'Renewal Tracking lists only expiring (within 6 months) and expired permits and contracts.',
           'They also show in the dashboard\'s Needs Attention.',
         ],
       },
@@ -207,7 +208,8 @@ const SCENARIOS: Scenario[] = [
           'Files and submits the renewal for that permit\'s locator — no form.',
           'Account Officers only; a Level 2 only for their own locators. One open renewal at a time.',
           'Goes straight to the locator\'s own Account Officer — no BDO, no assigning step.',
-          'Registered Locator shows "Renewal in process" until it\'s decided.',
+          'The permit leaves Renewal Tracking (it\'s in the Renewal Queue now) and the reminders stop.',
+          'The locator\'s Ref No reads REN-… instead of LOC-… (same number) until the renewal is decided.',
         ],
         notifies: 'The locator (email: renewal filed)',
       },
@@ -375,7 +377,11 @@ function FlowDots({ path, reduceMotion, count = 2, dur = 1.8 }: { path: string; 
 export function WorkflowTopology() {
   const [scenarioId, setScenarioId] = useState<Scenario['id']>('new');
   const scn = useMemo(() => SCENARIOS.find((s) => s.id === scenarioId)!, [scenarioId]);
-  const [step, setStep] = useState(0);
+  const [rawStep, setStep] = useState(0);
+  // Never past the current scenario's last step: switching from New Locator
+  // (9 steps) to Renewal (6) on step 7+ used to render a step that doesn't
+  // exist and blank the page until the reset below ran.
+  const step = Math.min(rawStep, scn.steps.length - 1);
   const [playing, setPlaying] = useState(true);
   const [speed, setSpeed] = useState<Speed>('Normal');
   const reduceMotion =
@@ -420,7 +426,10 @@ export function WorkflowTopology() {
             <button
               key={s.id}
               type="button"
-              onClick={() => setScenarioId(s.id)}
+              onClick={() => {
+                setStep(0);
+                setScenarioId(s.id);
+              }}
               className={cn('px-3 py-1.5 rounded-full text-[12px] font-semibold cursor-pointer transition-colors', scenarioId === s.id ? '' : 'text-secondary')}
               style={scenarioId === s.id ? { backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' } : undefined}
             >

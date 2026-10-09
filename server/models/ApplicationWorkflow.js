@@ -550,9 +550,13 @@ async function createSchema() {
  * prefix+year. Generated inside the same transaction as the insert-or-update
  * of its counter row so concurrent filings never race onto the same number. */
 async function generateApplicationNo(tx, isRenewal) {
-  const prefix = isRenewal ? "REN" : "APP";
+  // NEW-<year>-… for new filings (was APP-, kept on older rows), REN- for renewals.
+  const prefix = isRenewal ? "REN" : "NEW";
   const year = new Date().getFullYear();
   const counterKey = `${prefix}-${year}`;
+  // NEW- carries on from the old APP- count for the same year, so the two
+  // never share a number (APP-2026-00002 → NEW-2026-00003).
+  const continuesFrom = prefix === "NEW" ? `APP-${year}` : null;
 
   const result = await tx.query(
     `
@@ -560,10 +564,11 @@ async function generateApplicationNo(tx, isRenewal) {
     USING (SELECT @param0 AS counter_key) AS src
     ON target.counter_key = src.counter_key
     WHEN MATCHED THEN UPDATE SET last_value = target.last_value + 1
-    WHEN NOT MATCHED THEN INSERT (counter_key, last_value) VALUES (src.counter_key, 1)
+    WHEN NOT MATCHED THEN INSERT (counter_key, last_value)
+      VALUES (src.counter_key, ISNULL((SELECT last_value FROM dbo.application_no_counters WHERE counter_key = @param1), 0) + 1)
     OUTPUT INSERTED.last_value;
     `,
-    [counterKey]
+    [counterKey, continuesFrom]
   );
   const seq = result?.recordset?.[0]?.last_value || 1;
   return `${counterKey}-${String(seq).padStart(5, "0")}`;

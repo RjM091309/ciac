@@ -15,7 +15,7 @@ import { bannerHeading, loadSiteSettings, resolveLogo, type LogoAsset } from '..
 // this page renders the fields it returns, sends only what changed, and shows
 // the server's validation messages as-is.
 
-type SectionKey = 'branding' | 'email' | 'integrations' | 'security' | 'announcements';
+type SectionKey = 'branding' | 'email' | 'integrations' | 'security' | 'renewals' | 'announcements';
 
 type FieldMeta = {
   label: string;
@@ -70,6 +70,7 @@ const TABS: { key: SectionKey; caption: string; title: string; short: string }[]
   { key: 'email', caption: 'Outgoing mail', title: 'Email', short: 'Email' },
   { key: 'integrations', caption: 'Services', title: 'Integrations', short: 'APIs' },
   { key: 'security', caption: 'Sign-in', title: 'Security', short: 'Security' },
+  { key: 'renewals', caption: 'Expiry', title: 'Renewals', short: 'Renewals' },
   { key: 'announcements', caption: 'Notices', title: 'Announcements', short: 'Notices' },
 ];
 
@@ -124,6 +125,17 @@ const FIELD_HELP: Record<string, string> = {
   login_lockout_minutes: 'How long a locked account stays locked.',
   idle_timeout_minutes: 'Signed out after this long without activity. Shown on the login page too.',
   password_min_length: 'Applies whenever a password is set or changed. Existing passwords keep working.',
+  password_expiry_days:
+    'After this many days, users must set a new password at their next sign-in. 0 = passwords never expire. Existing passwords count from when this was introduced.',
+  allow_2fa_opt_out:
+    'Off: two-factor authentication is required for everyone — "Turn off" disappears from My Profile, and anyone who had turned it off sets it up again at their next sign-in.',
+  audit_retention_years: 'Older audit log entries are deleted once a day. 0 = keep forever. Each clean-up is itself logged.',
+  expiring_window_months:
+    'A contract shows as Expiring on Renewal Tracking and the dashboards this many months before it ends — and the first renewal reminder goes out then.',
+  reminders_enabled: 'Emails the locator (with an in-app notice to them and their Account Officer) when their contract enters the expiring window.',
+  reminder_interval_months: 'Follow-up reminders after the first one, until the renewal is filed.',
+  stop_after_expiry_months: 'No more reminders this many months after the contract has expired. 0 = stop on the expiry date.',
+  cc_account_officer: "Adds the locator's Account Officer as CC on the reminder email.",
   banner_title:
     'Optional. Shown in bold above the announcement. Leave empty to use the heading shown in grey, which follows the banner style.',
   banner_message: 'Shown at the top of every page and on the login page.',
@@ -1333,8 +1345,11 @@ export function PortalSettings() {
           shorter idle timeout applies to each person from their next activity.
         </Notice>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-4">
-          {['login_max_attempts', 'login_lockout_minutes', 'idle_timeout_minutes', 'password_min_length'].map((f) => renderField(f))}
+          {['login_max_attempts', 'login_lockout_minutes', 'idle_timeout_minutes', 'password_min_length', 'password_expiry_days', 'audit_retention_years'].map((f) =>
+            renderField(f)
+          )}
         </div>
+        {renderField('allow_2fa_opt_out')}
         <div className="border-t pt-4" style={{ borderColor: 'var(--border-subtle)' }}>
           <GroupHeader title="Cookie notice" hint="Shown once per browser, before the first sign-in" />
         </div>
@@ -1343,6 +1358,29 @@ export function PortalSettings() {
           <div className="space-y-4">{['cookie_title', 'cookie_message'].map((f) => renderField(f))}</div>
           <div className="space-y-4">{['cookie_accept_label', 'cookie_decline_label', 'cookie_decline_url'].map((f) => renderField(f))}</div>
         </div>
+      </div>
+    );
+  }
+
+  function renderRenewals() {
+    return (
+      <div className="space-y-4">
+        <Notice tone="info">
+          Applies right away: Renewal Tracking, the dashboards and the next reminder run (twice a day) use these values.
+        </Notice>
+        <section className="space-y-4">
+          <GroupHeader title="Expiring" hint="When a locator's contract counts as due for renewal" />
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-4">{renderField('expiring_window_months')}</div>
+        </section>
+        <section className="space-y-4">
+          <GroupHeader title="Reminder emails" hint="Sent to the locator until their renewal is filed" />
+          {renderField('reminders_enabled')}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-4">
+            {renderField('reminder_interval_months')}
+            {renderField('stop_after_expiry_months')}
+          </div>
+          {renderField('cc_account_officer')}
+        </section>
       </div>
     );
   }
@@ -1454,7 +1492,9 @@ export function PortalSettings() {
                   ? renderIntegrations()
                   : activeTab === 'security'
                     ? renderSecurity()
-                    : renderAnnouncements()}
+                    : activeTab === 'renewals'
+                      ? renderRenewals()
+                      : renderAnnouncements()}
 
             {/* Sticky so Save stays reachable on long tabs and small screens. On
                 phones it stops above the bottom nav on its own: <main>'s

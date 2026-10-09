@@ -121,7 +121,10 @@ async function getOverview(filters = {}) {
         SELECT p.status, p.expiry_date
         FROM dbo.permits p
         LEFT JOIN dbo.applications a ON a.id = p.application_id
-        ${permitFilter.whereSql}
+        ${permitFilter.whereSql ? `${permitFilter.whereSql} AND` : "WHERE"}
+          -- Same set as Renewal Tracking: not deleted, and in force (its
+          -- application approved, or a permit with no application).
+          p.is_active = 1 AND (p.application_id IS NULL OR a.status = 'APPROVED')
         `,
         permitFilter.params
       ),
@@ -151,6 +154,9 @@ async function getOverview(filters = {}) {
         FROM dbo.contracts c
         INNER JOIN dbo.applications a ON a.id = c.application_id
         ${whereSql}
+          -- A contract is "issued" once its application is approved (one saved
+          -- before Approve is still a draft).
+          AND a.status = 'APPROVED'
         `,
         params
       ),

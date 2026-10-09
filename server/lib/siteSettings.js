@@ -30,6 +30,7 @@ const SECTIONS = {
   email: { label: "Email", sensitive: true },
   integrations: { label: "Integrations", sensitive: true },
   security: { label: "Security", sensitive: true },
+  renewals: { label: "Renewals", sensitive: false },
   announcements: { label: "Announcements", sensitive: false },
 };
 
@@ -134,6 +135,13 @@ const FIELDS = [
   { section: "security", name: "login_lockout_minutes", label: "Lockout duration (minutes)", type: "int", min: 15, max: 1440, importFrom: "LOGIN_LOCKOUT_MINUTES", default: 15 },
   { section: "security", name: "idle_timeout_minutes", label: "Idle timeout (minutes)", type: "int", min: 5, max: 30, default: 15, public: true },
   { section: "security", name: "password_min_length", label: "Minimum password length", type: "int", min: 12, max: 64, default: 12, public: true },
+  // 0 = passwords never expire.
+  { section: "security", name: "password_expiry_days", label: "Password expiry (days)", type: "int", min: 0, max: 365, default: 0 },
+  // Off = two-factor stays required: "Turn off 2FA" in My Profile is refused
+  // and anyone who had turned it off sets it up again at their next sign-in.
+  { section: "security", name: "allow_2fa_opt_out", label: "Let users turn off two-factor authentication", type: "bool", default: true },
+  // 0 = keep the audit log forever.
+  { section: "security", name: "audit_retention_years", label: "Keep audit log for (years)", type: "int", min: 0, max: 10, default: 0 },
   // Cookie notice shown before the first sign-in (CookieConsent.tsx).
   { section: "security", name: "cookie_title", label: "Cookie notice title", type: "text", max: 80, required: true, default: "We use cookies" },
   {
@@ -157,6 +165,13 @@ const FIELDS = [
     required: true,
     default: "https://www.ciac.gov.ph",
   },
+
+  // --- Renewals (lib/renewalReminders.js, Permit.js expiring window) ---
+  { section: "renewals", name: "expiring_window_months", label: "Expiring window (months)", type: "int", min: 1, max: 12, default: 6 },
+  { section: "renewals", name: "reminders_enabled", label: "Email renewal reminders to locators", type: "bool", default: true },
+  { section: "renewals", name: "reminder_interval_months", label: "Follow-up every (months)", type: "int", min: 1, max: 6, default: 1 },
+  { section: "renewals", name: "stop_after_expiry_months", label: "Stop reminders after expiry (months)", type: "int", min: 0, max: 24, default: 6 },
+  { section: "renewals", name: "cc_account_officer", label: "Copy the Account Officer on the reminder email", type: "bool", default: false },
 
   // --- Announcements & maintenance ---
   { section: "announcements", name: "banner_enabled", label: "Show announcement banner", type: "bool", default: false },
@@ -474,6 +489,16 @@ const getters = {
   lockout: () => ({ maxAttempts: get("security.login_max_attempts"), lockoutMinutes: get("security.login_lockout_minutes") }),
   idleTimeoutSeconds: () => get("security.idle_timeout_minutes") * 60,
   passwordMinLength: () => get("security.password_min_length"),
+  passwordExpiryDays: () => get("security.password_expiry_days"),
+  allow2faOptOut: () => Boolean(get("security.allow_2fa_opt_out")),
+  auditRetentionYears: () => get("security.audit_retention_years"),
+  renewals: () => ({
+    expiringWindowMonths: get("renewals.expiring_window_months"),
+    remindersEnabled: Boolean(get("renewals.reminders_enabled")),
+    reminderIntervalMonths: get("renewals.reminder_interval_months"),
+    stopAfterExpiryMonths: get("renewals.stop_after_expiry_months"),
+    ccAccountOfficer: Boolean(get("renewals.cc_account_officer")),
+  }),
   // An empty saved message falls back to the default, so a blocked sign-in
   // (and the login page) always has something to say.
   maintenance: () => ({
@@ -568,6 +593,8 @@ function publicSettings() {
       idle_timeout_minutes: get("security.idle_timeout_minutes"),
       password_min_length: get("security.password_min_length"),
       authenticator_name: getters.totpIssuer(),
+      // My Profile hides "Turn off 2FA" when this is false.
+      allow_2fa_opt_out: getters.allow2faOptOut(),
     },
     cookie_notice: {
       title: get("security.cookie_title"),

@@ -16,6 +16,9 @@ type AuditLogRow = {
   entity_id: number | null;
   details: Record<string, unknown> | null;
   ip_address: string | null;
+  /** From the IP, looked up offline on the server: "PH", "LAN" (office network)… */
+  country_code?: string | null;
+  country?: string | null;
   user_agent: string | null;
   /** Sign-in session the action happened in (null for older rows). */
   session_id: string | null;
@@ -34,6 +37,24 @@ const CATEGORY_LABELS: Record<string, string> = {
   system: 'Portal settings',
 };
 const CATEGORY_OPTIONS = Object.entries(CATEGORY_LABELS).map(([value, label]) => ({ value, label }));
+
+const COUNTRY_OPTIONS = [
+  { value: 'abroad', label: 'Outside the Philippines' },
+  { value: 'PH', label: 'Philippines' },
+  { value: 'LAN', label: 'Local network' },
+  { value: 'unknown', label: 'Unknown' },
+];
+
+/** "🇵🇭 Philippines" — the flag from the two-letter code; LAN gets an office. */
+function countryLabel(row: { country_code?: string | null; country?: string | null }) {
+  const code = row.country_code;
+  if (!code) return '';
+  if (code === 'LAN') return '🏢 Local network';
+  const flag = /^[A-Z]{2}$/.test(code)
+    ? String.fromCodePoint(...[...code].map((c) => 0x1f1e6 + c.charCodeAt(0) - 65))
+    : '';
+  return `${flag} ${row.country || code}`.trim();
+}
 
 /** "45s", "12m", "2h 14m", "1d 3h". */
 function formatDuration(seconds: unknown): string | null {
@@ -103,6 +124,8 @@ const ACTION_LABELS: Record<string, string> = {
   PROPONENT_DEACTIVATED: 'Locator deactivated',
   PROPONENT_REACTIVATED: 'Locator reactivated',
   PROPONENT_CHANGE_APPROVED: 'Profile change approved',
+  RENEWAL_REMINDER_SENT: 'Renewal reminder sent',
+  AUDIT_LOG_PURGED: 'Old audit log entries deleted',
   PROPONENT_CHANGE_REJECTED: 'Profile change declined',
   PROPONENT_SELF_SETUP: 'Locator set up own profile',
   PROPONENT_CHANGE_REQUESTED: 'Locator requested profile change',
@@ -258,6 +281,7 @@ const AUDIT_FILTER_LABELS: Record<string, string> = {
   action: 'action',
   category: 'category',
   ip: 'IP',
+  country: 'country',
   entityType: 'record type',
   entityId: 'record id',
   session: 'session',
@@ -361,6 +385,14 @@ const FIELD_LABELS: Record<string, string> = {
   login_lockout_minutes: 'lockout duration (minutes)',
   idle_timeout_minutes: 'idle timeout (minutes)',
   password_min_length: 'minimum password length',
+  password_expiry_days: 'password expiry (days)',
+  allow_2fa_opt_out: 'users may turn off 2FA',
+  audit_retention_years: 'audit log retention (years)',
+  expiring_window_months: 'expiring window (months)',
+  reminders_enabled: 'renewal reminder emails',
+  reminder_interval_months: 'reminder follow-up (months)',
+  stop_after_expiry_months: 'stop reminders after expiry (months)',
+  cc_account_officer: 'CC Account Officer on reminders',
   banner_enabled: 'announcement banner',
   banner_title: 'banner title',
   banner_message: 'announcement',
@@ -661,6 +693,10 @@ function describeActivity(row: AuditLogRow): string {
       return d.business_name ? `Reactivated locator "${String(d.business_name)}"` : 'Reactivated a locator';
     case 'PROPONENT_CHANGE_APPROVED':
       return d.business_name ? `Approved profile changes for "${String(d.business_name)}"` : 'Approved a profile change request';
+    case 'RENEWAL_REMINDER_SENT':
+      return `Reminded "${String(d.business_name || 'locator')}" to renew contract ${String(d.permit_no || '')}${
+        Number(d.reminder) > 1 ? ` (follow-up #${Number(d.reminder)})` : ''
+      }${d.emailed_to ? ` — emailed ${String(d.emailed_to)}` : ''}`;
     case 'PROPONENT_CHANGE_REJECTED':
       return d.remarks
         ? `Declined profile changes for "${String(d.business_name ?? '')}" — "${String(d.remarks)}"`
@@ -1064,6 +1100,7 @@ function RowDetailsPanel({
           </ValueWithAction>
         </PanelField>
         <PanelField label="IP address">{formatIp(row.ip_address)}</PanelField>
+        <PanelField label="Country">{countryLabel(row) || <span className="text-secondary">Unknown</span>}</PanelField>
         <PanelField label="Device">{describeDevice(row.user_agent) || '—'}</PanelField>
         <PanelField label="Session">
           {row.session_id ? (
@@ -1123,6 +1160,7 @@ export function AuditLog() {
   const [searchQuery, setSearchQuery] = useState('');
   const [actionFilter, setActionFilter] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
+  const [countryFilter, setCountryFilter] = useState('');
   const [recordFilter, setRecordFilter] = useState<ScopeFilter | null>(null);
   const [sessionFilter, setSessionFilter] = useState<ScopeFilter | null>(null);
   const [userFilter, setUserFilter] = useState<ScopeFilter | null>(null);
@@ -1161,11 +1199,17 @@ export function AuditLog() {
     }
     if (actionFilter) params.set('action', actionFilter);
     if (categoryFilter) params.set('category', categoryFilter);
+    if (countryFilter) params.set('country', countryFilter);
     for (const scope of [userFilter, recordFilter, sessionFilter]) {
       if (scope) Object.entries(scope.params).forEach(([k, v]) => params.set(k, v));
     }
     if (fromDate) params.set('from', fromDate.toISOString());
-    if (toDate) params.set('to', toDate.toISOString());
+    // The whole "to" day counts (the picker gives its midnight).
+    if (toDate) {
+      const end = new Date(toDate);
+      end.setHours(23, 59, 59, 999);
+      params.set('to', end.toISOString());
+    }
     return params;
   }
 
@@ -1194,6 +1238,7 @@ export function AuditLog() {
     searchQuery ? actions.length : 0,
     actionFilter,
     categoryFilter,
+    countryFilter,
     JSON.stringify(recordFilter?.params),
     JSON.stringify(sessionFilter?.params),
     JSON.stringify(userFilter?.params),
@@ -1288,6 +1333,7 @@ export function AuditLog() {
     setSearchQuery('');
     setActionFilter('');
     setCategoryFilter('');
+    setCountryFilter('');
     clearDrillDowns();
     setFromDate(null);
     setToDate(null);
@@ -1342,6 +1388,7 @@ export function AuditLog() {
         { key: 'record', header: 'Record', width: 30 },
         { key: 'details', header: 'Details', width: 72 },
         { key: 'ip', header: 'IP address', width: 17 },
+        { key: 'country', header: 'Country', width: 18 },
         { key: 'device', header: 'Device', width: 22 },
         { key: 'session', header: 'Session', width: 11 },
       ];
@@ -1406,6 +1453,7 @@ export function AuditLog() {
           record: row.entity_type ? entityLabel(row) : '',
           details: [describeActivity(row), ...(changes || []).map((c) => `• ${describeChange(c)}`)].join('\n'),
           ip: formatIp(row.ip_address),
+          country: countryLabel(row).replace(/^\S+\s/, '') || '',
           device: describeDevice(row.user_agent) || '',
           session: row.session_id ? row.session_id.slice(0, 8) : '',
         };
@@ -1492,7 +1540,7 @@ export function AuditLog() {
               style={inputStyle}
             />
           </div>
-          <div className="col-span-2 sm:col-span-1 lg:w-52">
+          <div className="col-span-2 sm:col-span-1 lg:w-44">
             <AppSelect
               options={CATEGORY_OPTIONS}
               value={categoryFilter}
@@ -1502,7 +1550,17 @@ export function AuditLog() {
               compact
             />
           </div>
-          <div className="col-span-2 sm:col-span-1 lg:w-52">
+          <div className="col-span-2 sm:col-span-1 lg:w-44">
+            <AppSelect
+              options={COUNTRY_OPTIONS}
+              value={countryFilter}
+              onChange={setCountryFilter}
+              placeholder="All countries"
+              isClearable
+              compact
+            />
+          </div>
+          <div className="col-span-2 sm:col-span-1 lg:w-44">
             <AppSelect
               options={actionOptions}
               value={actionFilter}
@@ -1512,10 +1570,10 @@ export function AuditLog() {
               compact
             />
           </div>
-          <div className="min-w-0 lg:w-40">
+          <div className="min-w-0 lg:w-36">
             <DatePicker mode="single" bordered fullWidth value={fromDate} onChange={setFromDate} placeholder="From date" />
           </div>
-          <div className="min-w-0 lg:w-40">
+          <div className="min-w-0 lg:w-36">
             <DatePicker mode="single" bordered fullWidth value={toDate} onChange={setToDate} placeholder="To date" />
           </div>
           <button
@@ -1643,6 +1701,7 @@ export function AuditLog() {
                   <div className="mt-0.5 text-[11px] text-secondary break-all">
                     {row.entity_type ? entityLabel(row) : 'No entity'}
                     {row.ip_address ? ` · ${formatIp(row.ip_address)}` : ''}
+                    {row.country_code ? ` · ${countryLabel(row)}` : ''}
                   </div>
                   {row.user_agent && (
                     <div className="mt-0.5 text-[10px] break-all" style={{ color: 'var(--text-muted)' }} title={row.user_agent}>
@@ -1721,6 +1780,7 @@ export function AuditLog() {
                         </td>
                         <td className="px-3 py-2 text-[11px] text-secondary">
                           <div className="whitespace-nowrap">{formatIp(row.ip_address)}</div>
+                          {row.country_code ? <div className="whitespace-nowrap text-[10px]">{countryLabel(row)}</div> : null}
                           {row.user_agent && (
                             <div className="text-[10px] whitespace-nowrap" style={{ color: 'var(--text-muted)' }} title={row.user_agent}>
                               {describeDevice(row.user_agent)}
