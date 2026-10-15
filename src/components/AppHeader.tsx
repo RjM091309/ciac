@@ -740,17 +740,6 @@ export function AppHeader({
             </div>
           )}
 
-          <div
-            className="hidden sm:flex items-center gap-1.5 pl-2 pr-2.5 h-9 rounded-full cursor-pointer transition-colors shrink-0 text-[var(--text-muted)] hover:text-[var(--text)]"
-            style={{
-              backgroundColor: 'color-mix(in oklab, var(--control-bg) 88%, transparent)',
-            }}
-          >
-            <img src="https://flagcdn.com/w20/us.png" alt="US" className="w-4 h-2.5 rounded-sm" />
-            <span className="text-[11px] font-bold">EN</span>
-            <ChevronRight size={12} className="rotate-90 opacity-70" />
-          </div>
-
           <button
             aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
             onClick={onToggleTheme}
