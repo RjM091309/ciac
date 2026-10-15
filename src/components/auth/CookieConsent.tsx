@@ -1,12 +1,21 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Cookie } from 'lucide-react';
+import { Cookie, Lock, ShieldCheck } from 'lucide-react';
 import { DEFAULT_SITE_SETTINGS, useSiteSettings } from '../../lib/siteSettings';
 
 // Required notice before signing in. Agreeing unlocks the login form;
 // declining leaves the system for the page set in Portal Settings → Security
 // → Cookie notice (the CIAC public website by default). All its text comes
-// from there too.
+// from there too. "Change my preferences" explains what each kind of
+// cookie/tracking is for; all are required, so it can't switch any off.
+
+// Descriptions come from Portal Settings (cookie_notice.pref_*); titles and
+// button labels are fixed.
+const CATEGORIES = [
+  { icon: Lock, title: 'Strictly necessary cookies', key: 'pref_necessary' },
+  { icon: ShieldCheck, title: 'Activity & IP address logging (Audit Log)', key: 'pref_audit' },
+  { icon: Cookie, title: 'Display preferences', key: 'pref_display' },
+] as const;
 
 export function CookieConsent({
   open,
@@ -18,6 +27,7 @@ export function CookieConsent({
   onAccept: () => void;
 }) {
   const notice = useSiteSettings().cookie_notice;
+  const [showDetails, setShowDetails] = useState(false);
   if (!open) return null;
   const fallback = DEFAULT_SITE_SETTINGS.cookie_notice;
   const declineUrl = notice.decline_url || fallback.decline_url;
@@ -51,7 +61,32 @@ export function CookieConsent({
           </h2>
         </div>
 
-        <p className="text-[13px] leading-relaxed text-secondary">{notice.message || fallback.message}</p>
+        {showDetails ? (
+          <div className="flex flex-col gap-2.5">
+            {CATEGORIES.map(({ icon: Icon, title, key }) => (
+              <div key={title} className="rounded-xl border p-3" style={{ borderColor: 'var(--border-subtle)' }}>
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 text-[13px] font-semibold">
+                    <Icon size={15} />
+                    {title}
+                  </div>
+                  <span
+                    className="shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold"
+                    style={{ color: '#059669', backgroundColor: 'rgba(16,185,129,.14)' }}
+                  >
+                    Always on
+                  </span>
+                </div>
+                <p className="mt-1.5 text-[12px] leading-relaxed text-secondary">{notice[key] || fallback[key]}</p>
+              </div>
+            ))}
+            <p className="text-[11px] text-secondary">
+              All three are needed for the system to work, so they can't be switched off individually.
+            </p>
+          </div>
+        ) : (
+          <p className="text-[13px] leading-relaxed text-secondary">{notice.message || fallback.message}</p>
+        )}
 
         {privacyUrl ? (
           <a
@@ -72,7 +107,7 @@ export function CookieConsent({
             onClick={onAccept}
             autoFocus
           >
-            {notice.accept_label || fallback.accept_label}
+            I agree
           </button>
           <button
             type="button"
@@ -80,7 +115,15 @@ export function CookieConsent({
             style={{ borderColor: 'var(--border)', color: 'var(--text)' }}
             onClick={() => window.location.assign(declineUrl)}
           >
-            {notice.decline_label || fallback.decline_label}
+            I decline
+          </button>
+          <button
+            type="button"
+            className={secondaryBtn}
+            style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}
+            onClick={() => setShowDetails((v) => !v)}
+          >
+            {showDetails ? 'Back' : 'Change my preferences'}
           </button>
         </div>
       </div>

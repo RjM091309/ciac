@@ -154,8 +154,38 @@ const FIELDS = [
     multiline: true,
     default: "This platform utilizes cookies and tracking technologies to optimize browsing functionality, evaluate website traffic patterns, and analyze user acquisition sources.",
   },
-  { section: "security", name: "cookie_accept_label", label: "Agree button", type: "text", max: 30, required: true, default: "I agree" },
-  { section: "security", name: "cookie_decline_label", label: "Decline button", type: "text", max: 30, required: true, default: "I decline" },
+  // "Change my preferences" view: what each kind of cookie/tracking is for.
+  // (Button labels — I agree / I decline / Change my preferences — are fixed.)
+  {
+    section: "security",
+    name: "cookie_pref_necessary",
+    label: "Strictly necessary cookies",
+    type: "text",
+    max: 400,
+    required: true,
+    multiline: true,
+    default: "Keep you signed in and protect each request (HTTP-only session cookie and security tokens). Without them the system cannot work.",
+  },
+  {
+    section: "security",
+    name: "cookie_pref_audit",
+    label: "Activity & IP address logging (Audit Log)",
+    type: "text",
+    max: 400,
+    required: true,
+    multiline: true,
+    default: "Every sign-in and every record you encode, update, approve or delete is logged with your username, IP address, browser and time — for accountability and security reviews.",
+  },
+  {
+    section: "security",
+    name: "cookie_pref_display",
+    label: "Display preferences",
+    type: "text",
+    max: 400,
+    required: true,
+    multiline: true,
+    default: "Remembers things like light/dark theme and table filters on this device. Stored only in your browser.",
+  },
   {
     section: "security",
     name: "cookie_decline_url",
@@ -599,9 +629,10 @@ function publicSettings() {
     cookie_notice: {
       title: get("security.cookie_title"),
       message: get("security.cookie_message"),
-      accept_label: get("security.cookie_accept_label"),
-      decline_label: get("security.cookie_decline_label"),
       decline_url: get("security.cookie_decline_url"),
+      pref_necessary: get("security.cookie_pref_necessary"),
+      pref_audit: get("security.cookie_pref_audit"),
+      pref_display: get("security.cookie_pref_display"),
     },
     banner: isBannerActive()
       ? {

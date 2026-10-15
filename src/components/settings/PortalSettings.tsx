@@ -110,9 +110,10 @@ const FIELD_HELP: Record<string, string> = {
   terms_url: 'The login page "Terms" link. Must start with https://.',
   cookie_title: 'Heading of the cookie notice shown before the first sign-in.',
   cookie_message: 'Shown as one paragraph; line breaks are turned into spaces.',
-  cookie_accept_label: 'Agreeing unlocks the sign-in form.',
-  cookie_decline_label: 'Declining leaves the portal for the page below.',
-  cookie_decline_url: 'Where someone who declines is sent. Must start with https://.',
+  cookie_decline_url: 'Where someone who clicks "I decline" is sent. Must start with https://.',
+  cookie_pref_necessary: 'Shown under "Change my preferences".',
+  cookie_pref_audit: 'Shown under "Change my preferences".',
+  cookie_pref_display: 'Shown under "Change my preferences".',
   smtp_host: 'For example smtp.office365.com or smtp.gmail.com.',
   smtp_port: 'Usually 587 (STARTTLS) or 465 (SSL/TLS).',
   smtp_pass: 'Stored encrypted and never shown again. Re-enter it when you change the server or username.',
@@ -1353,10 +1354,17 @@ export function PortalSettings() {
         <div className="border-t pt-4" style={{ borderColor: 'var(--border-subtle)' }}>
           <GroupHeader title="Cookie notice" hint="Shown once per browser, before the first sign-in" />
         </div>
-        {/* Text on the left, buttons and where Decline goes on the right. */}
+        {/* Message on the left, where "I decline" goes on the right. Button
+            labels (I agree / I decline / Change my preferences) are fixed. */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-4">
           <div className="space-y-4">{['cookie_title', 'cookie_message'].map((f) => renderField(f))}</div>
-          <div className="space-y-4">{['cookie_accept_label', 'cookie_decline_label', 'cookie_decline_url'].map((f) => renderField(f))}</div>
+          <div className="space-y-4">{renderField('cookie_decline_url')}</div>
+        </div>
+        <div className="pt-1">
+          <GroupHeader title="Change my preferences" hint="What each kind of cookie/tracking is for — all are always on" />
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-x-4 gap-y-4">
+          {['cookie_pref_necessary', 'cookie_pref_audit', 'cookie_pref_display'].map((f) => renderField(f))}
         </div>
       </div>
     );

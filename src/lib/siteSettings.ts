@@ -44,7 +44,15 @@ export type PublicSiteSettings = {
   /** authenticator_name: the label new 2FA setups get in the authenticator app. */
   security: { idle_timeout_minutes: number; password_min_length: number; authenticator_name: string; allow_2fa_opt_out?: boolean };
   /** The notice shown before the first sign-in (Portal Settings → Security). */
-  cookie_notice: { title: string; message: string; accept_label: string; decline_label: string; decline_url: string };
+  cookie_notice: {
+    title: string;
+    message: string;
+    decline_url: string;
+    // "Change my preferences" descriptions, one per kind of cookie/tracking.
+    pref_necessary: string;
+    pref_audit: string;
+    pref_display: string;
+  };
   banner: { title: string; message: string; level: 'info' | 'warning' | 'critical'; ends_at: string | null } | null;
   maintenance: { enabled: boolean; message: string };
 };
@@ -84,9 +92,12 @@ export const DEFAULT_SITE_SETTINGS: PublicSiteSettings = {
     title: 'We use cookies',
     message:
       'This platform utilizes cookies and tracking technologies to optimize browsing functionality, evaluate website traffic patterns, and analyze user acquisition sources.',
-    accept_label: 'I agree',
-    decline_label: 'I decline',
     decline_url: 'https://www.ciac.gov.ph',
+    pref_necessary:
+      'Keep you signed in and protect each request (HTTP-only session cookie and security tokens). Without them the system cannot work.',
+    pref_audit:
+      'Every sign-in and every record you encode, update, approve or delete is logged with your username, IP address, browser and time — for accountability and security reviews.',
+    pref_display: 'Remembers things like light/dark theme and table filters on this device. Stored only in your browser.',
   },
   banner: null,
   maintenance: { enabled: false, message: 'The portal is undergoing scheduled maintenance. Please try again later.' },
