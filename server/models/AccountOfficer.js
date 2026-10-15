@@ -45,6 +45,7 @@ const SELECT_OFFICERS = `
     u.created_at,
     u.updated_at,
     u.department_id,
+    u.assessment_level,
     d.code AS department_code,
     d.name AS department_name,
     (SELECT COUNT(*) FROM dbo.proponents p WHERE p.account_officer_id = u.id) AS locator_count
@@ -65,6 +66,8 @@ function mapRow(row) {
     created_at: row.created_at ?? null,
     updated_at: row.updated_at ?? null,
     department_id: row.department_id ?? null,
+    // 1 = Level 1 (assigns), anything else = Level 2.
+    assessment_level: Number(row.assessment_level) === 1 ? 1 : 2,
     department_code: row.department_code ?? null,
     department_name: row.department_name ?? null,
     locator_count: Number(row.locator_count) || 0,

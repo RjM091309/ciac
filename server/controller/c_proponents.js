@@ -97,6 +97,11 @@ exports.listForLocatorList = async (req, res) => {
 exports.listAccountOfficerOptions = async (req, res) => {
   try {
     const rows = await AccountOfficer.listAccountOfficers();
+    // Who is asking: a Level 2 Account Officer's locators are always their
+    // own (read-only field); Level 1 assigns them to a Level 2.
+    const me = await accountOfficerScope(req);
+    const role = String(req.user?.role || "").toLowerCase();
+    const isAo = role !== "admin" && (await checkMenuAllowed(role, "approval:queue", "view"));
     return res.json({
       success: true,
       data: rows.map((o) => ({
@@ -104,9 +109,11 @@ exports.listAccountOfficerOptions = async (req, res) => {
         username: o.username,
         full_name: o.full_name,
         is_active: o.is_active,
+        assessment_level: o.assessment_level,
         department_code: o.department_code,
         department_name: o.department_name,
       })),
+      viewer: { userId: Number(req.user?.id) || null, accountOfficerLevel: me !== null ? 2 : isAo ? 1 : null },
     });
   } catch (error) {
     console.error("List account officer options error:", error);
@@ -819,6 +826,9 @@ exports.create = async (req, res) => {
     // Registered Locator only lists locators with an Account Officer. The
     // form hides that field from an Account Officer, so theirs defaults to them.
     let accountOfficerId = toNullableId(account_officer_id);
+    // A Level 2 Account Officer's new locator is always their own.
+    const ownOnly = await accountOfficerScope(req);
+    if (ownOnly !== null) accountOfficerId = ownOnly;
     if (!accountOfficerId && (await checkMenuAllowed(String(req.user?.role || "").toLowerCase(), "approval:queue", "view"))) {
       accountOfficerId = Number(req.user?.id) || null;
     }

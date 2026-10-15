@@ -160,9 +160,15 @@ type UserOption = {
   username: string;
   full_name: string | null;
   is_active: number;
+  /** 1 = Level 1 (assigns), 2 = Level 2. */
+  assessment_level?: number;
   department_code: string | null;
   department_name: string | null;
 };
+
+/** The signed-in user, as the Account Officer field needs it: Level 1 picks
+ * the Level 2 who handles the locator; Level 2's own locators are theirs. */
+type OfficerViewer = { userId: number | null; accountOfficerLevel: 1 | 2 | null };
 
 type ContractTypeOption = {
   id: number;
@@ -180,6 +186,7 @@ type LocatorsData = {
   contractTypes: ContractTypeOption[];
   landUses: LookupOption[];
   industries: IndustryOption[];
+  viewer: OfficerViewer;
 };
 
 // Industry = Application Types catalog, keyed by code (what applications store).
@@ -483,7 +490,7 @@ export function ProponentsManagement({
   const cardRefs = useRef<Record<number, HTMLButtonElement | null>>({});
 
   const { data: locatorsData, isLoading, isRevalidating, refresh } = useSessionStorageCachedResource<LocatorsData>({
-    cacheKey: 'ciac.locators.v10',
+    cacheKey: 'ciac.locators.v11',
     ttlMs: 5 * 60 * 1000,
     fetcher: async () => {
       const [pRes, dRes, uRes, atRes, luRes, inRes] = await Promise.all([
@@ -536,6 +543,10 @@ export function ProponentsManagement({
         contractTypes: nextContractTypes,
         landUses: toLookup(luJson.data),
         industries: (inJson.data || []).map((t: any) => ({ ...t, is_active: Number(t?.is_active) ? 1 : 0 })),
+        viewer: {
+          userId: uJson?.viewer?.userId ?? null,
+          accountOfficerLevel: uJson?.viewer?.accountOfficerLevel === 1 ? 1 : uJson?.viewer?.accountOfficerLevel === 2 ? 2 : null,
+        },
       };
     },
     onError: (e) => {
@@ -597,6 +608,11 @@ export function ProponentsManagement({
 
   const proponents = locatorsData?.proponents ?? [];
   const users = locatorsData?.users ?? [];
+  // Account Officer field: Level 1 assigns a Level 2; a Level 2 sees it
+  // read-only (always themselves on a new locator — the server enforces it).
+  const officerLevel = cpFullAccess || !isAccountOfficer ? null : locatorsData?.viewer.accountOfficerLevel ?? null;
+  const officerLocked = officerLevel === 2;
+  const myUserId = locatorsData?.viewer.userId ?? null;
 
   const rows: DisplayRow[] = useMemo(() => {
     const dynamicById = new Map((locatorsData?.dynamic ?? []).map((d) => [d.id, d]));
@@ -643,6 +659,8 @@ export function ProponentsManagement({
     () =>
       users
         .filter((u) => u.is_active === 1 || String(u.id) === form.account_officer_id)
+        // Level 1 hands the locator to a Level 2.
+        .filter((u) => officerLevel !== 1 || u.assessment_level !== 1 || String(u.id) === form.account_officer_id)
         .map((u) => {
           const name = (u.full_name || u.username).replace(/\s*\(Legacy Import\)\s*$/i, '');
           return {
@@ -652,8 +670,12 @@ export function ProponentsManagement({
           };
         })
         .sort((a, b) => a.label.localeCompare(b.label)),
-    [users, form.account_officer_id],
+    [users, form.account_officer_id, officerLevel],
   );
+  const officerName = (id: string) => {
+    const u = users.find((x) => String(x.id) === id);
+    return u ? (u.full_name || u.username).replace(/\s*\(Legacy Import\)\s*$/i, '') : '';
+  };
   const contractTypes = locatorsData?.contractTypes ?? [];
   // Type of Contract comes from File Maintenance > Type of Contract. Only active
   // types are offered, but the locator's current one stays listed even if it was
@@ -1130,7 +1152,7 @@ export function ProponentsManagement({
   async function save(skipDuplicateCheck = false) {
     // Registered Locator only lists locators with an Account Officer (an
     // Account Officer's own new locator defaults to them on the server).
-    if (!isAccountOfficer && !form.account_officer_id.trim()) {
+    if (!officerLocked && !form.account_officer_id.trim()) {
       toast.error("Choose the locator's Account Officer.");
       return;
     }
@@ -1695,8 +1717,16 @@ export function ProponentsManagement({
                 </Field>
               </div>
               <div>
-                {isAccountOfficer ? null : (
-                  <Field compact label="Account Officer">
+                <Field compact label={officerLevel === 1 ? 'Account Officer (Level 2)' : 'Account Officer'}>
+                  {officerLocked ? (
+                    <input
+                      className="app-form-control app-form-control-sm"
+                      readOnly
+                      tabIndex={-1}
+                      value={officerName(form.account_officer_id || (myUserId != null ? String(myUserId) : ''))}
+                      title="Your locators are assigned to you — Level 1 can reassign them"
+                    />
+                  ) : (
                     <div className="app-form-control app-form-control-sm p-0 overflow-hidden flex items-stretch">
                       <AppSelect
                         options={userOptions}
@@ -1710,8 +1740,8 @@ export function ProponentsManagement({
                         minHeight={26}
                       />
                     </div>
-                  </Field>
-                )}
+                  )}
+                </Field>
               </div>
               <div>
                 <Field compact label="Extension Date">
