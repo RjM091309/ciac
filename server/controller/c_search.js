@@ -3,6 +3,7 @@ const ControlPanelPermission = require("../models/ControlPanelPermission");
 const Assessment = require("../models/AssessmentEvaluation");
 const { BUCKET_MENU_KEYS, searchApplications } = require("../models/Search");
 const { publicErrorMessage } = require("../lib/httpError");
+const { aoLevel2Id } = require("../lib/departments");
 
 /** Which buckets (queue) the requesting role may see through search — same
  * Control Panel sidebar permission each queue's own screen already checks,
@@ -63,9 +64,16 @@ exports.search = async (req, res) => {
     // door, the applications a Manager assigned to them.
     const level2UserId =
       allowedBuckets.has("in_assessment") && !(await Assessment.isManager(req.user)) ? Number(req.user?.id) : null;
+    // A Level 2 Account Officer only finds their own renewals and their own
+    // Registered Locators.
+    const aoOwnId = await aoLevel2Id(req.user);
     const rows = allRows.map((row) => {
       let next = row;
       if (level2UserId && Number(row.assessment_evaluator_id) !== level2UserId) next = { ...next, in_assessment: 0 };
+      if (aoOwnId) {
+        if (Number(row.assessment_evaluator_id) !== aoOwnId) next = { ...next, in_renewals: 0 };
+        if (Number(row.proponent_account_officer_id) !== aoOwnId) next = { ...next, in_completed: 0 };
+      }
       return next;
     });
     const visible = rows.filter((row) =>

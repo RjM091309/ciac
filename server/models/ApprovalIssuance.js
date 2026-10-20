@@ -547,11 +547,10 @@ async function actOnStep(stepId, { action, remarks, actorId, override_unverified
   if (!approval) return null;
   if (approval.status !== "IN_PROGRESS") throw businessError("Approval is not in progress.");
 
-  // assigned_to restricts who may act to that one person (or admin); with no
-  // assignee, anyone with approval:queue edit access (enforced by the route's
-  // requireMenuAccess middleware) or admin may act.
+  // assigned_to restricts who may act to that one person (or admin). A step
+  // with no assignee (never sent For Approval) is admin-only.
   const isAdmin = await Role.userHasRoleName(actorId, "admin");
-  if (!isAdmin && step.assigned_to && Number(step.assigned_to) !== Number(actorId)) {
+  if (!isAdmin && (!step.assigned_to || Number(step.assigned_to) !== Number(actorId))) {
     throw businessError("This approval is assigned to someone else.");
   }
 

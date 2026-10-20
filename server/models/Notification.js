@@ -267,7 +267,9 @@ async function resolveApplicationRecipients(application, actorId, eventType) {
         )`
       : normalizeEventType(eventType) === "assessment"
         ? `AND ${roleHasEvalQueue}`
-        : "";
+        // A new application's events reach the Account Officer only through
+        // the Approved Queue (approval_ready), not through the renewal menu.
+        : `AND p.menu_key <> 'applications:renewals'`;
     // Through assessment:queue, a Level 2 BDO only hears about
     // applications assigned to them — only a Level 1 Manager
     // (users.assessment_level = 1) gets the whole queue's events.

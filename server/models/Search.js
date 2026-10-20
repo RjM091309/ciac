@@ -35,6 +35,7 @@ async function searchApplications(term) {
       p.id AS proponent_id,
       p.business_name AS proponent_name,
       p.ref_no AS proponent_ref_no,
+      p.account_officer_id AS proponent_account_officer_id,
       CASE WHEN a.is_renewal = 0 AND a.status <> 'APPROVED' THEN 1 ELSE 0 END AS in_new,
       CASE WHEN a.is_renewal = 1 THEN 1 ELSE 0 END AS in_renewals,
       -- Approved and Account Officer assigned → Registered Locator.

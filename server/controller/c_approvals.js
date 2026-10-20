@@ -35,8 +35,7 @@ function idParam(req, res, label = "id") {
   return id;
 }
 
-/** Admin sees every approval; any other approver (Account Officer) only the
- * ones assigned to them, plus any still unassigned. */
+/** Admin sees every approval; anyone else only the ones assigned to them. */
 function assigneeScope(req) {
   const isAdmin = String(req.user?.role || "").toLowerCase() === "admin";
   return isAdmin ? null : Number(req.user?.id) || -1;
@@ -52,8 +51,13 @@ async function ensureApprovalAccess(req, res, applicationId) {
     return false;
   }
   const assignee = await Approval.getApprovalAssigneeId(applicationId);
-  if (assignee === null || assignee === me) return true;
-  res.status(403).json({ success: false, message: "This approval is assigned to another Account Officer." });
+  if (assignee !== null && assignee === me) return true;
+  // No approver yet = not sent For Approval: nobody but an admin may open,
+  // start, charge, contract or decide it (Level 1's For Approval sets them).
+  res.status(403).json({
+    success: false,
+    message: assignee === null ? "This application hasn't been sent for approval yet." : "This approval is assigned to someone else.",
+  });
   return false;
 }
 

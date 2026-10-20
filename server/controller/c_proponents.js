@@ -17,6 +17,7 @@ const { resolveStoredPath, relativeStoragePath, contentDisposition } = require("
 const { placeLocatorUpload } = require("../lib/locatorFolders");
 const { publicErrorMessage } = require("../lib/httpError");
 const Assessment = require("../models/AssessmentEvaluation");
+const Approval = require("../models/ApprovalIssuance");
 const { checkMenuAllowed } = require("../middleware/m_auth");
 const { getters: site } = require("../lib/siteSettings");
 const Permit = require("../models/Permit");
@@ -43,7 +44,20 @@ exports.list = async (req, res) => {
     // no approved application yet), so only the Registered Locator master
     // checklist page passes this.
     const approvedOnly = String(req.query.approvedOnly || "") === "1";
-    const rows = await Proponent.listProponents({ approvedOnly });
+    let rows = await Proponent.listProponents({ approvedOnly });
+    if (approvedOnly) {
+      // Registered Locator: a newly approved locator still waiting in the
+      // Approved Queue (no Account Officer yet) isn't registered yet — older
+      // locators with no officer (e.g. legacy imports) stay listed so Level 1
+      // can assign one. A Level 2 Account Officer sees only their own.
+      const waiting = new Set((await Approval.listAssignmentQueue()).map((r) => Number(r.proponent_id)));
+      const me = await accountOfficerScope(req);
+      rows = rows.filter((r) =>
+        me !== null
+          ? Number(r.account_officer_id) === me
+          : r.account_officer_id != null || !waiting.has(Number(r.id))
+      );
+    }
     return res.json({ success: true, data: rows });
   } catch (error) {
     console.error("List proponents error:", error);

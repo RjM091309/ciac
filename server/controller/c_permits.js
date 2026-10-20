@@ -12,6 +12,7 @@ const { renderPermitCertificate } = require("../lib/permitCertificate");
 const { STORAGE_ROOT, relativeStoragePath, resolveStoredPath } = require("../lib/fileStorage");
 const { locatorDir, folderName } = require("../lib/locatorFolders");
 const { publicErrorMessage } = require("../lib/httpError");
+const { aoLevel2Id } = require("../lib/departments");
 
 /** Title-cases a stored role name ("ASSESSMENT OFFICER" -> "Assessment
  * Officer") for the certificate's signature block — roles are stored
@@ -78,7 +79,13 @@ exports.types = async (req, res) => {
 
 exports.list = async (req, res) => {
   try {
-    const rows = await Permit.listAll();
+    let rows = await Permit.listAll();
+    // A Level 2 Account Officer tracks (and renews) only their own locators.
+    const ownOnly = await aoLevel2Id(req.user);
+    if (ownOnly) {
+      const mine = new Set((await Proponent.listProponentIdsForAccountOfficer(ownOnly)).map(Number));
+      rows = rows.filter((r) => mine.has(Number(r.proponent_id)));
+    }
     return res.json({ success: true, data: rows });
   } catch (error) {
     console.error("List permits error:", error);
