@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { AlertTriangle, Calendar, Check, CircleDot, Gauge, Plus, Trash2 } from 'lucide-react';
+import { AlertTriangle, Calendar, CalendarClock, Check, CircleDot, Gauge, Plus, Trash2 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis } from 'recharts';
 import { toast } from 'sonner';
@@ -607,6 +607,156 @@ export function AttentionCard({
                 >
                   <badge.Icon size={11} />
                   {badge.label}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+/* ------------------------------- Lease Expiry ----------------------------- */
+
+export type LeaseExpiryBucket = 'expired' | 'within3' | 'within6';
+export type LeaseExpiryItem = {
+  permit_id: number;
+  proponent_id: number;
+  proponent_name: string | null;
+  permit_no: string;
+  expiry_date: string;
+  days_left: number;
+  bucket: LeaseExpiryBucket;
+  account_officer_name: string | null;
+  renewal_application_no: string | null;
+  link: string | null;
+};
+export type LeaseExpiry = {
+  counts: { expired: number; within3: number; within6: number; renewalFiled: number };
+  items: LeaseExpiryItem[];
+};
+
+const LEASE_BUCKETS: { key: LeaseExpiryBucket; label: string; hint: string; color: string; bg: string }[] = [
+  { key: 'expired', label: 'Expired', hint: 'Lease already ended', color: '#f43f5e', bg: 'rgba(244,63,94,.14)' },
+  { key: 'within3', label: 'Within 3 months', hint: 'Ends in the next 3 months', color: '#f97316', bg: 'rgba(249,115,22,.14)' },
+  { key: 'within6', label: '3 – 6 months', hint: 'Ends in 3 to 6 months', color: '#eab308', bg: 'rgba(234,179,8,.14)' },
+];
+
+function formatShortDate(value: string) {
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return '—';
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+/** Account Officer: locators whose lease expired or ends within 3 / 6
+ * months, with a count per bucket (click a tile to filter the list). */
+export function LeaseExpiryCard({
+  data,
+  navigate,
+  showOfficer,
+  className,
+}: {
+  data: LeaseExpiry | null | undefined;
+  navigate?: Navigate;
+  /** Level 1 sees every officer's locators, so name the officer on each row. */
+  showOfficer?: boolean;
+  className?: string;
+}) {
+  const [filter, setFilter] = useState<LeaseExpiryBucket | 'all'>('all');
+  const counts = data?.counts ?? { expired: 0, within3: 0, within6: 0, renewalFiled: 0 };
+  const items = data?.items ?? [];
+  const total = counts.expired + counts.within3 + counts.within6;
+  const shown = filter === 'all' ? items : items.filter((i) => i.bucket === filter);
+  const bucketOf = (b: LeaseExpiryBucket) => LEASE_BUCKETS.find((x) => x.key === b)!;
+
+  return (
+    <Card className={cn('flex flex-col', className)}>
+      <div className="flex items-center justify-between gap-2 mb-1">
+        <div className="flex items-center gap-2 min-w-0">
+          <CalendarClock size={14} className="text-orange-500 shrink-0" />
+          <h4 className="text-sm font-bold" style={{ color: 'var(--text)' }}>
+            Lease Expiry
+          </h4>
+        </div>
+        {filter !== 'all' ? (
+          <button type="button" onClick={() => setFilter('all')} className="text-[10px] font-semibold text-secondary hover:underline shrink-0">
+            Show all ({total})
+          </button>
+        ) : null}
+      </div>
+      <p className="text-[10px] text-secondary mb-3">
+        Leases ended or ending within 6 months
+        {counts.renewalFiled ? ` · ${counts.renewalFiled} with a renewal filed` : ''}
+      </p>
+
+      {/* One strip, three counts — click one to filter the list. */}
+      <div
+        className="grid grid-cols-3 rounded-xl border overflow-hidden mb-3"
+        style={{ borderColor: 'var(--border-subtle)' }}
+      >
+        {LEASE_BUCKETS.map((b, i) => {
+          const active = filter === b.key;
+          return (
+            <button
+              key={b.key}
+              type="button"
+              onClick={() => setFilter(active ? 'all' : b.key)}
+              title={b.hint}
+              className={cn('px-3 py-2.5 text-left transition-colors hover:bg-[var(--surface-hover)] min-w-0', i > 0 && 'border-l')}
+              style={{ borderColor: 'var(--border-subtle)', backgroundColor: active ? b.bg : undefined }}
+            >
+              <span className="flex items-center gap-1.5 min-w-0">
+                <span className="h-1.5 w-1.5 rounded-full shrink-0" style={{ backgroundColor: b.color }} />
+                <span className="text-[10px] font-medium text-secondary truncate">{b.label}</span>
+              </span>
+              <span className="block mt-0.5 text-xl font-bold tracking-tight tabular-nums" style={{ color: active ? b.color : 'var(--text)' }}>
+                {counts[b.key]}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      {shown.length === 0 ? (
+        <p className="text-[11px] text-secondary">
+          {filter === 'all' ? 'No leases ended or ending within 6 months.' : `No locators — ${bucketOf(filter).hint.toLowerCase()}.`}
+        </p>
+      ) : (
+        <div className={cn('sidebar-scroll space-y-2 pr-0.5', shown.length > 4 && 'h-[248px] overflow-y-auto attention-fade-bottom')}>
+          {shown.map((item) => {
+            const b = bucketOf(item.bucket);
+            const n = Math.abs(item.days_left);
+            const days = `${n} day${n === 1 ? '' : 's'}`;
+            return (
+              <div
+                key={item.permit_id}
+                {...clickableProps(navigate && item.link ? () => navigate(item.link as string) : undefined)}
+                className={cn(
+                  'flex items-center justify-between gap-2 p-2.5 rounded-xl min-w-0 transition-colors',
+                  navigate && item.link && 'cursor-pointer hover:brightness-110'
+                )}
+                style={{
+                  backgroundColor: 'color-mix(in oklab, var(--surface-hover) 70%, transparent)',
+                  border: '1px solid var(--border-subtle)',
+                }}
+              >
+                <div className="min-w-0">
+                  <p className="text-[11px] font-bold truncate" style={{ color: 'var(--text)' }}>
+                    {item.proponent_name || 'Unknown business'}
+                  </p>
+                  <p className="text-[10px] text-secondary truncate">
+                    {item.days_left < 0 ? 'Ended' : 'Ends'} {formatShortDate(item.expiry_date)}
+                    {showOfficer && item.account_officer_name ? ` · ${item.account_officer_name}` : ''}
+                    {item.renewal_application_no ? ` · ${item.renewal_application_no} filed` : ''}
+                  </p>
+                </div>
+                <span
+                  className="shrink-0 inline-flex items-center gap-1 text-[10px] font-bold px-2.5 py-1 rounded-full whitespace-nowrap"
+                  style={{ backgroundColor: b.bg, color: b.color }}
+                >
+                  {item.days_left < 0 ? <AlertTriangle size={11} /> : <Calendar size={11} />}
+                  {item.days_left < 0 ? `${days} overdue` : `${days} left`}
                 </span>
               </div>
             );

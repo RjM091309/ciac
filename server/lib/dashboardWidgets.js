@@ -34,6 +34,9 @@ const WIDGETS = [
   // Registered Locators (Account Officer: all for Level 1, their own for Level 2).
   { key: "dashboard:stats:locators", label: "Locators", parent: STATS_PARENT, requiresAnyMenu: ["approval:queue", "applications:renewals"] },
   { key: "dashboard:attention", label: "Needs Attention", group: "work", requiresAnyMenu: QUEUE_MENUS },
+  // Account Officer: their locators' leases (CONTRACT permits) expired or
+  // expiring within 3 / 6 months.
+  { key: "dashboard:expiry", label: "Lease Expiry", group: "work", requiresAnyMenu: ["approval:queue", "applications:renewals"] },
   { key: "dashboard:table", label: "Applications Table", group: "work", requiresAnyMenu: APPLICATION_MENUS },
   { key: "dashboard:status-chart", label: "Status Breakdown", group: "insights", requiresAnyMenu: [] },
   { key: "dashboard:pipeline", label: "Application Pipeline", group: "insights", requiresAnyMenu: [] },

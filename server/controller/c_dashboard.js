@@ -266,6 +266,85 @@ async function buildExpiryAttentionItems(limit, { includePermits = true, applica
     .slice(0, limit);
 }
 
+/** The Account Officer's "Lease Expiry" widget: one row per locator whose
+ * lease (its current CONTRACT permit) already expired or ends within 6
+ * months, bucketed expired / within 3 months / 3–6 months. Fixed 3- and
+ * 6-month marks (not the Portal Settings window), so the counts read the
+ * same on every server. Level 2 = their own locators (`proponentIds`). */
+async function buildLeaseExpiry({ proponentIds = null, menus }) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const addMonths = (n) => {
+    const d = new Date(today);
+    d.setMonth(d.getMonth() + n);
+    return d;
+  };
+  const in3 = addMonths(3);
+  const in6 = addMonths(6);
+
+  const permits = (await Permit.listAll()).filter(
+    (p) =>
+      upper(p.permit_type) === "CONTRACT" &&
+      p.expiry_date &&
+      p.effective_status !== "RENEWED" &&
+      p.effective_status !== "REVOKED" &&
+      (!proponentIds || proponentIds.has(Number(p.proponent_id)))
+  );
+  // A locator can have older contract permits; only the latest-ending one is its lease.
+  const latest = new Map();
+  for (const p of permits) {
+    const prev = latest.get(Number(p.proponent_id));
+    if (!prev || new Date(p.expiry_date) > new Date(prev.expiry_date)) latest.set(Number(p.proponent_id), p);
+  }
+
+  const officers = new Map(
+    (await selectData(
+      `SELECT p.id, u.full_name FROM dbo.proponents p LEFT JOIN dbo.users u ON u.id = p.account_officer_id
+       WHERE p.account_officer_id IS NOT NULL`
+    )).map((r) => [Number(r.id), r.full_name || null])
+  );
+
+  const items = [];
+  for (const p of latest.values()) {
+    const expiry = new Date(p.expiry_date);
+    if (Number.isNaN(expiry.getTime()) || expiry > in6) continue;
+    const days = Math.round((expiry.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+    const bucket = days < 0 ? "expired" : expiry <= in3 ? "within3" : "within6";
+    const renewalId = p.active_renewal_application_id;
+    items.push({
+      permit_id: p.id,
+      proponent_id: p.proponent_id,
+      proponent_name: p.proponent_name,
+      permit_no: p.permit_no,
+      expiry_date: p.expiry_date,
+      days_left: days,
+      bucket,
+      account_officer_name: officers.get(Number(p.proponent_id)) ?? null,
+      renewal_application_no: p.active_renewal_application_no ?? null,
+      link: renewalId
+        ? menus.has("applications:renewals")
+          ? `/applications/renewals?applicationId=${renewalId}`
+          : null
+        : menus.has("compliance:permits")
+          ? `/compliance/permits?permitId=${p.id}`
+          : menus.has("settings:proponents")
+            ? `/applications/proponents?proponentId=${p.proponent_id}`
+            : null,
+    });
+  }
+  items.sort((a, b) => a.days_left - b.days_left);
+  const count = (b) => items.filter((i) => i.bucket === b).length;
+  return {
+    counts: {
+      expired: count("expired"),
+      within3: count("within3"),
+      within6: count("within6"),
+      renewalFiled: items.filter((i) => i.renewal_application_no).length,
+    },
+    items,
+  };
+}
+
 /** Which queue (if any) a staff role works, from its Control Panel menu
  * access — never its name, so renamed and custom roles behave the same.
  * Approval wins when a role has both, same as before. */
@@ -441,6 +520,11 @@ async function buildStaffDashboard({ user, sidebarPermissions, widgetPermissions
   if (categoryCompletion) {
     data.categoryCompletion = categoryCompletion;
     data.canOpenRequirements = menus.has("applications:requirements");
+  }
+
+  if (widgets["dashboard:expiry"] && queue === "approval") {
+    data.leaseExpiry = await buildLeaseExpiry({ proponentIds: aoProponentIds, menus });
+    data.isManager = isManager;
   }
 
   if (widgets["dashboard:table"]) {

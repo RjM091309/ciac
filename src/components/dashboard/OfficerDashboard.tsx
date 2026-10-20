@@ -7,6 +7,7 @@ import { balancedRowStyle } from '../../lib/balancedColumns';
 import { DataTableControls } from '../ui/DataTableControls';
 import {
   AttentionCard,
+  LeaseExpiryCard,
   PerformanceCard,
   PipelineChartCard,
   QuickTasksCard,
@@ -14,6 +15,7 @@ import {
   StatusBreakdownCard,
   type AttentionItem,
   type CategoryCompletion,
+  type LeaseExpiry,
   type StatusBreakdown,
   type Trends,
   type Turnaround,
@@ -59,6 +61,10 @@ export type OfficerDashboardData = {
     locators: number;
   }>;
   attention?: AttentionItem[];
+  /** Account Officer: locators' leases expired / ending within 3 or 6 months. */
+  leaseExpiry?: LeaseExpiry;
+  /** Account Officer Level 1 (sees every officer's locators). */
+  isManager?: boolean;
   statusBreakdown?: StatusBreakdown;
   trends?: Trends;
   turnaround?: Turnaround;
@@ -151,11 +157,12 @@ export function OfficerDashboard({ data, navigate }: { data: OfficerDashboardDat
     { key: 'dashboard:stats:locators', label: 'Locators', value: stats.locators ?? 0, icon: Building2 },
   ].filter((c) => show('dashboard:stats') && show(c.key));
 
-  // Needs Attention and Quick Tasks sit side by side on wide screens;
-  // insights reflow to however many are on (balanced rows — no lone cards,
-  // no empty gaps). Without Needs Attention, Quick Tasks joins the insights
-  // row instead of stretching alone across a full-width row.
+  // Needs Attention and Lease Expiry (Account Officer) sit side by side on
+  // wide screens; Quick Tasks fills the second slot when only one of them is
+  // on, else it joins the insights row. Insights reflow to however many are
+  // on (balanced rows — no lone cards, no empty gaps).
   const showAttention = show('dashboard:attention');
+  const showExpiry = view === 'approval' && show('dashboard:expiry');
   const workCards: React.ReactNode[] = [];
   const insightCards: React.ReactNode[] = [];
   if (showAttention) {
@@ -163,7 +170,11 @@ export function OfficerDashboard({ data, navigate }: { data: OfficerDashboardDat
       <AttentionCard key="attention" items={data?.attention ?? []} navigate={navigate} description={copy.attention} />
     );
   }
-  if (showAttention && show('dashboard:quick-tasks')) workCards.push(<QuickTasksCard key="tasks" />);
+  if (showExpiry) {
+    workCards.push(<LeaseExpiryCard key="expiry" data={data?.leaseExpiry} navigate={navigate} showOfficer={data?.isManager} />);
+  }
+  const tasksInWorkRow = workCards.length === 1 && show('dashboard:quick-tasks');
+  if (tasksInWorkRow) workCards.push(<QuickTasksCard key="tasks" />);
 
   if (show('dashboard:status-chart') && data?.statusBreakdown) {
     insightCards.push(
@@ -187,7 +198,7 @@ export function OfficerDashboard({ data, navigate }: { data: OfficerDashboardDat
     );
   }
 
-  if (!showAttention && show('dashboard:quick-tasks')) insightCards.push(<QuickTasksCard key="tasks" />);
+  if (!tasksInWorkRow && show('dashboard:quick-tasks')) insightCards.push(<QuickTasksCard key="tasks" />);
 
   const showTable = show('dashboard:table');
   const nothingVisible = !statCards.length && !workCards.length && !insightCards.length && !showTable;

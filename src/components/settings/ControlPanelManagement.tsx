@@ -72,6 +72,8 @@ function widgetDescription(key: string, queue: QueueKind): string {
       return queue === 'approval'
         ? 'Renewals and locators waiting on the Account Officer, plus permits and contracts nearing expiry'
         : 'Level 2: open assignments · Level 1: reviews to recommend and applications to assign';
+    case 'dashboard:expiry':
+      return "Locators whose lease expired or ends within 3 / 6 months, with a count for each (Level 2: their own)";
     case 'dashboard:table':
       return queue === 'approval'
         ? "Renewals and approved locators (Level 2: their own)"
