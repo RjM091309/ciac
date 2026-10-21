@@ -634,8 +634,63 @@ async function assignEvaluator(applicationId, { evaluatorId, actorId }) {
       console.error("Assignment notification error:", error);
     }
   }
+  // Reassigned: the previous evaluator hears it's no longer theirs.
+  const previousId = toInt(asm.assigned_evaluator_id);
+  if (previousId && previousId !== evId && previousId !== toInt(actorId)) {
+    try {
+      await Notification.createNotification({
+        userId: previousId,
+        subject: `Reassigned: ${app?.application_no || ""}`.trim(),
+        body: `${await userName(actorId)} reassigned application ${app?.application_no || ""} to ${evName}. It's no longer assigned to you.`,
+        createdBy: actorId,
+        // No link: it would only open a "not assigned to you" page now.
+        eventType: "assessment",
+      });
+    } catch (error) {
+      console.error("Reassignment notification error:", error);
+    }
+  }
 
   return getAssessmentDetail(applicationId);
+}
+
+/** The assigned Level 2 opening their application starts the review:
+ * ASSIGNED → IN_REVIEW (only from ASSIGNED, only for that evaluator). */
+async function startReviewOnOpen(applicationId, evaluatorId) {
+  await ensureSchema();
+  const result = await updateData(
+    `UPDATE dbo.application_assessments
+     SET stage = 'IN_REVIEW', updated_by = @param1, updated_at = SYSUTCDATETIME()
+     OUTPUT inserted.id
+     WHERE application_id = @param0 AND stage = 'ASSIGNED' AND assigned_evaluator_id = @param1`,
+    [toInt(applicationId), toInt(evaluatorId)]
+  );
+  const assessmentId = toInt(result?.recordset?.[0]?.id);
+  if (!assessmentId) return false;
+  await logActivity(assessmentId, "STAGE_CHANGED", "ASSIGNED → IN_REVIEW (opened by evaluator)", evaluatorId);
+  return true;
+}
+
+/** Of these applications, the ones Level 1 sent back to Level 2 (from the
+ * review or from the approval panel) that Level 2 hasn't resubmitted yet —
+ * same rule as the evaluation screen's "Returned by Level 1" note. */
+async function listReturnedToEvaluatorIds(applicationIds) {
+  await ensureSchema();
+  const ids = (applicationIds || []).map(toInt).filter(Boolean);
+  if (!ids.length) return new Set();
+  const rows = await selectData(
+    `SELECT asm.application_id
+     FROM dbo.application_assessments asm
+     CROSS APPLY (
+       SELECT TOP (1) act.action FROM dbo.assessment_activity act
+       WHERE act.assessment_id = asm.id AND act.action IN ('RETURNED_TO_OFFICER', 'OFFICER_RECOMMENDED')
+       ORDER BY act.id DESC
+     ) last_review
+     WHERE asm.application_id IN (${ids.join(", ")})
+       AND asm.stage IN ('ASSIGNED', 'IN_REVIEW')
+       AND last_review.action = 'RETURNED_TO_OFFICER'`
+  );
+  return new Set(rows.map((r) => Number(r.application_id)));
 }
 
 async function setStage(applicationId, { stage, actorId }) {
@@ -1085,6 +1140,8 @@ async function sendForApproval(applicationId, { summary, actorId }) {
 }
 
 module.exports = {
+  listReturnedToEvaluatorIds,
+  startReviewOnOpen,
   sendForApproval,
   returnFromApproval,
   ensureSchema,

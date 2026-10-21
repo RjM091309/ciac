@@ -22,7 +22,12 @@ exports.listMyApplications = async (req, res) => {
 };
 
 exports.getMyApplication = async (req, res) => {
-  return res.json({ success: true, data: req.application });
+  try {
+    return res.json({ success: true, data: await Workflow.attachLocatorProgress({ ...req.application }) });
+  } catch (error) {
+    console.error("Get my application error:", error);
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
+  }
 };
 
 exports.getMyApplicationRequirements = async (req, res) => {

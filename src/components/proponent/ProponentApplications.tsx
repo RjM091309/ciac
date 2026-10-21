@@ -20,6 +20,9 @@ type ApplicationRow = {
   submitted_at: string | null;
   created_at: string;
   updated_at: string | null;
+  /** Locator-facing progress (e.g. IN_REVIEW while it's being evaluated);
+   * display only — `status` drives the actions. */
+  display_status?: string | null;
   current_officer_id: number | null;
   requirements_total?: number;
   requirements_verified?: number;
@@ -124,7 +127,7 @@ function StatusPill({ status }: { status: string }) {
       className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold border"
       style={{ backgroundColor: b.bg, color: b.color, borderColor: b.border }}
     >
-      {status}
+      {String(status || '').replace(/_/g, ' ')}
     </span>
   );
 }
@@ -213,7 +216,7 @@ function ApplicationsList({ navigate }: { navigate: Navigate }) {
                     <span className="text-[12px] font-semibold truncate" style={{ color: 'var(--text)' }}>
                       {app.application_no}
                     </span>
-                    <StatusPill status={app.status} />
+                    <StatusPill status={app.display_status || app.status} />
                   </div>
                   <div className="mt-1 flex items-center justify-between gap-2 text-[11px] text-secondary">
                     <span className="truncate">
@@ -267,7 +270,7 @@ function ApplicationsList({ navigate }: { navigate: Navigate }) {
                       <td className="px-3 py-2.5 text-[11px] text-secondary">{applicationTypeLabel(app.application_type)}</td>
                       <td className="px-3 py-2.5 text-[11px] text-secondary">{Number(app.is_renewal) ? 'Renewal' : 'New'}</td>
                       <td className="px-3 py-2.5 text-[11px]">
-                        <StatusPill status={app.status} />
+                        <StatusPill status={app.display_status || app.status} />
                       </td>
                       <td className="px-3 py-2.5 text-[11px] text-secondary w-44">
                         <div className="flex items-center gap-2">
@@ -610,7 +613,7 @@ function ApplicationDetail({
             <h3 className="text-lg font-bold tracking-tight truncate" style={{ color: 'var(--text)' }}>
               {app.application_no}
             </h3>
-            <StatusPill status={app.status} />
+            <StatusPill status={app.display_status || app.status} />
           </div>
           <p className="text-xs text-secondary">
             {applicationTypeLabel(app.application_type)} · {Number(app.is_renewal) ? 'Renewal' : 'New'} ·{' '}
@@ -630,7 +633,7 @@ function ApplicationDetail({
           className="rounded-xl px-4 py-3.5 border flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3"
           style={{
             backgroundColor: 'color-mix(in oklab, var(--surface) 92%, transparent)',
-            borderColor: getStatusBadgeStyles(app.status).border,
+            borderColor: getStatusBadgeStyles(app.display_status || app.status).border,
           }}
         >
           <div className="min-w-0">
@@ -686,7 +689,7 @@ function ApplicationDetail({
             <Info label="Application No." value={app.application_no} />
             <Info label="Type" value={applicationTypeLabel(app.application_type)} />
             <Info label="Track" value={Number(app.is_renewal) ? 'Renewal' : 'New'} />
-            <Info label="Status" value={<StatusPill status={app.status} />} />
+            <Info label="Status" value={<StatusPill status={app.display_status || app.status} />} />
             <Info label="Submitted" value={isDraft ? 'Not yet submitted' : fmtDate(app.submitted_at || app.created_at)} />
             <Info label="Last Updated" value={fmtDate(app.updated_at)} />
           </div>

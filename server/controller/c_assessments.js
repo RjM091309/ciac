@@ -3,6 +3,9 @@ const Workflow = require("../models/ApplicationWorkflow");
 const AuditLog = require("../models/AuditLog");
 const { publicErrorMessage } = require("../lib/httpError");
 const { departmentOf } = require("../lib/departments");
+const { checkMenuAllowed } = require("../middleware/m_auth");
+const Proponent = require("../models/Proponent");
+const Notification = require("../models/Notification");
 
 function fail(res, error, label) {
   console.error(`${label} error:`, error);
@@ -133,9 +136,41 @@ exports.detail = async (req, res) => {
     const id = appIdParam(req, res);
     if (id === null) return undefined;
     if (!(await ensureCanAct(req, res, id))) return undefined;
+    // Level 2 opening their assigned application = review started. Only with
+    // Edit on their queue (view-only opening changes nothing).
+    const scope = await scopeFor(req);
+    let reviewStarted = false;
+    if (!scope.manager && scope.userId) {
+      const app = await Workflow.getApplicationById(id);
+      const menuKey = Number(app?.is_renewal) ? "applications:renewals" : "assessment:queue";
+      if (await checkMenuAllowed(String(req.user?.role || "").toLowerCase(), menuKey, "edit")) {
+        reviewStarted = await Assessment.startReviewOnOpen(id, scope.userId).catch((error) => {
+          console.error("Start review on open error:", error);
+          return false;
+        });
+        // Tell the locator their application is now being reviewed (in-app only).
+        if (reviewStarted && app?.proponent_id) {
+          try {
+            const owner = await Proponent.getProponentById(app.proponent_id);
+            if (owner?.user_id) {
+              await Notification.createNotification({
+                userId: owner.user_id,
+                subject: `Application in review: ${app.application_no}`,
+                body: `Your ${Number(app.is_renewal) ? "renewal" : "application"} ${app.application_no} is now being reviewed.`,
+                createdBy: scope.userId,
+                applicationId: id,
+                eventType: "application_status",
+              });
+            }
+          } catch (error) {
+            console.error("Review-started notification error:", error);
+          }
+        }
+      }
+    }
     const data = await Assessment.getAssessmentDetail(id);
     if (!data) return res.status(404).json({ success: false, message: "Application not found" });
-    return res.json({ success: true, data });
+    return res.json({ success: true, data, reviewStarted: reviewStarted || undefined });
   } catch (error) {
     return fail(res, error, "Assessment detail");
   }

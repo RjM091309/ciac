@@ -714,6 +714,33 @@ async function listApplicationsForProponent(proponentId) {
     `,
     [proponentId]
   );
+  return attachLocatorProgress(rows);
+}
+
+/** What the locator sees as their application's progress (`display_status`),
+ * without changing the real status the workflow runs on: a submitted
+ * application the evaluator has opened reads IN_REVIEW. `updated_at` also
+ * moves with the evaluation, so "Last updated" reflects it. */
+async function attachLocatorProgress(rows) {
+  const list = Array.isArray(rows) ? rows : [rows];
+  const ids = list.map((r) => toInt(r?.id)).filter(Boolean);
+  if (!ids.length) return rows;
+  const Assessment = require("./AssessmentEvaluation");
+  await Assessment.ensureSchema();
+  const stages = await selectData(
+    `SELECT application_id, stage, updated_at FROM dbo.application_assessments WHERE application_id IN (${ids.join(", ")})`
+  );
+  const byApp = new Map(stages.map((s) => [Number(s.application_id), s]));
+  for (const row of list) {
+    if (!row) continue;
+    const asm = byApp.get(Number(row.id));
+    const status = String(row.status || "").toUpperCase();
+    const reviewing = ["SUBMITTED", "RESUBMITTED"].includes(status) && ["IN_REVIEW", "FOR_RECOMMENDATION"].includes(asm?.stage);
+    row.display_status = reviewing ? "IN_REVIEW" : row.status;
+    const asmAt = asm?.updated_at ? new Date(asm.updated_at) : null;
+    const rowAt = row.updated_at ? new Date(row.updated_at) : null;
+    if (asmAt && (!rowAt || asmAt > rowAt)) row.updated_at = asm.updated_at;
+  }
   return rows;
 }
 
@@ -2090,6 +2117,7 @@ module.exports = {
   getRequirementCompletionByCategory,
   getMostActiveProponentId,
   listApplicationsForProponent,
+  attachLocatorProgress,
   listApplicationsForOfficer,
   getApplicationById,
   createApplication,

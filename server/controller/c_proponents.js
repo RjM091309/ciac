@@ -79,6 +79,40 @@ async function accountOfficerScope(req) {
   return Number(req.user.id);
 }
 
+/** A locator's Account Officer was set or changed (Level 1 assigning a
+ * Level 2): the new officer gets the "locator assigned" pop-up, the previous
+ * one hears it was handed over. Nobody is told about their own action. */
+async function notifyOfficerChange({ proponent, fromId, toId, actorId }) {
+  const from = Number(fromId) || null;
+  const to = Number(toId) || null;
+  if (!to || from === to) return;
+  const label = `${proponent?.business_name || "A locator"}${proponent?.ref_no ? ` (${proponent.ref_no})` : ""}`;
+  try {
+    const toUser = await AccountOfficer.getAccountOfficerById(to);
+    const toName = toUser?.full_name || toUser?.username || "another Account Officer";
+    if (to !== Number(actorId)) {
+      await Notification.createNotification({
+        userId: to,
+        subject: `New locator assigned: ${proponent?.business_name || "locator"}`,
+        body: `${label} was assigned to you as their Account Officer.`,
+        createdBy: actorId,
+        eventType: "locator_assigned",
+      });
+    }
+    if (from && from !== Number(actorId)) {
+      await Notification.createNotification({
+        userId: from,
+        subject: `Locator reassigned: ${proponent?.business_name || "locator"}`,
+        body: `${label} was reassigned to ${toName}. It's no longer in your Registered Locators.`,
+        createdBy: actorId,
+        eventType: "approval",
+      });
+    }
+  } catch (error) {
+    console.error("Account Officer change notification error:", error);
+  }
+}
+
 /** For the /:id Registered Locator routes: a Level 2 Account Officer can only
  * open their own locators. */
 exports.requireOwnLocator = async (req, res, next) => {
@@ -928,6 +962,7 @@ exports.create = async (req, res) => {
       details: { business_name: row?.business_name },
       req,
     });
+    await notifyOfficerChange({ proponent: row, fromId: null, toId: accountOfficerId, actorId: req.user?.id });
     return res.status(201).json({ success: true, data: row });
   } catch (error) {
     console.error("Create proponent error:", error);
@@ -1160,6 +1195,12 @@ exports.update = async (req, res) => {
     }
     await applyLeaseTerm(id, leaseTerm, req.user?.id ?? null);
     const refreshed = await Proponent.getProponentById(id);
+    await notifyOfficerChange({
+      proponent: refreshed || row,
+      fromId: before?.account_officer_id,
+      toId: (refreshed || row)?.account_officer_id,
+      actorId: req.user?.id,
+    });
 
     await AuditLog.record({
       actorId: req.user?.id,

@@ -1107,9 +1107,14 @@ function AssessmentDetail({
   const [tab, setTab] = useState<Tab>(initialTab || 'Overview');
   const [busy, setBusy] = useState(false);
 
+  // Opening an assigned application puts it In Review (server-side) — the
+  // queue behind the drawer refreshes so its row shows that too.
+  const onMutatedRef = useRef(onMutated);
+  onMutatedRef.current = onMutated;
   const load = useCallback(async () => {
     const json = await apiFetch(`/api/assessments/${applicationId}`);
     setData(json.data);
+    if (json.reviewStarted) onMutatedRef.current();
   }, [applicationId]);
   useLiveRefresh(() => load().catch(() => {}));
 
@@ -1363,6 +1368,9 @@ function OverviewTab({
       </div>
       ) : null}
 
+      {/* Level 2 never moves the stage by hand: opening an assigned
+          application puts it In Review automatically (server-side). */}
+      {isManager ? (
       <div className="rounded-xl border p-3 flex flex-wrap gap-2" style={{ borderColor: 'var(--border)' }}>
         <div className="w-full text-[11px] font-bold uppercase tracking-wide text-secondary mb-1">Move stage</div>
         {/* For Recommendation is reached by submitting the review on the
@@ -1407,6 +1415,7 @@ function OverviewTab({
           </button>
         ) : null}
       </div>
+      ) : null}
     </div>
   );
 }

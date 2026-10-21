@@ -35,6 +35,8 @@ export default defineConfig(({mode}) => {
       host: '0.0.0.0',
       port: 2500,
       strictPort: true,
+      // Domains nginx forwards to this dev server (Vite rejects any other Host).
+      allowedHosts: ['bridge.3core21.com', 'www.bridge.3core21.com'],
       proxy: {
         '/api': {
           target: backendTarget,

@@ -482,6 +482,15 @@ async function buildStaffDashboard({ user, sidebarPermissions, widgetPermissions
   const historyApplications = queue === "approval" ? workApplications : applications;
   const performanceIds = queue === "approval" ? historyApplications.map((a) => a.id) : scopedIds;
   const summary = summarize(workApplications);
+  // "Returned" = sent back to the evaluator by Level 1 and not resubmitted
+  // yet (an application is no longer returned to the locator). Still in
+  // process, so it moves out of Pending into Returned.
+  const settled = new Set(["DRAFT", "APPROVED", "DISAPPROVED", "REJECTED", "RETURNED"]);
+  const returnedToEvaluator = await Assessment.listReturnedToEvaluatorIds(
+    workApplications.filter((a) => !settled.has(upper(a.status))).map((a) => a.id)
+  );
+  summary.returned += returnedToEvaluator.size;
+  summary.pending -= returnedToEvaluator.size;
 
   // Drives the dashboard's heading/wording, e.g. a read-only overview role
   // never sees "assigned to you".

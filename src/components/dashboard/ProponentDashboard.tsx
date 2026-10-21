@@ -15,6 +15,8 @@ type DashboardApplicationRow = {
   application_type: string;
   is_renewal: boolean | number;
   status: string;
+  /** Locator-facing progress (e.g. IN_REVIEW); display only. */
+  display_status?: string | null;
   submitted_at: string | null;
   created_at: string;
   requirements_total: number;
@@ -195,7 +197,8 @@ export function ProponentDashboard({
             {/* Mobile: card list — a <table> forces horizontal scrolling on narrow screens. */}
             <div className="sm:hidden space-y-2.5">
               {applications.map((app) => {
-                const badge = getStatusBadgeStyles(app.status);
+                const shownStatus = app.display_status || app.status;
+                const badge = getStatusBadgeStyles(shownStatus);
                 const total = Number(app.requirements_total || 0);
                 const verified = Number(app.requirements_verified || 0);
                 const pct = total > 0 ? Math.round((verified / total) * 100) : 0;
@@ -223,7 +226,7 @@ export function ProponentDashboard({
                         className="shrink-0 inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold border"
                         style={{ backgroundColor: badge.bg, color: badge.color, borderColor: badge.border }}
                       >
-                        {app.status}
+                        {String(shownStatus || '').replace(/_/g, ' ')}
                       </span>
                     </div>
                     <div className="mt-1 flex items-center justify-between gap-2 text-[11px] text-secondary">
@@ -279,7 +282,8 @@ export function ProponentDashboard({
                 </thead>
                 <tbody>
                   {applications.map((app) => {
-                    const badge = getStatusBadgeStyles(app.status);
+                    const shownStatus = app.display_status || app.status;
+                    const badge = getStatusBadgeStyles(shownStatus);
                     const total = Number(app.requirements_total || 0);
                     const verified = Number(app.requirements_verified || 0);
                     const pct = total > 0 ? Math.round((verified / total) * 100) : 0;
@@ -315,7 +319,7 @@ export function ProponentDashboard({
                             className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold border"
                             style={{ backgroundColor: badge.bg, color: badge.color, borderColor: badge.border }}
                           >
-                            {app.status}
+                            {String(shownStatus || '').replace(/_/g, ' ')}
                           </span>
                         </td>
                         <td className="px-3 py-2 text-[11px] text-secondary">

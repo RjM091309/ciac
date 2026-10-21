@@ -12,6 +12,10 @@ export function getStatusBadgeStyles(status: string | null | undefined) {
   if (s === 'RETURNED') {
     return { bg: 'rgba(249,115,22,.14)', color: '#f97316', border: 'rgba(249,115,22,.38)' };
   }
+  // Locator-facing progress: the evaluator has opened their application.
+  if (s === 'IN_REVIEW') {
+    return { bg: 'rgba(139,92,246,.14)', color: '#8b5cf6', border: 'rgba(139,92,246,.38)' };
+  }
   if (s === 'FOR_APPROVAL') {
     return { bg: 'rgba(59,130,246,.14)', color: '#3b82f6', border: 'rgba(59,130,246,.38)' };
   }
