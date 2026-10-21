@@ -55,6 +55,7 @@ async function userAuditSnapshot(id) {
         location: proponent?.location ?? null,
         land_use_id: proponent?.land_use_id ?? null,
         proposed_lease_term_years: proponent?.proposed_lease_term_years ?? null,
+        proposed_lease_term_unit: proponent?.proposed_lease_term_unit ?? "YEARS",
     contact_no: proponent?.contact_no ?? null,
   };
 }
@@ -98,10 +99,19 @@ exports.sendTempPasswordEmail = sendTempPasswordEmail;
 function leaseTermValue(v) {
   return v === undefined || v === null || String(v).trim() === "" ? null : Number(v);
 }
-function isValidLeaseTerm(v) {
-  const n = leaseTermValue(v);
-  return n === null || (Number.isFinite(n) && n > 0 && n <= 99);
+/** 'MONTHS' (short-term leases) or 'YEARS' (default). */
+function leaseTermUnit(v) {
+  return String(v || "").trim().toUpperCase() === "MONTHS" ? "MONTHS" : "YEARS";
 }
+/** Years: more than 0, up to 99 (halves allowed). Months: whole months, 1–1188 (99 years). */
+function isValidLeaseTerm(v, unit) {
+  const n = leaseTermValue(v);
+  if (n === null) return true;
+  if (!Number.isFinite(n) || n <= 0) return false;
+  return leaseTermUnit(unit) === "MONTHS" ? Number.isInteger(n) && n <= 1188 : n <= 99;
+}
+const LEASE_TERM_MESSAGE =
+  "Proposed lease term must be more than 0 — up to 99 years, or a whole number of months (up to 1188).";
 
 /** Land Use (File Maintenance) picked on the Locator Accounts form must exist. */
 async function isKnownLandUse(id) {
@@ -160,6 +170,7 @@ exports.getById = async (req, res) => {
         location: proponent?.location ?? null,
         land_use_id: proponent?.land_use_id ?? null,
         proposed_lease_term_years: proponent?.proposed_lease_term_years ?? null,
+        proposed_lease_term_unit: proponent?.proposed_lease_term_unit ?? "YEARS",
         contact_no: proponent?.contact_no ?? null,
       },
     });
@@ -213,6 +224,7 @@ exports.create = async (req, res) => {
       location,
       land_use_id,
       proposed_lease_term_years,
+      proposed_lease_term_unit,
       contact_no,
     } = req.body || {};
     if (land_use_id && !(await isKnownLandUse(land_use_id))) {
@@ -220,8 +232,8 @@ exports.create = async (req, res) => {
     }
     const department = await readDepartmentId(department_id);
     if (department.error) return res.status(400).json({ success: false, message: department.error, field: "department_id" });
-    if (!isValidLeaseTerm(proposed_lease_term_years)) {
-      return res.status(400).json({ success: false, message: "Proposed lease term must be a number of years (more than 0, up to 99)." });
+    if (!isValidLeaseTerm(proposed_lease_term_years, proposed_lease_term_unit)) {
+      return res.status(400).json({ success: false, message: LEASE_TERM_MESSAGE });
     }
     if (!username) return res.status(400).json({ success: false, message: "username is required" });
     if (!String(email || "").trim()) return res.status(400).json({ success: false, message: "email is required" });
@@ -284,6 +296,7 @@ exports.create = async (req, res) => {
           location: location ? String(location).trim() : null,
           land_use_id: land_use_id ? Number(land_use_id) : null,
           proposed_lease_term_years: leaseTermValue(proposed_lease_term_years),
+          proposed_lease_term_unit: leaseTermUnit(proposed_lease_term_unit),
           contact_no: contact_no ? String(contact_no).trim() : null,
           created_by: req.user?.id ?? null,
         });
@@ -367,6 +380,7 @@ exports.createLocatorWithApplication = async (req, res) => {
       location,
       land_use_id,
       proposed_lease_term_years,
+      proposed_lease_term_unit,
       contact_no,
       application_type,
       is_renewal,
@@ -376,8 +390,8 @@ exports.createLocatorWithApplication = async (req, res) => {
     if (land_use_id && !(await isKnownLandUse(land_use_id))) {
       return res.status(400).json({ success: false, message: "Unknown land use" });
     }
-    if (!isValidLeaseTerm(proposed_lease_term_years)) {
-      return res.status(400).json({ success: false, message: "Proposed lease term must be a number of years (more than 0, up to 99)." });
+    if (!isValidLeaseTerm(proposed_lease_term_years, proposed_lease_term_unit)) {
+      return res.status(400).json({ success: false, message: LEASE_TERM_MESSAGE });
     }
 
     if (!username) return res.status(400).json({ success: false, message: "username is required" });
@@ -438,6 +452,7 @@ exports.createLocatorWithApplication = async (req, res) => {
           location: location ? String(location).trim() : null,
           land_use_id: land_use_id ? Number(land_use_id) : null,
           proposed_lease_term_years: leaseTermValue(proposed_lease_term_years),
+          proposed_lease_term_unit: leaseTermUnit(proposed_lease_term_unit),
         contact_no: String(contact_no).trim(),
         created_by: req.user?.id ?? null,
       });
@@ -544,6 +559,7 @@ exports.update = async (req, res) => {
       location,
       land_use_id,
       proposed_lease_term_years,
+      proposed_lease_term_unit,
       contact_no,
     } = req.body || {};
     if (land_use_id && !(await isKnownLandUse(land_use_id))) {
@@ -551,8 +567,8 @@ exports.update = async (req, res) => {
     }
     const department = await readDepartmentId(department_id, (await User.getUserById(id))?.department_id);
     if (department.error) return res.status(400).json({ success: false, message: department.error, field: "department_id" });
-    if (!isValidLeaseTerm(proposed_lease_term_years)) {
-      return res.status(400).json({ success: false, message: "Proposed lease term must be a number of years (more than 0, up to 99)." });
+    if (!isValidLeaseTerm(proposed_lease_term_years, proposed_lease_term_unit)) {
+      return res.status(400).json({ success: false, message: LEASE_TERM_MESSAGE });
     }
     if (email !== undefined && !String(email || "").trim()) {
       return res.status(400).json({ success: false, message: "email is required" });
@@ -579,7 +595,7 @@ exports.update = async (req, res) => {
     // the admin-direct edit path (gated by the same settings:locator-users
     // permission as the rest of this route), separate from the proponent's
     // own self-service change-request flow in c_proponents.js.
-    if (business_name !== undefined || address !== undefined || lease_address !== undefined || location !== undefined || land_use_id !== undefined || proposed_lease_term_years !== undefined || contact_no !== undefined) {
+    if (business_name !== undefined || address !== undefined || lease_address !== undefined || location !== undefined || land_use_id !== undefined || proposed_lease_term_years !== undefined || proposed_lease_term_unit !== undefined || contact_no !== undefined) {
       try {
         const existing = await Proponent.getProponentByUserId(id);
         if (existing) {
@@ -590,6 +606,7 @@ exports.update = async (req, res) => {
             location: location !== undefined ? (location ? String(location).trim() : null) : undefined,
             land_use_id: land_use_id !== undefined ? (land_use_id ? Number(land_use_id) : null) : undefined,
             proposed_lease_term_years: proposed_lease_term_years !== undefined ? leaseTermValue(proposed_lease_term_years) : undefined,
+            proposed_lease_term_unit: proposed_lease_term_unit !== undefined ? leaseTermUnit(proposed_lease_term_unit) : undefined,
             contact_no: contact_no !== undefined ? (contact_no ? String(contact_no).trim() : null) : undefined,
             updated_by: req.user?.id ?? null,
           });
@@ -602,6 +619,7 @@ exports.update = async (req, res) => {
           location: location ? String(location).trim() : null,
           land_use_id: land_use_id ? Number(land_use_id) : null,
           proposed_lease_term_years: leaseTermValue(proposed_lease_term_years),
+          proposed_lease_term_unit: leaseTermUnit(proposed_lease_term_unit),
             contact_no: contact_no ? String(contact_no).trim() : null,
             created_by: req.user?.id ?? null,
           });

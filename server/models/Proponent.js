@@ -181,6 +181,12 @@ async function createSchema() {
     IF COL_LENGTH('dbo.proponents', 'proposed_lease_term_years') IS NULL
       ALTER TABLE dbo.proponents ADD proposed_lease_term_years DECIMAL(5,2) NULL;
   `);
+  // Unit of that term: 'MONTHS' for short-term leases; NULL/'YEARS' = years
+  // (every older row). The column name stays as it was.
+  await updateSchema(`
+    IF COL_LENGTH('dbo.proponents', 'proposed_lease_term_unit') IS NULL
+      ALTER TABLE dbo.proponents ADD proposed_lease_term_unit VARCHAR(10) NULL;
+  `);
   // "Profile" fields mirroring the legacy BRIDGE system's Locator's
   // Information form — like `location`, these are detail/edit-panel-only
   // (never bulk-fetched for the Locators List table).
@@ -707,6 +713,11 @@ async function listProponentsForLocatorList({ accountOfficerId = null } = {}) {
   }));
 }
 
+/** 'MONTHS' or 'YEARS' (the default — older rows have no unit). */
+function leaseTermUnit(value) {
+  return String(value || "").trim().toUpperCase() === "MONTHS" ? "MONTHS" : "YEARS";
+}
+
 async function createProponent({
   user_id,
   business_name,
@@ -716,6 +727,7 @@ async function createProponent({
   contact_no,
   location,
   proposed_lease_term_years,
+  proposed_lease_term_unit,
   ref_code,
   lease_address,
   account_officer_id,
@@ -839,10 +851,10 @@ async function createProponent({
   });
 
   if (newId && proposed_lease_term_years !== undefined && proposed_lease_term_years !== null && proposed_lease_term_years !== "") {
-    await updateData(`UPDATE dbo.proponents SET proposed_lease_term_years = @param1 WHERE id = @param0`, [
-      newId,
-      Number(proposed_lease_term_years),
-    ]);
+    await updateData(
+      `UPDATE dbo.proponents SET proposed_lease_term_years = @param1, proposed_lease_term_unit = @param2 WHERE id = @param0`,
+      [newId, Number(proposed_lease_term_years), leaseTermUnit(proposed_lease_term_unit)]
+    );
   }
   return await getProponentById(newId);
 }
@@ -895,6 +907,7 @@ async function updateProponent(
     contact_no,
     location,
     proposed_lease_term_years,
+    proposed_lease_term_unit,
     ref_code,
     lease_address,
     account_officer_id,
@@ -958,6 +971,7 @@ async function updateProponent(
       proposed_lease_term_years === null || proposed_lease_term_years === "" ? null : Number(proposed_lease_term_years)
     );
   }
+  if (proposed_lease_term_unit !== undefined) pushSet("proposed_lease_term_unit = ?", leaseTermUnit(proposed_lease_term_unit));
   if (ref_code !== undefined) pushSet("ref_code = ?", ref_code);
   if (lease_address !== undefined) pushSet("lease_address = ?", lease_address);
   if (account_officer_id !== undefined) pushSet("account_officer_id = ?", toInt(account_officer_id));
@@ -1097,6 +1111,7 @@ async function getProponentByUserId(userId) {
       p.location,
       p.land_use_id,
       p.proposed_lease_term_years,
+      p.proposed_lease_term_unit,
       p.contact_no,
       p.created_by,
       p.updated_by,
@@ -1122,6 +1137,7 @@ async function getProponentByUserId(userId) {
     location: p.location ?? null,
     land_use_id: p.land_use_id ?? null,
     proposed_lease_term_years: p.proposed_lease_term_years != null ? Number(p.proposed_lease_term_years) : null,
+    proposed_lease_term_unit: leaseTermUnit(p.proposed_lease_term_unit),
     contact_no: p.contact_no ?? null,
     created_by: p.created_by ?? null,
     updated_by: p.updated_by ?? null,

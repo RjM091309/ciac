@@ -133,6 +133,7 @@ export function LocatorUsersManagement({
     location: string;
     land_use_id: string;
     proposed_lease_term_years: string;
+    proposed_lease_term_unit: string;
     contact_no: string;
   } | null>(null);
   const [continuingDraftType, setContinuingDraftType] = useState('DIRECT_LEASE');
@@ -333,6 +334,7 @@ export function LocatorUsersManagement({
     location: '',
     land_use_id: '',
     proposed_lease_term_years: '',
+    proposed_lease_term_unit: 'YEARS',
     contact_no: '',
     application_type: 'DIRECT_LEASE',
     contract_type_id: '',
@@ -578,6 +580,7 @@ export function LocatorUsersManagement({
       form.location.trim() !== originalForm.location.trim() ||
       form.land_use_id !== originalForm.land_use_id ||
       form.proposed_lease_term_years !== originalForm.proposed_lease_term_years ||
+      form.proposed_lease_term_unit !== originalForm.proposed_lease_term_unit ||
       form.contact_no.trim() !== originalForm.contact_no.trim()
     );
   }, [editing, form, locatorRole, originalForm, fieldErrors, checkingField]);
@@ -604,6 +607,7 @@ export function LocatorUsersManagement({
       location: '',
       land_use_id: '',
       proposed_lease_term_years: '',
+      proposed_lease_term_unit: 'YEARS',
       contact_no: '',
       application_type: 'DIRECT_LEASE',
       contract_type_id: '',
@@ -626,6 +630,7 @@ export function LocatorUsersManagement({
       location: '',
       land_use_id: '',
       proposed_lease_term_years: '',
+      proposed_lease_term_unit: 'YEARS',
       contact_no: '',
       // Application-filing fields don't apply on edit (an account's linked
       // application isn't created/changed here) — kept only so `form` has
@@ -650,6 +655,7 @@ export function LocatorUsersManagement({
           location: json.data.location || '',
           land_use_id: json.data.land_use_id != null ? String(json.data.land_use_id) : '',
           proposed_lease_term_years: json.data.proposed_lease_term_years != null ? String(json.data.proposed_lease_term_years) : '',
+          proposed_lease_term_unit: json.data.proposed_lease_term_unit === 'MONTHS' ? 'MONTHS' : 'YEARS',
           contact_no: json.data.contact_no || '',
         };
         setForm(withProfile);
@@ -687,6 +693,7 @@ export function LocatorUsersManagement({
           location: form.location.trim() || undefined,
           land_use_id: form.land_use_id ? Number(form.land_use_id) : undefined,
           proposed_lease_term_years: form.proposed_lease_term_years.trim() || undefined,
+          proposed_lease_term_unit: form.proposed_lease_term_unit,
           contact_no: form.contact_no.trim(),
           application_type: form.application_type,
           contract_type_id: form.contract_type_id ? Number(form.contract_type_id) : null,
@@ -737,6 +744,7 @@ export function LocatorUsersManagement({
       payload.location = form.location.trim() || undefined;
       payload.land_use_id = form.land_use_id ? Number(form.land_use_id) : null;
       payload.proposed_lease_term_years = form.proposed_lease_term_years.trim() || null;
+      payload.proposed_lease_term_unit = form.proposed_lease_term_unit;
       payload.contact_no = form.contact_no.trim() || undefined;
       // No password field on this form: the backend generates one and emails
       // it when none is supplied, same as an admin-triggered reset.
@@ -957,6 +965,7 @@ export function LocatorUsersManagement({
         location: '',
         land_use_id: '',
         proposed_lease_term_years: '',
+        proposed_lease_term_unit: 'YEARS',
         contact_no: '',
       });
       setContinuingDraftType(app.application_type || 'DIRECT_LEASE');
@@ -979,6 +988,7 @@ export function LocatorUsersManagement({
                   location: json.data.location || '',
                   land_use_id: json.data.land_use_id != null ? String(json.data.land_use_id) : '',
                   proposed_lease_term_years: json.data.proposed_lease_term_years != null ? String(json.data.proposed_lease_term_years) : '',
+                  proposed_lease_term_unit: json.data.proposed_lease_term_unit === 'MONTHS' ? 'MONTHS' : 'YEARS',
                   contact_no: json.data.contact_no || '',
                 }
               : prev
@@ -1017,6 +1027,7 @@ export function LocatorUsersManagement({
           location: continuingDraft.location.trim() || undefined,
           land_use_id: continuingDraft.land_use_id ? Number(continuingDraft.land_use_id) : undefined,
           proposed_lease_term_years: continuingDraft.proposed_lease_term_years.trim() || undefined,
+          proposed_lease_term_unit: continuingDraft.proposed_lease_term_unit,
           contact_no: continuingDraft.contact_no.trim() || undefined,
         }),
       });
@@ -1550,17 +1561,11 @@ export function LocatorUsersManagement({
               />
             </Field>
           ) : null}
-          <Field label="Proposed Lease Term (in years)">
-            <input
-              type="number"
-              min={0}
-              max={99}
-              step="0.5"
-              inputMode="decimal"
-              className="app-input"
+          <Field label="Proposed Lease Term">
+            <LeaseTermInput
               value={form.proposed_lease_term_years}
-              onChange={(e) => setForm((p) => ({ ...p, proposed_lease_term_years: e.target.value }))}
-              placeholder="e.g. 5"
+              unit={form.proposed_lease_term_unit}
+              onChange={(value, unit) => setForm((p) => ({ ...p, proposed_lease_term_years: value, proposed_lease_term_unit: unit }))}
             />
           </Field>
           {!editing ? (
@@ -1725,17 +1730,13 @@ export function LocatorUsersManagement({
                   isClearable
                 />
               </Field>
-              <Field label="Proposed Lease Term (in years)">
-                <input
-                  type="number"
-                  min={0}
-                  max={99}
-                  step="0.5"
-                  inputMode="decimal"
-                  className="app-input"
+              <Field label="Proposed Lease Term">
+                <LeaseTermInput
                   value={continuingDraft.proposed_lease_term_years}
-                  onChange={(e) => setContinuingDraft((p) => (p ? { ...p, proposed_lease_term_years: e.target.value } : p))}
-                  placeholder="e.g. 5"
+                  unit={continuingDraft.proposed_lease_term_unit}
+                  onChange={(value, unit) =>
+                    setContinuingDraft((p) => (p ? { ...p, proposed_lease_term_years: value, proposed_lease_term_unit: unit } : p))
+                  }
                 />
               </Field>
             </div>
@@ -1927,6 +1928,48 @@ function Field({
       ) : hint ? (
         <p className="text-[10px] font-medium text-secondary">{hint}</p>
       ) : null}
+    </div>
+  );
+}
+
+const LEASE_TERM_UNITS = [
+  { value: 'YEARS', label: 'Years' },
+  { value: 'MONTHS', label: 'Months' },
+];
+
+/** Proposed lease term: a number plus its unit — years (halves allowed,
+ * up to 99) or whole months for short-term leases (up to 1188). */
+function LeaseTermInput({
+  value,
+  unit,
+  onChange,
+}: {
+  value: string;
+  unit: string;
+  onChange: (value: string, unit: string) => void;
+}) {
+  const months = unit === 'MONTHS';
+  return (
+    <div className="flex gap-2">
+      <input
+        type="number"
+        min={months ? 1 : 0}
+        max={months ? 1188 : 99}
+        step={months ? 1 : 0.5}
+        inputMode={months ? 'numeric' : 'decimal'}
+        className="app-input flex-1 min-w-0"
+        value={value}
+        onChange={(e) => onChange(e.target.value, unit)}
+        placeholder={months ? 'e.g. 6' : 'e.g. 5'}
+      />
+      <div className="w-32 shrink-0">
+        <AppSelect
+          isClearable={false}
+          options={LEASE_TERM_UNITS}
+          value={months ? 'MONTHS' : 'YEARS'}
+          onChange={(next) => onChange(value, next || 'YEARS')}
+        />
+      </div>
     </div>
   );
 }
