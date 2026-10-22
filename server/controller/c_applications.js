@@ -12,7 +12,7 @@ const { generateTempPassword } = require("../lib/password");
 const { sendTempPasswordEmail } = require("./c_users");
 const { publicErrorMessage } = require("../lib/httpError");
 const { departmentOf, aoLevel2Id } = require("../lib/departments");
-const { resolveStoredPath, relativeStoragePath } = require("../lib/fileStorage");
+const { resolveStoredPath, relativeStoragePath, contentDisposition } = require("../lib/fileStorage");
 const { placeApplicationUpload } = require("../lib/locatorFolders");
 
 /** A locator account created via Locator Accounts with a business profile
@@ -721,6 +721,13 @@ exports.downloadDocument = async (req, res) => {
     const abs = resolveStoredPath(document.storage_path);
     if (!abs || !fs.existsSync(abs)) {
       return res.status(404).json({ success: false, message: "File is no longer available." });
+    }
+    // ?view=1 opens a PDF or image in the browser tab; anything else still downloads.
+    const type = String(document.content_type || "").toLowerCase();
+    if (req.query.view === "1" && ["application/pdf", "image/png", "image/jpeg"].includes(type)) {
+      res.type(type);
+      res.setHeader("Content-Disposition", contentDisposition("inline", downloadName));
+      return res.sendFile(abs);
     }
     return res.download(abs, downloadName);
   } catch (error) {

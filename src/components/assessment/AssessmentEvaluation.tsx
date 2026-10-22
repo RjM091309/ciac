@@ -1399,38 +1399,12 @@ function OverviewTab({
       </div>
       ) : null}
 
-      {/* Level 2 never moves the stage by hand: opening an assigned
-          application puts it In Review automatically (server-side). */}
-      {isManager ? (
-      <div className="rounded-xl border p-3 flex flex-wrap gap-2" style={{ borderColor: 'var(--border)' }}>
-        <div className="w-full text-[11px] font-bold uppercase tracking-wide text-secondary mb-1">Move stage</div>
-        {/* For Recommendation is reached by submitting the review on the
-            Recommendation tab, not by moving the stage by hand. */}
-        {['ASSIGNED', 'IN_REVIEW'].map((s) => (
-          <button
-            key={s}
-            className={cn(
-              'rounded-lg px-3 py-1.5 text-[12px] font-semibold border disabled:opacity-40',
-              a.stage === s && 'ring-1 ring-[var(--text)]'
-            )}
-            style={{ borderColor: 'var(--border)', color: 'var(--text)' }}
-            disabled={busy || !perms.canEdit || a.stage === s || isClosed || a.stage === 'FOR_RECOMMENDATION' || !a.assigned_evaluator_id}
-            title={!a.assigned_evaluator_id ? 'Assign an evaluator first' : undefined}
-            onClick={() =>
-              run(
-                () =>
-                  apiFetch(`/api/assessments/${a.application_id}/stage`, {
-                    method: 'PATCH',
-                    body: JSON.stringify({ stage: s }),
-                  }),
-                `Moved to ${STAGE_LABELS[s]}`
-              )
-            }
-          >
-            {STAGE_LABELS[s]}
-          </button>
-        ))}
-        {(a.stage === 'COMPLETED' || a.stage === 'RETURNED') && isAdminReopen ? (
+      {/* No manual stage moves: the stage follows the work (assigning, the
+          evaluator opening it, submitting, Level 1's decision). Only an
+          admin's Reopen remains, for a closed evaluation. */}
+      {(a.stage === 'COMPLETED' || a.stage === 'RETURNED') && isAdminReopen ? (
+        <div className="rounded-xl border p-3 flex flex-wrap items-center gap-2" style={{ borderColor: 'var(--border)' }}>
+          <span className="text-[12px] text-secondary flex-1">This evaluation is closed.</span>
           <button
             className="rounded-lg px-3 py-1.5 text-[12px] font-semibold border disabled:opacity-40"
             style={{ borderColor: 'var(--border)', color: 'var(--text)' }}
@@ -1444,8 +1418,7 @@ function OverviewTab({
           >
             <RotateCcw size={13} className="inline mr-1" /> Reopen
           </button>
-        ) : null}
-      </div>
+        </div>
       ) : null}
     </div>
   );
@@ -2195,7 +2168,7 @@ function ContractTab({ data, canEdit, busy, run }: { data: DetailPayload; canEdi
           <a
             className="text-[12px] font-semibold underline"
             style={{ color: '#10b981' }}
-            href={`/api/applications/documents/${c.document_id}/file`}
+            href={`/api/applications/documents/${c.document_id}/file?view=1`}
             target="_blank"
             rel="noreferrer"
           >

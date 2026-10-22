@@ -4,8 +4,12 @@ import {
   CheckCircle2,
   Clock3,
   Coins,
+  ExternalLink,
+  FileCheck2,
   FileSignature,
+  FileText,
   Loader2,
+  Package,
   Plus,
   RotateCcw,
   Stamp,
@@ -1009,27 +1013,88 @@ function ContractTab({
 
   return (
     <div className="flex flex-col gap-3">
-      {c && (c.document_id || c.has_certificate) ? (
-        <div className="rounded-xl border p-3 flex flex-col gap-1.5" style={{ borderColor: 'var(--border-subtle)' }}>
-          {c.document_id ? (
-            <a
-              className="text-[12px] underline text-secondary hover:text-[var(--text)]"
-              href={`/api/applications/documents/${c.document_id}/file`}
-              target="_blank"
-              rel="noreferrer"
+      {c ? (
+        <div
+          className="rounded-xl border p-3.5 flex flex-col gap-3"
+          style={{ borderColor: c.document_id ? 'rgba(16,185,129,.45)' : 'var(--border-subtle)' }}
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-start gap-2.5 min-w-0">
+              <div
+                className="h-9 w-9 shrink-0 rounded-lg flex items-center justify-center"
+                style={{ backgroundColor: 'color-mix(in oklab, var(--control-bg) 85%, transparent)' }}
+              >
+                <FileSignature size={17} style={{ color: 'var(--text)' }} />
+              </div>
+              <div className="min-w-0">
+                <div className="text-[10px] font-semibold uppercase tracking-wide text-secondary">Contract no.</div>
+                <div className="text-[14px] font-bold truncate" style={{ color: 'var(--text)' }}>
+                  {c.contract_no}
+                </div>
+              </div>
+            </div>
+            <span
+              className="shrink-0 inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[10px] font-semibold border"
+              style={
+                c.document_id
+                  ? { color: '#10b981', backgroundColor: 'rgba(16,185,129,.12)', borderColor: 'rgba(16,185,129,.35)' }
+                  : { color: '#f59e0b', backgroundColor: 'rgba(245,158,11,.12)', borderColor: 'rgba(245,158,11,.35)' }
+              }
             >
-              View signed contract
-            </a>
-          ) : null}
-          {c.has_certificate ? (
+              {c.document_id ? <CheckCircle2 size={11} /> : <Clock3 size={11} />}
+              {c.document_id ? 'Signed copy uploaded' : 'Not signed yet'}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            {(
+              [
+                ['Effective start', c.effective_start],
+                ['Effective end', c.effective_end],
+              ] as const
+            ).map(([label, value]) => (
+              <div key={label} className="rounded-lg border px-2.5 py-1.5" style={{ borderColor: 'var(--border-subtle)' }}>
+                <div className="text-[10px] uppercase tracking-wide text-secondary">{label}</div>
+                <div className="text-[12px] font-semibold" style={{ color: 'var(--text)' }}>
+                  {value ? new Date(value).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) : '—'}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            {c.document_id ? (
+              <a
+                className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[12px] font-semibold"
+                style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
+                href={`/api/applications/documents/${c.document_id}/file?view=1`}
+                target="_blank"
+                rel="noreferrer"
+              >
+                <FileCheck2 size={13} /> View signed contract
+                <ExternalLink size={11} className="opacity-70" />
+              </a>
+            ) : null}
+            {c.has_certificate ? (
+              <button
+                type="button"
+                className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[12px] font-semibold border cursor-pointer"
+                style={{ borderColor: 'var(--border)', color: 'var(--text)' }}
+                onClick={() => window.open(`/api/approvals/contracts/${c.id}/certificate?view=1`, '_blank')}
+              >
+                <FileText size={13} /> View contract
+              </button>
+            ) : null}
             <button
               type="button"
-              className="text-[12px] underline text-secondary hover:text-[var(--text)] text-left cursor-pointer"
-              onClick={() => window.open(`/api/approvals/contracts/${c.id}/certificate?view=1`, '_blank')}
+              className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[12px] font-semibold border cursor-pointer"
+              style={{ borderColor: 'var(--border)', color: 'var(--text)' }}
+              title="The contract, the agreed terms and the locator's requirements in one PDF"
+              onClick={() => window.open(`/api/assessments/${a.application_id}/contract/print`, '_blank')}
             >
-              View Contract
+              <Package size={13} /> Contract package
             </button>
-          ) : null}
+          </div>
         </div>
       ) : null}
 
@@ -1091,7 +1156,7 @@ function ContractTab({
           {c?.document_id ? (
             <a
               className="text-[11px] underline text-secondary hover:text-[var(--text)]"
-              href={`/api/applications/documents/${c.document_id}/file`}
+              href={`/api/applications/documents/${c.document_id}/file?view=1`}
               target="_blank"
               rel="noreferrer"
             >

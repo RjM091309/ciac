@@ -1444,10 +1444,15 @@ export function LocatorUsersManagement({
                           const progress = progressByApp[applicationByUserId[u.id].id];
                           const percent = progress?.percent ?? 0;
                           const submittedPercent = progress?.submittedPercent ?? 0;
+                          // Uploaded by the locator and not checked yet (rejected ones wait for a re-upload instead).
+                          const waiting = Math.max(0, (progress?.submitted ?? 0) - (progress?.verified ?? 0) - (progress?.rejected ?? 0));
                           const barColor = percent >= 100 ? '#10b981' : percent >= 50 ? '#3b82f6' : '#f59e0b';
                           return (
                             <div>
-                              <div className="flex items-center gap-2">
+                              <div
+                                className="flex items-center gap-2"
+                                title={`${progress?.verified ?? 0} of ${progress?.total ?? 0} requirements verified · ${progress?.submitted ?? 0} uploaded by the locator`}
+                              >
                                 {/* Faint layer = submitted (uploaded), solid layer = verified. */}
                                 <div className="relative h-2 rounded-full overflow-hidden w-[90px]" style={{ backgroundColor: 'var(--input-border)' }}>
                                   <div className="absolute inset-y-0 left-0 rounded-full opacity-35" style={{ width: `${submittedPercent}%`, backgroundColor: '#3b82f6' }} />
@@ -1455,9 +1460,12 @@ export function LocatorUsersManagement({
                                 </div>
                                 <span className="font-semibold">{percent}%</span>
                               </div>
-                              <div className="mt-0.5 text-[10px] text-secondary">
-                                {submittedPercent}% submitted · {percent}% verified
-                              </div>
+                              {/* The number is verified; a note only when uploads are waiting for the evaluator. */}
+                              {waiting > 0 ? (
+                                <div className="mt-0.5 text-[10px] text-secondary">
+                                  {waiting} uploaded, waiting for review
+                                </div>
+                              ) : null}
                             </div>
                           );
                         })()
@@ -1556,17 +1564,15 @@ export function LocatorUsersManagement({
               required={!editing}
             />
           </Field>
+          {/* Type of contract sits beside the lease term (short-term leases). */}
           {!editing ? (
-            <Field label="Industry Type *">
+            <Field label="Type of contract *">
               <AppSelect
                 isClearable={false}
-                options={
-                  applicationTypeOptions.length > 0
-                    ? applicationTypeOptions.map((t) => ({ value: t.code, label: t.name }))
-                    : [{ value: 'DIRECT_LEASE', label: 'Direct Lease' }]
-                }
-                value={form.application_type}
-                onChange={(value) => setForm((p) => ({ ...p, application_type: value }))}
+                options={contractTypeOptions}
+                value={form.contract_type_id}
+                onChange={(value) => setForm((p) => ({ ...p, contract_type_id: value || '' }))}
+                placeholder="Select type of contract"
               />
             </Field>
           ) : null}
@@ -1578,13 +1584,16 @@ export function LocatorUsersManagement({
             />
           </Field>
           {!editing ? (
-            <Field label="Type of contract *">
+            <Field label="Industry Type *">
               <AppSelect
                 isClearable={false}
-                options={contractTypeOptions}
-                value={form.contract_type_id}
-                onChange={(value) => setForm((p) => ({ ...p, contract_type_id: value || '' }))}
-                placeholder="Select type of contract"
+                options={
+                  applicationTypeOptions.length > 0
+                    ? applicationTypeOptions.map((t) => ({ value: t.code, label: t.name }))
+                    : [{ value: 'DIRECT_LEASE', label: 'Direct Lease' }]
+                }
+                value={form.application_type}
+                onChange={(value) => setForm((p) => ({ ...p, application_type: value }))}
               />
             </Field>
           ) : null}
@@ -1730,15 +1739,6 @@ export function LocatorUsersManagement({
                   placeholder="Select type of contract"
                 />
               </Field>
-              <Field label="Land Use">
-                <AppSelect
-                  options={landUseOptions}
-                  value={continuingDraft.land_use_id}
-                  onChange={(value) => setContinuingDraft((p) => (p ? { ...p, land_use_id: value || '' } : p))}
-                  placeholder="Select..."
-                  isClearable
-                />
-              </Field>
               <Field label="Proposed Lease Term">
                 <LeaseTermInput
                   value={continuingDraft.proposed_lease_term_years}
@@ -1746,6 +1746,15 @@ export function LocatorUsersManagement({
                   onChange={(value, unit) =>
                     setContinuingDraft((p) => (p ? { ...p, proposed_lease_term_years: value, proposed_lease_term_unit: unit } : p))
                   }
+                />
+              </Field>
+              <Field label="Land Use">
+                <AppSelect
+                  options={landUseOptions}
+                  value={continuingDraft.land_use_id}
+                  onChange={(value) => setContinuingDraft((p) => (p ? { ...p, land_use_id: value || '' } : p))}
+                  placeholder="Select..."
+                  isClearable
                 />
               </Field>
             </div>
