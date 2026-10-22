@@ -5,6 +5,9 @@ import {
   AlertTriangle,
   CheckCircle2,
   ClipboardCheck,
+  FileSignature,
+  Printer,
+  Upload,
   Clock3,
   FileText,
   Loader2,
@@ -29,6 +32,7 @@ import { useControlPanelAccess } from '../../context/ControlPanelAccessContext';
 import { useSessionStorageCachedResource } from '../../hooks/useSessionStorageCachedResource';
 import { requestNotificationsRefresh } from '../../lib/notificationRefresh';
 import { ApprovalDetail } from '../approval/ApprovalIssuance';
+import { DatePicker, parseYmd, toYmd } from '../ui/DatePicker';
 import { useLiveRefresh } from '../../lib/liveData';
 
 const MENU_KEY = 'assessment:queue';
@@ -136,6 +140,8 @@ type DetailPayload = {
      * 2+ for a reupload after a rejection. */
     version?: number | string | null;
   }[];
+  /** Where the terms and contract stand (server: c_assessments.detail). */
+  contract_progress?: { terms_status: string | null; contract_no: string | null; signed: boolean };
 };
 
 type Summary = {
@@ -1105,7 +1111,7 @@ function StatTile({
   );
 }
 
-const TABS = ['Overview', 'Compliance', 'Recommendation', 'Activity Log'] as const;
+const TABS = ['Overview', 'Compliance', 'Terms', 'Contract', 'Recommendation', 'Activity Log'] as const;
 type Tab = (typeof TABS)[number];
 
 function AssessmentDetail({
@@ -1267,6 +1273,10 @@ function AssessmentDetail({
             <OverviewTab data={data} evaluators={evaluators} perms={perms} busy={busy} run={run} />
           ) : tab === 'Compliance' ? (
             <ComplianceTab data={data} canEdit={perms.canEdit} busy={busy} run={run} />
+          ) : tab === 'Terms' ? (
+            <TermsTab data={data} canEdit={perms.canEdit} busy={busy} run={run} />
+          ) : tab === 'Contract' ? (
+            <ContractTab data={data} canEdit={perms.canEdit} busy={busy} run={run} />
           ) : tab === 'Recommendation' ? (
             <RecommendationTab data={data} canEdit={perms.canEdit} busy={busy} run={run} />
           ) : (
@@ -1883,6 +1893,340 @@ function RequirementThreadModal({
   );
 }
 
+type TermsRow = {
+  body: string;
+  status: 'DRAFT' | 'SENT' | 'CHANGES_REQUESTED' | 'AGREED';
+  version: number;
+  sent_at: string | null;
+  sent_by_name: string | null;
+  responded_at: string | null;
+  locator_remarks: string | null;
+};
+
+const TERMS_STATUS: Record<TermsRow['status'], { label: string; color: string }> = {
+  DRAFT: { label: 'Draft — not sent', color: '#94a3b8' },
+  SENT: { label: 'Sent — waiting for the locator', color: '#3b82f6' },
+  CHANGES_REQUESTED: { label: 'Locator asked for changes', color: '#f59e0b' },
+  AGREED: { label: 'Agreed by the locator', color: '#10b981' },
+};
+
+/** Level 2 can change terms / the contract while the review is open. */
+function useLevel2Editable(data: DetailPayload, canEdit: boolean) {
+  const { isManager } = useAssessmentLevel();
+  const { fullAccess } = useControlPanelAccess();
+  const open = data.assessment.stage === 'ASSIGNED' || data.assessment.stage === 'IN_REVIEW';
+  return canEdit && open && (!isManager || fullAccess);
+}
+
+/** Terms and conditions: Level 2 writes them and sends them to the locator,
+ * who agrees (or asks for changes) in the portal. Agreed terms unlock the contract. */
+function TermsTab({ data, canEdit, busy, run }: { data: DetailPayload; canEdit: boolean; busy: boolean; run: RunFn }) {
+  const appId = data.assessment.application_id;
+  const editable = useLevel2Editable(data, canEdit);
+  const locked = Boolean(data.contract_progress?.contract_no);
+  const [terms, setTerms] = useState<TermsRow | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [draft, setDraft] = useState('');
+  const [confirmSend, setConfirmSend] = useState(false);
+
+  const load = useCallback(async () => {
+    const json = await apiFetch(`/api/assessments/${appId}/terms`);
+    setTerms(json.data || null);
+    setDraft(json.data?.body || '');
+  }, [appId]);
+  useEffect(() => {
+    load()
+      .catch((e) => toast.error((e as Error).message))
+      .finally(() => setLoading(false));
+  }, [load, data.contract_progress?.terms_status]);
+
+  if (loading) return <Loader2 className="animate-spin text-secondary mx-auto my-10" />;
+  const status = terms ? TERMS_STATUS[terms.status] : null;
+  const dirty = draft.trim() !== (terms?.body || '').trim();
+  const canWrite = editable && !locked;
+
+  return (
+    <div className="flex flex-col gap-3">
+      {status ? (
+        <div className="rounded-xl border p-3 text-[12px] flex flex-col gap-1" style={{ borderColor: `${status.color}66` }}>
+          <div className="flex items-center justify-between gap-2">
+            <span className="font-semibold" style={{ color: status.color }}>{status.label}</span>
+            {terms && terms.version > 0 ? <span className="text-secondary">Version {terms.version}</span> : null}
+          </div>
+          {terms?.sent_at ? (
+            <div className="text-secondary">
+              Sent {fmtDateTime(terms.sent_at)}{terms.sent_by_name ? ` by ${terms.sent_by_name}` : ''}
+            </div>
+          ) : null}
+          {terms?.status === 'AGREED' && terms.responded_at ? (
+            <div className="text-secondary">Agreed {fmtDateTime(terms.responded_at)} — you can now make the contract.</div>
+          ) : null}
+          {terms?.status === 'CHANGES_REQUESTED' && terms.locator_remarks ? (
+            <div className="mt-1 rounded-lg px-2.5 py-2" style={{ backgroundColor: 'rgba(245,158,11,.1)' }}>
+              <span className="font-semibold">Locator:</span> {terms.locator_remarks}
+            </div>
+          ) : null}
+        </div>
+      ) : (
+        <div className="text-[12px] text-secondary">
+          Write the terms and conditions agreed with the locator, then send them for the locator to agree in the portal.
+        </div>
+      )}
+
+      {locked ? (
+        <div className="text-[12px] text-secondary">The contract is recorded — the terms can't change anymore.</div>
+      ) : null}
+
+      <Field label="Terms and conditions">
+        <textarea
+          className={cn(inputCls, 'min-h-[260px] resize-y font-[inherit]')}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          readOnly={!canWrite}
+          placeholder="e.g. Lease rate, term, escalation, deposits, use of premises…"
+        />
+      </Field>
+
+      {canWrite ? (
+        <div className="flex flex-wrap gap-2 justify-end">
+          <button
+            className="rounded-lg px-3 py-1.5 text-[12px] font-semibold border disabled:opacity-50"
+            style={{ borderColor: 'var(--border)', color: 'var(--text)' }}
+            disabled={busy || !draft.trim() || !dirty}
+            onClick={() =>
+              run(async () => {
+                await apiFetch(`/api/assessments/${appId}/terms`, { method: 'PUT', body: JSON.stringify({ body: draft }) });
+                await load();
+              }, terms && terms.status !== 'DRAFT' ? 'Saved — send them again for the locator to agree' : 'Draft saved')
+            }
+          >
+            Save draft
+          </button>
+          <button
+            className="rounded-lg px-3 py-1.5 text-[12px] font-semibold disabled:opacity-50"
+            style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
+            disabled={busy || !draft.trim() || terms?.status === 'SENT' || (terms?.status === 'AGREED' && !dirty)}
+            onClick={() => setConfirmSend(true)}
+          >
+            <Send size={13} className="inline mr-1" /> Send to locator
+          </button>
+        </div>
+      ) : null}
+
+      <ConfirmModal
+        open={confirmSend}
+        title="Send the terms to the locator?"
+        description="They're emailed and shown in the locator's portal to agree, or to ask for changes."
+        confirmText="Send"
+        loading={busy}
+        onCancel={() => setConfirmSend(false)}
+        onConfirm={() =>
+          void run(async () => {
+            if (dirty || !terms) {
+              await apiFetch(`/api/assessments/${appId}/terms`, { method: 'PUT', body: JSON.stringify({ body: draft }) });
+            }
+            await apiFetch(`/api/assessments/${appId}/terms/send`, { method: 'POST', body: '{}' });
+            setConfirmSend(false);
+            await load();
+          }, 'Terms sent to the locator')
+        }
+      />
+    </div>
+  );
+}
+
+type ContractInfo = {
+  contract: {
+    id: number;
+    contract_no: string;
+    effective_start: string | null;
+    effective_end: string | null;
+    document_id: number | null;
+  } | null;
+  terms_status: string | null;
+  next_contract_no: string | null;
+};
+
+/** Level 2 makes the contract once the terms are agreed: record it, print the
+ * package (contract + terms + the locator's requirements in one PDF), have it
+ * signed, then upload the signed scan. Level 1 sees it read-only. */
+function ContractTab({ data, canEdit, busy, run }: { data: DetailPayload; canEdit: boolean; busy: boolean; run: RunFn }) {
+  const appId = data.assessment.application_id;
+  const editable = useLevel2Editable(data, canEdit);
+  const [info, setInfo] = useState<ContractInfo | null>(null);
+  const [form, setForm] = useState({ effective_start: '', effective_end: '' });
+  const [file, setFile] = useState<File | null>(null);
+
+  const load = useCallback(async () => {
+    const json = await apiFetch(`/api/assessments/${appId}/contract`);
+    setInfo(json.data);
+    setForm({
+      effective_start: (json.data?.contract?.effective_start || '').slice(0, 10),
+      effective_end: (json.data?.contract?.effective_end || '').slice(0, 10),
+    });
+  }, [appId]);
+  useEffect(() => {
+    load().catch((e) => toast.error((e as Error).message));
+  }, [load, data.contract_progress?.contract_no, data.contract_progress?.signed]);
+
+  if (!info) return <Loader2 className="animate-spin text-secondary mx-auto my-10" />;
+  const c = info.contract;
+  const agreed = info.terms_status === 'AGREED';
+
+  if (!agreed && !c) {
+    return (
+      <div className="rounded-xl border p-4 text-[12px] text-secondary" style={{ borderColor: 'var(--border)' }}>
+        The contract can be made once the locator agrees to the terms and conditions (Terms tab).
+      </div>
+    );
+  }
+
+  const saveContract = () =>
+    run(async () => {
+      await apiFetch(`/api/assessments/${appId}/contract`, {
+        method: 'PUT',
+        body: JSON.stringify({ effective_start: form.effective_start || null, effective_end: form.effective_end || null }),
+      });
+      await load();
+    }, c ? 'Contract updated' : 'Contract recorded');
+
+  const uploadSigned = () =>
+    run(async () => {
+      if (!file) return;
+      const fd = new FormData();
+      fd.append('application_id', String(appId));
+      fd.append('file', file);
+      const res = await fetch('/api/applications/documents', { method: 'POST', credentials: 'include', body: fd });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || json?.success === false) throw new Error(json?.message || 'Upload failed');
+      const documentId = json?.data?.id;
+      await apiFetch(`/api/assessments/${appId}/contract`, {
+        method: 'PUT',
+        body: JSON.stringify({ effective_start: form.effective_start || null, effective_end: form.effective_end || null, document_id: documentId }),
+      });
+      setFile(null);
+      await load();
+    }, 'Signed contract uploaded');
+
+  return (
+    <div className="flex flex-col gap-3">
+      {/* 1. Record */}
+      <div className="rounded-xl border p-3 flex flex-col gap-2" style={{ borderColor: 'var(--border)' }}>
+        <div className="text-[11px] font-bold uppercase tracking-wide text-secondary flex items-center gap-1.5">
+          <FileSignature size={12} /> 1 · Contract details
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+          <Field label="Contract no.">
+            <input className={inputCls} value={c?.contract_no || info.next_contract_no || '—'} readOnly disabled style={{ opacity: 0.7 }} />
+          </Field>
+          <Field label="Effective start">
+            {editable ? (
+              <DatePicker
+                mode="single"
+                bordered
+                fullWidth
+                placeholder="Select date"
+                value={parseYmd(form.effective_start)}
+                onChange={(d: Date | null) => setForm((f) => ({ ...f, effective_start: toYmd(d) }))}
+              />
+            ) : (
+              <input className={inputCls} value={form.effective_start || '—'} readOnly disabled style={{ opacity: 0.7 }} />
+            )}
+          </Field>
+          <Field label="Effective end">
+            {editable ? (
+              <DatePicker
+                mode="single"
+                bordered
+                fullWidth
+                placeholder="Select date"
+                value={parseYmd(form.effective_end)}
+                onChange={(d: Date | null) => setForm((f) => ({ ...f, effective_end: toYmd(d) }))}
+              />
+            ) : (
+              <input className={inputCls} value={form.effective_end || '—'} readOnly disabled style={{ opacity: 0.7 }} />
+            )}
+          </Field>
+        </div>
+        {!c ? <div className="text-[10px] text-secondary">The contract no. is assigned when you record it.</div> : null}
+        {editable ? (
+          <div className="flex justify-end">
+            <button
+              className="rounded-lg px-3 py-1.5 text-[12px] font-semibold disabled:opacity-50"
+              style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
+              disabled={busy || !form.effective_start || !form.effective_end}
+              onClick={() => void saveContract()}
+            >
+              {c ? 'Update contract' : 'Record contract'}
+            </button>
+          </div>
+        ) : null}
+      </div>
+
+      {/* 2. Print */}
+      <div className="rounded-xl border p-3 flex flex-col gap-2" style={{ borderColor: 'var(--border)', opacity: c ? 1 : 0.6 }}>
+        <div className="text-[11px] font-bold uppercase tracking-wide text-secondary flex items-center gap-1.5">
+          <Printer size={12} /> 2 · Print for signing
+        </div>
+        <div className="text-[12px] text-secondary">
+          One PDF: the contract, the agreed terms, and the locator's uploaded requirements. Print it and have it signed.
+        </div>
+        <div>
+          <button
+            className="rounded-lg px-3 py-1.5 text-[12px] font-semibold border disabled:opacity-50"
+            style={{ borderColor: 'var(--border)', color: 'var(--text)' }}
+            disabled={!c}
+            onClick={() => window.open(`/api/assessments/${appId}/contract/print`, '_blank')}
+          >
+            <Printer size={13} className="inline mr-1" /> Open contract package
+          </button>
+        </div>
+      </div>
+
+      {/* 3. Signed copy */}
+      <div
+        className="rounded-xl border p-3 flex flex-col gap-2"
+        style={{ borderColor: c?.document_id ? 'rgba(16,185,129,.45)' : 'var(--border)', opacity: c ? 1 : 0.6 }}
+      >
+        <div className="text-[11px] font-bold uppercase tracking-wide text-secondary flex items-center gap-1.5">
+          <Upload size={12} /> 3 · Signed contract
+        </div>
+        {c?.document_id ? (
+          <a
+            className="text-[12px] font-semibold underline"
+            style={{ color: '#10b981' }}
+            href={`/api/applications/documents/${c.document_id}/file`}
+            target="_blank"
+            rel="noreferrer"
+          >
+            <CheckCircle2 size={13} className="inline mr-1" /> View the signed contract
+          </a>
+        ) : (
+          <div className="text-[12px] text-secondary">Scan the signed contract as PDF and upload it here, then submit your review.</div>
+        )}
+        {editable && c ? (
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              type="file"
+              accept="application/pdf"
+              className="text-[12px]"
+              onChange={(e) => setFile(e.target.files?.[0] || null)}
+            />
+            <button
+              className="rounded-lg px-3 py-1.5 text-[12px] font-semibold disabled:opacity-50"
+              style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
+              disabled={busy || !file}
+              onClick={() => void uploadSigned()}
+            >
+              {c.document_id ? 'Replace signed copy' : 'Upload signed copy'}
+            </button>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 function RecommendationTab({
   data,
   canEdit,
@@ -1980,6 +2324,14 @@ function RecommendationTab({
                 Compliance tab first. Requirements the locator hasn't uploaded don't block submitting.
               </div>
             ) : null}
+            {!data.contract_progress?.signed ? (
+              <div
+                className="rounded-lg border px-3 py-2 text-[12px]"
+                style={{ borderColor: '#f59e0b55', backgroundColor: '#f59e0b1a', color: 'var(--text)' }}
+              >
+                Upload the signed contract on the Contract tab first — the review goes to Level 1 with it.
+              </div>
+            ) : null}
             <Field label="Summary / basis">
               <textarea
                 className={cn(inputCls, 'min-h-[70px] resize-y')}
@@ -1991,7 +2343,7 @@ function RecommendationTab({
             <button
               className="rounded-lg px-3 py-2 text-[13px] font-semibold disabled:opacity-50"
               style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
-              disabled={busy || !canEdit || uncheckedUploads > 0}
+              disabled={busy || !canEdit || uncheckedUploads > 0 || !data.contract_progress?.signed}
               onClick={() =>
                 run(
                   () =>

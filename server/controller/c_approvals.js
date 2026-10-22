@@ -287,6 +287,10 @@ exports.saveContract = async (req, res) => {
     const id = appIdParam(req, res);
     if (id === null) return undefined;
     if (!(await ensureApprovalAccess(req, res, id))) return undefined;
+    // Level 2 makes the contract in the evaluation; Level 1 only checks it.
+    if (String(req.user?.role || "").toLowerCase() !== "admin") {
+      return res.status(403).json({ success: false, message: "The contract is made by Level 2 on the evaluation's Contract tab." });
+    }
     const row = await Approval.saveContract(id, req.body || {}, req.user?.id ?? null);
     if (!row) return res.status(404).json({ success: false, message: "Application not found" });
     await AuditLog.record({

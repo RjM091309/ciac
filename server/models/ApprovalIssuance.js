@@ -563,8 +563,15 @@ async function actOnStep(stepId, { action, remarks, actorId, override_unverified
     // The contract is recorded first, so approving sends it to the Approved
     // Queue and Permits together (the Level 1 BDO who approves
     // has no way back to the Contract tab afterwards).
-    if (!(await Contract.getByApplicationId(approval.application_id))) {
-      throw businessError("Record the contract on the Contract tab before approving.");
+    // Level 2 records the contract and uploads the signed copy before their
+    // review reaches Level 1 — approving needs both.
+    const recorded = await Contract.getByApplicationId(approval.application_id);
+    if (!recorded?.document_id) {
+      throw businessError(
+        recorded
+          ? "The signed contract isn't uploaded yet — Return to Evaluator so Level 2 can upload it."
+          : "There's no contract yet — Return to Evaluator so Level 2 can make it."
+      );
     }
     await assertMandatoryRequirementsVerified(approval.application_id, { override: override_unverified });
   }

@@ -17,7 +17,8 @@ import {
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 
-// Workflow Topology (System Settings, admin only): an animated top-down map
+// Workflow Topology (System Settings; shown to the roles given it in Control
+// Panel): an animated top-down map
 // (network-topology style) of how an application moves through the system —
 // who acts at each step, what status it ends in, what the system does on its
 // own, and where the loops go back to. Static content that
@@ -87,7 +88,7 @@ const SCENARIOS: Scenario[] = [
       {
         lane: 'bdo1',
         title: 'Assign evaluator',
-        auto: ["Moves the stage to ASSIGNED.", "Shows the application to that Level 2 only — hidden from other Level 2s, in lists and notifications.", "Sends the evaluator a “New assignment” pop-up."],
+        auto: ["Moves the stage to ASSIGNED.", "Shows the application to that Level 2 only — hidden from other Level 2s, in lists and notifications.", "Sends the evaluator a “New assignment” pop-up.", "When the evaluator opens it, the stage moves to IN_REVIEW and the locator sees “In review”."],
         status: 'UNASSIGNED → ASSIGNED',
         where: 'Evaluation Queue',
         details: [
@@ -116,42 +117,75 @@ const SCENARIOS: Scenario[] = [
         where: 'Evaluation Queue · Compliance',
         details: [
           'Verify or reject each uploaded requirement, with remarks and a discussion thread with the locator.',
-          'Nothing to verify until the locator uploads it.',
+          'The terms can be negotiated while documents are still coming in.',
         ],
         notifies: 'The locator, when a requirement is rejected',
       },
       {
         lane: 'bdo2',
+        title: 'Terms & conditions → send',
+        auto: ["Saves the terms as a draft the locator can't see yet.", "On Send: version 1, 2, … each time; emails and notifies the locator.", "Editing terms already sent or agreed puts them back to draft — they must be sent and agreed again."],
+        status: 'Terms SENT',
+        where: 'Evaluation Queue · Terms',
+        details: [
+          'Level 2 writes the terms and conditions negotiated with the locator, then sends them.',
+          'The locator needs a portal login to see them.',
+        ],
+        notifies: 'The locator (email + in-app)',
+      },
+      {
+        lane: 'locator',
+        title: 'Agree to the terms',
+        auto: ["Records the answer and the version agreed to.", "Emails and notifies the evaluator: agreed → make the contract; changes → their remarks."],
+        status: 'AGREED · or changes requested',
+        where: 'Locator portal · My Applications · Terms',
+        details: [
+          'The locator reads the terms and clicks I agree, or Request changes with remarks.',
+          'Only agreed terms unlock the contract.',
+        ],
+        notifies: 'The evaluator (email + in-app)',
+      },
+      {
+        lane: 'bdo2',
+        title: 'Contract: record → print → sign → upload',
+        auto: ["Generates the contract number and renders the contract PDF; creates the contract permit — hidden from the locator until approved.", "Open contract package: one PDF with the contract, the agreed terms, an attachments list and every requirement the locator uploaded.", "Locks the terms once the contract is recorded.", "Accepts only a file uploaded to this same application as the signed copy."],
+        status: 'Signed contract uploaded',
+        where: 'Evaluation Queue · Contract',
+        details: [
+          'Record the contract (effective dates), open the package and print it.',
+          'Have it signed, scan it to PDF and upload the signed copy.',
+        ],
+      },
+      {
+        lane: 'bdo2',
         title: 'Submit review',
-        auto: ["Blocks the submit while any uploaded requirement is still unchecked (Pending).", "Moves the stage to FOR_RECOMMENDATION.", "Tells Level 1 the review is waiting."],
+        auto: ["Blocks the submit until every uploaded requirement is checked and the signed contract is uploaded.", "Moves the stage to FOR_RECOMMENDATION.", "Tells Level 1 the review is waiting."],
         status: 'FOR_RECOMMENDATION',
         where: 'Evaluation Queue · Recommendation',
         details: [
-          'Summary only. Every uploaded requirement must be verified or rejected first.',
+          'Summary of the review; the signed contract goes to Level 1 with it.',
           'Requirements still to follow (not uploaded yet) can be noted in the remarks.',
         ],
         notifies: 'BDO Level 1',
       },
       {
         lane: 'bdo1',
-        title: 'For Approval → contract → Approve',
-        auto: ["Starts the approval and assigns it to that Level 1.", "Saving the contract generates the contract number, renders the certificate PDF and creates the contract permit — hidden from the locator, Registered Locator and Renewal Tracking until approved.", "Keeps Approve locked until the contract exists; asks to confirm if mandatory requirements aren’t all verified (to follow).", "On Approve: status APPROVED; the locator is emailed the decision and now sees the contract and permit. A new application is queued for an Account Officer; a renewal marks the old permit RENEWED."],
+        title: 'Check → Approve',
+        auto: ["Starts the approval and assigns it to that Level 1.", "Keeps Approve locked until the signed contract is there; asks to confirm if mandatory requirements aren’t all verified (to follow).", "On Approve: status APPROVED; the locator is emailed the decision and now sees the contract and permit. A new application goes to the Approved Queue."],
         status: 'FOR_APPROVAL → APPROVED',
         where: 'Evaluation Queue · approval panel',
         details: [
           'Clicking the row sends it For Approval and opens the approval panel.',
-          'Compliance tab to review what the locator uploaded; Approval tab: save the contract, then Approve.',
-          'Approve stays locked until the contract is saved. Saving it creates the contract permit.',
-          'The locator sees the contract only after Approve.',
-          'Approving with mandatory requirements still unverified needs a confirmation (requirements to follow).',
+          'Level 1 checks the uploads, the terms and the signed contract (read-only), then Approves.',
+          'Something wrong: Return to Evaluator sends it back to Level 2 with remarks.',
         ],
-        notifies: 'Account Officer Level 1 (pop-up)',
+        notifies: 'Account Officer Level 1 (pop-up + email)',
       },
       {
         // The outcome of BDO Level 1's Approve, so it sits on their row.
         lane: 'bdo1',
         title: 'Approved Queue',
-        auto: ["Lists approved new applications without an Account Officer, newest first.", "Tells Level 1 Account Officers it’s waiting."],
+        auto: ["Lists approved new applications without an Account Officer, newest first.", "Tells Level 1 Account Officers it’s waiting (pop-up + email)."],
         status: 'Waiting for an Account Officer',
         where: 'Approved Queue',
         details: ['Newest approvals on top, until Level 1 Account Officer assigns a Level 2.'],
@@ -159,11 +193,11 @@ const SCENARIOS: Scenario[] = [
       {
         lane: 'ao1',
         title: 'Assign Account Officer',
-        auto: ["Sets the locator’s Account Officer and takes it off the Approved Queue.", "Sends the Level 2 Account Officer a “New locator assigned” pop-up."],
+        auto: ["Sets the locator’s Account Officer and takes it off the Approved Queue.", "Sends the Level 2 Account Officer a “New locator assigned” pop-up and email."],
         status: 'Level 2 assigned',
         where: 'Approved Queue',
-        details: ['Only Level 1 can assign. The Level 2 becomes the locator\'s Account Officer.'],
-        notifies: 'The Level 2 Account Officer (pop-up)',
+        details: ['Only Level 1 can assign. The Level 2 becomes the locator\'s Account Officer.', 'Reassigning later (Registered Locator) emails both the new and the previous officer.'],
+        notifies: 'The Level 2 Account Officer (pop-up + email)',
       },
       {
         lane: 'ao2',
@@ -181,7 +215,8 @@ const SCENARIOS: Scenario[] = [
     ],
     loops: [
       { from: 3, to: 2, label: 'Rejected → re-upload', local: true },
-      { from: 5, to: 3, label: 'Return to Evaluator' },
+      { from: 5, to: 4, label: 'Changes requested', local: true },
+      { from: 8, to: 6, label: 'Return to Evaluator' },
     ],
   },
   {
@@ -210,7 +245,6 @@ const SCENARIOS: Scenario[] = [
           'Files and submits the renewal for that permit\'s locator — no form.',
           'Account Officers only; a Level 2 only for their own locators. One open renewal at a time.',
           'Goes straight to the locator\'s own Account Officer — no BDO, no assigning step.',
-          'The permit leaves Renewal Tracking (it\'s in the Renewal Queue now) and the reminders stop.',
           'The locator\'s Ref No reads REN-… instead of LOC-… (same number) until the renewal is decided.',
         ],
         notifies: 'The locator (email: renewal filed)',
@@ -226,23 +260,72 @@ const SCENARIOS: Scenario[] = [
       },
       {
         lane: 'ao2',
-        title: 'Verify / reject, submit review',
-        auto: ["Keeps the renewal away from the BDO (queues and notifications).", "On submit: stage FOR_RECOMMENDATION and tells Account Officer Level 1."],
-        status: 'IN_REVIEW → FOR_RECOMMENDATION',
-        where: 'Renewal Queue',
+        title: 'Verify / reject documents',
+        auto: ["Keeps the renewal away from the BDO (queues and notifications).", "Tells the locator when a requirement is rejected."],
+        status: 'IN_REVIEW',
+        where: 'Renewal Queue · Compliance',
         details: ['Same review screen as the BDO\'s Evaluation Queue, scoped to renewals.'],
+        notifies: 'The locator, when a requirement is rejected',
+      },
+      {
+        lane: 'ao2',
+        title: 'Terms & conditions → send',
+        auto: ["Saves the terms as a draft the locator can't see yet.", "On Send: version 1, 2, … each time; emails and notifies the locator.", "Editing terms already sent or agreed puts them back to draft — they must be sent and agreed again."],
+        status: 'Terms SENT',
+        where: 'Renewal Queue · Terms',
+        details: [
+          'Level 2 writes the terms and conditions negotiated with the locator, then sends them.',
+          'The locator needs a portal login to see them.',
+        ],
+        notifies: 'The locator (email + in-app)',
+      },
+      {
+        lane: 'locator',
+        title: 'Agree to the terms',
+        auto: ["Records the answer and the version agreed to.", "Emails and notifies the evaluator: agreed → make the contract; changes → their remarks."],
+        status: 'AGREED · or changes requested',
+        where: 'Locator portal · My Applications · Terms',
+        details: [
+          'The locator reads the terms and clicks I agree, or Request changes with remarks.',
+          'Only agreed terms unlock the contract.',
+        ],
+        notifies: 'The evaluator (email + in-app)',
+      },
+      {
+        lane: 'ao2',
+        title: 'Contract: record → print → sign → upload',
+        auto: ["Generates the contract number and renders the contract PDF; creates the contract permit — hidden from the locator until approved.", "Open contract package: one PDF with the contract, the agreed terms, an attachments list and every requirement the locator uploaded.", "Locks the terms once the contract is recorded.", "Accepts only a file uploaded to this same application as the signed copy."],
+        status: 'Signed contract uploaded',
+        where: 'Renewal Queue · Contract',
+        details: [
+          'Record the contract (effective dates), open the package and print it.',
+          'Have it signed, scan it to PDF and upload the signed copy.',
+        ],
+      },
+      {
+        lane: 'ao2',
+        title: 'Submit review',
+        auto: ["Blocks the submit until every uploaded requirement is checked and the signed contract is uploaded.", "Moves the stage to FOR_RECOMMENDATION.", "Tells Level 1 the review is waiting."],
+        status: 'FOR_RECOMMENDATION',
+        where: 'Renewal Queue · Recommendation',
+        details: [
+          'Summary of the review; the signed contract goes to Level 1 with it.',
+          'Requirements still to follow (not uploaded yet) can be noted in the remarks.',
+        ],
         notifies: 'Account Officer Level 1',
       },
       {
         lane: 'ao1',
-        title: 'For Approval → contract → Approve',
-        auto: ["Starts the approval and assigns it to that Level 1.", "Saving the contract generates the contract number, renders the certificate PDF and creates the contract permit — hidden from the locator, Registered Locator and Renewal Tracking until approved.", "Keeps Approve locked until the contract exists; asks to confirm if mandatory requirements aren’t all verified (to follow).", "On Approve: status APPROVED; the locator is emailed the decision and now sees the contract and permit. A new application is queued for an Account Officer; a renewal marks the old permit RENEWED."],
+        title: 'Check → Approve',
+        auto: ["Starts the approval and assigns it to that Level 1.", "Keeps Approve locked until the signed contract is there; asks to confirm if mandatory requirements aren’t all verified (to follow).", "On Approve: status APPROVED; the locator is emailed the decision and now sees the contract and permit. The old permit becomes RENEWED."],
         status: 'FOR_APPROVAL → APPROVED',
         where: 'Renewal Queue · approval panel',
         details: [
-          'Same approval panel: Compliance review, save the new contract, Approve.',
-          'Disapprove closes it; a new renewal can then be filed.',
+          'Clicking the row sends it For Approval and opens the approval panel.',
+          'Level 1 checks the uploads, the terms and the signed contract (read-only), then Approves.',
+          'Something wrong: Return to Evaluator sends it back to Level 2 with remarks.',
         ],
+        notifies: 'The locator (email: decision)',
       },
       {
         lane: 'system',
@@ -259,7 +342,8 @@ const SCENARIOS: Scenario[] = [
     ],
     loops: [
       { from: 3, to: 2, label: 'Rejected → re-upload', local: true },
-      { from: 4, to: 3, label: 'Return to Evaluator' },
+      { from: 5, to: 4, label: 'Changes requested', local: true },
+      { from: 8, to: 6, label: 'Return to Evaluator' },
     ],
   },
   {

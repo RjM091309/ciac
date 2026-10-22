@@ -133,6 +133,47 @@ exports.downloadMyComplianceDocument = async (req, res) => {
   }
 };
 
+// ---- Terms and conditions (the evaluator sends them; the locator answers) ----
+
+exports.getMyApplicationTerms = async (req, res) => {
+  try {
+    const terms = await require("../models/ApplicationTerms").getForApplication(req.application.id);
+    // A draft the evaluator hasn't sent stays staff-only.
+    const visible = terms && terms.status !== "DRAFT" ? terms : null;
+    return res.json({ success: true, data: visible });
+  } catch (error) {
+    console.error("Get my application terms error:", error);
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
+  }
+};
+
+exports.respondToMyApplicationTerms = async (req, res) => {
+  try {
+    const action = String(req.body?.action || "").toUpperCase();
+    if (!["AGREE", "REQUEST_CHANGES"].includes(action)) {
+      return res.status(400).json({ success: false, message: "Choose Agree or Request changes." });
+    }
+    const data = await require("../models/ApplicationTerms").respond(req.application.id, {
+      action,
+      remarks: req.body?.remarks,
+      userId: req.user?.id ?? null,
+    });
+    await AuditLog.record({
+      actorId: req.user?.id,
+      actorUsername: req.user?.username,
+      action: action === "AGREE" ? "APPLICATION_TERMS_AGREED" : "APPLICATION_TERMS_CHANGES_REQUESTED",
+      entityType: "application",
+      entityId: req.application.id,
+      details: { application_no: req.application.application_no, version: data?.version, remarks: data?.locator_remarks || undefined },
+      req,
+    });
+    return res.json({ success: true, data });
+  } catch (error) {
+    console.error("Respond to terms error:", error);
+    return res.status(error.status || 500).json({ success: false, message: publicErrorMessage(error) });
+  }
+};
+
 exports.listMyApplications = async (req, res) => {
   try {
     const applications = await Workflow.listApplicationsForProponent(req.proponent.id);

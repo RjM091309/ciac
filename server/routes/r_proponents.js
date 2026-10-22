@@ -19,6 +19,9 @@ router.patch("/me", requireProponentSelf, proponentsController.updateMine);
 router.get("/me/applications", requireProponentSelf, portalController.listMyApplications);
 router.get("/me/applications/:id", requireProponentSelf, requireOwnApplication, portalController.getMyApplication);
 router.get("/me/applications/:id/requirements", requireProponentSelf, requireOwnApplication, portalController.getMyApplicationRequirements);
+// Terms and conditions sent by the evaluator: read, then agree / ask for changes.
+router.get("/me/applications/:id/terms", requireProponentSelf, requireOwnApplication, portalController.getMyApplicationTerms);
+router.post("/me/applications/:id/terms/respond", requireProponentSelf, requireOwnApplication, portalController.respondToMyApplicationTerms);
 router.get("/me/applications/:id/documents", requireProponentSelf, requireOwnApplication, portalController.getMyApplicationDocuments);
 router.post(
   "/me/applications/:id/documents",

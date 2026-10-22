@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, CheckCircle2, ChevronRight, ClipboardList, FileText, History, Loader2, MessageSquare, ScrollText, Send, Table2, Upload, X } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, ChevronRight, ClipboardList, FileSignature, FileText, History, Loader2, MessageSquare, ScrollText, Send, Table2, Upload, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { EmptyState } from '../ui/EmptyState';
 import { RequirementGroupTabs, useRequirementGroups } from '../ui/RequirementGroupTabs';
@@ -307,11 +307,183 @@ type DetailData = {
 const TABS = [
   { id: 'overview', label: 'Overview', icon: Table2 },
   { id: 'requirements', label: 'Requirements', icon: ClipboardList },
+  { id: 'terms', label: 'Terms', icon: FileSignature },
   { id: 'history', label: 'History', icon: History },
   { id: 'contract', label: 'Contract', icon: ScrollText },
 ] as const;
 
 type TabId = (typeof TABS)[number]['id'];
+
+type LocatorTerms = {
+  body: string;
+  status: 'SENT' | 'CHANGES_REQUESTED' | 'AGREED';
+  version: number;
+  sent_at: string | null;
+  sent_by_name: string | null;
+  responded_at: string | null;
+  locator_remarks: string | null;
+};
+
+/** The terms and conditions the evaluator sent: read them, then agree or ask
+ * for changes. Agreeing lets the evaluator prepare the contract. */
+function TermsPanel({ applicationId }: { applicationId: number }) {
+  const [terms, setTerms] = useState<LocatorTerms | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [mode, setMode] = useState<'none' | 'agree' | 'changes'>('none');
+  const [remarks, setRemarks] = useState('');
+
+  const load = useCallback(async () => {
+    const res = await fetch(`/api/proponents/me/applications/${applicationId}/terms`, { credentials: 'include' });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(json?.message || 'Could not load the terms');
+    setTerms(json.data || null);
+  }, [applicationId]);
+  useEffect(() => {
+    load()
+      .catch((e) => toast.error((e as Error).message))
+      .finally(() => setLoading(false));
+  }, [load]);
+  useLiveRefresh(() => load().catch(() => {}));
+
+  async function respond(action: 'AGREE' | 'REQUEST_CHANGES') {
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/proponents/me/applications/${applicationId}/terms/respond`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action, remarks: remarks.trim() || undefined }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || json?.success === false) throw new Error(json?.message || 'Could not send your answer');
+      setTerms(json.data);
+      setMode('none');
+      setRemarks('');
+      toast.success(action === 'AGREE' ? 'You agreed to the terms' : 'Your requested changes were sent');
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (loading) {
+    return (
+      <Card>
+        <div className="flex justify-center py-8">
+          <Loader2 className="animate-spin text-secondary" />
+        </div>
+      </Card>
+    );
+  }
+  if (!terms) {
+    return (
+      <Card>
+        <EmptyState
+          title="No terms yet"
+          description="Your evaluator will send the terms and conditions here once they're ready."
+        />
+      </Card>
+    );
+  }
+
+  const state =
+    terms.status === 'AGREED'
+      ? { text: `You agreed to these terms${terms.responded_at ? ` on ${fmtDate(terms.responded_at)}` : ''}.`, color: '#10b981' }
+      : terms.status === 'CHANGES_REQUESTED'
+        ? { text: 'You asked for changes. Your evaluator will send updated terms.', color: '#f59e0b' }
+        : { text: 'Please review these terms, then agree or ask for changes.', color: '#3b82f6' };
+
+  return (
+    <div className="space-y-3">
+      <div
+        className="rounded-xl border px-3 py-2.5 text-[12px] font-semibold"
+        style={{ borderColor: `${state.color}66`, backgroundColor: `${state.color}14`, color: state.color }}
+      >
+        {state.text}
+      </div>
+      <Card>
+        <div className="flex items-center justify-between gap-2 mb-3">
+          <h4 className="text-sm font-bold" style={{ color: 'var(--text)' }}>
+            Terms and Conditions
+          </h4>
+          <span className="text-[11px] text-secondary">
+            Version {terms.version}
+            {terms.sent_at ? ` · sent ${fmtDate(terms.sent_at)}` : ''}
+          </span>
+        </div>
+        <div className="text-[13px] leading-relaxed whitespace-pre-wrap" style={{ color: 'var(--text)' }}>
+          {terms.body}
+        </div>
+        {terms.status === 'CHANGES_REQUESTED' && terms.locator_remarks ? (
+          <div className="mt-4 rounded-lg px-3 py-2 text-[12px]" style={{ backgroundColor: 'rgba(245,158,11,.1)' }}>
+            <span className="font-semibold">Your request:</span> {terms.locator_remarks}
+          </div>
+        ) : null}
+      </Card>
+
+      {terms.status === 'SENT' ? (
+        <Card>
+          {mode === 'changes' ? (
+            <div className="space-y-2">
+              <label className="block text-[11px] font-semibold uppercase tracking-wide text-secondary">What would you like changed?</label>
+              <textarea
+                className="app-input w-full min-h-[90px]"
+                value={remarks}
+                onChange={(e) => setRemarks(e.target.value)}
+                placeholder="Describe the changes you're asking for…"
+              />
+              <div className="flex justify-end gap-2">
+                <button className="rounded-lg px-3 py-2 text-[12px] font-semibold border" style={{ borderColor: 'var(--border)' }} onClick={() => setMode('none')} disabled={busy}>
+                  Cancel
+                </button>
+                <button
+                  className="rounded-lg px-3 py-2 text-[12px] font-semibold disabled:opacity-50"
+                  style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
+                  disabled={busy || !remarks.trim()}
+                  onClick={() => void respond('REQUEST_CHANGES')}
+                >
+                  {busy ? <Loader2 size={13} className="inline animate-spin mr-1" /> : <Send size={13} className="inline mr-1" />}
+                  Send request
+                </button>
+              </div>
+            </div>
+          ) : mode === 'agree' ? (
+            <div className="space-y-2">
+              <p className="text-[13px]" style={{ color: 'var(--text)' }}>
+                By agreeing, you accept these terms and conditions (version {terms.version}). Your evaluator will then prepare the contract.
+              </p>
+              <div className="flex justify-end gap-2">
+                <button className="rounded-lg px-3 py-2 text-[12px] font-semibold border" style={{ borderColor: 'var(--border)' }} onClick={() => setMode('none')} disabled={busy}>
+                  Cancel
+                </button>
+                <button
+                  className="rounded-lg px-3 py-2 text-[12px] font-semibold disabled:opacity-50"
+                  style={{ backgroundColor: '#10b981', color: '#fff' }}
+                  disabled={busy}
+                  onClick={() => void respond('AGREE')}
+                >
+                  {busy ? <Loader2 size={13} className="inline animate-spin mr-1" /> : <CheckCircle2 size={13} className="inline mr-1" />}
+                  Yes, I agree
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="flex flex-wrap justify-end gap-2">
+              <button className="rounded-lg px-3 py-2 text-[12px] font-semibold border" style={{ borderColor: 'var(--border)', color: 'var(--text)' }} onClick={() => setMode('changes')}>
+                Request changes
+              </button>
+              <button className="rounded-lg px-3 py-2 text-[12px] font-semibold" style={{ backgroundColor: '#10b981', color: '#fff' }} onClick={() => setMode('agree')}>
+                <CheckCircle2 size={13} className="inline mr-1" /> I agree
+              </button>
+            </div>
+          )}
+        </Card>
+      ) : null}
+    </div>
+  );
+}
 
 function Card({
   children,
@@ -900,6 +1072,8 @@ function ApplicationDetail({
           )}
         </Card>
       )}
+
+      {tab === 'terms' && <TermsPanel applicationId={applicationId} />}
 
       {tab === 'history' && (
         <Card>

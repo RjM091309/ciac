@@ -23,6 +23,15 @@ router.post("/:applicationId/officer-review", requireAssessmentAccess("edit"), c
 router.post("/:applicationId/return-to-officer", requireAssessmentAccess("edit"), controller.returnToOfficer);
 router.post("/:applicationId/for-approval", requireAssessmentAccess("edit"), controller.forApproval);
 
+// Terms and conditions (Level 2 writes and sends them; the locator agrees in the portal).
+router.get("/:applicationId/terms", requireAssessmentAccess("view"), controller.getTerms);
+router.put("/:applicationId/terms", requireAssessmentAccess("edit"), controller.saveTerms);
+router.post("/:applicationId/terms/send", requireAssessmentAccess("edit"), controller.sendTerms);
+// Contract (Level 2, after the terms are agreed): record it, print the package, upload the signed scan.
+router.get("/:applicationId/contract", requireAssessmentAccess("view"), controller.getContract);
+router.put("/:applicationId/contract", requireAssessmentAccess("edit"), controller.saveContract);
+router.get("/:applicationId/contract/print", requireAssessmentAccess("view"), controller.printContract);
+
 // Documentary compliance — proxy to the application requirement workflow, gated by assessment access
 router.patch("/requirements/:id/status", requireAssessmentAccess("edit"), controller.updateRequirementStatus);
 router.patch("/requirements/:id/remarks", requireAssessmentAccess("edit"), controller.updateRequirementRemarks);

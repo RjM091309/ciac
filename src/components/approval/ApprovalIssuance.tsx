@@ -231,6 +231,9 @@ export function ApprovalDetail({
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<Tab>('Approval');
   const [busy, setBusy] = useState(false);
+  // Level 2 makes the contract on the evaluation; Level 1 only checks it here
+  // (the API keeps editing to admins).
+  const { fullAccess: contractAdmin } = useControlPanelAccess();
 
   const load = useCallback(async () => {
     const json = await apiFetch(`/api/approvals/${applicationId}`);
@@ -348,7 +351,18 @@ export function ApprovalDetail({
             <div className="flex flex-col gap-4">
               <section className="flex flex-col gap-2">
                 <div className="text-[11px] font-bold uppercase tracking-wide text-secondary">Contract</div>
-                <ContractTab data={data} canEdit={perms.canEdit} busy={busy} run={run} />
+                {!data.contract?.document_id ? (
+                  <div
+                    className="rounded-lg border px-3 py-2 text-[12px]"
+                    style={{ borderColor: '#f59e0b55', backgroundColor: '#f59e0b1a', color: 'var(--text)' }}
+                  >
+                    {data.contract
+                      ? "The signed contract isn't uploaded yet."
+                      : 'There is no contract yet.'}{' '}
+                    Level 2 makes it on the evaluation's Contract tab — use Return to Evaluator below.
+                  </div>
+                ) : null}
+                <ContractTab data={data} canEdit={perms.canEdit && contractAdmin} busy={busy} run={run} />
               </section>
               <section className="flex flex-col gap-2">
                 <div className="text-[11px] font-bold uppercase tracking-wide text-secondary">Decision</div>
@@ -1004,7 +1018,7 @@ function ContractTab({
               target="_blank"
               rel="noreferrer"
             >
-              View executed contract file
+              View signed contract
             </a>
           ) : null}
           {c.has_certificate ? (

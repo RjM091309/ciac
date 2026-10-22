@@ -1610,14 +1610,6 @@ export function ProponentsManagement({
                   </button>
                 ) : null}
               </span>
-            ) : editing?.user_id && loginInfo?.status === 'ACTIVE' ? (
-              <span
-                className="inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold border"
-                style={{ color: '#10b981', backgroundColor: 'rgba(16,185,129,.12)', borderColor: 'rgba(16,185,129,.35)' }}
-                title={`${loginInfo.username || ''} · ${loginInfo.email || ''}`}
-              >
-                Portal login active
-              </span>
             ) : null;
           const badge = (() => {
           // Lease status from the contract terms: Active through End Term

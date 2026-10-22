@@ -170,6 +170,16 @@ exports.detail = async (req, res) => {
     }
     const data = await Assessment.getAssessmentDetail(id);
     if (!data) return res.status(404).json({ success: false, message: "Application not found" });
+    // Where the terms and contract stand (Terms / Contract / Recommendation tabs).
+    const [terms, contract] = await Promise.all([
+      require("../models/ApplicationTerms").getForApplication(id),
+      require("../models/Contract").getByApplicationId(id),
+    ]);
+    data.contract_progress = {
+      terms_status: terms?.status || null,
+      contract_no: contract?.contract_no || null,
+      signed: Boolean(contract?.document_id),
+    };
     return res.json({ success: true, data, reviewStarted: reviewStarted || undefined });
   } catch (error) {
     return fail(res, error, "Assessment detail");
@@ -271,6 +281,14 @@ exports.officerReview = async (req, res) => {
     const id = appIdParam(req, res);
     if (id === null) return undefined;
     if (!(await ensureCanAct(req, res, id))) return undefined;
+    // Level 2 submits only with the signed contract uploaded.
+    const signed = await require("../models/Contract").getByApplicationId(id);
+    if (!signed?.document_id) {
+      return res.status(409).json({
+        success: false,
+        message: "Upload the signed contract first (Contract tab) — the review goes to Level 1 with it.",
+      });
+    }
     const { recommendation, summary } = req.body || {};
     const data = await Assessment.submitOfficerReview(id, {
       recommendation,
@@ -348,6 +366,157 @@ exports.forApproval = async (req, res) => {
     return res.json({ success: true, data });
   } catch (error) {
     return fail(res, error, "Send for approval");
+  }
+};
+
+/* ------------------------- Terms and conditions -------------------------- */
+
+const Terms = require("../models/ApplicationTerms");
+
+/** Terms can be written while the review is open — not once it's with
+ * Level 1 (For Recommendation) or decided. */
+async function ensureTermsEditable(res, applicationId, req) {
+  // Level 2 writes the terms and makes the contract; Level 1 only checks them.
+  if (req && String(req.user?.role || "").toLowerCase() !== "admin" && (await scopeFor(req)).manager) {
+    res.status(403).json({ success: false, message: "The terms and the contract are done by the assigned Level 2." });
+    return false;
+  }
+  const asm = await Assessment.getOrCreateAssessment(applicationId, null);
+  if (["FOR_RECOMMENDATION", "COMPLETED", "RETURNED"].includes(String(asm?.stage || ""))) {
+    res.status(409).json({ success: false, message: "The review was already submitted — the terms can't change now." });
+    return false;
+  }
+  return true;
+}
+
+exports.getTerms = async (req, res) => {
+  try {
+    const id = appIdParam(req, res);
+    if (id === null) return undefined;
+    if (!(await ensureCanAct(req, res, id))) return undefined;
+    return res.json({ success: true, data: await Terms.getForApplication(id) });
+  } catch (error) {
+    return fail(res, error, "Get terms");
+  }
+};
+
+exports.saveTerms = async (req, res) => {
+  try {
+    const id = appIdParam(req, res);
+    if (id === null) return undefined;
+    if (!(await ensureCanAct(req, res, id))) return undefined;
+    if (!(await ensureTermsEditable(res, id, req))) return undefined;
+    const data = await Terms.saveDraft(id, req.body?.body, req.user?.id ?? null);
+    return res.json({ success: true, data });
+  } catch (error) {
+    return fail(res, error, "Save terms");
+  }
+};
+
+exports.sendTerms = async (req, res) => {
+  try {
+    const id = appIdParam(req, res);
+    if (id === null) return undefined;
+    if (!(await ensureCanAct(req, res, id))) return undefined;
+    if (!(await ensureTermsEditable(res, id, req))) return undefined;
+    const data = await Terms.send(id, req.user?.id ?? null);
+    await AuditLog.record({
+      actorId: req.user?.id,
+      actorUsername: req.user?.username,
+      action: "APPLICATION_TERMS_SENT",
+      entityType: "application",
+      entityId: id,
+      details: { version: data?.version },
+      req,
+    });
+    return res.json({ success: true, data });
+  } catch (error) {
+    return fail(res, error, "Send terms");
+  }
+};
+
+/* -------------------------------- Contract -------------------------------- */
+// Level 2 makes the contract once the locator agreed to the terms: records it
+// (contract no., dates), prints the package (contract + terms + the locator's
+// requirements, one PDF), has it signed, then uploads the signed scan. Level 1
+// only checks it on the approval panel.
+
+const Contract = require("../models/Contract");
+const Approval = require("../models/ApprovalIssuance");
+
+exports.getContract = async (req, res) => {
+  try {
+    const id = appIdParam(req, res);
+    if (id === null) return undefined;
+    if (!(await ensureCanAct(req, res, id))) return undefined;
+    const contract = await Contract.getByApplicationId(id);
+    const terms = await Terms.getForApplication(id);
+    const nextNo = contract ? null : await Approval.previewContractNo(id).catch(() => null);
+    return res.json({ success: true, data: { contract: contract || null, terms_status: terms?.status || null, next_contract_no: nextNo } });
+  } catch (error) {
+    return fail(res, error, "Get contract");
+  }
+};
+
+exports.saveContract = async (req, res) => {
+  try {
+    const id = appIdParam(req, res);
+    if (id === null) return undefined;
+    if (!(await ensureCanAct(req, res, id))) return undefined;
+    if (!(await ensureTermsEditable(res, id, req))) return undefined;
+    const terms = await Terms.getForApplication(id);
+    if (terms?.status !== "AGREED") {
+      return res.status(409).json({ success: false, message: "The locator hasn't agreed to the terms and conditions yet." });
+    }
+    // The signed scan must be a file uploaded to this same application.
+    const documentId = req.body?.document_id == null || req.body?.document_id === "" ? undefined : Number(req.body.document_id);
+    if (documentId !== undefined) {
+      const owned = await require("../config/database").selectData(
+        `SELECT TOP (1) id FROM dbo.documents WHERE id = @param0 AND application_id = @param1`,
+        [documentId, id]
+      );
+      if (!owned?.[0]) return res.status(400).json({ success: false, message: "That file doesn't belong to this application." });
+    }
+    const row = await Approval.saveContract(
+      id,
+      { effective_start: req.body?.effective_start ?? null, effective_end: req.body?.effective_end ?? null, document_id: documentId },
+      req.user?.id ?? null
+    );
+    if (!row) return res.status(404).json({ success: false, message: "Application not found" });
+    await AuditLog.record({
+      actorId: req.user?.id,
+      actorUsername: req.user?.username,
+      action: "CONTRACT_SAVED",
+      entityType: "application",
+      entityId: id,
+      details: { contract_no: row?.contract_no, signed_copy_uploaded: Boolean(row?.document_id) },
+      req,
+    });
+    return res.json({ success: true, data: row });
+  } catch (error) {
+    return fail(res, error, "Save contract");
+  }
+};
+
+/** One PDF to print and sign: contract + agreed terms + requirement files. */
+exports.printContract = async (req, res) => {
+  try {
+    const id = appIdParam(req, res);
+    if (id === null) return undefined;
+    if (!(await ensureCanAct(req, res, id))) return undefined;
+    const bundle = await require("../lib/contractBundle").buildContractBundle(id);
+    if (!bundle) return res.status(404).json({ success: false, message: "Record the contract first." });
+    AuditLog.recordFileAccess(req, {
+      kind: "DOCUMENT",
+      entityType: "application",
+      entityId: id,
+      details: { file_name: bundle.fileName, purpose: "contract for signing" },
+    });
+    res.type("application/pdf");
+    res.setHeader("Content-Disposition", `inline; filename="${bundle.fileName}"`);
+    return res.send(Buffer.from(bundle.bytes));
+  } catch (error) {
+    return fail(res, error, "Print contract");
   }
 };
 

@@ -703,8 +703,8 @@ export default function App() {
                 // Administrators only (the API refuses everyone else too).
                 user?.role === 'admin' ? <PortalSettings /> : <RedirectTo to="/dashboard" navigate={navigate} />
               ) : view === 'settings:workflow' ? (
-                // Administrators only.
-                user?.role === 'admin' ? <WorkflowTopology /> : <RedirectTo to="/dashboard" navigate={navigate} />
+                // Any role given Workflow Topology in Control Panel (MenuGate above).
+                <WorkflowTopology />
               ) : view === 'compliance:permits' ? (
                 <PermitsManagement locationSearch={locationSearch} navigate={navigate} />
               ) : (

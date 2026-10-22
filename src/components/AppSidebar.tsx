@@ -368,6 +368,7 @@ export function AppSidebar({
     canView('settings:users') ||
     canView('settings:control-panel') ||
     canView('settings:audit-log') ||
+    canView('settings:workflow') ||
     showPortalSettings;
   const showFileMaintenance =
     canView('applications:requirements') ||
@@ -409,8 +410,8 @@ export function AppSidebar({
     canView('settings:control-panel') && { key: 'settings:control-panel', label: 'Control Panel', active: view === 'settings:control-panel', onClick: () => onViewChange('settings:control-panel') },
     canView('settings:audit-log') && { key: 'settings:audit-log', label: 'Audit Log', active: view === 'settings:audit-log', onClick: () => onViewChange('settings:audit-log') },
     showPortalSettings && { key: 'settings:portal', label: 'Portal Settings', active: view === 'settings:portal', onClick: () => onViewChange('settings:portal') },
-    // Admin only, same as Portal Settings.
-    showPortalSettings && { key: 'settings:workflow', label: 'Workflow Topology', active: view === 'settings:workflow', onClick: () => onViewChange('settings:workflow') },
+    // Any role given it in Control Panel (view only).
+    canView('settings:workflow') && { key: 'settings:workflow', label: 'Workflow Topology', active: view === 'settings:workflow', onClick: () => onViewChange('settings:workflow') },
   ].filter(Boolean) as SidebarLeaf[];
 
   const fileMaintenanceItems: SidebarLeaf[] = [

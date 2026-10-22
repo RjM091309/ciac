@@ -379,7 +379,7 @@ export const LANDING_CONFIG: Record<AppView, LandingConfig> = {
     description: 'An animated map of the application workflow — who acts at each step, from a new locator to renewal.',
     badge: 'Configuration',
     icon: Settings2,
-    adminOnly: true,
+    // View-only page: given to any role from Control Panel (Menus & Access).
     stats: [],
     table: { columns: [], rows: [] },
   },
