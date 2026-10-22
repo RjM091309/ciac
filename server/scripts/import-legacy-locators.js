@@ -13,6 +13,12 @@
  *     converted to LOC-…), Ref Code, location, business activities, industry,
  *     type of contract, land use, SEC registration, date signed, grace period,
  *     sub-lease, PGRO/PGRR, extension, capital (authorized/subscribed/paid-up)
+ *   - Industry Type / Type of Contract: matched by name; a legacy Type of
+ *     Contract with a different name here maps to the closest one (LEASE
+ *     AGREEMENT → DIRECT LEASE, SHORT-TERM… → SHORT TERM LEASE, …SUBLEASE… →
+ *     SUBLEASE AGREEMENT), and when the legacy industry (MANUFACTURING…) isn't
+ *     an Industry Type here, the Industry Type follows the contract (Direct
+ *     Lease / Sublease) and the legacy industry is kept in Business Activities
  *   - Account Officer: matched by name to an existing Account Officer user
  *     (create their accounts first); unmatched names are only reported — the
  *     locator stays without one until Level 1 assigns it
@@ -38,6 +44,8 @@
  *   node scripts/import-legacy-locators.js --apply --skip-documents
  *                                                             data only (documents in a later run)
  *   node scripts/import-legacy-locators.js --only=2024000001  one locator (with or without --apply)
+ *   node scripts/import-legacy-locators.js --apply --no-officers
+ *                                                             no Account Officer on any locator (assign later)
  *   node scripts/import-legacy-locators.js --remove [--apply] undoes this import (only locators it
  *                                                             created that have no application and no
  *                                                             portal login yet), files included
@@ -62,6 +70,8 @@ const { relativeStoragePath, resolveStoredPath } = require("../lib/fileStorage")
 const APPLY = process.argv.includes("--apply");
 const REMOVE = process.argv.includes("--remove");
 const SKIP_DOCS = process.argv.includes("--skip-documents");
+// Leave every locator without an Account Officer (assigned later on Registered Locator).
+const NO_OFFICERS = process.argv.includes("--no-officers");
 const ONLY = (process.argv.find((a) => a.startsWith("--only=")) || "").slice("--only=".length).trim() || null;
 const LEGACY_DB = process.env.LEGACY_DB || "actual";
 if (!/^\w+$/.test(LEGACY_DB)) throw new Error("LEGACY_DB must be a plain database name");
@@ -236,21 +246,67 @@ async function loadLegacy() {
 
 // ---------- mapping ----------
 
+// When the legacy Type of Contract isn't a Type of Contract name here, the
+// closest one (the client's File Maintenance names), if it exists.
+const CONTRACT_ALIASES = {
+  "LEASE AGREEMENT": ["DIRECT LEASE"],
+  "SHORT-TERM LEASE AGREEMENT": ["SHORT TERM LEASE", "SHORT-TERM LEASE"],
+  "APPROVAL OF SUBLEASE AGREEMENT": ["SUBLEASE AGREEMENT"],
+  "CONFIRMATION OF SUBLEASE AGREEMENT": ["SUBLEASE AGREEMENT"],
+  "SUBLEASE AGREEMENT": ["SUBLEASE AGREEMENT"],
+};
+const isSublease = (tocText) => /SUB-?LEASE/i.test(String(tocText || ""));
+
+function resolveContractType(tocText, lk) {
+  if (!tocText) return null;
+  const exact = lk.contractTypes.get(upperKey(tocText));
+  if (exact) return exact;
+  for (const name of CONTRACT_ALIASES[upperKey(tocText)] || []) {
+    const id = lk.contractTypes.get(upperKey(name));
+    if (id) return id;
+  }
+  return null;
+}
+
+/** Industry Type: the legacy Industry when it's a name here; otherwise (the
+ * client's Industry Types are lease kinds — Direct Lease / Sublease) the one
+ * that fits the legacy Type of Contract. */
+function resolveIndustry(industryText, tocText, lk) {
+  if (industryText) {
+    const exact = lk.industries.get(upperKey(industryText));
+    if (exact) return { code: exact, fromContract: false };
+  }
+  if (!tocText) return { code: null, fromContract: false };
+  const names = isSublease(tocText) ? ["SUBLEASE", "SUB-LEASE"] : ["DIRECT LEASE"];
+  for (const name of names) {
+    const code = lk.industries.get(upperKey(name));
+    if (code) return { code, fromContract: true };
+  }
+  return { code: null, fromContract: false };
+}
+
 function mapLocator(row, lk) {
   const officerName = txt(row.AccountOfficer);
-  const officerId = officerName ? lk.officers.get(personKey(officerName)) ?? null : null;
+  const officerId = officerName && !NO_OFFICERS ? lk.officers.get(personKey(officerName)) ?? null : null;
   const industryText = txt(row.Industry);
   const tocText = txt(row.TypeContract);
   const landUseText = txt(row.LandUse, 500);
+  const industry = resolveIndustry(industryText, tocText, lk);
+  // A legacy industry that isn't an Industry Type here (e.g. MANUFACTURING)
+  // is kept on the record, at the end of Business Activities.
+  const legacyIndustryNote = industryText && industry.fromContract ? `Industry (BRIDGE): ${industryText}` : null;
+  const activities = [txt(row.BusinessType), legacyIndustryNote].filter(Boolean).join("\n\n") || null;
   return {
     refNo: String(row.RefNo).trim(),
     businessName: txt(row.Tenant, 255) || `Legacy Locator ${row.RefNo}`,
     officerName,
     officerId,
     industryText,
-    industryCode: industryText ? lk.industries.get(upperKey(industryText)) ?? null : null,
+    industryCode: industry.code,
+    industryFromContract: industry.fromContract,
+    activities,
     tocText,
-    contractTypeId: tocText ? lk.contractTypes.get(upperKey(tocText)) ?? null : null,
+    contractTypeId: resolveContractType(tocText, lk),
     landUseText,
     landUseId: landUseText ? lk.landUses.get(upperKey(landUseText)) ?? null : null,
     createdBy: lk.usersByName.get(upperKey(row.EncodedBy)) ?? lk.adminId,
@@ -291,7 +347,7 @@ async function createLocator(row, m, children, actorId) {
         m.refNo,
         txt(row.RefCode, 100),
         txt(row.Location, 500),
-        txt(row.BusinessType),
+        m.activities,
         m.industryCode,
         m.contractTypeId,
         m.landUseText,
@@ -478,6 +534,7 @@ async function runImport() {
 
   const stats = { created: 0, skippedOther: 0, resumed: 0, docs: 0, docBytes: 0, failed: 0, permits: 0 };
   const unmatched = { officer: new Map(), industry: new Map(), contractType: new Map() };
+  const fromContract = new Map(); // Industry Type taken from the Type of Contract
   const bump = (map, k) => k && map.set(k, (map.get(k) || 0) + 1);
   let plannedDocs = 0;
   let plannedBytes = 0;
@@ -491,8 +548,9 @@ async function runImport() {
       signatories: legacy.signatories.get(m.refNo) || [],
     };
     const docs = legacy.docs.get(m.refNo) || [];
-    if (m.officerName && !m.officerId) bump(unmatched.officer, m.officerName);
-    if (m.industryText && !m.industryCode) bump(unmatched.industry, m.industryText);
+    if (m.officerName && !m.officerId && !NO_OFFICERS) bump(unmatched.officer, m.officerName);
+    if (!m.industryCode) bump(unmatched.industry, m.industryText || "(blank)");
+    if (m.industryFromContract) bump(fromContract, `${m.tocText} → ${[...lk.industries.entries()].find(([, c]) => c === m.industryCode)?.[0]}`);
     if (m.tocText && !m.contractTypeId) bump(unmatched.contractType, m.tocText);
 
     const found = existing.get(m.refNo);
@@ -546,8 +604,13 @@ async function runImport() {
     console.log(`Stockholders ${children.stockholders}, contact persons ${children.contacts}, signatories ${children.signatories} (${children.withEmail} with an email).`);
     console.log(`Documents: ${plannedDocs} file(s), ${mb(plannedBytes)}${SKIP_DOCS ? " — would be skipped (--skip-documents)" : ""} — make sure the uploads drive has room.`);
   }
-  console.log(`Account Officer names with no matching user (left unassigned): ${list(unmatched.officer)}`);
-  console.log(`Industries not in Industry Type (left blank): ${list(unmatched.industry)}`);
+  console.log(
+    NO_OFFICERS
+      ? "Account Officers: none assigned (--no-officers) — assign them on Registered Locator."
+      : `Account Officer names with no matching user (left unassigned): ${list(unmatched.officer)}`
+  );
+  console.log(`Industry Type from the Type of Contract (legacy industry kept in Business Activities): ${list(fromContract)}`);
+  console.log(`Locators left without an Industry Type (set it before renewing): ${list(unmatched.industry)}`);
   console.log(`Types of contract not in Type of Contract (left blank): ${list(unmatched.contractType)}`);
   console.log("No portal logins were created — add one per locator on Registered Locator (Portal login) once its email is known.");
 }
