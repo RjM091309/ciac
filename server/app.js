@@ -194,6 +194,15 @@ initializeDatabase()
       ["investment", () => Investment.ensureSchema()],
       ["building", () => Building.ensureSchema()],
       ["land use", () => LandUse.ensureSchema()],
+      // Compliance checklist columns (applicability) + uploaded documents —
+      // dashboards and the locator portal read them before anyone opens the module.
+      [
+        "compliance (checklist + documents)",
+        async () => {
+          await require("./models/ComplianceInspection").ensureSchema();
+          await require("./models/ComplianceDocument").ensureSchema();
+        },
+      ],
       ["drop unused legacy tables", () => dropUnusedLegacyTables()], // see config/legacyTables.js
       ["indexes", () => ensureIndexes()], // see config/indexes.js
       ["redundant indexes", () => dropRedundantIndexes()], // see config/indexes.js
