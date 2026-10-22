@@ -294,7 +294,7 @@ function mapLocator(row, lk) {
   const industry = resolveIndustry(industryText, tocText, lk);
   // A legacy industry that isn't an Industry Type here (e.g. MANUFACTURING)
   // is kept on the record, at the end of Business Activities.
-  const legacyIndustryNote = industryText && industry.fromContract ? `Industry (BRIDGE): ${industryText}` : null;
+  const legacyIndustryNote = industryText && (industry.fromContract || !industry.code) ? `Industry (BRIDGE): ${industryText}` : null;
   const activities = [txt(row.BusinessType), legacyIndustryNote].filter(Boolean).join("\n\n") || null;
   return {
     refNo: String(row.RefNo).trim(),
