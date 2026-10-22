@@ -105,6 +105,16 @@ async function createSchema() {
       CREATE UNIQUE INDEX UX_locator_compliance_items ON dbo.locator_compliance_items(proponent_id, item_code);
     END;
 
+    -- Per-locator applicability (set by the Compliance Officer): REQUIRED
+    -- (applicable — the default) or NOT_APPLICABLE (not needed for this
+    -- locator). Only REQUIRED items count toward the complied %, expiry
+    -- reminders, the dashboard alarm and "Compliant".
+    IF COL_LENGTH('dbo.locator_compliance_items', 'applicability') IS NULL
+      ALTER TABLE dbo.locator_compliance_items ADD applicability NVARCHAR(15) NOT NULL
+        CONSTRAINT DF_locator_compliance_items_applicability DEFAULT ('REQUIRED');
+    IF COL_LENGTH('dbo.locator_compliance_items', 'applicability_reason') IS NULL
+      ALTER TABLE dbo.locator_compliance_items ADD applicability_reason NVARCHAR(500) NULL;
+
     -- The checklist briefly lived per inspection (dbo.inspection_compliance_items).
     -- Carry anything saved there over to its locator — the most recent save
     -- per item — without touching items the locator already has.
@@ -243,21 +253,55 @@ async function logActivity(inspectionId, action, detail, actorId) {
   }
 }
 
+/** The locator's login user, for notices not tied to an application. */
+async function locatorUserId(proponentId) {
+  const rows = await selectData(`SELECT TOP (1) user_id FROM dbo.proponents WHERE id = @param0`, [toInt(proponentId)]);
+  return toInt(rows?.[0]?.user_id);
+}
+
 async function notifyProponentScoped({ inspection, subject, body, actorId }) {
-  // Inspections may not be tied to an application; only push app-scoped
-  // notifications when we have an application_id to hang them on.
-  const appId = toInt(inspection?.application_id);
-  if (!appId) return;
   try {
-    await Notification.createApplicationScopedNotifications({
-      applicationId: appId,
-      actorId,
-      eventType: "compliance",
-      subject,
-      body,
-    });
+    // Tied to an application: the usual application-scoped fan-out.
+    const appId = toInt(inspection?.application_id);
+    if (appId) {
+      await Notification.createApplicationScopedNotifications({
+        applicationId: appId,
+        actorId,
+        eventType: "compliance",
+        subject,
+        body,
+      });
+      return;
+    }
+    // Otherwise straight to the locator (most inspections aren't tied to one).
+    const userId = await locatorUserId(inspection?.proponent_id);
+    if (userId) {
+      await Notification.createNotification({ userId, subject, body, createdBy: toInt(actorId), eventType: "compliance" });
+    }
   } catch (error) {
     console.error("Inspection notification error:", error);
+  }
+}
+
+/** Tells the locator the Compliance Officer reviewed one of its checklist
+ * items (Complied / Not complied), with the remarks. */
+async function notifyLocatorOfReview({ proponentId, itemName, status, remarks, actorId }) {
+  if (status !== "COMPLIED" && status !== "NOT_COMPLIED") return;
+  try {
+    const userId = await locatorUserId(proponentId);
+    if (!userId) return;
+    await Notification.createNotification({
+      userId,
+      subject: status === "COMPLIED" ? `Compliance document accepted: ${itemName}` : `Compliance document not complied: ${itemName}`,
+      body:
+        status === "COMPLIED"
+          ? `${itemName} was marked Complied.${remarks ? ` Remarks: ${remarks}` : ""}`
+          : `${itemName} was marked Not complied${remarks ? ` — ${remarks}` : ""}. Please upload a corrected document under Compliance.`,
+      createdBy: toInt(actorId),
+      eventType: "compliance",
+    });
+  } catch (error) {
+    console.error("Compliance review notification error:", error);
   }
 }
 
@@ -349,6 +393,9 @@ async function getInspectionById(id) {
 // ---- Compliance checklist (legacy BRIDGE Compliance / Permits / Performance tabs) ----
 // The requirements themselves are file-maintained in dbo.compliance_requirements.
 const CHECKLIST_STATUSES = ["PENDING", "SUBMITTED", "COMPLIED", "NOT_COMPLIED"];
+const APPLICABILITY = ["REQUIRED", "NOT_APPLICABLE"];
+/** Only REQUIRED items count (complied %, reminders, alarm, Compliant). */
+const isRequired = (it) => !it?.applicability || it.applicability === "REQUIRED";
 
 /** Every checklist item for a locator, saved values merged over the catalog
  * (unsaved items come back Pending and blank). */
@@ -374,6 +421,8 @@ async function listComplianceItems(proponentId) {
       status: r.status || "PENDING",
       remarks: r.remarks ?? null,
       date_submitted: r.date_submitted ?? null,
+      applicability: r.applicability || "REQUIRED",
+      applicability_reason: r.applicability_reason ?? null,
       updated_at: r.updated_at ?? null,
     };
   });
@@ -406,7 +455,7 @@ async function listLocatorCompliance() {
       WHERE p.is_active = 1
       ORDER BY p.business_name
     `),
-    selectData(`SELECT proponent_id, item_code, status, validity_to FROM dbo.locator_compliance_items`),
+    selectData(`SELECT proponent_id, item_code, status, validity_to, applicability FROM dbo.locator_compliance_items`),
   ]);
 
   const byLocator = new Map();
@@ -427,29 +476,34 @@ async function listLocatorCompliance() {
     const items = requirements.map((r) => {
       const s = mine.get(r.code);
       const status = s?.status || "PENDING";
-      counts[status] = (counts[status] || 0) + 1;
-      const to = s?.validity_to ? new Date(s.validity_to) : null;
-      if (to && !Number.isNaN(to.getTime())) {
-        if (to < today) expired += 1;
-        else if (to <= soon) expiring += 1;
+      const applicability = s?.applicability || "REQUIRED";
+      // Not-applicable items don't count for this locator.
+      if (applicability === "REQUIRED") {
+        counts[status] = (counts[status] || 0) + 1;
+        const to = s?.validity_to ? new Date(s.validity_to) : null;
+        if (to && !Number.isNaN(to.getTime())) {
+          if (to < today) expired += 1;
+          else if (to <= soon) expiring += 1;
+        }
       }
-      return { code: r.code, name: r.name, category: r.category, status, validity_to: s?.validity_to ?? null };
+      return { code: r.code, name: r.name, category: r.category, status, applicability, validity_to: s?.validity_to ?? null };
     });
+    const required = items.filter(isRequired);
     return {
       proponent_id: p.id,
       proponent_name: p.business_name,
       ref_no: p.ref_no ?? null,
       business_type: p.business_type ?? null,
       inspections: Number(p.inspections || 0),
-      total: items.length,
+      total: required.length,
       complied: counts.COMPLIED,
       submitted: counts.SUBMITTED,
       pending: counts.PENDING,
       not_complied: counts.NOT_COMPLIED,
       expired,
       expiring,
-      // Completed only once every requirement is Complied.
-      status: items.length > 0 && counts.COMPLIED === items.length ? "COMPLETED" : "IN_PROGRESS",
+      // Completed once every REQUIRED item is Complied.
+      status: required.length > 0 && counts.COMPLIED === required.length ? "COMPLETED" : "IN_PROGRESS",
       items,
     };
   });
@@ -487,6 +541,149 @@ async function listLocatorActivity(proponentId) {
   });
 }
 
+/** The locator's own view of its compliance (portal Compliance page):
+ * checklist items, its inspections with their findings and corrective
+ * actions, and the same standing the staff monitoring board shows. Columns
+ * are picked explicitly so nothing staff-internal (inspector assignment,
+ * audit ids) reaches the portal. */
+async function getLocatorComplianceOverview(proponentId) {
+  await ensureSchema();
+  const pid = toInt(proponentId);
+  const [items, inspections, findings, actions] = await Promise.all([
+    listComplianceItems(pid),
+    selectData(
+      `
+      SELECT i.id, i.title, i.scheduled_date, i.conducted_date, i.status, i.result, i.summary,
+             COALESCE(cr.name, it.name) AS inspection_type_name
+      FROM dbo.inspections i
+      LEFT JOIN dbo.inspection_types it ON it.id = i.inspection_type_id
+      LEFT JOIN dbo.compliance_requirements cr ON cr.code = i.inspection_type_code
+      WHERE i.proponent_id = @param0
+      ORDER BY COALESCE(i.conducted_date, i.scheduled_date) DESC, i.id DESC
+      `,
+      [pid]
+    ),
+    selectData(
+      `
+      SELECT f.id, f.inspection_id, f.category, f.severity, f.description, f.recommendation, f.status
+      FROM dbo.inspection_findings f
+      INNER JOIN dbo.inspections i ON i.id = f.inspection_id
+      WHERE i.proponent_id = @param0
+      ORDER BY f.id DESC
+      `,
+      [pid]
+    ),
+    selectData(
+      `
+      SELECT c.id, c.inspection_id, c.finding_id, c.action_required, c.due_date, c.status, c.completed_date, c.remarks
+      FROM dbo.inspection_corrective_actions c
+      INNER JOIN dbo.inspections i ON i.id = c.inspection_id
+      WHERE i.proponent_id = @param0
+      ORDER BY ISNULL(c.due_date, '9999-12-31') ASC, c.id DESC
+      `,
+      [pid]
+    ),
+  ]);
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const openFindings = findings.filter((f) => String(f.status).toUpperCase() === "OPEN").length;
+  const openActions = actions.filter((a) => String(a.status).toUpperCase() !== "DONE");
+  const overdueActions = openActions.filter((a) => a.due_date && new Date(a.due_date) < today).length;
+  const failed = inspections.filter((i) => String(i.result).toUpperCase() === "FAILED").length;
+  // Same rule as the staff monitoring board (ComplianceInspections.tsx standingOf).
+  const standing =
+    overdueActions > 0 || failed > 0 ? "AT_RISK" : openFindings > 0 || openActions.length > 0 ? "MONITORING" : "COMPLIANT";
+
+  return { standing, items, inspections, findings, actions };
+}
+
+/** Compliance dashboard (admin + Compliance Officer): checklist roll-up,
+ * expiry buckets, items awaiting review, inspection standing, overdue
+ * corrective actions, upcoming inspections, and an alert list of documents
+ * already expired or due within 30 days (the dashboard alarm). */
+async function getComplianceDashboard() {
+  await ensureSchema();
+  const [locators, standingRows, upcoming, overdueActions] = await Promise.all([
+    listLocatorCompliance(),
+    getComplianceByProponent(),
+    selectData(`
+      SELECT TOP (10) i.id, i.title, i.scheduled_date, p.id AS proponent_id, p.business_name AS proponent_name
+      FROM dbo.inspections i
+      INNER JOIN dbo.proponents p ON p.id = i.proponent_id
+      WHERE i.status = 'SCHEDULED'
+        AND i.scheduled_date BETWEEN CAST(SYSUTCDATETIME() AS DATE) AND DATEADD(day, 30, CAST(SYSUTCDATETIME() AS DATE))
+      ORDER BY i.scheduled_date ASC
+    `),
+    selectData(`
+      SELECT COUNT(1) AS n
+      FROM dbo.inspection_corrective_actions c
+      WHERE c.status <> 'DONE' AND c.due_date IS NOT NULL AND c.due_date < CAST(SYSUTCDATETIME() AS DATE)
+    `),
+  ]);
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const expiry = { expired: 0, within30: 0, within90: 0, within180: 0 };
+  const alerts = [];
+  const awaitingReview = [];
+  let fullyComplied = 0;
+  let itemsTotal = 0;
+  let itemsComplied = 0;
+  let itemsSubmitted = 0;
+  for (const loc of locators) {
+    if (loc.status === "COMPLETED") fullyComplied += 1;
+    for (const it of loc.items) {
+      // Nothing about a not-applicable item counts for this locator.
+      if (it.status === "SUBMITTED" && it.applicability !== "NOT_APPLICABLE") {
+        awaitingReview.push({ proponent_id: loc.proponent_id, proponent_name: loc.proponent_name, item_name: it.name });
+      }
+      if (!isRequired(it)) continue;
+      itemsTotal += 1;
+      if (it.status === "COMPLIED") itemsComplied += 1;
+      if (it.status === "SUBMITTED") itemsSubmitted += 1;
+      if (!it.validity_to) continue;
+      const days = Math.round((new Date(it.validity_to).getTime() - today.getTime()) / 86400000);
+      if (Number.isNaN(days)) continue;
+      if (days < 0) expiry.expired += 1;
+      else if (days <= 30) expiry.within30 += 1;
+      else if (days <= 90) expiry.within90 += 1;
+      else if (days <= 180) expiry.within180 += 1;
+      if (days <= 30) {
+        alerts.push({
+          proponent_id: loc.proponent_id,
+          proponent_name: loc.proponent_name,
+          item_name: it.name,
+          validity_to: it.validity_to,
+          days_left: days,
+        });
+      }
+    }
+  }
+  alerts.sort((a, b) => a.days_left - b.days_left);
+
+  const standing = { compliant: 0, monitoring: 0, atRisk: 0 };
+  for (const r of standingRows) {
+    if (Number(r.overdue_actions) > 0 || Number(r.failed_inspections) > 0) standing.atRisk += 1;
+    else if (Number(r.open_findings) > 0 || Number(r.open_actions) > 0) standing.monitoring += 1;
+    else standing.compliant += 1;
+  }
+
+  return {
+    locators: locators.length,
+    fullyComplied,
+    items: { total: itemsTotal, complied: itemsComplied, submitted: itemsSubmitted },
+    expiry,
+    standing,
+    overdueActions: Number(overdueActions?.[0]?.n || 0),
+    upcomingInspections: upcoming,
+    awaitingReview: awaitingReview.slice(0, 20),
+    awaitingReviewTotal: awaitingReview.length,
+    alerts: alerts.slice(0, 50),
+    alertsTotal: alerts.length,
+  };
+}
+
 async function saveComplianceItem(proponentId, code, payload, actorId) {
   await ensureSchema();
   const pid = toInt(proponentId);
@@ -496,6 +693,20 @@ async function saveComplianceItem(proponentId, code, payload, actorId) {
   if (!item) throw clientError("Unknown or inactive compliance requirement");
   const { from, to } = readValidity(payload);
   const text = (v, max) => (v == null ? null : String(v).trim().slice(0, max) || null);
+  // Omitted (older clients) keeps whatever the item already had.
+  let applicability = payload?.applicability;
+  if (applicability === undefined) {
+    const current = await selectData(
+      `SELECT applicability FROM dbo.locator_compliance_items WHERE proponent_id = @param0 AND item_code = @param1`,
+      [pid, item.code]
+    );
+    applicability = current?.[0]?.applicability || "REQUIRED";
+  }
+  applicability = pick(applicability, APPLICABILITY, "REQUIRED");
+  // Remarks double as the reason when an item is Not applicable.
+  if (applicability !== "REQUIRED" && !text(payload?.remarks, 2000)) {
+    throw clientError("Add a reason in Remarks when an item is Not applicable for this locator.");
+  }
   await updateData(
     `
     MERGE dbo.locator_compliance_items AS t
@@ -505,12 +716,13 @@ async function saveComplianceItem(proponentId, code, payload, actorId) {
       particular = @param2, commitment = @param3, actual = @param4,
       validity_from = @param5, validity_to = @param6, status = @param7,
       remarks = @param8, date_submitted = @param9,
+      applicability = @param11, applicability_reason = @param12,
       updated_by = @param10, updated_at = SYSUTCDATETIME()
     WHEN NOT MATCHED THEN INSERT
       (proponent_id, item_code, particular, commitment, actual, validity_from, validity_to,
-       status, remarks, date_submitted, updated_by, updated_at)
+       status, remarks, date_submitted, applicability, applicability_reason, updated_by, updated_at)
       VALUES (@param0, @param1, @param2, @param3, @param4, @param5, @param6,
-       @param7, @param8, @param9, @param10, SYSUTCDATETIME());
+       @param7, @param8, @param9, @param11, @param12, @param10, SYSUTCDATETIME());
     `,
     [
       pid,
@@ -524,6 +736,9 @@ async function saveComplianceItem(proponentId, code, payload, actorId) {
       text(payload?.remarks, 2000),
       readDate(payload?.date_submitted, "Date submitted"),
       toInt(actorId),
+      applicability,
+      // Kept in step with remarks (the portal shows it as the reason).
+      applicability === "REQUIRED" ? null : text(payload?.remarks, 500),
     ]
   );
   const items = await listComplianceItems(pid);
@@ -1066,6 +1281,10 @@ module.exports = {
   getDocumentById,
   listComplianceItems,
   listLocatorCompliance,
+  getLocatorComplianceOverview,
+  getComplianceDashboard,
+  notifyLocatorOfReview,
+  APPLICABILITY,
   listLocatorActivity,
   saveComplianceItem,
 };

@@ -20,7 +20,11 @@ export type ProgressSummary = {
   pending: number;
   rejected: number;
   missing: number;
+  // Verified %.
   percent: number;
+  // Uploaded by the locator (or already verified).
+  submitted: number;
+  submittedPercent: number;
 };
 
 function toUpper(v: string | null | undefined) {
@@ -29,7 +33,7 @@ function toUpper(v: string | null | undefined) {
 
 export function computeProgress(reqRows: AppRequirementRow[], docRows: DocumentRow[]): ProgressSummary {
   const total = reqRows.length;
-  if (!total) return { total: 0, verified: 0, pending: 0, rejected: 0, missing: 0, percent: 0 };
+  if (!total) return { total: 0, verified: 0, pending: 0, rejected: 0, missing: 0, percent: 0, submitted: 0, submittedPercent: 0 };
 
   const hasDocumentByRequirement = new Set<number>(
     docRows.map((d) => Number(d.requirement_id)).filter((n) => Number.isFinite(n))
@@ -50,7 +54,9 @@ export function computeProgress(reqRows: AppRequirementRow[], docRows: DocumentR
   }
 
   const percent = Math.round((verified / total) * 100);
-  return { total, verified, pending, rejected, missing, percent };
+  const submitted = total - missing;
+  const submittedPercent = Math.round((submitted / total) * 100);
+  return { total, verified, pending, rejected, missing, percent, submitted, submittedPercent };
 }
 
 /** Fetches requirements + documents for each application id in parallel and

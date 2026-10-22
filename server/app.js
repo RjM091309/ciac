@@ -220,6 +220,9 @@ initializeDatabase()
     UserSession.startSweeper();
     // Emails locators whose lease contract is due for renewal (about 6 months left).
     require("./lib/renewalReminders").start();
+    // Emails locators (and alerts compliance staff) 6/3/1 months before a
+    // compliance document expires, and once when it lapses.
+    require("./lib/complianceReminders").start();
     // Deletes audit log entries past the retention set in Portal Settings (0 = keep forever).
     require("./lib/auditRetention").start();
   })

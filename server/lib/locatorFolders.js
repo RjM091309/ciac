@@ -97,7 +97,19 @@ async function placeLocatorUpload(absPath, proponentId) {
   }
 }
 
+/** Compliance documents the locator uploads from the portal:
+ * locators/<Ref No>/compliance/. Same fallback as placeLocatorUpload. */
+async function placeComplianceUpload(absPath, proponentId) {
+  try {
+    return moveInto(absPath, await locatorDir(proponentId, "compliance"));
+  } catch (error) {
+    console.error("Move compliance upload into locator folder failed:", error.message || error);
+    return absPath;
+  }
+}
+
 module.exports = {
+  placeComplianceUpload,
   LOCATORS_DIR,
   folderName,
   locatorDir,

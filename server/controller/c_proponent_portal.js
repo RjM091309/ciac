@@ -4,12 +4,134 @@ const Contract = require("../models/Contract");
 const Permit = require("../models/Permit");
 const ActivityLog = require("../models/ActivityLog");
 const AuditLog = require("../models/AuditLog");
-const { relativeStoragePath, resolveStoredPath } = require("../lib/fileStorage");
-const { placeApplicationUpload } = require("../lib/locatorFolders");
+const path = require("path");
+const Inspection = require("../models/ComplianceInspection");
+const ComplianceDocument = require("../models/ComplianceDocument");
+const { relativeStoragePath, resolveStoredPath, contentDisposition } = require("../lib/fileStorage");
+const { placeApplicationUpload, placeComplianceUpload } = require("../lib/locatorFolders");
 const { publicErrorMessage } = require("../lib/httpError");
 
 // All handlers below assume requireProponentSelf (req.proponent) has run, and
 // the per-application ones assume requireOwnApplication (req.application) has run.
+
+
+/** Streams a stored compliance document; ?view=1 opens it inline. */
+function sendComplianceFile(req, res, doc) {
+  const abs = resolveStoredPath(doc.storage_path);
+  if (!abs || !fs.existsSync(abs)) {
+    return res.status(404).json({ success: false, message: "File is no longer available." });
+  }
+  const name = doc.original_file_name || doc.file_name || path.basename(abs);
+  AuditLog.recordFileAccess(req, {
+    kind: "DOCUMENT",
+    entityType: "proponent",
+    entityId: doc.proponent_id,
+    details: { compliance_document_id: doc.id, item_code: doc.item_code, file_name: name },
+  });
+  if (doc.content_type) res.type(doc.content_type);
+  if (req.query.view === "1") {
+    res.setHeader("Content-Disposition", contentDisposition("inline", name));
+    return res.sendFile(abs);
+  }
+  return res.download(abs, name);
+}
+
+// ---- Compliance (portal "Compliance" page) ----
+
+/** Checklist + inspections/findings/actions + standing, with every uploaded
+ * file per item (newest first) so the page can show current + history. */
+exports.getMyCompliance = async (req, res) => {
+  try {
+    const [overview, documents] = await Promise.all([
+      Inspection.getLocatorComplianceOverview(req.proponent.id),
+      ComplianceDocument.listForProponent(req.proponent.id),
+    ]);
+    const byItem = new Map();
+    for (const d of documents) {
+      const list = byItem.get(d.item_code) || [];
+      // storage_path stays server-side.
+      const { storage_path, ...safe } = d;
+      list.push(safe);
+      byItem.set(d.item_code, list);
+    }
+    const items = overview.items.map((i) => ({ ...i, documents: byItem.get(i.code) || [] }));
+    return res.json({ success: true, data: { ...overview, items } });
+  } catch (error) {
+    console.error("Get my compliance error:", error);
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
+  }
+};
+
+exports.uploadMyComplianceDocument = async (req, res) => {
+  const discard = () => {
+    if (req.file?.path) fs.unlink(req.file.path, () => {});
+  };
+  try {
+    if (!req.file) return res.status(400).json({ success: false, message: "No file was uploaded." });
+    const items = await Inspection.listComplianceItems(req.proponent.id);
+    const item = items.find((i) => i.code === String(req.params.code));
+    if (!item) {
+      discard();
+      return res.status(400).json({ success: false, message: "Unknown or inactive compliance requirement." });
+    }
+    if (item.applicability === "NOT_APPLICABLE") {
+      discard();
+      return res.status(400).json({ success: false, message: "This item is marked not applicable for your business." });
+    }
+    const storedPath = await placeComplianceUpload(req.file.path, req.proponent.id);
+    req.file.path = storedPath;
+    const { document } = await ComplianceDocument.createUpload({
+      proponentId: req.proponent.id,
+      itemCode: item.code,
+      file: req.file,
+      storagePath: relativeStoragePath(storedPath),
+      validityFrom: req.body?.validity_from,
+      validityTo: req.body?.validity_to,
+      userId: req.user?.id ?? null,
+    });
+
+    ActivityLog.recordFromReq(req, {
+      entityType: "COMPLIANCE",
+      entityId: document?.id ?? null,
+      action: "COMPLIANCE_DOCUMENT_UPLOADED",
+      meta: { item: item.name, file_name: req.file.originalname },
+    });
+    await AuditLog.record({
+      actorId: req.user?.id,
+      actorUsername: req.user?.username,
+      action: "COMPLIANCE_DOCUMENT_UPLOADED",
+      entityType: "proponent",
+      entityId: req.proponent.id,
+      details: { item: item.name, file_name: req.file.originalname, uploaded_by: "locator" },
+      req,
+    });
+    await ComplianceDocument.notifyReviewers({
+      proponentName: req.proponent.business_name,
+      itemName: item.name,
+      actorId: req.user?.id ?? null,
+    });
+
+    const { storage_path, ...safe } = document || {};
+    return res.status(201).json({ success: true, data: safe });
+  } catch (error) {
+    discard();
+    console.error("Upload my compliance document error:", error);
+    return res.status(error.status || 500).json({ success: false, message: publicErrorMessage(error) });
+  }
+};
+
+exports.downloadMyComplianceDocument = async (req, res) => {
+  try {
+    const doc = await ComplianceDocument.getById(req.params.docId);
+    if (!doc || Number(doc.proponent_id) !== Number(req.proponent.id)) {
+      return res.status(404).json({ success: false, message: "Document not found" });
+    }
+    return sendComplianceFile(req, res, doc);
+  } catch (error) {
+    console.error("Download my compliance document error:", error);
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
+  }
+};
 
 exports.listMyApplications = async (req, res) => {
   try {

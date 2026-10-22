@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Building2, FileCheck2, FileText, History, KeyRound, LayoutDashboard, LogOut, Settings } from 'lucide-react';
+import { Building2, FileCheck2, FileText, History, KeyRound, LayoutDashboard, LogOut, Settings, ShieldCheck } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { useControlPanelAccess } from '../../context/ControlPanelAccessContext';
 import { useBottomNavTabs } from './ProponentBottomNav';
@@ -10,6 +10,7 @@ const SHEET_ICONS: Record<string, React.ComponentType<{ size?: number; strokeWid
   dashboard: LayoutDashboard,
   'me:applications': FileText,
   'me:contracts-permits': FileCheck2,
+  'me:compliance': ShieldCheck,
   'me:profile': Building2,
   'me:activity': History,
 };
@@ -68,6 +69,7 @@ const NAV_ITEMS: ProponentNavItem[] = [
   { key: 'dashboard', label: 'Dashboard' },
   { key: 'me:applications', label: 'My Applications' },
   { key: 'me:contracts-permits', label: 'Contracts & Permits' },
+  { key: 'me:compliance', label: 'Compliance' },
   { key: 'me:profile', label: 'My Business Profile' },
   { key: 'me:activity', label: 'Activity History' },
 ];

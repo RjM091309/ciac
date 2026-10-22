@@ -280,6 +280,14 @@ const LIST_SELECT = `
       ELSE DATEDIFF(DAY, asm.assigned_at, ISNULL(asm.recommended_at, SYSUTCDATETIME())) END AS days_in_assessment,
     (SELECT COUNT(1) FROM dbo.application_requirements ar WHERE ar.application_id = a.id) AS requirements_total,
     (SELECT COUNT(1) FROM dbo.application_requirements ar WHERE ar.application_id = a.id AND ar.status = 'VERIFIED') AS requirements_verified,
+    -- Submitted = the locator has uploaded a file for it (or it's already verified).
+    (
+      SELECT COUNT(1) FROM dbo.application_requirements ar
+      WHERE ar.application_id = a.id
+        AND (ar.status = 'VERIFIED' OR EXISTS (
+          SELECT 1 FROM dbo.documents d WHERE d.application_id = ar.application_id AND d.requirement_id = ar.requirement_id
+        ))
+    ) AS requirements_submitted,
     -- Per-document breakdown for the list's "X/Y verified" tooltip — small
     -- enough per application (a handful of requirements) to inline here
     -- rather than a separate round trip per row on hover.

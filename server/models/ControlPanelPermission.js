@@ -17,7 +17,14 @@ async function cachedRows(kind, roleId, load) {
 // right, even if a row for one exists or is sent in a save. Enforced here, at
 // read and write time, so every permission check (m_auth.js guards, search,
 // dashboard scoping) is covered, not just the Control Panel UI.
-const LOCATOR_MENU_KEYS = new Set(["dashboard", "me:applications", "me:contracts-permits", "me:profile", "me:activity"]);
+const LOCATOR_MENU_KEYS = new Set([
+  "dashboard",
+  "me:applications",
+  "me:contracts-permits",
+  "me:compliance",
+  "me:profile",
+  "me:activity",
+]);
 
 async function isLocatorRole(roleId) {
   const locatorRoleId = await Role.getActiveRoleIdByName("proponent");

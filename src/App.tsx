@@ -20,6 +20,7 @@ const PreviewDashboard = lazy(() => import('./components/dashboard/PreviewDashbo
 const ProponentProfile = lazy(() => import('./components/proponent/ProponentProfile').then((m) => ({ default: m.ProponentProfile })));
 const ProponentApplications = lazy(() => import('./components/proponent/ProponentApplications').then((m) => ({ default: m.ProponentApplications })));
 const ProponentContractsPermits = lazy(() => import('./components/proponent/ProponentContractsPermits').then((m) => ({ default: m.ProponentContractsPermits })));
+const ProponentCompliance = lazy(() => import('./components/proponent/ProponentCompliance').then((m) => ({ default: m.ProponentCompliance })));
 const ProponentActivity = lazy(() => import('./components/proponent/ProponentActivity').then((m) => ({ default: m.ProponentActivity })));
 const PermitsManagement = lazy(() => import('./components/compliance/PermitsManagement').then((m) => ({ default: m.PermitsManagement })));
 const UsersManagement = lazy(() => import('./components/settings/UsersManagement').then((m) => ({ default: m.UsersManagement })));
@@ -155,13 +156,14 @@ const PATH_TO_VIEW = Object.entries(VIEW_TO_PATH).reduce(
 );
 
 // --- Proponent self-service portal (separate from the permission-gated AppView set) ---
-type ProponentView = 'dashboard' | 'me:profile' | 'me:applications' | 'me:contracts-permits' | 'me:activity';
+type ProponentView = 'dashboard' | 'me:profile' | 'me:applications' | 'me:contracts-permits' | 'me:compliance' | 'me:activity';
 
 const PROPONENT_VIEW_TO_PATH: Record<ProponentView, string> = {
   dashboard: '/dashboard',
   'me:profile': '/me/profile',
   'me:applications': '/me/applications',
   'me:contracts-permits': '/me/contracts-permits',
+  'me:compliance': '/me/compliance',
   'me:activity': '/me/activity',
 };
 
@@ -193,6 +195,11 @@ const PROPONENT_SUBHEADER: Record<ProponentView, { title: string; description: s
   'me:contracts-permits': {
     title: 'Contracts & Permits',
     description: 'Your executed lease contracts and the permits on record with {org}.',
+    badge: 'Compliance',
+  },
+  'me:compliance': {
+    title: 'Compliance',
+    description: 'Upload your compliance documents and follow your inspections, findings and standing with {org}.',
     badge: 'Compliance',
   },
   'me:activity': {
@@ -635,6 +642,8 @@ export default function App() {
                   <ProponentApplications locationSearch={locationSearch} navigate={navigate} />
                 ) : proponentView === 'me:contracts-permits' ? (
                   <ProponentContractsPermits navigate={navigate} />
+                ) : proponentView === 'me:compliance' ? (
+                  <ProponentCompliance />
                 ) : proponentView === 'me:activity' ? (
                   <ProponentActivity />
                 ) : (
@@ -649,6 +658,8 @@ export default function App() {
                   <ProponentApplications locationSearch={locationSearch} navigate={navigate} />
                 ) : dashboardPreviewRole === 'proponent' && previewProponentView === 'me:contracts-permits' ? (
                   <ProponentContractsPermits navigate={navigate} />
+                ) : dashboardPreviewRole === 'proponent' && previewProponentView === 'me:compliance' ? (
+                  <ProponentCompliance />
                 ) : dashboardPreviewRole === 'proponent' && previewProponentView === 'me:activity' ? (
                   <ProponentActivity />
                 ) : (

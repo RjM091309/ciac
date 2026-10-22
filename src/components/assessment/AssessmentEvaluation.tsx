@@ -82,6 +82,8 @@ type AssessmentRow = {
   days_in_assessment: number | null;
   requirements_total: number;
   requirements_verified: number;
+  // Uploaded by the locator (or already verified) — the "% submitted" figure.
+  requirements_submitted?: number;
   requirements_breakdown: RequirementBreakdown[];
 };
 
@@ -205,6 +207,14 @@ const REQ_STATUS_STYLE: Record<string, { color: string; bg: string; Icon: typeof
   REJECTED: { color: '#ef4444', bg: 'rgba(239,68,68,.15)', Icon: XCircle },
   PENDING: { color: '#f59e0b', bg: 'rgba(245,158,11,.15)', Icon: Clock3 },
 };
+
+/** % of an application's requirements the locator has uploaded a file for
+ * (verified ones count too) — shown next to the verified count. */
+function submittedPct(r: { requirements_total: number; requirements_verified: number; requirements_submitted?: number }) {
+  if (!r.requirements_total) return 0;
+  const submitted = r.requirements_submitted ?? r.requirements_verified;
+  return Math.round((submitted / r.requirements_total) * 100);
+}
 
 // One requirement in the queue's "X/Y verified" hover breakdown. `category`
 // is its Requirement Category (absent when uncategorized/ad-hoc).
@@ -770,12 +780,17 @@ export function AssessmentEvaluation({
                     <div className="flex items-center justify-between mb-1 text-[10px]">
                       <span className="uppercase tracking-wider text-secondary">Compliance Progress</span>
                       <span className="font-semibold" style={{ color: 'var(--text)' }}>
-                        {r.requirements_verified}/{r.requirements_total} verified
+                        {r.requirements_verified}/{r.requirements_total} verified · {submittedPct(r)}% submitted
                       </span>
                     </div>
-                    <div className="h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--input-border)' }}>
+                    {/* Faint layer = submitted (uploaded), solid layer = verified. */}
+                    <div className="relative h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--input-border)' }}>
                       <div
-                        className="h-full rounded-full"
+                        className="absolute inset-y-0 left-0 rounded-full opacity-35"
+                        style={{ width: `${submittedPct(r)}%`, backgroundColor: '#3b82f6' }}
+                      />
+                      <div
+                        className="relative h-full rounded-full"
                         style={{
                           width: `${compliancePct}%`,
                           backgroundColor: compliancePct >= 100 ? '#10b981' : compliancePct >= 50 ? '#3b82f6' : '#f59e0b',
@@ -847,9 +862,14 @@ export function AssessmentEvaluation({
                       {/* Progress bar + verified/total; hover for the per-category breakdown. */}
                       <ComplianceTooltip breakdown={r.requirements_breakdown}>
                         <div className="flex items-center gap-2">
-                          <div className="h-1.5 flex-1 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--control-bg)' }}>
+                          {/* Faint layer = submitted (uploaded), solid layer = verified. */}
+                          <div className="relative h-1.5 flex-1 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--control-bg)' }}>
                             <div
-                              className="h-full rounded-full"
+                              className="absolute inset-y-0 left-0 rounded-full opacity-30"
+                              style={{ width: `${submittedPct(r)}%`, backgroundColor: 'var(--text)' }}
+                            />
+                            <div
+                              className="relative h-full rounded-full"
                               style={{
                                 width: `${r.requirements_total ? Math.round((r.requirements_verified / r.requirements_total) * 100) : 0}%`,
                                 backgroundColor: 'var(--text)',
@@ -860,6 +880,7 @@ export function AssessmentEvaluation({
                             {r.requirements_verified}/{r.requirements_total}
                           </span>
                         </div>
+                        <div className="mt-0.5 text-[10px] tabular-nums">{submittedPct(r)}% submitted</div>
                       </ComplianceTooltip>
                     </td>
                     <td className="px-3 py-2.5 text-right text-[11px] tabular-nums">

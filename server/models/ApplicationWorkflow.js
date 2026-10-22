@@ -741,6 +741,55 @@ async function attachLocatorProgress(rows) {
     const rowAt = row.updated_at ? new Date(row.updated_at) : null;
     if (asmAt && (!rowAt || asmAt > rowAt)) row.updated_at = asm.updated_at;
   }
+  await attachCompliantStatus(list);
+  return rows;
+}
+
+/** Approved → "Compliant" (label only): an APPROVED application whose locator
+ * has every active compliance requirement marked Complied shows COMPLIANT as
+ * its `display_status`. The real status stays APPROVED, so Approval, Reports
+ * and Permits keep working on it unchanged. */
+async function attachCompliantStatus(rows) {
+  const list = (Array.isArray(rows) ? rows : [rows]).filter(Boolean);
+  const proponentIds = [
+    ...new Set(
+      list
+        .filter((r) => String(r.status || "").toUpperCase() === "APPROVED")
+        .map((r) => toInt(r.proponent_id))
+        .filter(Boolean)
+    ),
+  ];
+  if (!proponentIds.length) return rows;
+  try {
+    const compliant = await selectData(
+      `
+      SELECT p.id
+      FROM dbo.proponents p
+      WHERE p.id IN (${proponentIds.join(", ")})
+        AND EXISTS (SELECT 1 FROM dbo.compliance_requirements cr WHERE cr.is_active = 1)
+        -- Every active requirement is Complied, unless this locator has it
+        -- marked Not applicable.
+        AND NOT EXISTS (
+          SELECT 1 FROM dbo.compliance_requirements cr
+          WHERE cr.is_active = 1
+            AND NOT EXISTS (
+              SELECT 1 FROM dbo.locator_compliance_items li
+              WHERE li.proponent_id = p.id AND li.item_code = cr.code
+                AND (li.status = 'COMPLIED' OR ISNULL(li.applicability, 'REQUIRED') <> 'REQUIRED')
+            )
+        )
+      `
+    );
+    const ids = new Set(compliant.map((r) => Number(r.id)));
+    for (const row of list) {
+      if (String(row.status || "").toUpperCase() === "APPROVED" && ids.has(Number(row.proponent_id))) {
+        row.display_status = "COMPLIANT";
+      }
+    }
+  } catch (error) {
+    // Compliance tables not there yet (fresh DB) — leave the label as is.
+    console.error("Attach compliant status skipped:", error.message);
+  }
   return rows;
 }
 
@@ -2127,6 +2176,7 @@ module.exports = {
   updateApplicationStatus,
   listApplicationRequirements,
   syncRequirementsFromCatalog,
+  attachCompliantStatus,
   updateApplicationRequirementStatus,
   updateApplicationRequirementRemarks,
   getApplicationRequirementById,

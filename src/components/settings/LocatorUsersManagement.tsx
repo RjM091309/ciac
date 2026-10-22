@@ -1441,14 +1441,23 @@ export function LocatorUsersManagement({
                     <td className="px-3 py-2 text-[11px] min-w-[150px]">
                       {applicationByUserId[u.id] ? (
                         (() => {
-                          const percent = progressByApp[applicationByUserId[u.id].id]?.percent ?? 0;
+                          const progress = progressByApp[applicationByUserId[u.id].id];
+                          const percent = progress?.percent ?? 0;
+                          const submittedPercent = progress?.submittedPercent ?? 0;
                           const barColor = percent >= 100 ? '#10b981' : percent >= 50 ? '#3b82f6' : '#f59e0b';
                           return (
-                            <div className="flex items-center gap-2">
-                              <div className="h-2 rounded-full overflow-hidden w-[90px]" style={{ backgroundColor: 'var(--input-border)' }}>
-                                <div className="h-full rounded-full transition-all" style={{ width: `${percent}%`, backgroundColor: barColor }} />
+                            <div>
+                              <div className="flex items-center gap-2">
+                                {/* Faint layer = submitted (uploaded), solid layer = verified. */}
+                                <div className="relative h-2 rounded-full overflow-hidden w-[90px]" style={{ backgroundColor: 'var(--input-border)' }}>
+                                  <div className="absolute inset-y-0 left-0 rounded-full opacity-35" style={{ width: `${submittedPercent}%`, backgroundColor: '#3b82f6' }} />
+                                  <div className="relative h-full rounded-full transition-all" style={{ width: `${percent}%`, backgroundColor: barColor }} />
+                                </div>
+                                <span className="font-semibold">{percent}%</span>
                               </div>
-                              <span className="font-semibold">{percent}%</span>
+                              <div className="mt-0.5 text-[10px] text-secondary">
+                                {submittedPercent}% submitted · {percent}% verified
+                              </div>
                             </div>
                           );
                         })()

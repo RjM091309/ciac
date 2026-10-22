@@ -3,6 +3,10 @@ export function getStatusBadgeStyles(status: string | null | undefined) {
   if (s === 'VERIFIED' || s === 'APPROVED' || s === 'ACTIVE') {
     return { bg: 'rgba(16,185,129,.14)', color: '#10b981', border: 'rgba(16,185,129,.38)' };
   }
+  // Approved + every compliance requirement complied (display label only).
+  if (s === 'COMPLIANT') {
+    return { bg: 'rgba(5,150,105,.18)', color: '#059669', border: 'rgba(5,150,105,.45)' };
+  }
   if (s === 'PENDING' || s === 'PENDING_REVIEW' || s === 'SUBMITTED' || s === 'RESUBMITTED' || s === 'FOR_REVIEW') {
     return { bg: 'rgba(245,158,11,.14)', color: '#f59e0b', border: 'rgba(245,158,11,.38)' };
   }

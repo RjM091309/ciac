@@ -36,6 +36,16 @@ router.get("/me/contracts/:id/certificate", requireProponentSelf, portalControll
 router.get("/me/permits", requireProponentSelf, portalController.listMyPermits);
 router.get("/me/permits/:id/certificate", requireProponentSelf, portalController.downloadMyPermitCertificate);
 router.get("/me/activity", requireProponentSelf, portalController.getMyActivity);
+// Compliance: the locator's own checklist, inspections and uploads.
+router.get("/me/compliance", requireProponentSelf, portalController.getMyCompliance);
+router.post(
+  "/me/compliance/:code/documents",
+  requireProponentSelf,
+  uploadDocumentOnly,
+  verifyUploadedFile,
+  portalController.uploadMyComplianceDocument
+);
+router.get("/me/compliance/documents/:docId/download", requireProponentSelf, portalController.downloadMyComplianceDocument);
 
 // Admin review of profile change requests — before "/:id" for the same reason.
 router.get("/change-requests", requireMenuAccess(MENU_KEY, "view"), proponentsController.listChangeRequests);

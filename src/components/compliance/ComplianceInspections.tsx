@@ -13,6 +13,7 @@ import {
   Search,
   ShieldCheck,
   Trash2,
+  Upload,
   UserCheck,
   X,
 } from 'lucide-react';
@@ -113,6 +114,28 @@ type ActivityRow = {
   created_at: string | null;
 };
 
+// A file the locator uploaded for a checklist item from the portal
+// (newest first; every earlier upload is kept as history).
+type LocatorUpload = {
+  id: number;
+  item_code: string;
+  original_file_name: string | null;
+  file_name: string;
+  validity_to: string | null;
+  status: 'SUBMITTED' | 'ACCEPTED' | 'REJECTED' | string;
+  uploaded_at: string;
+  uploaded_by_name?: string | null;
+  // 1 = the locator uploaded it from the portal; 0 = staff uploaded it for them.
+  uploaded_by_locator?: number | boolean;
+};
+const uploadedBy = (u: LocatorUpload) =>
+  Number(u.uploaded_by_locator) ? 'by locator' : `by ${u.uploaded_by_name || 'staff'}`;
+const UPLOAD_STATUS: Record<string, { label: string; color: string }> = {
+  SUBMITTED: { label: 'Under review', color: '#3b82f6' },
+  ACCEPTED: { label: 'Accepted', color: '#10b981' },
+  REJECTED: { label: 'Rejected', color: '#ef4444' },
+};
+
 type ComplianceItem = {
   code: string;
   group: 'COMPLIANCE' | 'PERMITS' | 'PERFORMANCE';
@@ -125,6 +148,14 @@ type ComplianceItem = {
   status: string;
   remarks: string | null;
   date_submitted: string | null;
+  // Per-locator: REQUIRED (applicable, the default) / NOT_APPLICABLE, set here
+  // by the Compliance Officer. Only REQUIRED items count anywhere.
+  applicability?: 'REQUIRED' | 'NOT_APPLICABLE' | string;
+  applicability_reason?: string | null;
+};
+const APPLICABILITY_LABELS: Record<string, string> = {
+  REQUIRED: 'Applicable',
+  NOT_APPLICABLE: 'Not applicable',
 };
 
 type DetailPayload = {
@@ -247,7 +278,7 @@ type LocatorComplianceRow = {
   expired: number;
   expiring: number;
   status: 'IN_PROGRESS' | 'COMPLETED';
-  items: { code: string; name: string; category: string; status: string; validity_to: string | null }[];
+  items: { code: string; name: string; category: string; status: string; applicability?: string; validity_to: string | null }[];
 };
 
 const REQUIREMENT_STATUS_ICON: Record<string, typeof CalendarClock> = {
@@ -278,7 +309,8 @@ function RequirementsTooltip({
   const width = TOOLTIP_WIDTH + 90;
   const groups = useMemo(() => {
     const map = new Map<string, { key: string; items: LocatorComplianceRow['items'] }>();
-    for (const it of items || []) {
+    // Items not applicable to this locator don't count.
+    for (const it of (items || []).filter((x) => !x.applicability || x.applicability === 'REQUIRED')) {
       const key = it.category || '';
       const g = map.get(key) || { key, items: [] };
       g.items.push(it);
@@ -1201,6 +1233,18 @@ function LocatorInspectionsDrawer({
   const [activityKey, setActivityKey] = useState(0);
   const [checklist, setChecklist] = useState<ComplianceItem[]>([]);
   const [checklistLoading, setChecklistLoading] = useState(true);
+  // Locator uploads from the portal, grouped by checklist item.
+  const [uploads, setUploads] = useState<Record<string, LocatorUpload[]>>({});
+  const loadUploads = useCallback(() => {
+    apiFetch(`/api/inspections/locators/${proponentId}/compliance-documents`)
+      .then((j) => {
+        const map: Record<string, LocatorUpload[]> = {};
+        for (const d of (j.data || []) as LocatorUpload[]) (map[d.item_code] ||= []).push(d);
+        setUploads(map);
+      })
+      .catch(() => setUploads({}));
+  }, [proponentId]);
+  useEffect(() => loadUploads(), [loadUploads]);
   useEffect(() => {
     let cancelled = false;
     setChecklistLoading(true);
@@ -1258,7 +1302,8 @@ function LocatorInspectionsDrawer({
         <div className="px-4 flex items-center gap-1 border-b overflow-x-auto" style={{ borderColor: 'var(--border)' }}>
           {[
             ...CHECKLIST_GROUPS.map((g) => {
-              const inGroup = checklist.filter((it) => it.group === g.key);
+              // Items not applicable to this locator don't count.
+              const inGroup = checklist.filter((it) => it.group === g.key && (it.applicability || 'REQUIRED') === 'REQUIRED');
               const complied = inGroup.filter((it) => it.status === 'COMPLIED').length;
               return { key: g.key, label: g.label, count: checklistLoading ? '' : `${complied}/${inGroup.length}` };
             }),
@@ -1290,11 +1335,15 @@ function LocatorInspectionsDrawer({
             <LocatorChecklist
               proponentId={proponentId}
               items={checklist}
+              uploads={uploads}
               group={tab}
               canEdit={canEdit}
               onSaved={(saved) => {
                 setChecklist((prev) => prev.map((it) => (it.code === saved.code ? saved : it)));
                 setActivityKey((k) => k + 1);
+                // Complied / Not complied re-stamps the latest upload; a staff
+                // upload adds one.
+                loadUploads();
                 onChecklistSaved();
               }}
             />
@@ -1843,12 +1892,14 @@ function checklistBadge(status: string) {
 function LocatorChecklist({
   proponentId,
   items,
+  uploads,
   group,
   canEdit,
   onSaved,
 }: {
   proponentId: number;
   items: ComplianceItem[];
+  uploads: Record<string, LocatorUpload[]>;
   group: ComplianceItem['group'];
   canEdit: boolean;
   onSaved: (item: ComplianceItem) => void;
@@ -1856,6 +1907,39 @@ function LocatorChecklist({
   const [editing, setEditing] = useState<string | null>(null);
   useEffect(() => setEditing(null), [group]);
   const visible = items.filter((it) => it.group === group);
+  // Items not applicable to this locator sit in their own section below the
+  // applicable list, with the reason, instead of mixed in.
+  const required = visible.filter((it) => (it.applicability || 'REQUIRED') === 'REQUIRED');
+  const notRequired = visible.filter((it) => (it.applicability || 'REQUIRED') !== 'REQUIRED');
+
+  const renderList = (list: ComplianceItem[]) => (
+    <div className="rounded-xl border overflow-hidden" style={{ borderColor: CHECKLIST_LINE }}>
+      {list.map((it, idx) => (
+        <div key={it.code} style={idx > 0 ? { borderTop: `1px solid ${CHECKLIST_LINE}` } : undefined}>
+          {editing === it.code ? (
+            <ChecklistEditor
+              item={it}
+              proponentId={proponentId}
+              onSaved={(saved) => {
+                onSaved(saved);
+                setEditing(null);
+              }}
+              onCancel={() => setEditing(null)}
+            />
+          ) : (
+            <ChecklistRow
+              item={it}
+              uploads={uploads[it.code] || []}
+              canEdit={canEdit}
+              onEdit={() => setEditing(it.code)}
+              proponentId={proponentId}
+              onUploaded={onSaved}
+            />
+          )}
+        </div>
+      ))}
+    </div>
+  );
 
   return (
     <div className="flex flex-col gap-3">
@@ -1865,39 +1949,72 @@ function LocatorChecklist({
           : 'Required documents for this locator. Record what was submitted, how long it is valid, and whether it complies.'}
       </p>
 
-      <div className="rounded-xl border overflow-hidden" style={{ borderColor: CHECKLIST_LINE }}>
-        {visible.map((it, idx) => (
-          <div key={it.code} style={idx > 0 ? { borderTop: `1px solid ${CHECKLIST_LINE}` } : undefined}>
-            {editing === it.code ? (
-              <ChecklistEditor
-                item={it}
-                proponentId={proponentId}
-                onSaved={(saved) => {
-                  onSaved(saved);
-                  setEditing(null);
-                }}
-                onCancel={() => setEditing(null)}
-              />
-            ) : (
-              <ChecklistRow item={it} canEdit={canEdit} onEdit={() => setEditing(it.code)} />
-            )}
+      {required.length ? (
+        renderList(required)
+      ) : (
+        <p className="text-[11px] text-secondary">Nothing in this group is required for this locator.</p>
+      )}
+
+      {notRequired.length ? (
+        <div className="mt-2 flex flex-col gap-2">
+          <div className="flex items-center gap-2">
+            <div className="text-[10px] font-bold uppercase tracking-widest text-secondary">
+              Not applicable to this locator
+            </div>
+            <span className="text-[11px] font-semibold tabular-nums text-secondary">{notRequired.length}</span>
           </div>
-        ))}
-      </div>
+          <p className="-mt-1 text-[11px] text-secondary">
+            Not counted toward this locator’s compliance, reminders or the dashboard. Use Update to make one Applicable again.
+          </p>
+          {renderList(notRequired)}
+        </div>
+      ) : null}
     </div>
   );
 }
 
-function ChecklistRow({ item, canEdit, onEdit }: { item: ComplianceItem; canEdit: boolean; onEdit: () => void }) {
+function ChecklistRow({
+  item,
+  uploads,
+  canEdit,
+  onEdit,
+  proponentId,
+  onUploaded,
+}: {
+  item: ComplianceItem;
+  uploads: LocatorUpload[];
+  canEdit: boolean;
+  onEdit: () => void;
+  proponentId: number;
+  onUploaded: (item: ComplianceItem) => void;
+}) {
+  const [showEarlier, setShowEarlier] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const latest = uploads[0] || null;
+  const openUpload = (u: LocatorUpload) =>
+    window.open(`/api/inspections/compliance-documents/${u.id}/download?view=1`, '_blank');
   const validity = fmtValidity(item.validity_from, item.validity_to);
   const vState = validityState(item.validity_to);
   const isPerformance = item.group === 'PERFORMANCE';
+  const applicability = item.applicability || 'REQUIRED';
   return (
-    <div className="flex flex-col sm:flex-row sm:items-start gap-2 sm:gap-3 px-3 py-3">
+    <div
+      className="flex flex-col sm:flex-row sm:items-start gap-2 sm:gap-3 px-3 py-3"
+      style={applicability === 'NOT_APPLICABLE' ? { opacity: 0.55 } : undefined}
+    >
       <div className="min-w-0 flex-1">
-        <div className="text-[13px] font-semibold" style={{ color: 'var(--text)' }}>
+        <div className="flex flex-wrap items-center gap-2 text-[13px] font-semibold" style={{ color: 'var(--text)' }}>
           {item.name}
+          {applicability !== 'REQUIRED' ? (
+            <span
+              className="rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide"
+              style={{ color: 'var(--text-muted)', border: '1px solid var(--border)' }}
+            >
+              {APPLICABILITY_LABELS[applicability] || applicability}
+            </span>
+          ) : null}
         </div>
+
         {isPerformance ? (
           item.commitment || item.actual ? (
             <div className="mt-0.5 text-[11px] text-secondary">
@@ -1918,13 +2035,68 @@ function ChecklistRow({ item, canEdit, onEdit }: { item: ComplianceItem; canEdit
           </span>
           <span className="text-secondary">Submitted: {fmtDate(item.date_submitted)}</span>
         </div>
+        {latest ? (
+          <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px]">
+            <button
+              type="button"
+              onClick={() => openUpload(latest)}
+              className="inline-flex min-w-0 items-center gap-1 hover:underline cursor-pointer"
+              style={{ color: 'var(--text)' }}
+              title="Uploaded by the locator — open to review"
+            >
+              <FileText size={12} className="shrink-0" />
+              <span className="truncate max-w-[240px]">{latest.original_file_name || latest.file_name}</span>
+            </button>
+            <span className="font-semibold" style={{ color: (UPLOAD_STATUS[latest.status] || UPLOAD_STATUS.SUBMITTED).color }}>
+              {(UPLOAD_STATUS[latest.status] || UPLOAD_STATUS.SUBMITTED).label}
+            </span>
+            <span className="text-secondary">· {fmtDate(latest.uploaded_at)} · {uploadedBy(latest)}</span>
+            {uploads.length > 1 ? (
+              <button
+                type="button"
+                onClick={() => setShowEarlier((v) => !v)}
+                className="text-secondary underline cursor-pointer"
+              >
+                {showEarlier ? 'Hide' : `${uploads.length - 1} earlier`}
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+        {showEarlier ? (
+          <div className="mt-1 space-y-0.5 pl-4">
+            {uploads.slice(1).map((u) => (
+              <div key={u.id} className="flex flex-wrap items-center gap-x-2 text-[11px] text-secondary">
+                <button type="button" onClick={() => openUpload(u)} className="hover:underline cursor-pointer truncate max-w-[220px]">
+                  {u.original_file_name || u.file_name}
+                </button>
+                <span>· {fmtDate(u.uploaded_at)} · {uploadedBy(u)}</span>
+                <span>· valid until {fmtDate(u.validity_to)}</span>
+                <span style={{ color: (UPLOAD_STATUS[u.status] || UPLOAD_STATUS.SUBMITTED).color }}>
+                  · {(UPLOAD_STATUS[u.status] || UPLOAD_STATUS.SUBMITTED).label}
+                </span>
+              </div>
+            ))}
+          </div>
+        ) : null}
       </div>
       <div className="flex items-center gap-1.5 shrink-0">
         <Badge label={(CHECKLIST_STATUS_LABELS[item.status] || item.status).toUpperCase()} styles={checklistBadge(item.status)} />
-        {canEdit ? (
+        {canEdit && applicability !== 'NOT_APPLICABLE' ? (
           <button
             type="button"
             className="ml-1 inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11px] font-medium"
+            style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'var(--control-bg)', color: 'var(--text)' }}
+            onClick={() => setUploading(true)}
+            title="Upload a document for this locator (walk-in, emailed or paper copy)"
+          >
+            <Upload size={12} />
+            Upload
+          </button>
+        ) : null}
+        {canEdit ? (
+          <button
+            type="button"
+            className="inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11px] font-medium"
             style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'var(--control-bg)', color: 'var(--text)' }}
             onClick={onEdit}
           >
@@ -1933,7 +2105,166 @@ function ChecklistRow({ item, canEdit, onEdit }: { item: ComplianceItem; canEdit
           </button>
         ) : null}
       </div>
+      {uploading ? (
+        <StaffUploadDialog
+          item={item}
+          proponentId={proponentId}
+          onClose={() => setUploading(false)}
+          onUploaded={(saved) => {
+            setUploading(false);
+            onUploaded(saved);
+          }}
+        />
+      ) : null}
     </div>
+  );
+}
+
+const STAFF_UPLOAD_MAX_MB = 50;
+const STAFF_UPLOAD_EXTENSIONS = ['.pdf', '.doc', '.docx', '.xls', '.xlsx'];
+
+/** Compliance Officer uploads a document on the locator's behalf (walk-in,
+ * emailed or paper copy; locators without a portal login). Same rules and
+ * history as a portal upload. "Mark as Complied" records it as already
+ * reviewed — otherwise it waits as Submitted like a portal upload. */
+function StaffUploadDialog({
+  item,
+  proponentId,
+  onClose,
+  onUploaded,
+}: {
+  item: ComplianceItem;
+  proponentId: number;
+  onClose: () => void;
+  onUploaded: (item: ComplianceItem) => void;
+}) {
+  const [file, setFile] = useState<File | null>(null);
+  const [validFrom, setValidFrom] = useState('');
+  const [validTo, setValidTo] = useState('');
+  const [markComplied, setMarkComplied] = useState(true);
+  const [remarks, setRemarks] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const problem = (f: File) => {
+    const name = f.name.toLowerCase();
+    if (!STAFF_UPLOAD_EXTENSIONS.some((ext) => name.endsWith(ext))) return 'Only PDF, Word or Excel documents are allowed.';
+    if (f.size > STAFF_UPLOAD_MAX_MB * 1024 * 1024) return `File is too large (max ${STAFF_UPLOAD_MAX_MB} MB).`;
+    return null;
+  };
+  const validityInvalid = Boolean(validFrom && validTo && validTo < validFrom);
+
+  const submit = async () => {
+    if (!file) return;
+    const p = problem(file);
+    if (p) return toast.error(p);
+    setBusy(true);
+    try {
+      const body = new FormData();
+      body.append('file', file);
+      if (validFrom) body.append('validity_from', validFrom);
+      if (validTo) body.append('validity_to', validTo);
+      if (markComplied) body.append('mark_complied', '1');
+      if (remarks.trim()) body.append('remarks', remarks.trim());
+      const res = await fetch(`/api/inspections/locators/${proponentId}/compliance/${encodeURIComponent(item.code)}/documents`, {
+        method: 'POST',
+        credentials: 'include',
+        body,
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || json?.success === false) throw new Error(json?.message || 'Upload failed');
+      toast.success(markComplied ? `${item.name} uploaded and marked Complied` : `${item.name} uploaded`);
+      if (json?.data?.item) onUploaded(json.data.item);
+      else onClose();
+    } catch (err) {
+      toast.error((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return createPortal(
+    <div className="fixed inset-0 z-[90] flex items-end sm:items-center justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,.5)' }} role="dialog" aria-modal="true">
+      <div className="w-full max-w-md rounded-2xl border p-5 shadow-2xl" style={{ backgroundColor: 'var(--surface)', borderColor: 'var(--border)', color: 'var(--text)' }}>
+        <div className="flex items-start justify-between gap-2 mb-1">
+          <h3 className="text-sm font-bold">Upload for locator: {item.name}</h3>
+          <button type="button" onClick={onClose} className="p-1 rounded text-secondary" aria-label="Close">
+            <X size={16} />
+          </button>
+        </div>
+        <p className="text-[11px] text-secondary mb-4">
+          For walk-in, emailed or paper copies. PDF, Word or Excel · up to {STAFF_UPLOAD_MAX_MB} MB. Earlier files stay in the history.
+        </p>
+
+        <input
+          type="file"
+          accept={STAFF_UPLOAD_EXTENSIONS.join(',')}
+          onChange={(e) => {
+            const f = e.target.files?.[0] ?? null;
+            if (f && problem(f)) {
+              toast.error(problem(f));
+              e.target.value = '';
+              return;
+            }
+            setFile(f);
+          }}
+          className="block w-full text-xs text-secondary file:mr-2 file:rounded-md file:border-0 file:px-3 file:py-1.5 file:text-xs file:font-semibold"
+        />
+
+        <div className="mt-4 grid grid-cols-2 gap-3">
+          <Field label="Validity from">
+            <div className={FIELD_BOX}>
+              <DatePicker mode="single" bordered fullWidth placeholder="Start" value={parseYmd(validFrom)} onChange={(d: Date | null) => setValidFrom(toYmd(d))} />
+            </div>
+          </Field>
+          <Field label="Validity to">
+            <div className={FIELD_BOX}>
+              <DatePicker mode="single" bordered fullWidth placeholder="End" value={parseYmd(validTo)} onChange={(d: Date | null) => setValidTo(toYmd(d))} />
+            </div>
+          </Field>
+        </div>
+        {validityInvalid ? (
+          <p className="mt-1 text-[11px]" style={{ color: '#ef4444' }}>
+            The validity end date can't be before its start date.
+          </p>
+        ) : null}
+
+        <label className="mt-4 flex items-start gap-2 text-[12px] cursor-pointer">
+          <input type="checkbox" className="mt-0.5" checked={markComplied} onChange={(e) => setMarkComplied(e.target.checked)} />
+          <span>
+            <span className="font-semibold">Mark as Complied</span>
+            <span className="block text-[11px] text-secondary">I've reviewed this document. Leave unchecked to keep it as Submitted for review.</span>
+          </span>
+        </label>
+
+        <div className="mt-3">
+          <Field label="Remarks">
+            <textarea
+              className={cn(inputCls, EDITOR_FIELD, 'min-h-[48px] resize-y')}
+              value={remarks}
+              onChange={(e) => setRemarks(e.target.value)}
+              placeholder="e.g. received at the office (walk-in)"
+            />
+          </Field>
+        </div>
+
+        <div className="mt-5 flex justify-end gap-2">
+          <button type="button" onClick={onClose} className="rounded-lg border px-4 py-2 text-xs font-semibold" style={{ borderColor: 'var(--border)' }}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={() => void submit()}
+            disabled={!file || busy || validityInvalid}
+            className="inline-flex items-center gap-1.5 rounded-lg px-4 py-2 text-xs font-semibold disabled:opacity-50"
+            style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
+          >
+            {busy ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
+            {busy ? 'Uploading…' : 'Upload'}
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body
   );
 }
 
@@ -1958,9 +2289,14 @@ function ChecklistEditor({
     status: item.status || 'PENDING',
     remarks: item.remarks || '',
     date_submitted: ymdOf(item.date_submitted),
+    applicability: item.applicability || 'REQUIRED',
   });
   const set = (patch: Partial<typeof form>) => setForm((f) => ({ ...f, ...patch }));
-  const validityInvalid = Boolean(form.validity_from && form.validity_to && form.validity_to < form.validity_from);
+  const notApplicable = form.applicability === 'NOT_APPLICABLE';
+  const validityInvalid =
+    !notApplicable && Boolean(form.validity_from && form.validity_to && form.validity_to < form.validity_from);
+  // Not applicable needs a reason — the Remarks field is that reason.
+  const needsReason = notApplicable && !form.remarks.trim();
   const isPerformance = item.group === 'PERFORMANCE';
 
   const save = async () => {
@@ -1984,93 +2320,106 @@ function ChecklistEditor({
     }
   };
 
+  const dateField = (label: string, key: 'validity_from' | 'validity_to' | 'date_submitted', placeholder: string) => (
+    <Field label={label}>
+      <div className={FIELD_BOX}>
+        <DatePicker
+          mode="single"
+          bordered
+          fullWidth
+          placeholder={placeholder}
+          value={parseYmd(form[key])}
+          onChange={(d: Date | null) => set({ [key]: toYmd(d) } as Partial<typeof form>)}
+        />
+      </div>
+    </Field>
+  );
+
   return (
     // Page background behind the form so its fields stand out in both themes.
-    <div className="px-3 py-3 flex flex-col gap-2.5" style={{ backgroundColor: 'var(--background)' }}>
+    <div className="px-3 py-3 flex flex-col gap-3" style={{ backgroundColor: 'var(--background)' }}>
       <div className="text-[13px] font-semibold" style={{ color: 'var(--text)' }}>
         {item.name}
       </div>
 
-      {isPerformance ? (
-        <div className="grid grid-cols-2 gap-2">
-          <Field label="Commitment">
-            <input className={cn(inputCls, EDITOR_FIELD)} value={form.commitment} onChange={(e) => set({ commitment: e.target.value })} />
-          </Field>
-          <Field label="Actual">
-            <input className={cn(inputCls, EDITOR_FIELD)} value={form.actual} onChange={(e) => set({ actual: e.target.value })} />
-          </Field>
-        </div>
-      ) : item.group === 'PERMITS' ? null : (
-        <Field label="Particular">
-          <textarea
-            className={cn(inputCls, EDITOR_FIELD, 'min-h-[52px] resize-y')}
-            value={form.particular}
-            onChange={(e) => set({ particular: e.target.value })}
-            placeholder="e.g. policy / document no., coverage, issuing office"
-          />
-        </Field>
-      )}
-
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-        <Field label="Validity from">
-          <div className={FIELD_BOX}>
-            <DatePicker
-              mode="single"
-              bordered
-              fullWidth
-              placeholder="Start"
-              value={parseYmd(form.validity_from)}
-              onChange={(d: Date | null) => set({ validity_from: toYmd(d) })}
-            />
-          </div>
-        </Field>
-        <Field label="Validity to">
-          <div className={FIELD_BOX}>
-            <DatePicker
-              mode="single"
-              bordered
-              fullWidth
-              placeholder="End"
-              value={parseYmd(form.validity_to)}
-              onChange={(d: Date | null) => set({ validity_to: toYmd(d) })}
-            />
-          </div>
-        </Field>
-        <Field label="Status">
+      {/* Row 1: does it apply, where it stands, when it came in. */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+        <Field label="Applies to this locator">
           <div className={FIELD_BOX}>
             <AppSelect
               compact
               isClearable={false}
-              value={form.status}
-              onChange={(v) => set({ status: v || 'PENDING' })}
-              options={Object.entries(CHECKLIST_STATUS_LABELS).map(([value, label]) => ({ value, label }))}
+              value={form.applicability}
+              onChange={(v) => set({ applicability: v || 'REQUIRED' })}
+              options={Object.entries(APPLICABILITY_LABELS).map(([value, label]) => ({ value, label }))}
             />
           </div>
         </Field>
-        <Field label="Date submitted">
-          <div className={FIELD_BOX}>
-            <DatePicker
-              mode="single"
-              bordered
-              fullWidth
-              placeholder="Select date"
-              value={parseYmd(form.date_submitted)}
-              onChange={(d: Date | null) => set({ date_submitted: toYmd(d) })}
-            />
-          </div>
-        </Field>
+        {notApplicable ? (
+          <p className="sm:col-span-2 self-end pb-1.5 text-[11px] text-secondary">
+            Moves to “Not applicable to this locator” and stops counting toward compliance, reminders and the dashboard.
+          </p>
+        ) : (
+          <>
+            <Field label="Status">
+              <div className={FIELD_BOX}>
+                <AppSelect
+                  compact
+                  isClearable={false}
+                  value={form.status}
+                  onChange={(v) => set({ status: v || 'PENDING' })}
+                  options={Object.entries(CHECKLIST_STATUS_LABELS).map(([value, label]) => ({ value, label }))}
+                />
+              </div>
+            </Field>
+            {dateField('Date submitted', 'date_submitted', 'Select date')}
+          </>
+        )}
       </div>
-      {validityInvalid ? (
-        <p className="-mt-1 text-[11px]" style={{ color: '#ef4444' }}>
-          The validity end date can't be before its start date.
-        </p>
-      ) : null}
 
-      <Field label="Remarks">
+      {notApplicable ? null : (
+        <>
+          {/* Row 2: what was submitted. */}
+          {isPerformance ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <Field label="Commitment">
+                <input className={cn(inputCls, EDITOR_FIELD)} value={form.commitment} onChange={(e) => set({ commitment: e.target.value })} />
+              </Field>
+              <Field label="Actual">
+                <input className={cn(inputCls, EDITOR_FIELD)} value={form.actual} onChange={(e) => set({ actual: e.target.value })} />
+              </Field>
+            </div>
+          ) : item.group === 'PERMITS' ? null : (
+            <Field label="Particular">
+              <textarea
+                className={cn(inputCls, EDITOR_FIELD, 'min-h-[52px] resize-y')}
+                value={form.particular}
+                onChange={(e) => set({ particular: e.target.value })}
+                placeholder="e.g. policy / document no., coverage, issuing office"
+              />
+            </Field>
+          )}
+
+          {/* Row 3: how long it is valid. */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            {dateField('Validity from', 'validity_from', 'Start')}
+            {dateField('Validity to', 'validity_to', 'End')}
+          </div>
+          {validityInvalid ? (
+            <p className="-mt-1.5 text-[11px]" style={{ color: '#ef4444' }}>
+              The validity end date can't be before its start date.
+            </p>
+          ) : null}
+        </>
+      )}
+
+      {/* Row 4: remarks — doubles as the reason when Not applicable. */}
+      <Field label={notApplicable ? 'Remarks (reason) *' : 'Remarks'}>
         <textarea
           className={cn(inputCls, EDITOR_FIELD, 'min-h-[52px] resize-y')}
           value={form.remarks}
           onChange={(e) => set({ remarks: e.target.value })}
+          placeholder={notApplicable ? 'Why this doesn’t apply, e.g. office tenant — no operations on site' : undefined}
         />
       </Field>
 
@@ -2088,7 +2437,8 @@ function ChecklistEditor({
           type="button"
           className="rounded-lg px-3 py-1.5 text-[12px] font-semibold disabled:opacity-50"
           style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
-          disabled={busy || validityInvalid}
+          disabled={busy || validityInvalid || needsReason}
+          title={needsReason ? 'Add a reason in Remarks' : undefined}
           onClick={save}
         >
           Save

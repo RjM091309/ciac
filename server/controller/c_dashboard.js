@@ -8,6 +8,7 @@ const Contract = require("../models/Contract");
 const Permit = require("../models/Permit");
 const ActivityLog = require("../models/ActivityLog");
 const DashboardWidgets = require("../lib/dashboardWidgets");
+const ComplianceInspection = require("../models/ComplianceInspection");
 const { selectData } = require("../config/database");
 const { publicErrorMessage } = require("../lib/httpError");
 
@@ -541,6 +542,8 @@ async function buildStaffDashboard({ user, sidebarPermissions, widgetPermissions
     // Officer's table keeps listing their approved locators.
     const tableApplications = queue === "assessment" ? workApplications : applications;
     data.applications = tableApplications.map((a) => ({ ...a, link: linkFor(a.id, Boolean(Number(a.is_renewal)), a.status) }));
+    // Approved + every compliance requirement complied → shown as COMPLIANT.
+    await Workflow.attachCompliantStatus(data.applications);
   }
 
   if (widgets["dashboard:attention"]) {
@@ -681,6 +684,7 @@ exports.getMyDashboard = async (req, res) => {
           categoryCompletion,
           turnaround,
           attention: [...expiryItems, ...attentionQueue(applications, { limit: ATTENTION_MAX })].slice(0, ATTENTION_MAX),
+          compliance: await ComplianceInspection.getComplianceDashboard(),
         },
       });
     }
@@ -696,6 +700,11 @@ exports.getMyDashboard = async (req, res) => {
         ])
       : [[], []];
     const data = await buildStaffDashboard({ user: req.user, sidebarPermissions, widgetPermissions });
+    // Compliance Officer (any role with the Compliance & Inspection menu):
+    // compliance overview + expiry alarm on top of the dashboard.
+    if (DashboardWidgets.enabledMenus(sidebarPermissions).has("compliance:inspections")) {
+      data.compliance = await ComplianceInspection.getComplianceDashboard();
+    }
     return res.json({ success: true, role: "officer", data });
   } catch (error) {
     console.error("Get my dashboard error:", error);

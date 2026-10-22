@@ -6,6 +6,7 @@ import {
   Building2,
   CalendarClock,
   ChevronLeft,
+  ShieldCheck,
   ChevronRight,
   Cpu,
   Pause,
@@ -22,7 +23,7 @@ import { cn } from '../../lib/utils';
 // own, and where the loops go back to. Static content that
 // mirrors the server workflow (see .claude/skills/ciac-project/SKILL.md).
 
-type LaneId = 'bdo2' | 'bdo1' | 'locator' | 'ao1' | 'ao2' | 'system';
+type LaneId = 'bdo2' | 'bdo1' | 'locator' | 'ao1' | 'ao2' | 'co' | 'system';
 
 const LANES: Record<LaneId, { label: string; sub: string; color: string }> = {
   bdo2: { label: 'BDO', sub: 'Level 2', color: '#3b82f6' },
@@ -30,6 +31,7 @@ const LANES: Record<LaneId, { label: string; sub: string; color: string }> = {
   locator: { label: 'Locator', sub: 'Portal', color: '#f59e0b' },
   ao1: { label: 'Account Officer', sub: 'Level 1', color: '#10b981' },
   ao2: { label: 'Account Officer', sub: 'Level 2', color: '#14b8a6' },
+  co: { label: 'Compliance Officer', sub: 'Inspections', color: '#f43f5e' },
   system: { label: 'System', sub: 'Automatic', color: '#94a3b8' },
 };
 
@@ -54,7 +56,7 @@ type Step = {
 type Loop = { from: number; to: number; label: string; local?: boolean };
 
 type Scenario = {
-  id: 'new' | 'renewal';
+  id: 'new' | 'renewal' | 'compliance';
   label: string;
   lanes: LaneId[];
   steps: Step[];
@@ -260,6 +262,95 @@ const SCENARIOS: Scenario[] = [
       { from: 4, to: 3, label: 'Return to Evaluator' },
     ],
   },
+  {
+    id: 'compliance',
+    label: 'Compliance',
+    lanes: ['locator', 'co', 'system'],
+    steps: [
+      {
+        lane: 'locator',
+        title: 'Upload compliance document',
+        auto: [
+          "Checks the file (PDF, Word or Excel, up to 50 MB; content must match the type).",
+          "Files it under the locator's own folder (locators/<Ref No>/compliance/).",
+          "Keeps every earlier upload as history — nothing is overwritten.",
+          "Sets the checklist item to SUBMITTED with today's date and the validity entered.",
+          "Alerts every Compliance Officer and admin (in-app).",
+        ],
+        status: 'SUBMITTED',
+        where: 'Locator portal · Compliance',
+        details: [
+          'Checklist grouped as Compliance, Permits & Clearances and Performance Commitment.',
+          'Upload or re-upload per item, with optional Valid from / Valid until.',
+          'The locator also sees its standing, inspections, findings and corrective actions (view only).',
+        ],
+        notifies: 'Compliance Officers and admins',
+      },
+      {
+        lane: 'co',
+        title: 'Review document',
+        auto: [
+          "Complied stamps the latest submitted file ACCEPTED; Not complied stamps it REJECTED with the remarks.",
+          "Records the change in the locator's checklist activity and the Audit Log.",
+        ],
+        status: 'COMPLIED · NOT_COMPLIED',
+        where: 'Compliance & Inspection · locator checklist',
+        details: [
+          'Opens the locator’s file (and its earlier uploads) from the checklist row.',
+          'Update → Complied or Not complied, with remarks the locator can see.',
+          'Per locator, marks an item Not applicable (with a reason) — it moves to its own list and doesn’t count toward compliance, reminders or the alarm.',
+          'Can also upload a document for the locator (walk-in, emailed or paper copy) and mark it Complied right away; it joins the same history.',
+        ],
+        notifies: 'The locator (in-app: Complied / Not complied, with the remarks)',
+      },
+      {
+        lane: 'co',
+        title: 'Inspect · findings · corrective actions',
+        auto: [
+          "Works out each locator’s standing: At Risk (failed inspection or overdue action), Monitoring (open findings/actions), else Compliant.",
+          "Tells the locator (in-app) when an inspection is assigned and when it’s completed.",
+        ],
+        status: 'COMPLIANT · MONITORING · AT RISK',
+        where: 'Compliance & Inspection',
+        details: [
+          'Schedules and records inspections, findings and corrective actions with due dates.',
+          'The locator sees them on its Compliance page.',
+        ],
+        notifies: 'The locator (inspection assigned / completed)',
+      },
+      {
+        lane: 'system',
+        title: 'Expiry reminders · dashboard alarm',
+        auto: [
+          "Every 12 hours: finds checklist items whose Valid until is 6 months, 3 months or 1 month away, or just lapsed.",
+          "Emails the locator once per stage (one email listing all due items) plus an in-app notice.",
+          "Alerts every Compliance Officer and admin in-app, saying whether the email went out.",
+          "Dashboard: red alarm banner while anything is expired, due within 30 days, or a corrective action is overdue.",
+          "A renewed document (new Valid until) starts its own 6/3/1 series; logged in the Audit Log.",
+        ],
+        status: '6 MO · 3 MO · 1 MO · EXPIRED',
+        where: 'Email · notifications · dashboard',
+        details: [
+          'Compliance section on the admin and Compliance Officer dashboards: expiry buckets, awaiting review, upcoming inspections.',
+        ],
+        notifies: 'The locator (email + in-app), Compliance Officers and admins',
+      },
+      {
+        lane: 'system',
+        title: 'Compliant',
+        auto: [
+          "When every active compliance requirement is Complied, the locator’s APPROVED application shows as COMPLIANT (label only — the status stays APPROVED).",
+        ],
+        status: 'APPROVED → COMPLIANT',
+        where: 'Locator portal · dashboards',
+        details: ['Approval, Reports and Permits keep working on APPROVED unchanged.'],
+      },
+    ],
+    loops: [
+      { from: 1, to: 0, label: 'Not complied → re-upload', local: true },
+      { from: 3, to: 0, label: 'Expiring → renew document' },
+    ],
+  },
 ];
 
 // Diagram geometry (SVG user units) — a top-down tree: the steps run down
@@ -327,6 +418,7 @@ const LANE_ICON: Record<LaneId, typeof Briefcase> = {
   locator: Building2,
   ao1: UserCheck,
   ao2: UserCheck,
+  co: ShieldCheck,
   system: Cpu,
 };
 

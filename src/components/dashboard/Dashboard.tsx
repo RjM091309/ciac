@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Building2, ChevronLeft, ChevronRight, Clock, FileText, MoreHorizontal, Rocket, TrendingUp, XCircle } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { useSiteSettings } from '../../lib/siteSettings';
+import { ComplianceOverview, type ComplianceDashboardData } from './ComplianceOverview';
 import {
   AttentionCard,
   PerformanceCard,
@@ -33,6 +34,8 @@ export type AdminDashboardData = {
   categoryCompletion: CategoryCompletion[];
   turnaround?: Turnaround;
   attention?: AttentionItem[];
+  /** Compliance roll-up + expiry alarm (ComplianceInspection.getComplianceDashboard). */
+  compliance?: ComplianceDashboardData;
 };
 
 const MetricCard = ({
@@ -167,6 +170,11 @@ export function Dashboard({ data, navigate }: { data: AdminDashboardData | null;
 
   return (
     <>
+      {data?.compliance ? (
+        <div className="mb-3 sm:mb-4 lg:mb-5">
+          <ComplianceOverview data={data.compliance} navigate={navigate} />
+        </div>
+      ) : null}
       <div className="grid grid-cols-12 gap-3 sm:gap-4 lg:gap-5 touch-landscape-dashboard-grid">
         {/* Left side: hero + metrics — full width until 1181px (iPad Pro 1024 matches iPad Air stack) */}
         <div className="col-span-12 xl:col-span-8 flex flex-col gap-3 sm:gap-4 touch-landscape-top-left">

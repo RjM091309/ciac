@@ -2,6 +2,8 @@ const express = require("express");
 const router = express.Router();
 const controller = require("../controller/c_inspections");
 const { requireMenuAccess } = require("../middleware/m_auth");
+const { uploadDocumentOnly } = require("../middleware/m_upload");
+const { verifyUploadedFile } = require("../lib/uploadCheck");
 
 const MENU_KEY = "compliance:inspections";
 
@@ -23,6 +25,17 @@ router.get("/locators/compliance", requireMenuAccess(MENU_KEY, "view"), controll
 router.get("/locators/:id/compliance", requireMenuAccess(MENU_KEY, "view"), controller.listComplianceItems);
 router.get("/locators/:id/activity", requireMenuAccess(MENU_KEY, "view"), controller.listLocatorActivity);
 router.put("/locators/:id/compliance/:code", requireMenuAccess(MENU_KEY, "edit"), controller.saveComplianceItem);
+// Files the locator uploaded from the portal (review + history).
+router.get("/locators/:id/compliance-documents", requireMenuAccess(MENU_KEY, "view"), controller.listComplianceDocuments);
+// Compliance Officer uploads a document for the locator (manual / walk-in).
+router.post(
+  "/locators/:id/compliance/:code/documents",
+  requireMenuAccess(MENU_KEY, "edit"),
+  uploadDocumentOnly,
+  verifyUploadedFile,
+  controller.uploadComplianceDocument
+);
+router.get("/compliance-documents/:docId/download", requireMenuAccess(MENU_KEY, "view"), controller.downloadComplianceDocument);
 
 // Findings
 router.post("/:id/findings", requireMenuAccess(MENU_KEY, "add"), controller.addFinding);

@@ -1,4 +1,9 @@
+const fs = require("fs");
+const path = require("path");
 const Inspection = require("../models/ComplianceInspection");
+const ComplianceDocument = require("../models/ComplianceDocument");
+const { resolveStoredPath, relativeStoragePath, contentDisposition } = require("../lib/fileStorage");
+const { placeComplianceUpload } = require("../lib/locatorFolders");
 const AuditLog = require("../models/AuditLog");
 const { diffChanges } = require("../lib/auditDiff");
 const { publicErrorMessage } = require("../lib/httpError");
@@ -411,7 +416,126 @@ const CHECKLIST_FIELDS = [
   "status",
   "remarks",
   "date_submitted",
+  "applicability",
+  "applicability_reason",
 ];
+
+
+/** Streams a stored compliance document; ?view=1 opens it inline. */
+function sendComplianceFile(req, res, doc) {
+  const abs = resolveStoredPath(doc.storage_path);
+  if (!abs || !fs.existsSync(abs)) {
+    return res.status(404).json({ success: false, message: "File is no longer available." });
+  }
+  const name = doc.original_file_name || doc.file_name || path.basename(abs);
+  AuditLog.recordFileAccess(req, {
+    kind: "DOCUMENT",
+    entityType: "proponent",
+    entityId: doc.proponent_id,
+    details: { compliance_document_id: doc.id, item_code: doc.item_code, file_name: name },
+  });
+  if (doc.content_type) res.type(doc.content_type);
+  if (req.query.view === "1") {
+    res.setHeader("Content-Disposition", contentDisposition("inline", name));
+    return res.sendFile(abs);
+  }
+  return res.download(abs, name);
+}
+
+/** Every file a locator uploaded (all items, newest first) for review. */
+exports.listComplianceDocuments = async (req, res) => {
+  try {
+    const id = idParam(req, res, "id", "locator id");
+    if (id === null) return undefined;
+    const rows = await ComplianceDocument.listForProponent(id);
+    return res.json({ success: true, data: rows.map(({ storage_path, ...safe }) => safe) });
+  } catch (error) {
+    return fail(res, error, "List compliance documents");
+  }
+};
+
+/** Compliance Officer uploads a document for the locator (walk-in, emailed
+ * or paper copies; locators without a portal login). Same file rules and
+ * history as a portal upload; "mark_complied" records it as already reviewed. */
+exports.uploadComplianceDocument = async (req, res) => {
+  const discard = () => {
+    if (req.file?.path) fs.unlink(req.file.path, () => {});
+  };
+  try {
+    const id = idParam(req, res, "id", "locator id");
+    if (id === null) return discard();
+    if (!req.file) return res.status(400).json({ success: false, message: "No file was uploaded." });
+    const items = await Inspection.listComplianceItems(id);
+    const item = items.find((i) => i.code === String(req.params.code));
+    if (!item) {
+      discard();
+      return res.status(400).json({ success: false, message: "Unknown or inactive compliance requirement." });
+    }
+    if (item.applicability === "NOT_APPLICABLE") {
+      discard();
+      return res.status(400).json({ success: false, message: "This item is marked not applicable for this locator." });
+    }
+    const markComplied = ["1", "true", "on"].includes(String(req.body?.mark_complied || "").toLowerCase());
+    const remarks = String(req.body?.remarks || "").trim() || null;
+
+    const storedPath = await placeComplianceUpload(req.file.path, id);
+    req.file.path = storedPath;
+    const { document } = await ComplianceDocument.createUpload({
+      proponentId: id,
+      itemCode: item.code,
+      file: req.file,
+      storagePath: relativeStoragePath(storedPath),
+      validityFrom: req.body?.validity_from,
+      validityTo: req.body?.validity_to,
+      userId: req.user?.id ?? null,
+      markComplied,
+      remarks,
+    });
+
+    await AuditLog.record({
+      actorId: req.user?.id,
+      actorUsername: req.user?.username,
+      action: "COMPLIANCE_DOCUMENT_UPLOADED",
+      entityType: "proponent",
+      entityId: id,
+      details: {
+        item: item.name,
+        file_name: req.file.originalname,
+        uploaded_by: "staff",
+        marked_complied: markComplied,
+      },
+      req,
+    });
+    if (markComplied) {
+      await Inspection.notifyLocatorOfReview({
+        proponentId: id,
+        itemName: item.name,
+        status: "COMPLIED",
+        remarks,
+        actorId: req.user?.id ?? null,
+      });
+    }
+
+    const updated = (await Inspection.listComplianceItems(id)).find((i) => i.code === item.code) || null;
+    const { storage_path, ...safe } = document || {};
+    return res.status(201).json({ success: true, data: { document: safe, item: updated } });
+  } catch (error) {
+    discard();
+    return fail(res, error, "Upload compliance document");
+  }
+};
+
+exports.downloadComplianceDocument = async (req, res) => {
+  try {
+    const docId = idParam(req, res, "docId", "document id");
+    if (docId === null) return undefined;
+    const doc = await ComplianceDocument.getById(docId);
+    if (!doc) return res.status(404).json({ success: false, message: "Document not found" });
+    return sendComplianceFile(req, res, doc);
+  } catch (error) {
+    return fail(res, error, "Download compliance document");
+  }
+};
 
 exports.listLocatorActivity = async (req, res) => {
   try {
@@ -432,6 +556,18 @@ exports.saveComplianceItem = async (req, res) => {
     const before = beforeItems.find((i) => i.code === String(req.params.code)) || null;
     const data = await Inspection.saveComplianceItem(id, req.params.code, req.body || {}, req.user?.id ?? null);
     if (!data) return res.status(404).json({ success: false, message: "Locator not found" });
+    // Complied / Not complied also stamps the locator's latest submitted file,
+    // and — when the status actually changed — tells the locator.
+    await ComplianceDocument.applyReview(id, data.code, data.status, data.remarks, req.user?.id ?? null);
+    if (before?.status !== data.status && data.applicability !== "NOT_APPLICABLE") {
+      await Inspection.notifyLocatorOfReview({
+        proponentId: id,
+        itemName: data.name,
+        status: data.status,
+        remarks: data.remarks,
+        actorId: req.user?.id ?? null,
+      });
+    }
     await AuditLog.record({
       actorId: req.user?.id,
       actorUsername: req.user?.username,

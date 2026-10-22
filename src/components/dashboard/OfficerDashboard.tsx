@@ -5,6 +5,7 @@ import { getStatusBadgeStyles } from './statusBadge';
 import { cn } from '../../lib/utils';
 import { balancedRowStyle } from '../../lib/balancedColumns';
 import { DataTableControls } from '../ui/DataTableControls';
+import { ComplianceOverview, type ComplianceDashboardData } from './ComplianceOverview';
 import {
   AttentionCard,
   LeaseExpiryCard,
@@ -28,6 +29,9 @@ type DashboardApplicationRow = {
   application_type: string;
   is_renewal: boolean | number;
   status: string;
+  // Label shown instead of status where set (e.g. COMPLIANT for an approved,
+  // fully-complied locator). The workflow still runs on `status`.
+  display_status?: string | null;
   submitted_at: string | null;
   created_at: string;
   requirements_total: number;
@@ -70,6 +74,9 @@ export type OfficerDashboardData = {
   turnaround?: Turnaround;
   categoryCompletion?: CategoryCompletion[];
   canOpenRequirements?: boolean;
+  /** Roles with the Compliance & Inspection menu (the Compliance Officer):
+   * compliance roll-up + expiry alarm, shown at the top. */
+  compliance?: ComplianceDashboardData;
 };
 
 const VIEW_COPY: Record<
@@ -255,7 +262,9 @@ export function OfficerDashboard({ data, navigate }: { data: OfficerDashboardDat
         </div>
       </div>
 
-      {nothingVisible ? (
+      {data?.compliance ? <ComplianceOverview data={data.compliance} navigate={navigate} /> : null}
+
+      {nothingVisible && !data?.compliance ? (
         <div className="glass-card p-4 sm:p-6 !border-transparent" style={{ backgroundColor: 'var(--surface)' }}>
           <EmptyState
             icon={<LayoutDashboard size={32} className="opacity-40" />}
@@ -299,7 +308,7 @@ export function OfficerDashboard({ data, navigate }: { data: OfficerDashboardDat
               {/* Mobile: card list — a <table> forces horizontal scrolling on narrow screens. */}
               <div className="sm:hidden space-y-2.5">
                 {pagedApplications.map((app) => {
-                  const badge = getStatusBadgeStyles(app.status);
+                  const badge = getStatusBadgeStyles(app.display_status || app.status);
                   const total = Number(app.requirements_total || 0);
                   const verified = Number(app.requirements_verified || 0);
                   const pct = total > 0 ? Math.round((verified / total) * 100) : 0;
@@ -331,7 +340,7 @@ export function OfficerDashboard({ data, navigate }: { data: OfficerDashboardDat
                           className="shrink-0 inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold border"
                           style={{ backgroundColor: badge.bg, color: badge.color, borderColor: badge.border }}
                         >
-                          {app.status}
+                          {app.display_status || app.status}
                         </span>
                       </div>
                       <p className="mt-1 text-[11px] font-medium truncate" style={{ color: 'var(--text)' }}>
@@ -372,7 +381,7 @@ export function OfficerDashboard({ data, navigate }: { data: OfficerDashboardDat
                   </thead>
                   <tbody>
                     {pagedApplications.map((app) => {
-                      const badge = getStatusBadgeStyles(app.status);
+                      const badge = getStatusBadgeStyles(app.display_status || app.status);
                       const total = Number(app.requirements_total || 0);
                       const verified = Number(app.requirements_verified || 0);
                       const pct = total > 0 ? Math.round((verified / total) * 100) : 0;
@@ -394,7 +403,7 @@ export function OfficerDashboard({ data, navigate }: { data: OfficerDashboardDat
                               className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold border whitespace-nowrap"
                               style={{ backgroundColor: badge.bg, color: badge.color, borderColor: badge.border }}
                             >
-                              {app.status}
+                              {app.display_status || app.status}
                             </span>
                           </td>
                           <td className="px-3 py-2 text-[11px] text-secondary w-40">
