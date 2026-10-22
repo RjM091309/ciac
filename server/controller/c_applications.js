@@ -30,22 +30,33 @@ async function activateLocatorIfPending(proponentId, actorId) {
     const user = await User.getUserById(userId);
     if (!user || String(user.status || "").toUpperCase() !== "PENDING") return null;
 
+    // Never to a placeholder address (legacy import) or a missing one.
+    const email = String(user.email || "").trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || /@ciac\.local$/i.test(email)) {
+      return { activated: false, emailSent: false, reason: "NO_EMAIL" };
+    }
+
     const tempPassword = generateTempPassword();
     await User.adminResetPassword(userId, tempPassword);
-    const activated = await User.setUserStatus(userId, "ACTIVE");
     const mailResult = await sendTempPasswordEmail({
-      to: activated.email,
-      name: activated.full_name || activated.username,
-      username: activated.username,
+      to: email,
+      name: user.full_name || user.username,
+      username: user.username,
       tempPassword,
       isNewAccount: true,
     });
-    return { activated: true, emailSent: mailResult.sent };
+    // Only an account whose password actually reached the locator goes
+    // ACTIVE; otherwise it stays PENDING so the login can be sent again
+    // (Registered Locator → Send login now).
+    if (!mailResult.sent) return { activated: false, emailSent: false, reason: "EMAIL_FAILED" };
+    await User.setUserStatus(userId, "ACTIVE");
+    return { activated: true, emailSent: true };
   } catch (error) {
     console.error("Activate pending locator error:", error);
     return null;
   }
 }
+exports.activateLocatorIfPending = activateLocatorIfPending;
 
 // Same menu set as Notification.js's EVENT_TYPE_MENU_KEYS.application_status
 // — whoever can see one of these queues can open an application's detail.

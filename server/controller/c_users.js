@@ -77,14 +77,16 @@ function sendTempPasswordEmail({ to, name, username, tempPassword, isNewAccount 
     text:
       `Hello ${name},\n\n${intro}\n\n` +
       `Username: ${username}\n` +
-      `Temporary password: ${tempPassword}\n\n` +
+      `Temporary password: ${tempPassword}\n` +
+      `(You can also sign in with this email address instead of the username.)\n\n` +
       `Sign in here: ${loginUrl}\n\n` +
       `You'll be asked to set a new password right away. If you didn't expect this, ${contact}.\n`,
     html:
       `<p>Hello ${escapeHtml(name)},</p>` +
       `<p>${escapeHtml(intro)}</p>` +
       `<p>Username: <b>${escapeHtml(username)}</b><br/>` +
-      `Temporary password: <span style="font-size:18px;font-weight:bold;letter-spacing:1px;">${escapeHtml(tempPassword)}</span></p>` +
+      `Temporary password: <span style="font-size:18px;font-weight:bold;letter-spacing:1px;">${escapeHtml(tempPassword)}</span><br/>` +
+      `<span style="color:#6b7280;">You can also sign in with this email address instead of the username.</span></p>` +
       `<p><a href="${loginUrl}" style="display:inline-block;padding:10px 18px;background:#111827;color:#fff;text-decoration:none;border-radius:6px;">Sign in to the portal</a></p>` +
       `<p>You'll be asked to set a new password right away. If you didn't expect this, ${escapeHtml(contact)}.</p>`,
   });

@@ -21,6 +21,14 @@
  *
  * Usage: node server/scripts/migrate-legacy-locators.js
  */
+// SUPERSEDED — use scripts/import-legacy-locators.js. This older script hangs
+// every legacy locator on one shared placeholder login (so "Portal login" and
+// the renewal email never work for them) and creates fake applications.
+if (!process.argv.includes("--force-old-script")) {
+  console.error("Superseded: run scripts/import-legacy-locators.js instead (see its header).");
+  process.exit(1);
+}
+
 const bcrypt = require("bcryptjs");
 const { selectData, runInTransaction, getConnection } = require("../config/database");
 const Proponent = require("../models/Proponent");

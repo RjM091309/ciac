@@ -9,7 +9,9 @@
 // dbo.compliance_expiry_reminders records which stage was sent for which
 // expiry date, so each stage goes out once — and an item first noticed late
 // (say 20 days out) only gets the 1-month reminder, not all three. A renewed
-// document (new valid-until) starts its own series.
+// document (new valid-until) starts its own series. If the email fails (no
+// SMTP, server down), only the email is retried on later runs while the item
+// is still at that stage — the in-app notices aren't repeated.
 const { selectData, insertData, updateSchema } = require("../config/database");
 const { sendMail } = require("./mailer");
 const { escapeHtml } = require("./html");
@@ -97,19 +99,28 @@ async function listDue() {
   );
   if (!rows.length) return [];
   const sent = await selectData(
-    `SELECT proponent_id, item_code, CONVERT(varchar(10), validity_to, 23) AS validity_to, stage
+    `SELECT proponent_id, item_code, CONVERT(varchar(10), validity_to, 23) AS validity_to, stage, emailed
      FROM dbo.compliance_expiry_reminders
      WHERE validity_to >= DATEADD(day, -@param0, CAST(SYSUTCDATETIME() AS DATE))`,
     [EXPIRED_NOTICE_WITHIN_DAYS]
   );
-  const sentKeys = new Set(sent.map((s) => `${s.proponent_id}|${s.item_code}|${s.validity_to}|${s.stage}`));
+  const keyOf = (r, ymd, stage) => `${r.proponent_id}|${r.item_code}|${ymd}|${stage}`;
+  const emailedKeys = new Set(sent.filter((s) => s.emailed).map((s) => keyOf(s, s.validity_to, s.stage)));
+  const unemailedKeys = new Set(sent.filter((s) => !s.emailed).map((s) => keyOf(s, s.validity_to, s.stage)));
   const due = [];
   for (const r of rows) {
     const stage = stageFor(r.validity_to);
     if (!stage) continue;
     const ymd = new Date(r.validity_to).toISOString().slice(0, 10);
-    if (sentKeys.has(`${r.proponent_id}|${r.item_code}|${ymd}|${stage.key}`)) continue;
-    due.push({ ...r, validity_ymd: ymd, stage });
+    const key = keyOf(r, ymd, stage.key);
+    if (emailedKeys.has(key)) continue;
+    if (unemailedKeys.has(key)) {
+      // Notified in-app already; only the email failed — retry it if there's
+      // an address to send to (still at this stage, so it's still relevant).
+      if (r.locator_email) due.push({ ...r, validity_ymd: ymd, stage, retry: true });
+      continue;
+    }
+    due.push({ ...r, validity_ymd: ymd, stage, retry: false });
   }
   return due;
 }
@@ -128,9 +139,13 @@ async function remindLocator(group, staffIds) {
   const loginUrl = `${String(process.env.FRONTEND_URL || "").replace(/\/+$/, "")}/`;
   const portal = site.locatorPortalLabel();
   const lines = group.map(lineFor);
+  // Items reaching this stage for the first time (in-app notices go out for
+  // these); the rest are email retries of an earlier, failed send.
+  const fresh = group.filter((i) => !i.retry);
+  const freshLines = fresh.map(lineFor);
 
-  // 1. Record first, so a later failure can't repeat this stage every run.
-  for (const item of group) {
+  // 1. Record first, so a later failure can't repeat the in-app notices.
+  for (const item of fresh) {
     await insertData(
       `
       IF NOT EXISTS (
@@ -181,25 +196,45 @@ async function remindLocator(group, staffIds) {
     }
   }
 
+  // Only email retries this run: nothing else to send.
+  if (!fresh.length) {
+    if (emailed) {
+      await AuditLog.record({
+        actorId: null,
+        actorUsername: "system",
+        action: "COMPLIANCE_EXPIRY_REMINDER_SENT",
+        entityType: "proponent",
+        entityId: first.proponent_id,
+        details: {
+          business_name: first.business_name,
+          items: group.map((i) => ({ item: i.item_name, valid_until: i.validity_ymd, stage: i.stage.key })),
+          emailed_to: first.locator_email,
+          retry: true,
+        },
+      });
+    }
+    return;
+  }
+
   // 3. In-app: the locator, then every compliance reviewer.
   if (first.locator_user_id) {
     await Notification.createNotification({
       userId: first.locator_user_id,
-      subject: anyExpired ? "Compliance documents expired" : "Compliance documents expiring soon",
-      body: `${lines.join("; ")}. Upload the renewed document${group.length === 1 ? "" : "s"} under Compliance.`,
+      subject: fresh.some((i) => i.stage.key === "EXPIRED") ? "Compliance documents expired" : "Compliance documents expiring soon",
+      body: `${freshLines.join("; ")}. Upload the renewed document${fresh.length === 1 ? "" : "s"} under Compliance.`,
       eventType: "compliance",
     }).catch(() => {});
   }
   const emailNote = emailed
     ? "The locator was emailed."
     : first.locator_email
-      ? "The email to the locator could not be sent — reach out to them."
+      ? "The email to the locator could not be sent — it will be retried."
       : "The locator has no email on file — reach out to them.";
   for (const userId of staffIds) {
     await Notification.createNotification({
       userId,
-      subject: `${anyExpired ? "Compliance expired" : "Compliance expiring"}: ${first.business_name}`,
-      body: `${first.business_name} (${first.ref_no || "locator"}) — ${lines.join("; ")}. ${emailNote}`,
+      subject: `${fresh.some((i) => i.stage.key === "EXPIRED") ? "Compliance expired" : "Compliance expiring"}: ${first.business_name}`,
+      body: `${first.business_name} (${first.ref_no || "locator"}) — ${freshLines.join("; ")}. ${emailNote}`,
       eventType: "compliance",
     }).catch(() => {});
   }

@@ -18,6 +18,7 @@ const { placeLocatorUpload } = require("../lib/locatorFolders");
 const { publicErrorMessage } = require("../lib/httpError");
 const Assessment = require("../models/AssessmentEvaluation");
 const Approval = require("../models/ApprovalIssuance");
+const { emailStaffInBackground } = require("../lib/staffEmail");
 const { checkMenuAllowed } = require("../middleware/m_auth");
 const { getters: site } = require("../lib/siteSettings");
 const Permit = require("../models/Permit");
@@ -98,6 +99,12 @@ async function notifyOfficerChange({ proponent, fromId, toId, actorId }) {
         createdBy: actorId,
         eventType: "locator_assigned",
       });
+      emailStaffInBackground(to, {
+        subject: `New locator assigned to you: ${proponent?.business_name || "locator"}`,
+        lines: [`${label} was assigned to you as their Account Officer.`, "You'll find them in your Registered Locators."],
+        linkPath: "/applications/proponents",
+        linkLabel: "Open Registered Locators",
+      });
     }
     if (from && from !== Number(actorId)) {
       await Notification.createNotification({
@@ -106,6 +113,12 @@ async function notifyOfficerChange({ proponent, fromId, toId, actorId }) {
         body: `${label} was reassigned to ${toName}. It's no longer in your Registered Locators.`,
         createdBy: actorId,
         eventType: "approval",
+      });
+      emailStaffInBackground(from, {
+        subject: `Locator reassigned: ${proponent?.business_name || "locator"}`,
+        lines: [`${label} was reassigned to ${toName}.`, "It's no longer in your Registered Locators."],
+        linkPath: "/dashboard",
+        linkLabel: "Open the portal",
       });
     }
   } catch (error) {
@@ -756,6 +769,50 @@ exports.findDuplicates = async (req, res) => {
  * a portal account, linked to this same record (no second locator). It
  * starts PENDING like any new locator: the login and temporary password are
  * emailed when their first application or renewal is filed. */
+/** "Send login now": emails a PENDING portal login its username and a
+ * temporary password right away (instead of waiting for the renewal). The
+ * login only becomes ACTIVE once the email has gone out. */
+exports.sendLogin = async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ success: false, message: "Invalid id" });
+    const proponent = await Proponent.getProponentById(id);
+    if (!proponent) return res.status(404).json({ success: false, message: "Locator not found" });
+    if (!proponent.user_id) {
+      return res.status(400).json({ success: false, message: "This locator has no portal login yet — add one first." });
+    }
+    if (proponent.login_status !== "PENDING") {
+      return res.status(409).json({
+        success: false,
+        message: "This login was already sent. To send a new password, use Reset password on Locator Accounts.",
+      });
+    }
+    const result = await require("./c_applications").activateLocatorIfPending(id, req.user?.id ?? null);
+    if (!result?.emailSent) {
+      return res.status(result?.reason === "NO_EMAIL" ? 400 : 502).json({
+        success: false,
+        message:
+          result?.reason === "NO_EMAIL"
+            ? "This login has no valid email — the locator's real email is needed."
+            : "The email couldn't be sent (check Portal Settings → Email). The login stays pending — try again.",
+      });
+    }
+    await AuditLog.record({
+      actorId: req.user?.id,
+      actorUsername: req.user?.username,
+      action: "LOCATOR_LOGIN_SENT",
+      entityType: "proponent",
+      entityId: id,
+      details: { business_name: proponent.business_name, username: proponent.login_username, email: proponent.login_email },
+      req,
+    });
+    return res.json({ success: true, data: await Proponent.getProponentById(id), message: `Login sent to ${proponent.login_email}.` });
+  } catch (error) {
+    console.error("Send locator login error:", error);
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
+  }
+};
+
 exports.createLogin = async (req, res) => {
   let createdUserId = null;
   try {
@@ -765,12 +822,20 @@ exports.createLogin = async (req, res) => {
     if (!proponent) return res.status(404).json({ success: false, message: "Locator not found" });
     if (proponent.user_id) return res.status(409).json({ success: false, message: "This locator already has a login." });
 
-    const username = String(req.body?.username || "").trim();
     const email = String(req.body?.email || "").trim();
-    const fullName = String(req.body?.full_name || "").trim() || null;
-    if (!username) return res.status(400).json({ success: false, message: "Username is required.", field: "username" });
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      return res.status(400).json({ success: false, message: "Enter a valid email.", field: "email" });
+    // users.full_name is required: no contact name → the business name.
+    const fullName = String(req.body?.full_name || "").trim() || proponent.business_name;
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || /@ciac\.local$/i.test(email)) {
+      return res.status(400).json({ success: false, message: "Enter the locator's real email.", field: "email" });
+    }
+    // No username typed: one from the Ref No (2024000002, LOC-2026-00002 →
+    // loc202600002), numbered if taken. The locator can sign in with the
+    // email too.
+    let username = String(req.body?.username || "").trim();
+    if (!username) {
+      const base = String(proponent.ref_no || "").toLowerCase().replace(/[^a-z0-9]/g, "") || `locator${id}`;
+      username = base;
+      for (let n = 2; !(await User.isFieldAvailable("username", username)) && n < 50; n += 1) username = `${base}-${n}`;
     }
     if (!(await User.isFieldAvailable("username", username))) {
       return res.status(409).json({ success: false, message: "That username is already taken.", field: "username" });
@@ -807,7 +872,7 @@ exports.createLogin = async (req, res) => {
     return res.status(201).json({
       success: true,
       data: { user_id: createdUserId, username, email, status: "PENDING" },
-      message: "Login created — pending. It's emailed to the locator when their renewal is filed.",
+      message: "Login created — pending. Send it now, or it goes to the locator when their renewal is filed.",
     });
   } catch (error) {
     console.error("Create locator login error:", error);

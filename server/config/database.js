@@ -127,6 +127,10 @@ async function runInTransaction(work) {
 }
 
 module.exports = {
+  // For one-off scripts that need their own pool (e.g. a long request timeout
+  // for large legacy file reads).
+  getDbConfig,
+  sql,
   initializeDatabase,
   getConnection,
   selectData,

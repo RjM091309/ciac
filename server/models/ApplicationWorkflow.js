@@ -158,6 +158,16 @@ async function createStatusChangeNotifications({ application, toStatus, remarks,
           applicationId: application?.id,
           eventType: "approval_ready",
         });
+        // Turn-over from the BDO: email too, not just the in-app notice.
+        require("../lib/staffEmail").emailStaffInBackground(id, {
+          subject: `Locator ready for an Account Officer: ${locator || appNo}`,
+          lines: [
+            `${locator || "A locator"} (${appNo}) was approved by the BDO and is now in the Approved Queue.`,
+            "Please assign a Level 2 Account Officer to handle this locator.",
+          ],
+          linkPath: "/approval",
+          linkLabel: "Open the Approved Queue",
+        });
       }
     } catch (error) {
       console.error("Account Officer assignment notification error:", error);

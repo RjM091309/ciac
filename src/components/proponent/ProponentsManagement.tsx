@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Plus, Save, Search } from 'lucide-react';
+import { Plus, Save, Search, Send } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { toast } from 'sonner';
 import { SidePanel } from '../ui/SidePanel';
@@ -716,6 +716,29 @@ export function ProponentsManagement({
   const [loginOpen, setLoginOpen] = useState(false);
   const [loginForm, setLoginForm] = useState({ username: '', email: '', full_name: '' });
   const [loginSaving, setLoginSaving] = useState(false);
+  // The open locator's portal login (from GET /:id): PENDING = created but
+  // not sent yet ("Send login now"), ACTIVE = the locator has it.
+  const [loginInfo, setLoginInfo] = useState<{ status: string | null; email: string | null; username: string | null } | null>(null);
+  const [sendLoginOpen, setSendLoginOpen] = useState(false);
+  const [sendingLogin, setSendingLogin] = useState(false);
+  // No username typed: the server makes one from the Ref No (shown as a hint).
+  const suggestedUsername = (editing?.ref_no || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  async function sendLogin() {
+    if (!editing) return;
+    setSendingLogin(true);
+    try {
+      const res = await fetch(api(`/api/proponents/${editing.id}/login/send`), { method: 'POST', credentials: 'include' });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.message || 'Could not send the login');
+      setLoginInfo({ status: json?.data?.login_status ?? 'ACTIVE', email: json?.data?.login_email ?? null, username: json?.data?.login_username ?? null });
+      setSendLoginOpen(false);
+      toast.success(json?.message || 'Login sent');
+    } catch (e: any) {
+      toast.error(e?.message || 'Could not send the login');
+    } finally {
+      setSendingLogin(false);
+    }
+  }
   async function createLogin() {
     if (!editing) return;
     setLoginSaving(true);
@@ -734,6 +757,7 @@ export function ProponentsManagement({
       if (!res.ok) throw new Error(json?.message || 'Could not create the login');
       const userId = Number(json?.data?.user_id);
       setEditing((prev) => (prev ? { ...prev, user_id: userId } : prev));
+      setLoginInfo({ status: 'PENDING', email: json?.data?.email ?? null, username: json?.data?.username ?? null });
       setForm((prev) => ({ ...prev, user_id: String(userId) }));
       setLoginOpen(false);
       toast.success(json?.message || 'Login created');
@@ -986,6 +1010,7 @@ export function ProponentsManagement({
     setActiveProfileTab('Profile');
     setLoaded(null);
     setEditing(p);
+    setLoginInfo(null);
     setForm({
       user_id: p.user_id != null ? String(p.user_id) : '',
       business_name: p.business_name || '',
@@ -1003,6 +1028,7 @@ export function ProponentsManagement({
       .then((json) => {
         if (locationRequestIdRef.current !== p.id) return; // superseded by a newer openEdit() call
         const data = json?.data || {};
+        setLoginInfo({ status: data.login_status ?? null, email: data.login_email ?? null, username: data.login_username ?? null });
         const profileFields = {
           location: data.location || '',
           ref_code: data.ref_code || '',
@@ -1562,6 +1588,36 @@ export function ProponentsManagement({
               >
                 <Plus size={12} /> Portal login
               </button>
+            ) : editing?.user_id && loginInfo?.status === 'PENDING' ? (
+              // Created but not sent yet: who it goes to, and send it now.
+              <span className="inline-flex items-center gap-1.5">
+                <span
+                  className="inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold border"
+                  style={{ color: '#d97706', backgroundColor: 'rgba(245,158,11,.12)', borderColor: 'rgba(245,158,11,.35)' }}
+                  title={`${loginInfo.username || ''} · ${loginInfo.email || 'no email'}`}
+                >
+                  Login pending
+                </span>
+                {canEdit ? (
+                  <button
+                    type="button"
+                    onClick={() => setSendLoginOpen(true)}
+                    className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold border cursor-pointer"
+                    style={{ color: 'var(--text)', borderColor: 'var(--border-subtle)' }}
+                    title={`Email the username and a temporary password to ${loginInfo.email || 'the locator'}`}
+                  >
+                    <Send size={12} /> Send login now
+                  </button>
+                ) : null}
+              </span>
+            ) : editing?.user_id && loginInfo?.status === 'ACTIVE' ? (
+              <span
+                className="inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold border"
+                style={{ color: '#10b981', backgroundColor: 'rgba(16,185,129,.12)', borderColor: 'rgba(16,185,129,.35)' }}
+                title={`${loginInfo.username || ''} · ${loginInfo.email || ''}`}
+              >
+                Portal login active
+              </span>
             ) : null;
           const badge = (() => {
           // Lease status from the contract terms: Active through End Term
@@ -2639,18 +2695,18 @@ export function ProponentsManagement({
       <ConfirmModal
         open={loginOpen}
         title="Create portal login"
-        description="For this existing locator. It stays pending: the login and a temporary password are emailed to the locator when their renewal is filed."
+        description="For this existing locator, with their real email. Nothing is sent yet: it stays pending until you click Send login now, or until their renewal is filed. They can sign in with the username or the email."
         confirmText="Create login"
         loading={loginSaving}
-        confirmDisabled={!loginForm.username.trim() || !loginForm.email.trim()}
+        confirmDisabled={!loginForm.email.trim()}
         onCancel={() => setLoginOpen(false)}
         onConfirm={() => void createLogin()}
       >
         <div className="space-y-2 pt-1">
           {(
             [
-              ['username', 'Username'],
-              ['email', 'Email'],
+              ['email', 'Email *'],
+              ['username', 'Username (optional)'],
               ['full_name', 'Contact name (optional)'],
             ] as const
           ).map(([key, label]) => (
@@ -2661,12 +2717,24 @@ export function ProponentsManagement({
                 type={key === 'email' ? 'email' : 'text'}
                 autoComplete="off"
                 value={loginForm[key]}
+                placeholder={key === 'username' && suggestedUsername ? `${suggestedUsername} (from the Ref No)` : undefined}
                 onChange={(e) => setLoginForm((p) => ({ ...p, [key]: e.target.value }))}
               />
             </label>
           ))}
         </div>
       </ConfirmModal>
+
+      {/* Send a pending portal login now */}
+      <ConfirmModal
+        open={sendLoginOpen}
+        title="Send portal login?"
+        description={`The username${loginInfo?.username ? ` (${loginInfo.username})` : ''} and a temporary password will be emailed to ${loginInfo?.email || 'the locator'}. They'll set their own password at first sign-in.`}
+        confirmText="Send login"
+        loading={sendingLogin}
+        onCancel={() => setSendLoginOpen(false)}
+        onConfirm={() => void sendLogin()}
+      />
     </div>
   );
 }

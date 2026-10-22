@@ -72,6 +72,7 @@ router.get("/land-uses", requireAnyMenuAccess([MENU_KEY, "settings:locator-users
 router.get("/duplicates", requireMenuAccess(MENU_KEY, "view"), proponentsController.findDuplicates);
 router.get("/:id", requireMenuAccess(MENU_KEY, "view"), proponentsController.requireOwnLocator, proponentsController.getById);
 router.post("/:id/login", requireMenuAccess(MENU_KEY, "edit"), proponentsController.requireOwnLocator, proponentsController.createLogin);
+router.post("/:id/login/send", requireMenuAccess(MENU_KEY, "edit"), proponentsController.requireOwnLocator, proponentsController.sendLogin);
 router.get("/:id/documents", requireMenuAccess(MENU_KEY, "view"), proponentsController.requireOwnLocator, proponentsController.getDocuments);
 router.post(
   "/:id/documents",

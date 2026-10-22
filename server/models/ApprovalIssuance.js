@@ -944,6 +944,17 @@ async function assignAccountOfficer(applicationId, { accountOfficerId, actorId }
       applicationId: appId,
       eventType: "locator_assigned",
     });
+    if (officerId !== toInt(actorId)) {
+      require("../lib/staffEmail").emailStaffInBackground(officerId, {
+        subject: `New locator assigned to you: ${row.proponent_name || row.application_no}`,
+        lines: [
+          `${row.proponent_name || "A locator"} (${row.application_no}) was assigned to you as their Account Officer.`,
+          "You'll find them in your Registered Locators.",
+        ],
+        linkPath: "/applications/proponents",
+        linkLabel: "Open Registered Locators",
+      });
+    }
   } catch (error) {
     console.error("Account officer assignment notification error:", error);
   }

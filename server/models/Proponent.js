@@ -518,8 +518,13 @@ async function getProponentById(id) {
       CASE WHEN latest_app.application_type IS NULL THEN 0 ELSE 1 END AS has_application,
       CASE WHEN ct.effective_start IS NULL AND ct.effective_end IS NULL AND ct.contract_type_id IS NULL THEN 0 ELSE 1 END AS has_contract,
       open_ren.application_no AS renewal_application_no,
-      open_ren.status AS renewal_status
+      open_ren.status AS renewal_status,
+      plogin.username AS login_username,
+      NULLIF(plogin.email, '') AS login_email,
+      plogin.status AS login_status
     FROM dbo.proponents p
+    -- The locator's portal login (Registered Locator header).
+    LEFT JOIN dbo.users plogin ON plogin.id = p.user_id
     -- A renewal that's been started but not yet decided (panel badge).
     OUTER APPLY (
       SELECT TOP (1) r.application_no, r.status
@@ -566,6 +571,10 @@ async function getProponentById(id) {
   return {
     id: p.id,
     user_id: p.user_id ?? null,
+    login_username: p.login_username ?? null,
+    login_email: p.login_email ?? null,
+    // PENDING (created, not sent yet) / ACTIVE / …; null = no login.
+    login_status: p.login_status ? String(p.login_status).toUpperCase() : null,
     business_name: p.business_name,
     registration_no: p.registration_no ?? null,
     tin: p.tin ? decryptValue(p.tin) : null,
