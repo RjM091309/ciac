@@ -221,8 +221,9 @@ function requireAnyMenuAccess(menuKeys, action = "view") {
     }
     const role = String(req.user.role || "").toLowerCase();
     try {
+      const { blockedByLevel } = require("../lib/departments");
       for (const menuKey of menuKeys) {
-        if (await checkMenuAllowed(role, menuKey, action)) return next();
+        if ((await checkMenuAllowed(role, menuKey, action)) && !(await blockedByLevel(req.user, menuKey))) return next();
       }
       return res.status(403).json({ success: false, message: "You are not authorized to access this. Please contact the administrator." });
     } catch (error) {
@@ -331,10 +332,23 @@ function requireUserMenuAccess(action = "view") {
       if (newRole) menuKeys.add(newRoleName === "proponent" ? "settings:locator-users" : "settings:users");
       if (!menuKeys.size) menuKeys.add("settings:users");
 
+      // Lazy: lib/departments requires this module.
+      const { blockedByLevel } = require("../lib/departments");
       for (const menuKey of menuKeys) {
-        if (!(await checkMenuAllowed(role, menuKey, action))) {
+        if (!(await checkMenuAllowed(role, menuKey, action)) || (await blockedByLevel(req.user, menuKey))) {
           return res.status(403).json({ success: false, message: "You are not authorized to access this. Please contact the administrator." });
         }
+      }
+
+      // Only accounts in the user's own role(s) (lib/userScope.js) — same
+      // "not found" as the list, which leaves the others out.
+      const userScope = require("../lib/userScope");
+      const scope = await userScope.scopeFor(req.user);
+      if (hasTarget && !(await userScope.userInScope(scope, targetId))) {
+        return res.status(404).json({ success: false, message: "User not found" });
+      }
+      if (newRole && !userScope.inScope(scope, [newRole.id])) {
+        return res.status(403).json({ success: false, message: "You can only give accounts your own role." });
       }
       return next();
     } catch (error) {

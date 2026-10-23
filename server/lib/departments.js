@@ -32,4 +32,22 @@ async function aoLevel2Id(user) {
   return Number(user.id) || null;
 }
 
-module.exports = { departmentOf, aoLevel2Id };
+// Menus only Level 1 of the BDO / Account Officers may open, even when the
+// Control Panel turns them on for the whole role: Level 1 manages the
+// department's own user accounts, Level 2 doesn't.
+const LEVEL1_ONLY_MENUS = new Set(["settings:users"]);
+
+/** A Level 2 BDO or Account Officer (not admin, not other roles). */
+async function isLevel2Officer(user) {
+  const dept = await departmentOf(user);
+  if (dept !== "bdo" && dept !== "ao") return false;
+  const Assessment = require("../models/AssessmentEvaluation");
+  return !(await Assessment.isManager(user));
+}
+
+/** Whether `menuKey` is closed to this user by their level. */
+async function blockedByLevel(user, menuKey) {
+  return LEVEL1_ONLY_MENUS.has(menuKey) && (await isLevel2Officer(user));
+}
+
+module.exports = { departmentOf, aoLevel2Id, LEVEL1_ONLY_MENUS, isLevel2Officer, blockedByLevel };

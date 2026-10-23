@@ -434,6 +434,15 @@ export default function App() {
         // No page reload on sign-out, so drop the cached profile — otherwise the
         // next person to sign in here would briefly see this one's photo.
         setMyProfile(null);
+        // The user lists are cached per tab and only hold the accounts this
+        // person may manage — don't show them to the next one.
+        try {
+          Object.keys(sessionStorage)
+            .filter((k) => k.startsWith('ciac.users_roles'))
+            .forEach((k) => sessionStorage.removeItem(k));
+        } catch {
+          // storage blocked
+        }
         setAuthState('guest');
         setLoginNotice(notice ?? null);
         navigate('/', { replace: true });

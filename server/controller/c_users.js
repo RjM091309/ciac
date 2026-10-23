@@ -13,6 +13,7 @@ const { sendMail } = require("../lib/mailer");
 const { escapeHtml } = require("../lib/html");
 const { diffChanges } = require("../lib/auditDiff");
 const { publicErrorMessage } = require("../lib/httpError");
+const { scopeFor, inScope } = require("../lib/userScope");
 const { checkPassword } = require("../lib/reauth");
 const { getters: site } = require("../lib/siteSettings");
 
@@ -123,7 +124,8 @@ async function isKnownLandUse(id) {
 
 exports.list = async (req, res) => {
   try {
-    const rows = await User.listUsers();
+    const scope = await scopeFor(req.user);
+    const rows = (await User.listUsers()).filter((u) => inScope(scope, u.roles.map((r) => r.id)));
     return res.json({ success: true, data: rows });
   } catch (error) {
     console.error("List users error:", error);

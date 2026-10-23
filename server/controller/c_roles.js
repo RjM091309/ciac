@@ -2,6 +2,7 @@ const Role = require("../models/Role");
 const ControlPanelPermission = require("../models/ControlPanelPermission");
 const AuditLog = require("../models/AuditLog");
 const { publicErrorMessage } = require("../lib/httpError");
+const { scopeFor } = require("../lib/userScope");
 
 // Fixed roles — locked against rename/retire from the UI. Two different
 // reasons land a name on this list:
@@ -53,7 +54,9 @@ function isUniqueNameViolation(error) {
 
 exports.list = async (req, res) => {
   try {
-    const rows = await Role.listRoles();
+    // Non-admins only get their own role(s) to assign (lib/userScope.js).
+    const scope = await scopeFor(req.user);
+    const rows = (await Role.listRoles()).filter((r) => !scope || scope.has(Number(r.id)));
     // Lets User Management show the Assessment level picker only for roles
     // that actually reach the Evaluation Queue.
     const assessmentRoleIds = await ControlPanelPermission.listRoleIdsWithMenu("assessment:queue");

@@ -4,6 +4,7 @@ const AuditLog = require("../models/AuditLog");
 const { publishToUsers } = require("../lib/notificationStream");
 const { publicErrorMessage } = require("../lib/httpError");
 const DashboardWidgets = require("../lib/dashboardWidgets");
+const { LEVEL1_ONLY_MENUS, isLevel2Officer } = require("../lib/departments");
 
 function parseRoleId(v) {
   const id = Number(v);
@@ -113,6 +114,12 @@ function isExemptRole(roleName) {
   return String(roleName || "").trim().toLowerCase() === "admin";
 }
 
+/** Drops the Level-1-only menus (lib/departments.js) for a Level 2 BDO / AO. */
+async function withoutLevel1Menus(user, rows) {
+  if (!(await isLevel2Officer(user))) return rows;
+  return rows.filter((r) => !LEVEL1_ONLY_MENUS.has(String(r.menu_key)));
+}
+
 exports.getMySidebarPermissions = async (req, res) => {
   try {
     const roleName = req.user?.role;
@@ -121,7 +128,7 @@ exports.getMySidebarPermissions = async (req, res) => {
     }
     const roleId = await Role.getActiveRoleIdByName(roleName);
     if (!roleId) return res.json({ success: true, fullAccess: false, data: [] });
-    const rows = await ControlPanelPermission.getSidebarPermissions(roleId);
+    const rows = await withoutLevel1Menus(req.user, await ControlPanelPermission.getSidebarPermissions(roleId));
     return res.json({ success: true, fullAccess: false, data: rows });
   } catch (error) {
     console.error("Get my sidebar permissions error:", error);
@@ -140,7 +147,7 @@ exports.getMyMenuCrudPermissions = async (req, res) => {
     // Same rule as the API guards: a hidden menu grants no Add/Edit/Delete,
     // whatever flags were left saved on it.
     const visible = new Set(
-      (await ControlPanelPermission.getSidebarPermissions(roleId))
+      (await withoutLevel1Menus(req.user, await ControlPanelPermission.getSidebarPermissions(roleId)))
         .filter((r) => Number(r.is_enabled) === 1 || r.is_enabled === true)
         .map((r) => String(r.menu_key))
     );
