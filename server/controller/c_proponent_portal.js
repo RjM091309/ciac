@@ -85,8 +85,8 @@ exports.uploadMyComplianceDocument = async (req, res) => {
       itemCode: item.code,
       file: req.file,
       storagePath: relativeStoragePath(storedPath),
-      validityFrom: req.body?.validity_from,
-      validityTo: req.body?.validity_to,
+      // The Compliance Officer sets the validity when reviewing the document;
+      // the locator only uploads it.
       userId: req.user?.id ?? null,
     });
 

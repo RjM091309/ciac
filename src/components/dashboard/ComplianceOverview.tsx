@@ -45,11 +45,35 @@ function Stat({ label, value, sub, color }: { label: string; value: React.ReactN
   );
 }
 
-export function ComplianceOverview({ data, navigate }: { data: ComplianceDashboardData; navigate?: Navigate }) {
+/** Widget keys (Control Panel → Dashboard Widgets, "Compliance" group). */
+export type ComplianceWidgetKey =
+  | 'dashboard:compliance:alarm'
+  | 'dashboard:compliance:summary'
+  | 'dashboard:compliance:expiry'
+  | 'dashboard:compliance:due'
+  | 'dashboard:compliance:review'
+  | 'dashboard:compliance:inspections';
+
+export function ComplianceOverview({
+  data,
+  navigate,
+  show = () => true,
+}: {
+  data: ComplianceDashboardData;
+  navigate?: Navigate;
+  /** Which parts are on for the role; the admin dashboard shows them all. */
+  show?: (key: ComplianceWidgetKey) => boolean;
+}) {
   const open = () => navigate?.(COMPLIANCE_PAGE);
   const urgent = data.expiry.expired + data.expiry.within30;
-  const showAlarm = urgent > 0 || data.overdueActions > 0;
+  const showAlarm = show('dashboard:compliance:alarm') && (urgent > 0 || data.overdueActions > 0);
   const compliedPct = data.items.total ? Math.round((data.items.complied / data.items.total) * 100) : 0;
+  const showSummary = show('dashboard:compliance:summary');
+  const showExpiry = show('dashboard:compliance:expiry');
+  const lists = (['dashboard:compliance:due', 'dashboard:compliance:review', 'dashboard:compliance:inspections'] as const).filter(show);
+  const statCount = (showSummary ? 4 : 0) + (showExpiry ? 4 : 0);
+  const showCard = statCount > 0 || lists.length > 0;
+  if (!showAlarm && !showCard) return null;
 
   return (
     <div className="space-y-3">
@@ -90,6 +114,7 @@ export function ComplianceOverview({ data, navigate }: { data: ComplianceDashboa
         </div>
       ) : null}
 
+      {showCard ? (
       <div className="glass-card p-4 sm:p-5 !border-transparent" style={{ backgroundColor: 'var(--surface)' }}>
         <div className="flex items-center gap-2 mb-3">
           <ShieldCheck size={16} style={{ color: 'var(--text)' }} />
@@ -107,23 +132,39 @@ export function ComplianceOverview({ data, navigate }: { data: ComplianceDashboa
           ) : null}
         </div>
 
-        <div className="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-8 gap-2">
-          <Stat label="Fully complied" value={`${data.fullyComplied}/${data.locators}`} sub="locators" />
-          <Stat label="Items complied" value={`${compliedPct}%`} sub={`${data.items.complied} of ${data.items.total}`} color="#10b981" />
-          <Stat label="Awaiting review" value={data.awaitingReviewTotal} color={data.awaitingReviewTotal ? '#3b82f6' : undefined} />
-          <Stat label="Expired" value={data.expiry.expired} color={data.expiry.expired ? ALARM : undefined} />
-          <Stat label="≤ 1 month" value={data.expiry.within30} color={data.expiry.within30 ? ALARM : undefined} />
-          <Stat label="≤ 3 months" value={data.expiry.within90} color={data.expiry.within90 ? '#f59e0b' : undefined} />
-          <Stat label="≤ 6 months" value={data.expiry.within180} />
-          <Stat
-            label="At risk / Monitoring"
-            value={`${data.standing.atRisk} / ${data.standing.monitoring}`}
-            sub={data.overdueActions ? `${data.overdueActions} overdue action(s)` : 'from inspections'}
-            color={data.standing.atRisk ? ALARM : undefined}
-          />
+        {statCount > 0 ? (
+        <div className={statCount === 8 ? 'grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-8 gap-2' : 'grid grid-cols-2 sm:grid-cols-4 gap-2'}>
+          {showSummary ? (
+            <>
+              <Stat label="Fully complied" value={`${data.fullyComplied}/${data.locators}`} sub="locators" />
+              <Stat label="Items complied" value={`${compliedPct}%`} sub={`${data.items.complied} of ${data.items.total}`} color="#10b981" />
+              <Stat label="Awaiting review" value={data.awaitingReviewTotal} color={data.awaitingReviewTotal ? '#3b82f6' : undefined} />
+            </>
+          ) : null}
+          {showExpiry ? (
+            <>
+              <Stat label="Expired" value={data.expiry.expired} color={data.expiry.expired ? ALARM : undefined} />
+              <Stat label="≤ 1 month" value={data.expiry.within30} color={data.expiry.within30 ? ALARM : undefined} />
+              <Stat label="≤ 3 months" value={data.expiry.within90} color={data.expiry.within90 ? '#f59e0b' : undefined} />
+              <Stat label="≤ 6 months" value={data.expiry.within180} />
+            </>
+          ) : null}
+          {showSummary ? (
+            <Stat
+              label="At risk / Monitoring"
+              value={`${data.standing.atRisk} / ${data.standing.monitoring}`}
+              sub={data.overdueActions ? `${data.overdueActions} overdue action(s)` : 'from inspections'}
+              color={data.standing.atRisk ? ALARM : undefined}
+            />
+          ) : null}
         </div>
+        ) : null}
 
-        <div className="mt-4 grid grid-cols-1 lg:grid-cols-3 gap-3">
+        {lists.length > 0 ? (
+        <div
+          className={`${statCount > 0 ? 'mt-4 ' : ''}grid grid-cols-1 gap-3 ${lists.length === 3 ? 'lg:grid-cols-3' : lists.length === 2 ? 'lg:grid-cols-2' : ''}`}
+        >
+          {show('dashboard:compliance:due') ? (
           <List
             title="Expired / due within 30 days"
             icon={FileClock}
@@ -142,6 +183,8 @@ export function ComplianceOverview({ data, navigate }: { data: ComplianceDashboa
               />
             ))}
           </List>
+          ) : null}
+          {show('dashboard:compliance:review') ? (
           <List
             title="Awaiting review"
             icon={ClipboardCheck}
@@ -153,6 +196,8 @@ export function ComplianceOverview({ data, navigate }: { data: ComplianceDashboa
               <Row key={`${a.proponent_id}-${a.item_name}-${i}`} title={a.item_name} sub={a.proponent_name} badge="Submitted" badgeColor="#3b82f6" />
             ))}
           </List>
+          ) : null}
+          {show('dashboard:compliance:inspections') ? (
           <List
             title="Inspections in the next 30 days"
             icon={CalendarClock}
@@ -164,8 +209,11 @@ export function ComplianceOverview({ data, navigate }: { data: ComplianceDashboa
               <Row key={u.id} title={u.title} sub={u.proponent_name} badge={fmtDate(u.scheduled_date)} badgeColor="var(--text-muted)" />
             ))}
           </List>
+          ) : null}
         </div>
+        ) : null}
       </div>
+      ) : null}
     </div>
   );
 }

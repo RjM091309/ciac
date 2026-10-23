@@ -17,6 +17,7 @@ const APPLICATION_MENUS = ["applications:new", "applications:renewals", "assessm
 // Officer Approved/Renewal Queue).
 const QUEUE_MENUS = ["assessment:queue", "approval:queue", "applications:renewals"];
 const REQUIREMENT_MENUS = [...APPLICATION_MENUS, "applications:requirements"];
+const COMPLIANCE_MENUS = ["compliance:inspections"];
 
 const STATS_PARENT = "dashboard:stats";
 
@@ -43,7 +44,17 @@ const WIDGETS = [
   { key: "dashboard:performance", label: "Processing Performance", group: "insights", requiresAnyMenu: [] },
   { key: "dashboard:requirements", label: "Requirements Overview", group: "insights", requiresAnyMenu: REQUIREMENT_MENUS },
   { key: "dashboard:quick-tasks", label: "Quick Tasks", group: "tools", requiresAnyMenu: [] },
+  // Compliance (roles with Inspections & Monitoring — the Compliance Officer).
+  { key: "dashboard:compliance:alarm", label: "Compliance Alert", group: "compliance", requiresAnyMenu: COMPLIANCE_MENUS },
+  { key: "dashboard:compliance:summary", label: "Compliance Summary", group: "compliance", requiresAnyMenu: COMPLIANCE_MENUS },
+  { key: "dashboard:compliance:expiry", label: "Expiry Counts", group: "compliance", requiresAnyMenu: COMPLIANCE_MENUS },
+  { key: "dashboard:compliance:due", label: "Expired / Due List", group: "compliance", requiresAnyMenu: COMPLIANCE_MENUS },
+  { key: "dashboard:compliance:review", label: "Awaiting Review List", group: "compliance", requiresAnyMenu: COMPLIANCE_MENUS },
+  { key: "dashboard:compliance:inspections", label: "Upcoming Inspections", group: "compliance", requiresAnyMenu: COMPLIANCE_MENUS },
 ];
+
+/** The Compliance section's parts, in the order they're drawn. */
+const COMPLIANCE_WIDGETS = WIDGETS.filter((w) => w.group === "compliance").map((w) => w.key);
 
 const WIDGET_KEYS = new Set(WIDGETS.map((w) => w.key));
 const BY_KEY = new Map(WIDGETS.map((w) => [w.key, w]));
@@ -107,6 +118,7 @@ function sanitizeWidgetRows(rows) {
 }
 
 module.exports = {
+  COMPLIANCE_WIDGETS,
   APPLICATION_MENUS,
   QUEUE_MENUS,
   enabledMenus,

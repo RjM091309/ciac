@@ -495,8 +495,18 @@ async function buildStaffDashboard({ user, sidebarPermissions, widgetPermissions
 
   // Drives the dashboard's heading/wording, e.g. a read-only overview role
   // never sees "assigned to you".
+  // A role outside the BDO / Account Officer queues whose work is Compliance
+  // & Inspection gets the Compliance wording instead of "Applications".
   const view =
-    queue === "approval" ? "approval" : queue === "assessment" ? (isManager ? "assessment-manager" : "assessment-officer") : "overview";
+    queue === "approval"
+      ? "approval"
+      : queue === "assessment"
+        ? isManager
+          ? "assessment-manager"
+          : "assessment-officer"
+        : menus.has("compliance:inspections")
+          ? "compliance"
+          : "overview";
   const data = { view, widgets };
 
   if (widgets["dashboard:stats"]) {
@@ -702,7 +712,8 @@ exports.getMyDashboard = async (req, res) => {
     const data = await buildStaffDashboard({ user: req.user, sidebarPermissions, widgetPermissions });
     // Compliance Officer (any role with the Compliance & Inspection menu):
     // compliance overview + expiry alarm on top of the dashboard.
-    if (DashboardWidgets.enabledMenus(sidebarPermissions).has("compliance:inspections")) {
+    // Only when at least one of its parts is on for the role (Control Panel → Widgets).
+    if (DashboardWidgets.COMPLIANCE_WIDGETS.some((key) => data.widgets?.[key])) {
       data.compliance = await ComplianceInspection.getComplianceDashboard();
     }
     return res.json({ success: true, role: "officer", data });
@@ -777,6 +788,9 @@ exports.getPreview = async (req, res) => {
     const visibleMenus = new Set(sidebarPermissions.filter((r) => Number(r.is_enabled) === 1 || r.is_enabled === true).map((r) => String(r.menu_key)));
     const crudPermissions = crudRows.filter((r) => visibleMenus.has(String(r.menu_key)));
     const data = await buildStaffDashboard({ user: null, sidebarPermissions, widgetPermissions });
+    if (DashboardWidgets.COMPLIANCE_WIDGETS.some((key) => data.widgets?.[key])) {
+      data.compliance = await ComplianceInspection.getComplianceDashboard();
+    }
     return res.json({ success: true, role: "officer", widgetPermissions, sidebarPermissions, crudPermissions, data });
   } catch (error) {
     console.error("Get dashboard preview error:", error);

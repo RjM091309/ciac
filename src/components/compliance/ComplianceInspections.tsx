@@ -674,7 +674,7 @@ export function ComplianceInspections({
     canDelete: fullAccess || perm.can_delete,
   };
 
-  const [tab, setTab] = useState<'inspections' | 'monitor' | 'requirements'>('inspections');
+  const [tab, setTab] = useState<'locators' | 'inspections' | 'requirements'>('locators');
   const [rows, setRows] = useState<InspectionRow[]>([]);
   const [locators, setLocators] = useState<LocatorComplianceRow[]>([]);
   const [summary, setSummary] = useState<Summary | null>(null);
@@ -764,22 +764,29 @@ export function ComplianceInspections({
   const filteredLocators = useMemo(() => {
     const q = search.trim().toLowerCase();
     return locators.filter((l) => {
-      if (statusFilter && l.status !== statusFilter) return false;
+      if (statusFilter && docStateOf(l).key !== statusFilter) return false;
       if (!q) return true;
       return [l.proponent_name, l.ref_no, l.business_type].some((v) => (v || '').toLowerCase().includes(q));
     });
   }, [locators, search, statusFilter]);
-  const tiles = useMemo(
-    () => ({
+  // The first four count locators by the same state as the Status column;
+  // the last two count documents.
+  const tiles = useMemo(() => {
+    const count = (key: string) => locators.filter((l) => docStateOf(l).key === key).length;
+    return {
       locators: locators.length,
-      completed: locators.filter((l) => l.status === 'COMPLETED').length,
-      inProgress: locators.filter((l) => l.status === 'IN_PROGRESS').length,
-      notComplied: locators.reduce((n, l) => n + l.not_complied, 0),
+      needsAction: count('NEEDS_ACTION'),
+      inProgress: count('IN_PROGRESS'),
+      complete: count('COMPLETE'),
       expiring: locators.reduce((n, l) => n + l.expiring, 0),
       expired: locators.reduce((n, l) => n + l.expired, 0),
-    }),
-    [locators]
-  );
+    };
+  }, [locators]);
+  // A locator tile filters the Locators list to that state (again: clears).
+  const filterTo = (key: string) => {
+    setTab('locators');
+    setStatusFilter((cur) => (cur === key ? '' : key));
+  };
   const openLocator = (l: LocatorComplianceRow) =>
     setDrawer({
       proponentId: l.proponent_id,
@@ -788,6 +795,12 @@ export function ComplianceInspections({
     });
 
   const pg = usePagination(filteredLocators, pageSize, page);
+  // Inspection standing per locator (open findings / actions, failed, overdue).
+  const standingByLocator = useMemo(() => {
+    const map = new Map<number, ReturnType<typeof standingOf>>();
+    for (const r of summary?.by_proponent || []) map.set(Number(r.proponent_id), standingOf(r));
+    return map;
+  }, [summary]);
 
   const refresh = useCallback(async () => {
     try {
@@ -800,19 +813,37 @@ export function ComplianceInspections({
   return (
     <div className="flex flex-col gap-4">
       <div className="grid grid-cols-3 lg:grid-cols-6 gap-2">
-        <StatTile label="Locators" value={loading ? '—' : tiles.locators} />
-        <StatTile label="Completed" value={loading ? '—' : tiles.completed} tone="#10b981" />
-        <StatTile label="In Progress" value={loading ? '—' : tiles.inProgress} tone="#3b82f6" />
-        <StatTile label="Not Complied" value={loading ? '—' : tiles.notComplied} tone="#ef4444" />
-        <StatTile label="Expiring Soon" value={loading ? '—' : tiles.expiring} tone="#f59e0b" />
-        <StatTile label="Expired" value={loading ? '—' : tiles.expired} tone="#ef4444" />
+        <StatTile label="Locators" value={loading ? '—' : tiles.locators} onClick={() => filterTo('')} />
+        <StatTile
+          label="Needs action"
+          value={loading ? '—' : tiles.needsAction}
+          tone="#ef4444"
+          active={statusFilter === 'NEEDS_ACTION'}
+          onClick={() => filterTo('NEEDS_ACTION')}
+        />
+        <StatTile
+          label="In progress"
+          value={loading ? '—' : tiles.inProgress}
+          tone="#3b82f6"
+          active={statusFilter === 'IN_PROGRESS'}
+          onClick={() => filterTo('IN_PROGRESS')}
+        />
+        <StatTile
+          label="Complete"
+          value={loading ? '—' : tiles.complete}
+          tone="#10b981"
+          active={statusFilter === 'COMPLETE'}
+          onClick={() => filterTo('COMPLETE')}
+        />
+        <StatTile label="Docs expiring soon" value={loading ? '—' : tiles.expiring} tone="#f59e0b" />
+        <StatTile label="Docs expired" value={loading ? '—' : tiles.expired} tone="#ef4444" />
       </div>
 
       <div className="flex items-center gap-1 border-b" style={{ borderColor: 'var(--border)' }}>
         {(
           [
-            ['inspections', 'Locators'],
-            ['monitor', 'Compliance Monitor'],
+            ['locators', 'Locators'],
+            ['inspections', 'Inspections'],
             ['requirements', 'Compliance Requirements'],
           ] as const
         ).map(([k, label]) => (
@@ -824,9 +855,9 @@ export function ComplianceInspections({
               tab === k ? 'border-[var(--text)] text-[var(--text)]' : 'border-transparent text-secondary hover:text-[var(--text)]'
             )}
           >
-            {k === 'monitor' || k === 'requirements' ? (
+            {k === 'requirements' ? (
               <>
-                <span className="sm:hidden">{k === 'monitor' ? 'Monitor' : 'Requirements'}</span>
+                <span className="sm:hidden">Requirements</span>
                 <span className="hidden sm:inline">{label}</span>
               </>
             ) : (
@@ -860,22 +891,14 @@ export function ComplianceInspections({
               .catch(() => undefined);
           }}
         />
-      ) : tab === 'monitor' ? (
-        <MonitorTab
-          summary={summary}
-          loading={loading}
-          onOpenProponent={(pid, name) =>
-            setDrawer({ proponentId: pid, title: name, subtitle: 'All inspections for this locator' })
-          }
-        />
+      ) : tab === 'inspections' ? (
+        <InspectionsTab rows={rows} loading={loading} onOpen={(id) => setSelectedId(id)} />
       ) : (
         <>
-          <div
-            className="rounded-xl border overflow-hidden shadow-sm"
-            style={{ borderColor: 'var(--border)', backgroundColor: 'var(--surface)' }}
-          >
+          {/* Same floating card as the other lists (Registered Locator, Renewal Tracking…). */}
+          <div className="glass-card p-3 sm:p-5 !border-transparent overflow-hidden" style={{ backgroundColor: 'var(--surface)' }}>
             {/* Search and filter sit inside the card, like Renewal Tracking. */}
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 px-3 pt-3 sm:px-4 sm:pt-4 pb-1">
+            <div className="flex flex-col sm:flex-row sm:items-center gap-2 mb-3">
               <div className="relative group w-full sm:w-72">
                 <Search
                   size={14}
@@ -889,21 +912,22 @@ export function ComplianceInspections({
                   style={{ backgroundColor: 'color-mix(in oklab, var(--control-bg) 70%, transparent)' }}
                 />
               </div>
-              <div className="min-w-0 w-full sm:w-44">
+              <div className="min-w-0 w-full sm:w-48">
                 <AppSelect
                   compact
                   placeholder="All statuses"
                   value={statusFilter}
                   onChange={setStatusFilter}
                   options={[
-                    { value: 'IN_PROGRESS', label: 'In Progress' },
-                    { value: 'COMPLETED', label: 'Completed' },
+                    { value: 'NEEDS_ACTION', label: 'Needs action' },
+                    { value: 'IN_PROGRESS', label: 'In progress' },
+                    { value: 'COMPLETE', label: 'Complete' },
                   ]}
                 />
               </div>
             </div>
             {loading ? (
-              <div className="p-4">
+              <div className="py-2">
                 <TableSkeleton rows={6} />
               </div>
             ) : filteredLocators.length === 0 ? (
@@ -915,7 +939,7 @@ export function ComplianceInspections({
             ) : (
               <>
               {/* Phones: one card per locator; tap to open its compliance. */}
-              <div className="sm:hidden p-2 space-y-2">
+              <div className="sm:hidden space-y-2">
                 {pg.pageItems.map((l) => (
                   <button
                     key={l.proponent_id}
@@ -937,7 +961,7 @@ export function ComplianceInspections({
                           {l.business_type ? ` · ${l.business_type}` : ''}
                         </div>
                       </div>
-                      <Badge label={LOCATOR_STATUS_LABELS[l.status]} styles={statusBadge(l.status)} />
+                      <Badge label={docStateOf(l).label} styles={docStateOf(l).styles} />
                     </div>
                     <div className="mt-2 text-[11px] text-secondary">
                       {l.complied}/{l.total} complied
@@ -951,29 +975,30 @@ export function ComplianceInspections({
                 <table className="min-w-full text-left text-xs">
                   <thead>
                     <tr style={{ borderBottom: '1px solid var(--border-subtle)' }}>
-                      <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary">Ref No.</th>
-                      <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary">Locator</th>
-                      <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary">Industry Type</th>
-                      <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary">Compliance</th>
-                      <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary">Status</th>
+                      <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary whitespace-nowrap">Ref No.</th>
+                      <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary whitespace-nowrap">Locator</th>
+                      <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary whitespace-nowrap">Industry Type</th>
+                      <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary whitespace-nowrap">Documents</th>
+                      <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary whitespace-nowrap">Status</th>
+                      <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary whitespace-nowrap">Inspections</th>
                     </tr>
                   </thead>
                   <tbody>
                     {pg.pageItems.map((l) => (
                       <tr
                         key={l.proponent_id}
-                        className="transition-colors cursor-pointer hover:bg-[var(--selected-bg)]"
+                        className="cursor-pointer hover:bg-[var(--control-bg)]/40"
                         style={{ borderTop: '1px solid var(--border-subtle)' }}
                         onClick={() => openLocator(l)}
                       >
-                        <td className="px-3 py-2.5">
-                          <div className="font-semibold" style={{ color: 'var(--text)' }}>
-                            {l.ref_no || '—'}
-                          </div>
+                        <td className="px-3 py-2 text-[11px] whitespace-nowrap" style={{ color: 'var(--text)' }}>
+                          {l.ref_no || '—'}
                         </td>
-                        <td className="px-3 py-2.5 text-[11px] text-secondary">{l.proponent_name}</td>
-                        <td className="px-3 py-2.5 text-[11px] text-secondary">{l.business_type || '—'}</td>
-                        <td className="px-3 py-2.5 text-[11px] text-secondary">
+                        <td className="px-3 py-2 text-[11px]" style={{ color: 'var(--text)' }}>{l.proponent_name}</td>
+                        <td className="px-3 py-2 text-[11px] text-secondary max-w-[180px] truncate" title={l.business_type || ''}>
+                          {l.business_type || '—'}
+                        </td>
+                        <td className="px-3 py-2 text-[11px] text-secondary">
                           <RequirementsTooltip items={l.items}>
                             {l.complied}/{l.total} complied
                           </RequirementsTooltip>
@@ -987,8 +1012,18 @@ export function ComplianceInspections({
                             </span>
                           ) : null}
                         </td>
-                        <td className="px-3 py-2.5">
-                          <Badge label={LOCATOR_STATUS_LABELS[l.status]} styles={statusBadge(l.status)} />
+                        <td className="px-3 py-2">
+                          <Badge label={docStateOf(l).label} styles={docStateOf(l).styles} />
+                        </td>
+                        <td className="px-3 py-2">
+                          {standingByLocator.get(Number(l.proponent_id)) ? (
+                            <Badge
+                              label={standingByLocator.get(Number(l.proponent_id))!.label}
+                              styles={standingByLocator.get(Number(l.proponent_id))!.styles}
+                            />
+                          ) : (
+                            <span className="text-[11px] text-secondary">None yet</span>
+                          )}
                         </td>
                       </tr>
                     ))}
@@ -997,7 +1032,7 @@ export function ComplianceInspections({
               </div>
               </>
             )}
-            <div className="px-2 pb-2 sm:p-0">
+            <div>
               <DataTableControls
                 page={page}
                 totalPages={pg.totalPages}
@@ -1023,6 +1058,19 @@ export function ComplianceInspections({
             title={drawer.title}
             subtitle={drawer.subtitle}
             canEdit={perms.canEdit}
+            inspections={rows.filter((r) => r.proponent_id === drawer.proponentId)}
+            onOpenInspection={(id) => setSelectedId(id)}
+            onNewInspection={
+              perms.canAdd
+                ? () =>
+                    setCreating({
+                      proponentId: drawer.proponentId,
+                      usedTypeCodes: rows
+                        .filter((r) => r.proponent_id === drawer.proponentId && r.inspection_type_code)
+                        .map((r) => r.inspection_type_code as string),
+                    })
+                : undefined
+            }
             onChecklistSaved={refresh}
             onClose={() => setDrawer(null)}
           />
@@ -1055,10 +1103,29 @@ export function ComplianceInspections({
 }
 
 /** Same stat card as Assessment & Evaluation and the other module pages. */
-function StatTile({ label, value, tone }: { label: string; value: React.ReactNode; tone?: string }) {
+function StatTile({
+  label,
+  value,
+  tone,
+  active,
+  onClick,
+}: {
+  label: string;
+  value: React.ReactNode;
+  tone?: string;
+  active?: boolean;
+  onClick?: () => void;
+}) {
+  const Tag = onClick ? 'button' : 'div';
   return (
-    <div
-      className="rounded-xl px-2.5 sm:px-3 py-2.5 sm:py-3 flex flex-col gap-1 shadow-sm min-w-0"
+    <Tag
+      type={onClick ? 'button' : undefined}
+      onClick={onClick}
+      className={cn(
+        'rounded-xl px-2.5 sm:px-3 py-2.5 sm:py-3 flex flex-col gap-1 shadow-sm min-w-0 text-left border transition-colors',
+        onClick && 'cursor-pointer hover:border-[var(--border)]',
+        active ? 'border-[var(--text-muted)]' : 'border-transparent'
+      )}
       style={{ backgroundColor: 'color-mix(in oklab, var(--surface) 94%, white 6%)' }}
     >
       <span className="text-[9px] sm:text-[10px] font-semibold text-secondary uppercase tracking-wide sm:tracking-widest truncate">
@@ -1067,148 +1134,154 @@ function StatTile({ label, value, tone }: { label: string; value: React.ReactNod
       <span className="text-lg font-bold leading-tight" style={{ color: tone || 'var(--text)' }}>
         {value}
       </span>
-    </div>
+    </Tag>
   );
 }
 
-function MonitorTab({
-  summary,
-  loading,
-  onOpenProponent,
-}: {
-  summary: Summary | null;
-  loading: boolean;
-  onOpenProponent: (proponentId: number, proponentName: string) => void;
-}) {
-  if (loading) return <TableSkeleton rows={6} />;
-  const rows = summary?.by_proponent || [];
-  if (rows.length === 0) {
-    return (
-      <EmptyState
-        icon={<ShieldCheck size={40} className="opacity-40" />}
-        title="No compliance data"
-        description="Once inspections are recorded, per-locator compliance standing shows here."
-      />
-    );
-  }
-  const standingOf = (r: (typeof rows)[number]) =>
-    r.overdue_actions > 0 || r.failed_inspections > 0
-      ? { label: 'At Risk', styles: resultBadge('FAILED') }
-      : r.open_findings > 0 || r.open_actions > 0
-        ? { label: 'Monitoring', styles: resultBadge('PASSED_WITH_FINDINGS') }
-        : { label: 'Compliant', styles: resultBadge('PASSED') };
-  return (
-    <>
-    {/* Phones: one card per locator instead of a 9-column table */}
-    <div className="sm:hidden space-y-2">
-      {rows.map((r) => {
-        const standing = standingOf(r);
-        const stats: [string, number, boolean][] = [
-          ['Inspections', r.total_inspections, false],
-          ['Completed', r.completed_inspections, false],
-          ['Failed', r.failed_inspections, r.failed_inspections > 0],
-          ['Open findings', r.open_findings, false],
-          ['Open actions', r.open_actions, false],
-          ['Overdue', r.overdue_actions, r.overdue_actions > 0],
-        ];
-        return (
-          <button
-            key={r.proponent_id}
-            type="button"
-            className="w-full text-left rounded-xl border p-3 cursor-pointer active:bg-[var(--selected-bg)] transition-colors"
-            style={{ borderColor: 'var(--border)', backgroundColor: 'var(--surface)' }}
-            onClick={() => onOpenProponent(r.proponent_id, r.proponent_name)}
-          >
-            <div className="flex items-start justify-between gap-2">
-              <div className="min-w-0 flex-1">
-                <div className="text-[13px] font-semibold leading-snug break-words" style={{ color: 'var(--text)' }}>
-                  {r.proponent_name}
-                </div>
-                <div className="mt-0.5 text-[11px] text-secondary">Last inspection: {fmtDate(r.last_inspection_date)}</div>
-              </div>
-              <div className="shrink-0">
-                <Badge label={standing.label} styles={standing.styles} />
-              </div>
-            </div>
-            <div className="mt-2.5 grid grid-cols-3 gap-x-2 gap-y-2">
-              {stats.map(([label, value, danger]) => (
-                <div key={label} className="min-w-0">
-                  <div className="text-[9px] uppercase tracking-wider text-secondary truncate">{label}</div>
-                  <div
-                    className="text-[13px] font-semibold tabular-nums"
-                    style={{ color: danger ? '#ef4444' : 'var(--text)' }}
-                  >
-                    {value}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </button>
-        );
-      })}
-    </div>
+/** Every inspection, newest first: search + status filter; a row opens the
+ * inspection (findings, corrective actions, result). */
+function InspectionsTab({ rows, loading, onOpen }: { rows: InspectionRow[]; loading: boolean; onOpen: (id: number) => void }) {
+  const [search, setSearch] = useState('');
+  const [status, setStatus] = useState('');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return rows.filter((r) => {
+      if (status && r.status !== status) return false;
+      if (!q) return true;
+      return [r.title, r.proponent_name, r.proponent_ref_no, r.inspection_type_name, r.inspector_name, r.inspector_username].some((v) =>
+        String(v || '').toLowerCase().includes(q)
+      );
+    });
+  }, [rows, search, status]);
+  useEffect(() => setPage(1), [search, status]);
+  const pg = usePagination(filtered, pageSize, page);
 
-    {/* Same table look as the Locators tab. */}
-    <div
-      className="hidden sm:block rounded-xl border overflow-hidden shadow-sm"
-      style={{ borderColor: 'var(--border)', backgroundColor: 'var(--surface)' }}
-    >
-      <div className="overflow-x-auto">
-        <table className="min-w-full text-left text-xs">
-          <thead>
-            <tr style={{ borderBottom: '1px solid var(--border-subtle)' }}>
-              {['Locator', 'Inspections', 'Completed', 'Failed', 'Open Findings', 'Open Actions', 'Overdue', 'Last Inspection', 'Standing'].map(
-                (col) => (
-                  <th key={col} className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary whitespace-nowrap">
-                    {col}
-                  </th>
-                )
-              )}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((r) => {
-              const standing = standingOf(r);
-              return (
-                <tr
-                  key={r.proponent_id}
-                  className="transition-colors cursor-pointer hover:bg-[var(--selected-bg)]"
-                  style={{ borderTop: '1px solid var(--border-subtle)' }}
-                  onClick={() => onOpenProponent(r.proponent_id, r.proponent_name)}
-                >
-                  <td className="px-3 py-2.5">
-                    <div className="font-semibold" style={{ color: 'var(--text)' }}>
-                      {r.proponent_name}
+  return (
+    <div className="glass-card p-3 sm:p-5 !border-transparent overflow-hidden" style={{ backgroundColor: 'var(--surface)' }}>
+      <div className="flex flex-col sm:flex-row sm:items-center gap-2 mb-3">
+        <div className="relative group w-full sm:w-72">
+          <Search
+            size={14}
+            className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)] group-focus-within:text-[var(--text)] transition-colors pointer-events-none"
+          />
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search inspection / locator…"
+            className="h-9 rounded-full pl-9 pr-3 text-xs w-full focus:outline-none focus:ring-1 focus:ring-[var(--border)] text-[var(--text)] placeholder:text-[var(--text-muted)] transition-all"
+            style={{ backgroundColor: 'color-mix(in oklab, var(--control-bg) 70%, transparent)' }}
+          />
+        </div>
+        <div className="min-w-0 w-full sm:w-48">
+          <AppSelect
+            compact
+            isClearable
+            placeholder="All statuses"
+            value={status}
+            onChange={(v) => setStatus(v || '')}
+            options={STATUS_ORDER.map((k) => ({ value: k, label: STATUS_LABELS[k] || k }))}
+          />
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="py-2">
+          <TableSkeleton rows={6} />
+        </div>
+      ) : filtered.length === 0 ? (
+        <EmptyState
+          icon={<ClipboardCheck size={40} className="opacity-40" />}
+          title="No inspections"
+          description={rows.length ? 'Try adjusting your search or filter.' : 'Use New Inspection to schedule one.'}
+        />
+      ) : (
+        <>
+          {/* Phones: one card per inspection. */}
+          <div className="sm:hidden space-y-2">
+            {pg.pageItems.map((r) => (
+              <button
+                key={r.id}
+                type="button"
+                className="w-full text-left rounded-xl p-3 cursor-pointer"
+                style={{ border: '1px solid var(--border-subtle)', backgroundColor: 'color-mix(in oklab, var(--control-bg) 35%, transparent)' }}
+                onClick={() => onOpen(r.id)}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="text-[13px] font-semibold break-words" style={{ color: 'var(--text)' }}>{r.title}</div>
+                    <div className="mt-0.5 text-[11px] text-secondary break-words">
+                      {r.proponent_name || '—'} · {fmtDate(r.conducted_date || r.scheduled_date)}
                     </div>
-                  </td>
-                  <td className="px-3 py-2.5 text-[11px] text-secondary tabular-nums">{r.total_inspections}</td>
-                  <td className="px-3 py-2.5 text-[11px] text-secondary tabular-nums">{r.completed_inspections}</td>
-                  <td
-                    className="px-3 py-2.5 text-[11px] text-secondary tabular-nums"
-                    style={r.failed_inspections ? { color: '#ef4444' } : undefined}
-                  >
-                    {r.failed_inspections}
-                  </td>
-                  <td className="px-3 py-2.5 text-[11px] text-secondary tabular-nums">{r.open_findings}</td>
-                  <td className="px-3 py-2.5 text-[11px] text-secondary tabular-nums">{r.open_actions}</td>
-                  <td
-                    className="px-3 py-2.5 text-[11px] text-secondary tabular-nums"
-                    style={r.overdue_actions ? { color: '#ef4444' } : undefined}
-                  >
-                    {r.overdue_actions}
-                  </td>
-                  <td className="px-3 py-2.5 text-[11px] text-secondary whitespace-nowrap">{fmtDate(r.last_inspection_date)}</td>
-                  <td className="px-3 py-2.5">
-                    <Badge label={standing.label} styles={standing.styles} />
-                  </td>
+                  </div>
+                  <Badge label={STATUS_LABELS[r.status] || r.status} styles={statusBadge(r.status)} />
+                </div>
+              </button>
+            ))}
+          </div>
+          <div className="hidden sm:block overflow-x-auto">
+            <table className="min-w-full text-left text-xs">
+              <thead>
+                <tr style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+                  {['Inspection', 'Locator', 'Inspector', 'Scheduled', 'Status', 'Result'].map((col) => (
+                    <th key={col} className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary whitespace-nowrap">
+                      {col}
+                    </th>
+                  ))}
                 </tr>
-              );
-            })}
-          </tbody>
-        </table>
+              </thead>
+              <tbody>
+                {pg.pageItems.map((r) => (
+                  <tr
+                    key={r.id}
+                    className="cursor-pointer hover:bg-[var(--control-bg)]/40"
+                    style={{ borderTop: '1px solid var(--border-subtle)' }}
+                    onClick={() => onOpen(r.id)}
+                  >
+                    <td className="px-3 py-2 text-[11px]" style={{ color: 'var(--text)' }}>
+                      {r.title}
+                      {r.inspection_type_name ? <div className="text-[10px] text-secondary">{r.inspection_type_name}</div> : null}
+                    </td>
+                    <td className="px-3 py-2 text-[11px]" style={{ color: 'var(--text)' }}>
+                      {r.proponent_name || '—'}
+                      {r.proponent_ref_no ? <div className="text-[10px] text-secondary">{r.proponent_ref_no}</div> : null}
+                    </td>
+                    <td className="px-3 py-2 text-[11px] text-secondary">{r.inspector_name || r.inspector_username || 'Unassigned'}</td>
+                    <td className="px-3 py-2 text-[11px] text-secondary whitespace-nowrap">{fmtDate(r.scheduled_date)}</td>
+                    <td className="px-3 py-2">
+                      <Badge label={STATUS_LABELS[r.status] || r.status} styles={statusBadge(r.status)} />
+                    </td>
+                    <td className="px-3 py-2">
+                      {r.result ? (
+                        <Badge label={RESULT_LABELS[r.result] || r.result} styles={resultBadge(r.result)} />
+                      ) : (
+                        <span className="text-[11px] text-secondary">—</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+      <div>
+        <DataTableControls
+          page={page}
+          totalPages={pg.totalPages}
+          totalItems={filtered.length}
+          showingFrom={pg.showingFrom}
+          showingTo={pg.showingTo}
+          visiblePageNumbers={pg.visiblePageNumbers}
+          pageSize={pageSize}
+          pageSizeOptions={[10, 20, 50, 100]}
+          onPageSizeChange={setPageSize}
+          onPageChange={setPage}
+          loading={loading}
+        />
       </div>
     </div>
-    </>
   );
 }
 
@@ -1217,6 +1290,9 @@ function LocatorInspectionsDrawer({
   title,
   subtitle,
   canEdit,
+  inspections,
+  onOpenInspection,
+  onNewInspection,
   onChecklistSaved,
   onClose,
 }: {
@@ -1224,12 +1300,16 @@ function LocatorInspectionsDrawer({
   title: string;
   subtitle: string;
   canEdit: boolean;
+  inspections: InspectionRow[];
+  onOpenInspection: (id: number) => void;
+  /** Absent when the user can't schedule inspections. */
+  onNewInspection?: () => void;
   onChecklistSaved: () => void;
   onClose: () => void;
 }) {
   // The locator's compliance checklist, one tab per requirement category,
-  // plus an Activity tab of changes made to it.
-  const [tab, setTab] = useState<ComplianceItem['group'] | 'ACTIVITY'>('COMPLIANCE');
+  // then its inspections and an Activity tab of changes made to the checklist.
+  const [tab, setTab] = useState<ComplianceItem['group'] | 'INSPECTIONS' | 'ACTIVITY'>('COMPLIANCE');
   const [activityKey, setActivityKey] = useState(0);
   const [checklist, setChecklist] = useState<ComplianceItem[]>([]);
   const [checklistLoading, setChecklistLoading] = useState(true);
@@ -1307,6 +1387,7 @@ function LocatorInspectionsDrawer({
               const complied = inGroup.filter((it) => it.status === 'COMPLIED').length;
               return { key: g.key, label: g.label, count: checklistLoading ? '' : `${complied}/${inGroup.length}` };
             }),
+            { key: 'INSPECTIONS' as const, label: 'Inspections', count: String(inspections.length || '') },
             { key: 'ACTIVITY' as const, label: 'Activity', count: '' },
           ].map((t) => (
             <button
@@ -1329,6 +1410,8 @@ function LocatorInspectionsDrawer({
         <div className="flex-1 overflow-y-auto p-4">
           {tab === 'ACTIVITY' ? (
             <LocatorActivity proponentId={proponentId} reloadKey={activityKey} />
+          ) : tab === 'INSPECTIONS' ? (
+            <LocatorInspectionList rows={inspections} onOpen={onOpenInspection} onNew={onNewInspection} />
           ) : checklistLoading ? (
             <TableSkeleton rows={6} />
           ) : (
@@ -1350,6 +1433,75 @@ function LocatorInspectionsDrawer({
           )}
         </div>
       </motion.div>
+    </div>
+  );
+}
+
+/** One locator's inspections inside its drawer, newest first. */
+function LocatorInspectionList({ rows, onOpen, onNew }: { rows: InspectionRow[]; onOpen: (id: number) => void; onNew?: () => void }) {
+  const sorted = useMemo(
+    () => [...rows].sort((a, b) => String(b.conducted_date || b.scheduled_date || '').localeCompare(String(a.conducted_date || a.scheduled_date || ''))),
+    [rows]
+  );
+  return (
+    <div className="space-y-3">
+      {onNew ? (
+        <div className="flex justify-end">
+          <button
+            className="rounded-lg px-3 py-1.5 text-[12px] font-semibold whitespace-nowrap"
+            style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
+            onClick={onNew}
+          >
+            <Plus size={13} className="inline mr-1" />
+            New Inspection
+          </button>
+        </div>
+      ) : null}
+      {sorted.length === 0 ? (
+        <EmptyState
+          icon={<ClipboardCheck size={40} className="opacity-40" />}
+          title="No inspections yet"
+          description="Inspections scheduled for this locator show up here."
+        />
+      ) : (
+        sorted.map((r) => (
+          <button
+            key={r.id}
+            type="button"
+            className="w-full text-left rounded-xl p-3 cursor-pointer hover:bg-[var(--control-bg)]/40 transition-colors"
+            style={{ border: '1px solid var(--border-subtle)' }}
+            onClick={() => onOpen(r.id)}
+          >
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <div className="text-[13px] font-semibold break-words" style={{ color: 'var(--text)' }}>
+                  {r.title}
+                </div>
+                <div className="mt-0.5 text-[11px] text-secondary break-words">
+                  {[r.inspection_type_name, r.inspector_name || r.inspector_username || 'Unassigned', fmtDate(r.conducted_date || r.scheduled_date)]
+                    .filter(Boolean)
+                    .join(' · ')}
+                </div>
+                {r.open_findings || r.open_actions ? (
+                  <div className="mt-1 text-[11px]" style={{ color: r.overdue_actions ? '#ef4444' : '#f59e0b' }}>
+                    {[
+                      r.open_findings ? `${r.open_findings} open finding${r.open_findings === 1 ? '' : 's'}` : null,
+                      r.open_actions ? `${r.open_actions} open action${r.open_actions === 1 ? '' : 's'}` : null,
+                      r.overdue_actions ? `${r.overdue_actions} overdue` : null,
+                    ]
+                      .filter(Boolean)
+                      .join(' · ')}
+                  </div>
+                ) : null}
+              </div>
+              <div className="flex flex-col items-end gap-1 shrink-0">
+                <Badge label={STATUS_LABELS[r.status] || r.status} styles={statusBadge(r.status)} />
+                {r.result ? <Badge label={RESULT_LABELS[r.result] || r.result} styles={resultBadge(r.result)} /> : null}
+              </div>
+            </div>
+          </button>
+        ))
+      )}
     </div>
   );
 }
@@ -1860,10 +2012,24 @@ const CHECKLIST_GROUP_LABEL: Record<string, string> = {
   PERFORMANCE: 'Performance Commitment',
 };
 
-const LOCATOR_STATUS_LABELS: Record<LocatorComplianceRow['status'], string> = {
-  IN_PROGRESS: 'In Progress',
-  COMPLETED: 'Completed',
-};
+/** Documents (the checklist): Needs action when anything is Not complied or
+ * expired, Complete when every applicable item is Complied, else In progress. */
+function docStateOf(l: LocatorComplianceRow) {
+  if (l.not_complied > 0 || l.expired > 0)
+    return { key: 'NEEDS_ACTION', label: 'Needs action', styles: resultBadge('FAILED') };
+  if (l.status === 'COMPLETED') return { key: 'COMPLETE', label: 'Complete', styles: resultBadge('PASSED') };
+  return { key: 'IN_PROGRESS', label: 'In progress', styles: statusBadge('IN_PROGRESS') };
+}
+
+/** Inspections: At risk (failed or overdue action), Monitoring (open findings
+ * or actions), else No issues. */
+function standingOf(r: Summary['by_proponent'][number]) {
+  return r.overdue_actions > 0 || r.failed_inspections > 0
+    ? { label: 'At risk', styles: resultBadge('FAILED') }
+    : r.open_findings > 0 || r.open_actions > 0
+      ? { label: 'Monitoring', styles: resultBadge('PASSED_WITH_FINDINGS') }
+      : { label: 'No issues', styles: resultBadge('PASSED') };
+}
 
 const CHECKLIST_STATUS_LABELS: Record<string, string> = {
   PENDING: 'Pending',

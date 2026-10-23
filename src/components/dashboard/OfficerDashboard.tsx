@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Ban, Building2, ClipboardList, FileCheck, FileText, Inbox, LayoutDashboard, ListChecks, RotateCcw, XCircle } from 'lucide-react';
+import { Ban, Building2, ClipboardList, FileCheck, FileText, Inbox, LayoutDashboard, ListChecks, RotateCcw, ShieldCheck, XCircle } from 'lucide-react';
 import { EmptyState } from '../ui/EmptyState';
 import { getStatusBadgeStyles } from './statusBadge';
 import { cn } from '../../lib/utils';
@@ -44,7 +44,7 @@ type Navigate = (to: string, opts?: { replace?: boolean }) => void;
 
 /** What the staff dashboard is for this role (server-decided from its
  * Control Panel menu access and, for Assessment, the user's level). */
-type DashboardView = 'approval' | 'assessment-officer' | 'assessment-manager' | 'overview';
+type DashboardView = 'approval' | 'assessment-officer' | 'assessment-manager' | 'compliance' | 'overview';
 
 /** Shape of GET /api/dashboard/me for every non-admin staff role. Only the
  * widgets this role may have and has on come back (`widgets` says which);
@@ -107,6 +107,15 @@ const VIEW_COPY: Record<
     tableEmpty: 'No new applications yet.',
     attention: 'Reviews awaiting your recommendation, and applications to assign',
     totalLabel: 'New Applications',
+  },
+  // Compliance Officer: Compliance & Inspection, outside the application queues.
+  compliance: {
+    title: 'Compliance Overview',
+    description: "Locators' compliance documents, expiries and inspections.",
+    table: 'All Applications',
+    tableEmpty: 'No applications yet.',
+    attention: '',
+    totalLabel: 'Total Applications',
   },
   overview: {
     title: 'Applications Overview',
@@ -188,7 +197,7 @@ export function OfficerDashboard({ data, navigate }: { data: OfficerDashboardDat
       <StatusBreakdownCard
         key="status"
         breakdown={data.statusBreakdown}
-        description={view === 'overview' ? 'Every application, by current status' : 'Applications on this dashboard, by status'}
+        description={view === 'overview' || view === 'compliance' ? 'Every application, by current status' : 'Applications on this dashboard, by status'}
       />
     );
   }
@@ -247,7 +256,9 @@ export function OfficerDashboard({ data, navigate }: { data: OfficerDashboardDat
         <div className="pointer-events-none absolute -top-32 -right-32 h-80 w-80 rounded-full bg-blue-600/30 blur-[100px]" />
         <div className="relative flex items-center gap-3">
           <div className="p-2.5 rounded-xl border shrink-0" style={{ backgroundColor: 'var(--control-bg)', borderColor: 'var(--border-subtle)' }}>
-            {view === 'overview' ? (
+            {view === 'compliance' ? (
+              <ShieldCheck size={22} style={{ color: 'var(--text)' }} />
+            ) : view === 'overview' ? (
               <LayoutDashboard size={22} style={{ color: 'var(--text)' }} />
             ) : (
               <ClipboardList size={22} style={{ color: 'var(--text)' }} />
@@ -262,7 +273,7 @@ export function OfficerDashboard({ data, navigate }: { data: OfficerDashboardDat
         </div>
       </div>
 
-      {data?.compliance ? <ComplianceOverview data={data.compliance} navigate={navigate} /> : null}
+      {data?.compliance ? <ComplianceOverview data={data.compliance} navigate={navigate} show={show} /> : null}
 
       {nothingVisible && !data?.compliance ? (
         <div className="glass-card p-4 sm:p-6 !border-transparent" style={{ backgroundColor: 'var(--surface)' }}>

@@ -99,7 +99,7 @@ const DOC_STATUS: Record<string, { label: string; color: string }> = {
   REJECTED: { label: 'Rejected', color: '#ef4444' },
 };
 const STANDING: Record<Overview['standing'], { label: string; color: string; bg: string; hint: string }> = {
-  COMPLIANT: { label: 'Compliant', color: '#10b981', bg: 'rgba(16,185,129,.14)', hint: 'No open findings or corrective actions.' },
+  COMPLIANT: { label: 'No issues', color: '#10b981', bg: 'rgba(16,185,129,.14)', hint: 'No open findings or corrective actions from inspections.' },
   MONITORING: { label: 'Monitoring', color: '#f59e0b', bg: 'rgba(245,158,11,.14)', hint: 'You have open findings or corrective actions to address.' },
   AT_RISK: { label: 'At Risk', color: '#ef4444', bg: 'rgba(239,68,68,.14)', hint: 'A failed inspection or overdue corrective action needs attention.' },
 };
@@ -168,7 +168,44 @@ export function ProponentCompliance() {
   const [data, setData] = useState<Overview | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [uploadFor, setUploadFor] = useState<ComplianceItem | null>(null);
+  // Direct upload, like an application's requirements: the row's Upload
+  // button opens the file picker and the file goes up as soon as it's picked.
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const uploadTarget = useRef<ComplianceItem | null>(null);
+  const [uploadingCode, setUploadingCode] = useState<string | null>(null);
+  function startUpload(item: ComplianceItem) {
+    if (uploadingCode) return;
+    uploadTarget.current = item;
+    fileInputRef.current?.click();
+  }
+  async function uploadFile(file: File) {
+    const item = uploadTarget.current;
+    if (fileInputRef.current) fileInputRef.current.value = '';
+    if (!item) return;
+    const name = file.name.toLowerCase();
+    if (!ALLOWED_EXTENSIONS.some((ext) => name.endsWith(ext))) return void toast.error('Only PDF, Word or Excel documents are allowed.');
+    if (file.size > MAX_UPLOAD_MB * 1024 * 1024) return void toast.error(`File is too large (max ${MAX_UPLOAD_MB} MB).`);
+    setUploadingCode(item.code);
+    try {
+      const body = new FormData();
+      body.append('file', file);
+      const res = await fetch(`/api/proponents/me/compliance/${encodeURIComponent(item.code)}/documents`, {
+        method: 'POST',
+        credentials: 'include',
+        body,
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.message || 'Upload failed');
+      toast.success(`${item.name} submitted for review.`);
+      reload();
+    } catch (e: any) {
+      toast.error(e?.message || 'Upload failed');
+    } finally {
+      setUploadingCode(null);
+    }
+  }
+  const uploadLabel = (item: ComplianceItem) =>
+    uploadingCode === item.code ? 'Uploading…' : item.status === 'COMPLIED' ? 'Upload renewed file' : item.documents.length ? 'Reupload' : 'Upload';
   const [historyFor, setHistoryFor] = useState<string | null>(null);
 
   const [liveTick, setLiveTick] = useState(0);
@@ -236,31 +273,65 @@ export function ProponentCompliance() {
   const standing = STANDING[data.standing] || STANDING.COMPLIANT;
   const submittedPct = counts.total ? Math.round(((counts.submitted + counts.complied) / counts.total) * 100) : 0;
   const compliedPct = counts.total ? Math.round((counts.complied / counts.total) * 100) : 0;
+  // Applicable items the locator has to act on: not uploaded yet, marked Not
+  // complied, or expired / expiring (a newer file under review doesn't count).
+  const todo = (data.items || [])
+    .filter(isRequired)
+    .map((item) => {
+      const v = validityState(item.validity_to);
+      if (item.status === 'NOT_COMPLIED') return { item, reason: 'Not complied — upload a corrected document', color: '#ef4444' };
+      if (item.status === 'SUBMITTED') return null;
+      if (v === 'expired') return { item, reason: `Expired on ${fmtDate(item.validity_to)} — upload the renewed document`, color: '#ef4444' };
+      if (v === 'expiring') return { item, reason: `Expires on ${fmtDate(item.validity_to)} — upload the renewed document`, color: '#f59e0b' };
+      if (item.status === 'PENDING' && !item.documents.length) return { item, reason: 'Not submitted yet', color: 'var(--text-muted)' };
+      return null;
+    })
+    .filter((x): x is { item: ComplianceItem; reason: string; color: string } => Boolean(x));
+  const docState =
+    todo.some((t) => t.color === '#ef4444')
+      ? { label: 'Needs action', color: '#ef4444' }
+      : counts.total > 0 && counts.complied === counts.total
+        ? { label: 'Complete', color: '#10b981' }
+        : { label: 'In progress', color: '#3b82f6' };
   const openActions = data.actions.filter((a) => a.status !== 'DONE');
   const openFindings = data.findings.filter((f) => f.status === 'OPEN');
 
   return (
     <div className="space-y-4 sm:space-y-5">
-      {/* Standing + counts */}
+      {/* Documents first (what the locator works on), inspections apart. */}
       <div className="rounded-2xl p-4 sm:p-5" style={FLOAT_ITEM}>
         <div className="flex flex-wrap items-center gap-3">
           <span
             className="inline-flex h-10 w-10 items-center justify-center rounded-full"
-            style={{ backgroundColor: standing.bg, color: standing.color }}
+            style={{ backgroundColor: `${docState.color}24`, color: docState.color }}
           >
-            <ShieldCheck size={20} />
+            <ClipboardCheck size={20} />
           </span>
-          <div className="min-w-0">
-            <div className="text-[10px] font-semibold uppercase tracking-widest text-secondary">Compliance standing</div>
-            <div className="text-lg font-bold" style={{ color: standing.color }}>{standing.label}</div>
-            <div className="text-[11px] text-secondary">{standing.hint}</div>
+          <div className="min-w-0 flex-1">
+            <div className="text-[10px] font-semibold uppercase tracking-widest text-secondary">Compliance documents</div>
+            <div className="text-lg font-bold" style={{ color: docState.color }}>{docState.label}</div>
+            <div className="text-[11px] text-secondary">
+              {counts.complied} of {counts.total} complied
+              {todo.length ? ` · ${todo.length} need${todo.length === 1 ? 's' : ''} your action` : ''}
+            </div>
+          </div>
+          <div
+            className="inline-flex items-center gap-2 rounded-xl px-3 py-2"
+            style={{ border: '1px solid var(--border-subtle)' }}
+            title={standing.hint}
+          >
+            <ShieldCheck size={15} style={{ color: standing.color }} />
+            <div className="leading-tight">
+              <div className="text-[9px] font-semibold uppercase tracking-widest text-secondary">Inspections</div>
+              <div className="text-[12px] font-bold" style={{ color: standing.color }}>{standing.label}</div>
+            </div>
           </div>
         </div>
         <div className="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-2">
           {[
-            { label: 'Submitted', value: `${submittedPct}%`, sub: `${counts.submitted + counts.complied} of ${counts.total}` },
             { label: 'Complied', value: `${compliedPct}%`, sub: `${counts.complied} of ${counts.total}`, color: '#10b981' },
-            { label: 'Not complied', value: String(counts.notComplied), color: counts.notComplied ? '#ef4444' : undefined },
+            { label: 'Under review', value: String(counts.submitted), color: counts.submitted ? '#3b82f6' : undefined },
+            { label: 'Need your action', value: String(todo.length), color: todo.length ? '#ef4444' : undefined },
             {
               label: 'Expired / Expiring',
               value: `${counts.expired} / ${counts.expiring}`,
@@ -276,8 +347,50 @@ export function ProponentCompliance() {
         </div>
       </div>
 
+      {/* What the locator needs to do, before the full checklist. */}
+      {todo.length ? (
+        <Card title="To do" icon={AlertTriangle} right={<span className="text-[11px] font-bold tabular-nums">{todo.length}</span>}>
+          <div className="rounded-xl overflow-hidden" style={{ border: '1px solid var(--border-subtle)' }}>
+            {todo.map(({ item, reason, color }, idx) => (
+              <div
+                key={item.code}
+                className="flex flex-wrap items-center gap-x-3 gap-y-2 p-3"
+                style={{ borderTop: idx === 0 ? undefined : '1px solid var(--border-subtle)' }}
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="text-[12px] font-semibold" style={{ color: 'var(--text)' }}>{item.name}</div>
+                  <div className="text-[11px] font-semibold" style={{ color }}>{reason}</div>
+                  {item.status === 'NOT_COMPLIED' && item.remarks ? (
+                    <div className="mt-0.5 text-[11px] text-secondary">Officer's remarks: {item.remarks}</div>
+                  ) : null}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => startUpload(item)}
+                  disabled={Boolean(uploadingCode)}
+                  className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-semibold cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed border shrink-0"
+                  style={{ color: 'var(--nav-active-bg)', borderColor: 'var(--border-subtle)' }}
+                >
+                  {uploadingCode === item.code ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />} {uploadLabel(item)}
+                </button>
+              </div>
+            ))}
+          </div>
+        </Card>
+      ) : null}
+
       {/* Checklist */}
       <Card title="Compliance Checklist" icon={ClipboardCheck}>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept={ALLOWED_EXTENSIONS.join(',')}
+          className="hidden"
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) void uploadFile(f);
+          }}
+        />
         <p className="text-[11px] text-secondary mb-3">
           Upload each document here. The Compliance Officer reviews it and marks it Complied or Not complied. Earlier
           uploads are kept under History. PDF, Word or Excel · up to {MAX_UPLOAD_MB} MB.
@@ -373,11 +486,12 @@ export function ProponentCompliance() {
                               {notApplicable ? null : (
                               <button
                                 type="button"
-                                onClick={() => setUploadFor(item)}
-                                className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-[11px] font-semibold cursor-pointer"
-                                style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
+                                onClick={() => startUpload(item)}
+                                disabled={Boolean(uploadingCode)}
+                                className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-semibold cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed border"
+                                style={{ color: 'var(--nav-active-bg)', borderColor: 'var(--border-subtle)' }}
                               >
-                                <Upload size={12} /> {latest ? 'Re-upload' : 'Upload'}
+                                {uploadingCode === item.code ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />} {uploadLabel(item)}
                               </button>
                               )}
                             </div>
@@ -548,118 +662,6 @@ export function ProponentCompliance() {
         ) : null}
       </Card>
 
-      {uploadFor ? (
-        <UploadDialog
-          item={uploadFor}
-          onClose={() => setUploadFor(null)}
-          onUploaded={() => {
-            setUploadFor(null);
-            reload();
-          }}
-        />
-      ) : null}
-    </div>
-  );
-}
-
-function UploadDialog({ item, onClose, onUploaded }: { item: ComplianceItem; onClose: () => void; onUploaded: () => void }) {
-  const [file, setFile] = useState<File | null>(null);
-  const [validFrom, setValidFrom] = useState('');
-  const [validTo, setValidTo] = useState('');
-  const [busy, setBusy] = useState(false);
-  const inputRef = useRef<HTMLInputElement | null>(null);
-
-  function problem(f: File): string | null {
-    const name = f.name.toLowerCase();
-    if (!ALLOWED_EXTENSIONS.some((ext) => name.endsWith(ext))) return 'Only PDF, Word or Excel documents are allowed.';
-    if (f.size > MAX_UPLOAD_MB * 1024 * 1024) return `File is too large (max ${MAX_UPLOAD_MB} MB).`;
-    return null;
-  }
-
-  async function submit() {
-    if (!file) return;
-    const p = problem(file);
-    if (p) return toast.error(p);
-    if (validFrom && validTo && validFrom > validTo) return toast.error('Valid until must be on or after Valid from.');
-    setBusy(true);
-    try {
-      const body = new FormData();
-      body.append('file', file);
-      if (validFrom) body.append('validity_from', validFrom);
-      if (validTo) body.append('validity_to', validTo);
-      const res = await fetch(`/api/proponents/me/compliance/${encodeURIComponent(item.code)}/documents`, {
-        method: 'POST',
-        credentials: 'include',
-        body,
-      });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(json?.message || 'Upload failed');
-      toast.success(`${item.name} submitted for review`);
-      onUploaded();
-    } catch (e: any) {
-      toast.error(e?.message || 'Upload failed');
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <div className="fixed inset-0 z-[80] flex items-end sm:items-center justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,.5)' }} role="dialog" aria-modal="true">
-      <div className="w-full max-w-md rounded-2xl border p-5 shadow-2xl" style={{ backgroundColor: 'var(--surface)', borderColor: 'var(--border-subtle)', color: 'var(--text)' }}>
-        <div className="flex items-start justify-between gap-2 mb-1">
-          <h3 className="text-sm font-bold">Upload: {item.name}</h3>
-          <button type="button" onClick={onClose} className="p-1 rounded cursor-pointer text-secondary" aria-label="Close">
-            <X size={16} />
-          </button>
-        </div>
-        <p className="text-[11px] text-secondary mb-4">
-          PDF, Word or Excel · up to {MAX_UPLOAD_MB} MB. Your earlier upload stays on file.
-        </p>
-
-        <input
-          ref={inputRef}
-          type="file"
-          accept={ALLOWED_EXTENSIONS.join(',')}
-          onChange={(e) => {
-            const f = e.target.files?.[0] ?? null;
-            if (f && problem(f)) {
-              toast.error(problem(f));
-              e.target.value = '';
-              return;
-            }
-            setFile(f);
-          }}
-          className="block w-full text-xs text-secondary file:mr-2 file:rounded-md file:border-0 file:px-3 file:py-1.5 file:text-xs file:font-semibold file:cursor-pointer"
-        />
-
-        <div className="mt-4 grid grid-cols-2 gap-3">
-          <label className="text-[10px] font-semibold uppercase tracking-wide text-secondary">
-            Valid from
-            <input type="date" value={validFrom} onChange={(e) => setValidFrom(e.target.value)} className="app-input mt-1 w-full" />
-          </label>
-          <label className="text-[10px] font-semibold uppercase tracking-wide text-secondary">
-            Valid until
-            <input type="date" value={validTo} onChange={(e) => setValidTo(e.target.value)} className="app-input mt-1 w-full" />
-          </label>
-        </div>
-        <p className="mt-1 text-[10px] text-secondary">Optional — the validity printed on the document, if any.</p>
-
-        <div className="mt-5 flex justify-end gap-2">
-          <button type="button" onClick={onClose} className="rounded-lg px-4 py-2 text-xs font-semibold border cursor-pointer" style={{ borderColor: 'var(--border)' }}>
-            Cancel
-          </button>
-          <button
-            type="button"
-            onClick={() => void submit()}
-            disabled={!file || busy}
-            className="inline-flex items-center gap-1.5 rounded-lg px-4 py-2 text-xs font-semibold cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-            style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
-          >
-            {busy ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
-            {busy ? 'Uploading…' : 'Submit for review'}
-          </button>
-        </div>
-      </div>
     </div>
   );
 }

@@ -92,6 +92,9 @@ async function listDue() {
     WHERE i.validity_to IS NOT NULL
       -- Items marked Not applicable for the locator get no reminders.
       AND ISNULL(i.applicability, 'REQUIRED') = 'REQUIRED'
+      -- A renewed document already uploaded and waiting for review: no reminder
+      -- (the Compliance Officer sets the new validity when reviewing it).
+      AND ISNULL(i.status, '') <> 'SUBMITTED'
       AND i.validity_to <= DATEADD(day, 183, CAST(SYSUTCDATETIME() AS DATE))
       AND i.validity_to >= DATEADD(day, -@param0, CAST(SYSUTCDATETIME() AS DATE))
     `,

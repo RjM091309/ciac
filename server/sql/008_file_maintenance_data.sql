@@ -32,6 +32,19 @@ BEGIN
   RETURN;
 END
 
+-- requirement_categories / requirements need created_by (NOT NULL): the first administrator.
+DECLARE @created_by INT = (
+  SELECT TOP (1) u.id FROM dbo.users u
+  INNER JOIN dbo.user_roles ur ON ur.user_id = u.id
+  INNER JOIN dbo.roles r ON r.id = ur.role_id
+  WHERE LOWER(LTRIM(RTRIM(r.name))) = 'admin' ORDER BY u.id
+);
+IF @created_by IS NULL
+BEGIN
+  RAISERROR('No administrator account in this database - create one first (server/scripts/create-admin.js), then re-run.', 16, 1);
+  RETURN;
+END
+
 BEGIN TRANSACTION;
 
 -- dbo.type_of_contract (5) --------------------------------------------------
@@ -82,8 +95,8 @@ UPDATE t SET description = s.description, is_active = s.is_active, deactivated_v
 FROM dbo.requirement_categories t JOIN @requirement_categories s ON s.name = t.name
 WHERE ISNULL(t.description, N'') <> ISNULL(s.description, N'') OR t.is_active <> s.is_active OR t.deactivated_via_cascade <> s.deactivated_via_cascade;
 
-INSERT dbo.requirement_categories (name, description, is_active, deactivated_via_cascade)
-SELECT s.name, s.description, s.is_active, s.deactivated_via_cascade FROM @requirement_categories s
+INSERT dbo.requirement_categories (name, description, is_active, deactivated_via_cascade, created_by)
+SELECT s.name, s.description, s.is_active, s.deactivated_via_cascade, @created_by FROM @requirement_categories s
 WHERE NOT EXISTS (SELECT 1 FROM dbo.requirement_categories t WHERE t.name = s.name);
 
 -- dbo.requirements (29) - category resolved by name ----------------------
@@ -130,8 +143,8 @@ WHERE t.is_ad_hoc = 0
        OR t.for_new <> s.for_new OR t.for_renewal <> s.for_renewal OR t.is_mandatory <> s.is_mandatory
        OR t.is_active <> s.is_active OR t.deactivated_via_cascade <> s.deactivated_via_cascade);
 
-INSERT dbo.requirements (code, name, description, category_id, for_new, for_renewal, is_mandatory, is_active, is_ad_hoc, deactivated_via_cascade, created_at)
-SELECT s.code, s.name, s.description, c.id, s.for_new, s.for_renewal, s.is_mandatory, s.is_active, 0, s.deactivated_via_cascade, SYSUTCDATETIME()
+INSERT dbo.requirements (code, name, description, category_id, for_new, for_renewal, is_mandatory, is_active, is_ad_hoc, deactivated_via_cascade, created_by, created_at)
+SELECT s.code, s.name, s.description, c.id, s.for_new, s.for_renewal, s.is_mandatory, s.is_active, 0, s.deactivated_via_cascade, @created_by, SYSUTCDATETIME()
 FROM @requirements s
 LEFT JOIN dbo.requirement_categories c ON c.name = s.category_name
 WHERE NOT EXISTS (SELECT 1 FROM dbo.requirements t WHERE t.code = s.code);

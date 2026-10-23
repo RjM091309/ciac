@@ -36,7 +36,7 @@ type CatalogWidget = {
   parent: string | null;
   requiresAnyMenu: string[];
 };
-type WidgetGroup = 'summary' | 'work' | 'insights' | 'tools';
+type WidgetGroup = 'summary' | 'work' | 'insights' | 'tools' | 'compliance';
 
 function api(path: string) {
   return path;
@@ -54,6 +54,7 @@ const WIDGET_GROUPS: { key: WidgetGroup; label: string; hint: string }[] = [
   { key: 'work', label: 'Work lists', hint: 'Rows this role acts on or reviews' },
   { key: 'insights', label: 'Insights', hint: 'Charts and performance, scoped to what this role sees' },
   { key: 'tools', label: 'Tools', hint: 'Personal utilities' },
+  { key: 'compliance', label: 'Compliance', hint: "Locators' compliance documents and inspections (Compliance & Inspection)" },
 ];
 
 type QueueKind = 'approval' | 'assessment' | 'overview';
@@ -90,6 +91,18 @@ function widgetDescription(key: string, queue: QueueKind): string {
       return 'Requirement completion by category';
     case 'dashboard:quick-tasks':
       return "Each user's own to-do list — nobody else sees it";
+    case 'dashboard:compliance:alarm':
+      return 'Red banner when documents expired or are due within 30 days, or a corrective action is overdue';
+    case 'dashboard:compliance:summary':
+      return 'Fully complied locators, items complied, awaiting review, at risk / monitoring';
+    case 'dashboard:compliance:expiry':
+      return 'Documents expired, and expiring within 1 / 3 / 6 months';
+    case 'dashboard:compliance:due':
+      return 'Each document expired or due within 30 days, by locator';
+    case 'dashboard:compliance:review':
+      return 'Documents locators uploaded that still need review';
+    case 'dashboard:compliance:inspections':
+      return 'Inspections scheduled in the next 30 days';
     default:
       return '';
   }
