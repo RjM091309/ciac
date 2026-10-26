@@ -1274,10 +1274,28 @@ export function LoginPage(props: {
             )}
             </motion.div>
 
-            <motion.div variants={revealItem} className="min-h-5">
-              <span className="text-xs" style={{ color: messageColor }} role="status" aria-live="polite">
-                {message.text}
-              </span>
+            <motion.div variants={revealItem} className="min-h-5" role="status" aria-live="polite">
+              {message.text && message.type !== 'muted' ? (
+                // Errors and confirmations in a tinted box with an icon —
+                // plain colored text was too faint on the photo background.
+                <div
+                  className="flex items-start gap-2.5 rounded-xl border px-3.5 py-3 text-[13px] leading-snug"
+                  style={{
+                    borderColor: message.type === 'error' ? 'rgba(248,113,113,.6)' : 'rgba(52,211,153,.6)',
+                    backgroundColor: message.type === 'error' ? 'rgba(239,68,68,.2)' : 'rgba(16,185,129,.2)',
+                    color: 'var(--text)',
+                  }}
+                >
+                  <span className="mt-px shrink-0" style={{ color: message.type === 'error' ? '#f87171' : '#34d399' }}>
+                    {message.type === 'error' ? <AlertTriangle size={15} /> : <CheckCircle2 size={15} />}
+                  </span>
+                  <span className="min-w-0 break-words">{message.text}</span>
+                </div>
+              ) : (
+                <span className="text-xs" style={{ color: messageColor }}>
+                  {message.text}
+                </span>
+              )}
             </motion.div>
           </motion.form>
 
