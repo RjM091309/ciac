@@ -1,13 +1,20 @@
 // Word → PDF through LibreOffice (headless), so the PDF looks like the Word
 // file: same fonts, sizes and paper. Needs LibreOffice on the server —
 // Windows: install it from libreoffice.org (found in Program Files); Linux:
-// apt install libreoffice-writer-nogui fonts-crosextra-carlito. Or point
-// SOFFICE_PATH at soffice(.exe). Returns null when it isn't installed.
+// apt install libreoffice-writer-nogui. Or point SOFFICE_PATH at
+// soffice(.exe). Returns null when it isn't installed.
+//
+// The lease agreement's font is Arial Narrow (licensed, so not shipped);
+// LibreOffice uses Liberation Sans Narrow in its place — same widths, free —
+// and that's shipped in server/templates/fonts and handed to every
+// conversion, so no server needs it installed.
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
 const { execFile } = require("child_process");
 const { pathToFileURL } = require("url");
+
+const FONTS_DIR = path.join(__dirname, "..", "templates", "fonts");
 
 const CANDIDATES = [
   process.env.SOFFICE_PATH,
@@ -46,13 +53,22 @@ async function convert(soffice, docxBytes) {
     const input = path.join(dir, "document.docx");
     fs.writeFileSync(input, docxBytes);
     // Its own profile folder: works under a service account (NSSM) and
-    // never collides with a LibreOffice someone has open.
-    const profile = pathToFileURL(path.join(dir, "profile")).href;
+    // never collides with a LibreOffice someone has open. Fonts in its
+    // user/fonts folder are loaded for this run.
+    const profileDir = path.join(dir, "profile");
+    const userFonts = path.join(profileDir, "user", "fonts");
+    fs.mkdirSync(userFonts, { recursive: true });
+    for (const f of fs.existsSync(FONTS_DIR) ? fs.readdirSync(FONTS_DIR) : []) {
+      if (/\.(ttf|otf)$/i.test(f)) fs.copyFileSync(path.join(FONTS_DIR, f), path.join(userFonts, f));
+    }
+    const profile = pathToFileURL(profileDir).href;
     await new Promise((resolve, reject) => {
       execFile(
         soffice,
         [`-env:UserInstallation=${profile}`, "--headless", "--norestore", "--convert-to", "pdf", "--outdir", dir, input],
-        { timeout: 90_000, windowsHide: true },
+        // No Skia: as a Windows service (no desktop session) its rendering
+        // can come out without text.
+        { timeout: 90_000, windowsHide: true, env: { ...process.env, SAL_DISABLESKIA: "1" } },
         (error, stdout, stderr) => (error ? reject(new Error(`LibreOffice: ${stderr || error.message}`)) : resolve())
       );
     });
