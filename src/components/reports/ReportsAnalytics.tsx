@@ -23,6 +23,8 @@ import { DataTableControls } from '../ui/DataTableControls';
 import { DatePicker } from '../ui/DatePicker';
 import { EmptyState } from '../ui/EmptyState';
 import { Skeleton, TableSkeleton } from '../ui/Skeleton';
+import { csvEscape, downloadBlob, usePagination } from './reportUtils';
+import { StockholdersReport } from './StockholdersReport';
 
 const STATUS_LABELS: Record<string, string> = {
   SUBMITTED: 'Submitted',
@@ -224,22 +226,6 @@ function buildTrendSeries(monthly: { month: string; total: number }[], range: Tr
   });
 }
 
-function csvEscape(v: string | number) {
-  const s = String(v ?? '');
-  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-}
-
-function downloadBlob(filename: string, content: BlobPart, type: string) {
-  const blob = new Blob([content], { type });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
-}
 
 function readFiltersFromUrl() {
   if (typeof window === 'undefined')
@@ -301,30 +287,49 @@ function useIsPhone() {
   return isPhone;
 }
 
-function usePagination<T>(items: T[], pageSize: number, page: number) {
-  return useMemo(() => {
-    const totalPages = Math.max(1, Math.ceil(items.length / Math.max(1, pageSize)));
-    const safePage = Math.min(Math.max(1, page), totalPages);
-    const start = (safePage - 1) * pageSize;
-    const visible =
-      totalPages <= 5
-        ? Array.from({ length: totalPages }, (_, i) => i + 1)
-        : safePage <= 3
-          ? [1, 2, 3, 4, 5]
-          : safePage >= totalPages - 2
-            ? [totalPages - 4, totalPages - 3, totalPages - 2, totalPages - 1, totalPages]
-            : [safePage - 2, safePage - 1, safePage, safePage + 1, safePage + 2];
-    return {
-      totalPages,
-      pageItems: items.slice(start, start + pageSize),
-      showingFrom: items.length === 0 ? 0 : start + 1,
-      showingTo: Math.min(items.length, safePage * pageSize),
-      visiblePageNumbers: visible,
-    };
-  }, [items, pageSize, page]);
+
+type ReportKey = 'applications' | 'stockholders';
+const REPORTS: { key: ReportKey; label: string }[] = [
+  { key: 'applications', label: 'Applications' },
+  { key: 'stockholders', label: 'Stockholders & Nationality' },
+];
+
+/** The Reports page: one tab per report (?report=… in the address bar). */
+export function ReportsAnalytics({ navigate }: { navigate?: (to: string, opts?: { replace?: boolean }) => void }) {
+  const [report, setReport] = useState<ReportKey>(() =>
+    new URLSearchParams(window.location.search).get('report') === 'stockholders' ? 'stockholders' : 'applications'
+  );
+  const pick = (key: ReportKey) => {
+    setReport(key);
+    const params = new URLSearchParams(window.location.search);
+    if (key === 'applications') params.delete('report');
+    else params.set('report', key);
+    const qs = params.toString();
+    window.history.replaceState(window.history.state, '', `${window.location.pathname}${qs ? `?${qs}` : ''}`);
+  };
+  return (
+    <div className="space-y-4 sm:space-y-5">
+      <div className="flex items-center gap-1 border-b overflow-x-auto" style={{ borderColor: 'var(--border-subtle)' }}>
+        {REPORTS.map((r) => (
+          <button
+            key={r.key}
+            type="button"
+            onClick={() => pick(r.key)}
+            className={cn(
+              'px-3 py-2.5 text-[13px] font-semibold border-b-2 -mb-px whitespace-nowrap transition-colors',
+              report === r.key ? 'border-[var(--text)] text-[var(--text)]' : 'border-transparent text-secondary hover:text-[var(--text)]'
+            )}
+          >
+            {r.label}
+          </button>
+        ))}
+      </div>
+      {report === 'stockholders' ? <StockholdersReport /> : <ApplicationsReport navigate={navigate} />}
+    </div>
+  );
 }
 
-export function ReportsAnalytics({ navigate }: { navigate?: (to: string, opts?: { replace?: boolean }) => void }) {
+function ApplicationsReport({ navigate }: { navigate?: (to: string, opts?: { replace?: boolean }) => void }) {
   const urlFilters = useMemo(readFiltersFromUrl, []);
   const [dateFrom, setDateFrom] = useState<Date | null>(urlFilters.dateFrom);
   const [dateTo, setDateTo] = useState<Date | null>(urlFilters.dateTo);

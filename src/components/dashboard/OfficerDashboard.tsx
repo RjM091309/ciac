@@ -150,7 +150,16 @@ function formatDate(value: string | null) {
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
-export function OfficerDashboard({ data, navigate }: { data: OfficerDashboardData | null; navigate?: Navigate }) {
+export function OfficerDashboard({
+  data,
+  navigate,
+  preview,
+}: {
+  data: OfficerDashboardData | null;
+  navigate?: Navigate;
+  /** The admin's preview of another role (PreviewDashboard). */
+  preview?: boolean;
+}) {
   const view: DashboardView = data?.view ?? 'overview';
   const copy = VIEW_COPY[view];
   const show = (key: string) => Boolean(data?.widgets?.[key]);
@@ -190,7 +199,7 @@ export function OfficerDashboard({ data, navigate }: { data: OfficerDashboardDat
     workCards.push(<LeaseExpiryCard key="expiry" data={data?.leaseExpiry} navigate={navigate} showOfficer={data?.isManager} />);
   }
   const tasksInWorkRow = workCards.length === 1 && show('dashboard:quick-tasks');
-  if (tasksInWorkRow) workCards.push(<QuickTasksCard key="tasks" />);
+  if (tasksInWorkRow) workCards.push(<QuickTasksCard key="tasks" preview={preview} />);
 
   if (show('dashboard:status-chart') && data?.statusBreakdown) {
     insightCards.push(
@@ -214,7 +223,7 @@ export function OfficerDashboard({ data, navigate }: { data: OfficerDashboardDat
     );
   }
 
-  if (!tasksInWorkRow && show('dashboard:quick-tasks')) insightCards.push(<QuickTasksCard key="tasks" />);
+  if (!tasksInWorkRow && show('dashboard:quick-tasks')) insightCards.push(<QuickTasksCard key="tasks" preview={preview} />);
 
   const showTable = show('dashboard:table');
   const nothingVisible = !statCards.length && !workCards.length && !insightCards.length && !showTable;

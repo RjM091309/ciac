@@ -66,7 +66,7 @@ export function PreviewDashboard({ role, navigate }: { role: PreviewRole; naviga
     );
   }
 
-  if (state.status === 'officer') return <OfficerDashboard data={state.data} navigate={navigate} />;
+  if (state.status === 'officer') return <OfficerDashboard data={state.data} navigate={navigate} preview />;
   if (state.status === 'proponent') return <ProponentDashboard data={state.data} widgetOverrides={state.widgetOverrides} navigate={navigate} />;
 
   return (

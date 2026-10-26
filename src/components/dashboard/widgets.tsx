@@ -94,8 +94,10 @@ function prettyStatus(status: string) {
 type QuickTask = { id: number; title: string; is_done: boolean; created_at: string };
 
 /** DBM-06 (real half): a personal to-do list backed by /api/quick-tasks —
- * replaces what used to be three hardcoded sample rows with no storage. */
-export function QuickTasksCard({ className }: { className?: string }) {
+ * replaces what used to be three hardcoded sample rows with no storage.
+ * `preview`: the admin's dashboard preview of another role — the list is
+ * whoever is signed in, so it shows none of the admin's own tasks there. */
+export function QuickTasksCard({ className, preview }: { className?: string; preview?: boolean }) {
   const [tasks, setTasks] = useState<QuickTask[]>([]);
   const [tab, setTab] = useState<'active' | 'done'>('active');
   const [draft, setDraft] = useState('');
@@ -112,8 +114,8 @@ export function QuickTasksCard({ className }: { className?: string }) {
   }
 
   useEffect(() => {
-    load();
-  }, []);
+    if (!preview) load();
+  }, [preview]);
 
   const active = tasks.filter((t) => !t.is_done);
   const done = tasks.filter((t) => t.is_done);
@@ -200,7 +202,11 @@ export function QuickTasksCard({ className }: { className?: string }) {
       <div className="space-y-2 sm:space-y-3 mb-4 sm:mb-6 min-h-[2.5rem]">
         {visible.length === 0 ? (
           <p className="text-[11px] text-secondary">
-            {tab === 'active' ? 'No open tasks — add one below.' : 'Nothing completed yet.'}
+            {preview
+              ? "Preview — each user sees and adds their own tasks here; yours aren't shown."
+              : tab === 'active'
+                ? 'No open tasks — add one below.'
+                : 'Nothing completed yet.'}
           </p>
         ) : (
           visible.map((task) => (
@@ -253,6 +259,7 @@ export function QuickTasksCard({ className }: { className?: string }) {
           placeholder="Add a quick task..."
           aria-label="New quick task"
           value={draft}
+          disabled={preview}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === 'Enter') addTask();
@@ -263,7 +270,7 @@ export function QuickTasksCard({ className }: { className?: string }) {
         <button
           type="button"
           onClick={addTask}
-          disabled={busy || !draft.trim()}
+          disabled={preview || busy || !draft.trim()}
           aria-label="Add task"
           className="absolute inset-y-1 right-1 px-3 rounded-2xl transition-colors flex items-center justify-center disabled:opacity-40 cursor-pointer"
           style={{ backgroundColor: 'var(--control-bg)' }}

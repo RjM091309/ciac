@@ -34,7 +34,8 @@ exports.overview = async (req, res) => {
 };
 
 const EXPORT_FORMATS = ["csv", "pdf"];
-const EXPORT_FILTER_KEYS = ["dateFrom", "dateTo", "applicationType", "status", "isRenewal", "search"];
+const EXPORT_FILTER_KEYS = ["dateFrom", "dateTo", "applicationType", "status", "isRenewal", "search", "nationality"];
+const EXPORT_REPORTS = ["applications", "stockholders"];
 
 /** The Reports page builds its CSV/PDF in the browser from data it already
  * fetched, so the server never sees the file itself — the page reports each
@@ -57,7 +58,7 @@ exports.logExport = async (req, res) => {
     action: "REPORT_EXPORTED",
     entityType: "report",
     details: {
-      report: "applications",
+      report: EXPORT_REPORTS.includes(body.report) ? body.report : "applications",
       format,
       rowCount: Number.isFinite(rowCount) && rowCount >= 0 ? Math.floor(rowCount) : null,
       filters,
@@ -65,6 +66,15 @@ exports.logExport = async (req, res) => {
     req,
   });
   return res.json({ success: true });
+};
+
+exports.stockholders = async (req, res) => {
+  try {
+    const data = await Report.listStockholders();
+    return res.json({ success: true, data });
+  } catch (error) {
+    return fail(res, error, "Reports stockholders");
+  }
 };
 
 exports.applications = async (req, res) => {

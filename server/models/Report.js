@@ -234,7 +234,65 @@ async function listApplications(filters = {}) {
   );
 }
 
+/** Stockholders report: every active locator with its stockholders, and
+ * how many stockholders (and companies) there are per nationality.
+ * Nationality is free text on the profile, so it's grouped case- and
+ * space-insensitively ("Filipino" = "FILIPINO "); blank = Not specified. */
+async function listStockholders() {
+  await require("./Stockholder").ensureSchema();
+  const rows = await selectData(`
+    SELECT p.id AS proponent_id, p.ref_no, p.business_name,
+           s.id AS stockholder_id, s.name, s.nationality, s.subscribed, s.paid, s.ownership
+    FROM dbo.proponents p
+    LEFT JOIN dbo.stockholder s ON s.proponent_id = p.id AND s.is_active = 1
+    WHERE p.is_active = 1
+    ORDER BY p.business_name, s.id
+  `);
+  const companies = new Map();
+  for (const r of rows) {
+    let c = companies.get(r.proponent_id);
+    if (!c) {
+      c = { proponent_id: r.proponent_id, ref_no: r.ref_no || null, business_name: r.business_name, stockholders: [] };
+      companies.set(r.proponent_id, c);
+    }
+    if (r.stockholder_id == null) continue;
+    const nationality = String(r.nationality || "").replace(/\s+/g, " ").trim().toUpperCase() || null;
+    c.stockholders.push({
+      name: r.name,
+      nationality,
+      subscribed: Number(r.subscribed) || 0,
+      paid: Number(r.paid) || 0,
+      ownership: Number(r.ownership) || 0,
+    });
+  }
+  const list = [...companies.values()];
+  const byNationality = new Map();
+  for (const c of list) {
+    const counts = {};
+    for (const s of c.stockholders) {
+      const key = s.nationality || "NOT SPECIFIED";
+      counts[key] = (counts[key] || 0) + 1;
+    }
+    c.total = c.stockholders.length;
+    c.nationalities = Object.entries(counts)
+      .map(([nationality, count]) => ({ nationality, count }))
+      .sort((a, b) => b.count - a.count || a.nationality.localeCompare(b.nationality));
+    for (const { nationality, count } of c.nationalities) {
+      const n = byNationality.get(nationality) || { nationality, stockholders: 0, companies: 0 };
+      n.stockholders += count;
+      n.companies += 1;
+      byNationality.set(nationality, n);
+    }
+  }
+  return {
+    companies: list.filter((c) => c.total > 0),
+    companies_without: list.filter((c) => c.total === 0).length,
+    nationalities: [...byNationality.values()].sort((a, b) => b.stockholders - a.stockholders || a.nationality.localeCompare(b.nationality)),
+  };
+}
+
 module.exports = {
   getOverview,
   listApplications,
+  listStockholders,
 };
