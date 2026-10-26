@@ -520,6 +520,46 @@ exports.printContract = async (req, res) => {
   }
 };
 
+/** The lease agreement form (lib/leaseAgreement.js): fields and values. */
+exports.getLeaseAgreement = async (req, res) => {
+  try {
+    const id = appIdParam(req, res);
+    if (id === null) return undefined;
+    if (!(await ensureCanAct(req, res, id))) return undefined;
+    const form = await require("../lib/leaseAgreement").getForm(id);
+    if (!form) return res.status(404).json({ success: false, message: "Application not found" });
+    return res.json({ success: true, data: form });
+  } catch (error) {
+    return fail(res, error, "Lease agreement");
+  }
+};
+
+/** Saves the form and downloads the filled lease agreement (Word). */
+exports.generateLeaseAgreement = async (req, res) => {
+  try {
+    const id = appIdParam(req, res);
+    if (id === null) return undefined;
+    if (!(await ensureCanAct(req, res, id))) return undefined;
+    const terms = await Terms.getForApplication(id);
+    if (terms?.status !== "AGREED") {
+      return res.status(409).json({ success: false, message: "The locator hasn't agreed to the terms and conditions yet." });
+    }
+    const doc = await require("../lib/leaseAgreement").generate(id, req.body?.values, req.user?.id);
+    if (!doc) return res.status(404).json({ success: false, message: "Application not found" });
+    AuditLog.recordFileAccess(req, {
+      kind: "DOCUMENT",
+      entityType: "application",
+      entityId: id,
+      details: { file_name: doc.fileName, purpose: "lease agreement (Word)" },
+    });
+    res.type("application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+    res.setHeader("Content-Disposition", `attachment; filename="${doc.fileName}"`);
+    return res.send(doc.bytes);
+  } catch (error) {
+    return fail(res, error, "Generate lease agreement");
+  }
+};
+
 exports.updateRequirementStatus = async (req, res) => {
   try {
     const id = Number(req.params.id);

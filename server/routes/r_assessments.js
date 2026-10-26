@@ -31,6 +31,8 @@ router.post("/:applicationId/terms/send", requireAssessmentAccess("edit"), contr
 router.get("/:applicationId/contract", requireAssessmentAccess("view"), controller.getContract);
 router.put("/:applicationId/contract", requireAssessmentAccess("edit"), controller.saveContract);
 router.get("/:applicationId/contract/print", requireAssessmentAccess("view"), controller.printContract);
+router.get("/:applicationId/contract/agreement", requireAssessmentAccess("view"), controller.getLeaseAgreement);
+router.post("/:applicationId/contract/agreement", requireAssessmentAccess("edit"), controller.generateLeaseAgreement);
 
 // Documentary compliance — proxy to the application requirement workflow, gated by assessment access
 router.patch("/requirements/:id/status", requireAssessmentAccess("edit"), controller.updateRequirementStatus);

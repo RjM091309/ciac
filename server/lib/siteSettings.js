@@ -202,6 +202,25 @@ const FIELDS = [
   { section: "renewals", name: "reminder_interval_months", label: "Follow-up every (months)", type: "int", min: 1, max: 6, default: 1 },
   { section: "renewals", name: "stop_after_expiry_months", label: "Stop reminders after expiry (months)", type: "int", min: 0, max: 24, default: 6 },
   { section: "renewals", name: "cc_account_officer", label: "Copy the Account Officer on the reminder email", type: "bool", default: false },
+  // CIAC's signatory on the generated lease agreement (lib/leaseAgreement.js).
+  // The ID details are personal data, so they're entered here, not shipped as defaults.
+  { section: "renewals", name: "contract_signatory_name", label: "Signatory name", type: "text", max: 120, default: "JOSEPH P. ALCAZAR" },
+  { section: "renewals", name: "contract_signatory_title", label: "Title", type: "text", max: 120, default: "President and Chief Executive Officer" },
+  { section: "renewals", name: "contract_signatory_title_short", label: "Short title", type: "text", max: 80, default: "President and CEO" },
+  { section: "renewals", name: "contract_signatory_pronoun", label: "In his / her capacity", type: "enum", options: ["his", "her"], default: "his" },
+  {
+    section: "renewals",
+    name: "contract_signatory_authority",
+    label: "Authority to sign",
+    type: "text",
+    max: 300,
+    default: "Secretary’s Certificate, Resolution No. RM-11-01, Series of 2024",
+  },
+  { section: "renewals", name: "contract_signatory_id_type", label: "ID type", type: "text", max: 60, default: "Passport" },
+  { section: "renewals", name: "contract_signatory_id_no", label: "ID number", type: "text", max: 60, default: "" },
+  { section: "renewals", name: "contract_signatory_id_issued", label: "ID date issued", type: "text", max: 60, default: "" },
+  { section: "renewals", name: "contract_signatory_id_expiry", label: "ID expiry", type: "text", max: 60, default: "" },
+  { section: "renewals", name: "contract_signatory_id_place", label: "ID place issued", type: "text", max: 80, default: "" },
 
   // --- Announcements & maintenance ---
   { section: "announcements", name: "banner_enabled", label: "Show announcement banner", type: "bool", default: false },

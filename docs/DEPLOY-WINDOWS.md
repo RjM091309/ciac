@@ -27,6 +27,8 @@ Install:
 | NSSM | <https://nssm.cc>. Put `nssm.exe` on the PATH, e.g. in `C:\Windows\System32`. |
 | ODBC Driver 18 for SQL Server | Only when using Windows authentication to SQL Server (`DB_TRUSTED_CONNECTION=true`) |
 | An SSL certificate for the site's domain | Login needs HTTPS (see §7) |
+| LibreOffice | <https://www.libreoffice.org>, default install path. Turns the lease agreement (Word) into PDF for the contract package; without it the package says to use the Word download instead. Restart the backend service after installing. |
+| Arial Narrow font | The lease agreement's font. Comes with Microsoft Office; if the server has no Office, copy `ARIALN*.TTF` from a PC that has it into `C:\Windows\Fonts`. |
 
 Suggested folders (any paths work — adjust the commands below):
 

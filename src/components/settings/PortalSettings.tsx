@@ -1389,6 +1389,21 @@ export function PortalSettings() {
           </div>
           {renderField('cc_account_officer')}
         </section>
+        <section className="space-y-4">
+          <GroupHeader title="Lease agreement signatory" hint="CIAC's signatory on the lease agreement Level 2 generates (Word)" />
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-4">
+            {renderField('contract_signatory_name')}
+            {renderField('contract_signatory_title')}
+            {renderField('contract_signatory_title_short')}
+            {renderField('contract_signatory_pronoun')}
+            <div className="md:col-span-2">{renderField('contract_signatory_authority')}</div>
+            {renderField('contract_signatory_id_type')}
+            {renderField('contract_signatory_id_no')}
+            {renderField('contract_signatory_id_issued')}
+            {renderField('contract_signatory_id_expiry')}
+            {renderField('contract_signatory_id_place')}
+          </div>
+        </section>
       </div>
     );
   }

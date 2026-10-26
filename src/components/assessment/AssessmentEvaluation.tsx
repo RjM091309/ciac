@@ -6,6 +6,7 @@ import {
   CheckCircle2,
   ClipboardCheck,
   FileSignature,
+  FileDown,
   Printer,
   Upload,
   Clock3,
@@ -24,6 +25,7 @@ import { toast } from 'sonner';
 import { RequirementGroupTabs, useRequirementGroups } from '../ui/RequirementGroupTabs';
 import { cn } from '../../lib/utils';
 import { AppSelect } from '../ui/AppSelect';
+import { AddressAutocomplete } from '../ui/AddressAutocomplete';
 import { DataTableControls } from '../ui/DataTableControls';
 import { EmptyState } from '../ui/EmptyState';
 import { ConfirmModal } from '../ui/ConfirmModal';
@@ -2008,6 +2010,235 @@ function TermsTab({ data, canEdit, busy, run }: { data: DetailPayload; canEdit: 
   );
 }
 
+/** A large box to drop a PDF on, or click to pick one. */
+function PdfDropzone({ file, onFile, disabled }: { file: File | null; onFile: (file: File | null) => void; disabled?: boolean }) {
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const [over, setOver] = useState(false);
+  const take = (f: File | undefined | null) => {
+    if (!f) return;
+    if (f.type !== 'application/pdf' && !/\.pdf$/i.test(f.name)) {
+      toast.error('Upload the signed contract as a PDF.');
+      return;
+    }
+    onFile(f);
+  };
+  return (
+    <div
+      role="button"
+      tabIndex={disabled ? -1 : 0}
+      onClick={() => !disabled && inputRef.current?.click()}
+      onKeyDown={(e) => {
+        if (!disabled && (e.key === 'Enter' || e.key === ' ')) {
+          e.preventDefault();
+          inputRef.current?.click();
+        }
+      }}
+      onDragOver={(e) => {
+        e.preventDefault();
+        if (!disabled) setOver(true);
+      }}
+      onDragLeave={(e) => {
+        // Moving onto the text inside the box isn't leaving it.
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setOver(false);
+      }}
+      onDrop={(e) => {
+        e.preventDefault();
+        setOver(false);
+        if (!disabled) take(e.dataTransfer.files?.[0]);
+      }}
+      className={cn(
+        'rounded-xl border-2 border-dashed px-4 py-6 flex flex-col items-center justify-center gap-1.5 text-center transition-colors',
+        disabled ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer hover:bg-[var(--control-bg)]/40'
+      )}
+      style={{
+        borderColor: over ? 'var(--nav-active-bg)' : 'var(--border)',
+        backgroundColor: over ? 'color-mix(in oklab, var(--nav-active-bg) 6%, transparent)' : undefined,
+      }}
+    >
+      <input
+        ref={inputRef}
+        type="file"
+        accept="application/pdf,.pdf"
+        className="hidden"
+        onChange={(e) => {
+          take(e.target.files?.[0]);
+          e.target.value = '';
+        }}
+      />
+      {file ? (
+        <>
+          <img src="/images/pdf.png" alt="" className="w-10 h-10" />
+          <div className="text-[12px] font-semibold break-all" style={{ color: 'var(--text)' }}>
+            {file.name}
+          </div>
+          <div className="text-[11px] text-secondary">
+            {(file.size / 1024 / 1024).toFixed(2)} MB ·{' '}
+            <button
+              type="button"
+              className="underline"
+              onClick={(e) => {
+                e.stopPropagation();
+                onFile(null);
+              }}
+            >
+              Remove
+            </button>{' '}
+            · click or drop to change
+          </div>
+        </>
+      ) : (
+        <>
+          <Upload size={22} className="text-secondary" />
+          <div className="text-[12px] font-semibold" style={{ color: 'var(--text)' }}>
+            Drop the signed PDF here, or click to choose
+          </div>
+          <div className="text-[11px] text-secondary">PDF only</div>
+        </>
+      )}
+    </div>
+  );
+}
+
+type LeaseAgreementField = {
+  key: string;
+  label: string;
+  hint?: string;
+  system?: boolean;
+  multiline?: boolean;
+  address?: boolean;
+  renewal?: boolean;
+  options?: string[];
+};
+
+/** The lease agreement form: values prefilled from the application (and the
+ * locator's last agreement); Generate saves them and downloads the Word file. */
+function LeaseAgreementDialog({ appId, onClose }: { appId: number; onClose: () => void }) {
+  const [form, setForm] = useState<{ fields: LeaseAgreementField[]; values: Record<string, string>; is_renewal: boolean } | null>(null);
+  const [values, setValues] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    apiFetch(`/api/assessments/${appId}/contract/agreement`)
+      .then((j) => {
+        setForm(j.data);
+        setValues(j.data.values || {});
+      })
+      .catch((e) => {
+        toast.error((e as Error).message);
+        onClose();
+      });
+  }, [appId, onClose]);
+
+  const generate = async () => {
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/assessments/${appId}/contract/agreement`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ values }),
+      });
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}));
+        throw new Error(json?.message || `Request failed (${res.status})`);
+      }
+      const name = /filename="([^"]+)"/.exec(res.headers.get('Content-Disposition') || '')?.[1] || 'Lease-Agreement.docx';
+      const url = URL.createObjectURL(await res.blob());
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = name;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success('Lease agreement downloaded');
+      onClose();
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const fields = (form?.fields || []).filter((f) => !f.renewal || form?.is_renewal);
+  return createPortal(
+    <div className="fixed inset-0 z-[90] flex items-end sm:items-center justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,.5)' }} role="dialog" aria-modal="true">
+      <div
+        className="w-full max-w-2xl max-h-[90vh] flex flex-col rounded-2xl border shadow-2xl"
+        style={{ backgroundColor: 'var(--surface)', borderColor: 'var(--border)', color: 'var(--text)' }}
+      >
+        <div className="px-5 pt-5 pb-3 flex items-start justify-between gap-2">
+          <h3 className="text-sm font-bold">{form?.is_renewal === false ? 'Lease agreement' : 'Renewal of lease agreement'}</h3>
+          <button type="button" onClick={onClose} className="p-1 rounded text-secondary" aria-label="Close">
+            <X size={16} />
+          </button>
+        </div>
+        <div className="px-5 pb-3 overflow-y-auto flex-1 custom-scrollbar">
+          {!form ? (
+            <Loader2 className="animate-spin text-secondary mx-auto my-10" />
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {fields.map((f) => (
+                <div key={f.key} className={f.multiline || f.address ? 'sm:col-span-2' : undefined}>
+                  <Field label={f.label}>
+                    {f.options ? (
+                      <AppSelect
+                        compact
+                        value={values[f.key] || f.options[0]}
+                        onChange={(v) => setValues((cur) => ({ ...cur, [f.key]: v || f.options![0] }))}
+                        options={f.options.map((o) => ({ value: o, label: o }))}
+                      />
+                    ) : f.address ? (
+                      <AddressAutocomplete
+                        value={values[f.key] || ''}
+                        onChange={(v) => setValues((cur) => ({ ...cur, [f.key]: v }))}
+                        className={inputCls}
+                        placeholder="Start typing to search, or type the full address"
+                      />
+                    ) : f.multiline ? (
+                      <textarea
+                        className={cn(inputCls, 'min-h-[64px]')}
+                        value={values[f.key] || ''}
+                        maxLength={2000}
+                        onChange={(e) => setValues((cur) => ({ ...cur, [f.key]: e.target.value }))}
+                      />
+                    ) : (
+                      <input
+                        className={inputCls}
+                        value={values[f.key] || ''}
+                        maxLength={2000}
+                        onChange={(e) => setValues((cur) => ({ ...cur, [f.key]: e.target.value }))}
+                      />
+                    )}
+                  </Field>
+                  {f.hint ? <div className="text-[10px] text-secondary mt-0.5">{f.hint}</div> : null}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+        <div className="px-5 py-3 border-t flex justify-end gap-2" style={{ borderColor: 'var(--border)' }}>
+          <button
+            className="rounded-lg px-3 py-1.5 text-[12px] font-semibold border"
+            style={{ borderColor: 'var(--border)', color: 'var(--text)' }}
+            onClick={onClose}
+          >
+            Cancel
+          </button>
+          <button
+            className="rounded-lg px-3 py-1.5 text-[12px] font-semibold disabled:opacity-50"
+            style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
+            disabled={!form || busy}
+            onClick={() => void generate()}
+          >
+            {busy ? <Loader2 size={13} className="inline mr-1 animate-spin" /> : <FileDown size={13} className="inline mr-1" />}
+            Download Word file
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
 type ContractInfo = {
   contract: {
     id: number;
@@ -2020,15 +2251,18 @@ type ContractInfo = {
   next_contract_no: string | null;
 };
 
-/** Level 2 makes the contract once the terms are agreed: record it, print the
- * package (contract + terms + the locator's requirements in one PDF), have it
- * signed, then upload the signed scan. Level 1 sees it read-only. */
+/** Level 2 makes the contract once the terms are agreed: record it, generate
+ * the lease agreement (Word, to finish and notarize), print the package
+ * (contract + terms + the locator's requirements in one PDF), have it signed,
+ * then upload the signed scan. Level 1 sees it read-only. */
 function ContractTab({ data, canEdit, busy, run }: { data: DetailPayload; canEdit: boolean; busy: boolean; run: RunFn }) {
   const appId = data.assessment.application_id;
   const editable = useLevel2Editable(data, canEdit);
   const [info, setInfo] = useState<ContractInfo | null>(null);
   const [form, setForm] = useState({ effective_start: '', effective_end: '' });
   const [file, setFile] = useState<File | null>(null);
+  const [agreementOpen, setAgreementOpen] = useState(false);
+  const closeAgreement = useCallback(() => setAgreementOpen(false), []);
 
   const load = useCallback(async () => {
     const json = await apiFetch(`/api/assessments/${appId}/contract`);
@@ -2045,6 +2279,9 @@ function ContractTab({ data, canEdit, busy, run }: { data: DetailPayload; canEdi
   if (!info) return <Loader2 className="animate-spin text-secondary mx-auto my-10" />;
   const c = info.contract;
   const agreed = info.terms_status === 'AGREED';
+  // Update only does something once a date differs from the recorded one.
+  const datesChanged =
+    !c || form.effective_start !== (c.effective_start || '').slice(0, 10) || form.effective_end !== (c.effective_end || '').slice(0, 10);
 
   if (!agreed && !c) {
     return (
@@ -2127,7 +2364,7 @@ function ContractTab({ data, canEdit, busy, run }: { data: DetailPayload; canEdi
             <button
               className="rounded-lg px-3 py-1.5 text-[12px] font-semibold disabled:opacity-50"
               style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
-              disabled={busy || !form.effective_start || !form.effective_end}
+              disabled={busy || !form.effective_start || !form.effective_end || !datesChanged}
               onClick={() => void saveContract()}
             >
               {c ? 'Update contract' : 'Record contract'}
@@ -2136,13 +2373,35 @@ function ContractTab({ data, canEdit, busy, run }: { data: DetailPayload; canEdi
         ) : null}
       </div>
 
-      {/* 2. Print */}
-      <div className="rounded-xl border p-3 flex flex-col gap-2" style={{ borderColor: 'var(--border)', opacity: c ? 1 : 0.6 }}>
+      {/* 2. Lease agreement (Word) */}
+      <div className="rounded-xl border p-3 flex flex-col gap-2" style={{ borderColor: 'var(--border)' }}>
         <div className="text-[11px] font-bold uppercase tracking-wide text-secondary flex items-center gap-1.5">
-          <Printer size={12} /> 2 · Print for signing
+          <FileDown size={12} /> 2 · Lease agreement
         </div>
         <div className="text-[12px] text-secondary">
-          One PDF: the contract, the agreed terms, and the locator's uploaded requirements. Print it and have it signed.
+          The lease agreement as a Word file, filled from this application — check the details, download, and finish it in Word.
+        </div>
+        {editable ? (
+          <div>
+            <button
+              className="rounded-lg px-3 py-1.5 text-[12px] font-semibold border"
+              style={{ borderColor: 'var(--border)', color: 'var(--text)' }}
+              onClick={() => setAgreementOpen(true)}
+            >
+              <FileDown size={13} className="inline mr-1" /> Generate lease agreement
+            </button>
+          </div>
+        ) : null}
+      </div>
+      {agreementOpen ? <LeaseAgreementDialog appId={appId} onClose={closeAgreement} /> : null}
+
+      {/* 3. Print */}
+      <div className="rounded-xl border p-3 flex flex-col gap-2" style={{ borderColor: 'var(--border)', opacity: c ? 1 : 0.6 }}>
+        <div className="text-[11px] font-bold uppercase tracking-wide text-secondary flex items-center gap-1.5">
+          <Printer size={12} /> 3 · Print for signing
+        </div>
+        <div className="text-[12px] text-secondary">
+          One PDF: the lease agreement (with the details from step 2), the agreed terms, and the locator's uploaded requirements. Print it and have it signed.
         </div>
         <div>
           <button
@@ -2162,37 +2421,44 @@ function ContractTab({ data, canEdit, busy, run }: { data: DetailPayload; canEdi
         style={{ borderColor: c?.document_id ? 'rgba(16,185,129,.45)' : 'var(--border)', opacity: c ? 1 : 0.6 }}
       >
         <div className="text-[11px] font-bold uppercase tracking-wide text-secondary flex items-center gap-1.5">
-          <Upload size={12} /> 3 · Signed contract
+          <Upload size={12} /> 4 · Signed contract
         </div>
         {c?.document_id ? (
           <a
-            className="text-[12px] font-semibold underline"
-            style={{ color: '#10b981' }}
+            className="flex items-center gap-3 rounded-xl border p-3 hover:bg-[var(--control-bg)]/40 transition-colors"
+            style={{ borderColor: 'var(--border)' }}
             href={`/api/applications/documents/${c.document_id}/file?view=1`}
             target="_blank"
             rel="noreferrer"
           >
-            <CheckCircle2 size={13} className="inline mr-1" /> View the signed contract
+            <img src="/images/pdf.png" alt="" className="w-10 h-10 shrink-0" />
+            <div className="min-w-0">
+              <div className="text-[12px] font-semibold" style={{ color: 'var(--text)' }}>
+                Signed contract
+              </div>
+              <div className="text-[11px] font-semibold" style={{ color: '#10b981' }}>
+                <CheckCircle2 size={12} className="inline mr-1" />
+                Uploaded · click to view
+              </div>
+            </div>
           </a>
         ) : (
           <div className="text-[12px] text-secondary">Scan the signed contract as PDF and upload it here, then submit your review.</div>
         )}
         {editable && c ? (
-          <div className="flex flex-wrap items-center gap-2">
-            <input
-              type="file"
-              accept="application/pdf"
-              className="text-[12px]"
-              onChange={(e) => setFile(e.target.files?.[0] || null)}
-            />
-            <button
-              className="rounded-lg px-3 py-1.5 text-[12px] font-semibold disabled:opacity-50"
-              style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
-              disabled={busy || !file}
-              onClick={() => void uploadSigned()}
-            >
-              {c.document_id ? 'Replace signed copy' : 'Upload signed copy'}
-            </button>
+          <div className="flex flex-col gap-2">
+            <PdfDropzone file={file} onFile={setFile} disabled={busy} />
+            <div className="flex justify-end">
+              <button
+                className="rounded-lg px-3 py-1.5 text-[12px] font-semibold disabled:opacity-50"
+                style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
+                disabled={busy || !file}
+                onClick={() => void uploadSigned()}
+              >
+                {busy ? <Loader2 size={13} className="inline mr-1 animate-spin" /> : <Upload size={13} className="inline mr-1" />}
+                {c.document_id ? 'Replace signed copy' : 'Upload signed copy'}
+              </button>
+            </div>
           </div>
         ) : null}
       </div>

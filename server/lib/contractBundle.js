@@ -1,18 +1,22 @@
-// The contract package Level 2 prints for signing: one PDF with the contract,
-// the terms and conditions the locator agreed to, an attachments list, and
-// every requirement the locator uploaded (latest file per requirement).
+// The contract package Level 2 prints for signing: one PDF with the lease
+// agreement, the terms and conditions the locator agreed to, an attachments
+// list, and every requirement the locator uploaded (latest file per
+// requirement).
 //
-// PDFs are copied page by page and JPG/PNG images get a page each; Word or
-// Excel files can't be merged into a PDF, so they're only named in the list.
-//
-// The contract part is the generated contract certificate for now — the
-// client's own contract template replaces it once it's provided.
+// The lease agreement is the client's Word template filled with what Level 2
+// saved in the Contract tab (lib/leaseAgreement.js), turned into PDF by
+// LibreOffice (lib/docxToPdf.js); without LibreOffice a page says to use the
+// Word download instead. PDFs are copied page by page and JPG/PNG images get
+// a page each; uploaded Word or Excel files are only named in the list.
 const fs = require("fs");
 const { PDFDocument, StandardFonts, rgb } = require("pdf-lib");
 const { selectData } = require("../config/database");
 const { resolveStoredPath } = require("./fileStorage");
+const LeaseAgreement = require("./leaseAgreement");
+const { docxToPdf } = require("./docxToPdf");
 
-const A4 = [595.28, 841.89];
+// Long bond (8.5 × 13 in), the lease agreement's paper.
+const PAGE = [612, 936];
 const MARGIN = 56;
 
 /** The standard PDF fonts only cover basic Latin: swap the usual extras. */
@@ -56,9 +60,9 @@ function wrap(text, font, size, width) {
 
 /** Writes a titled block of text, adding pages as needed. */
 function textPages(pdf, fonts, title, body, subtitle) {
-  const width = A4[0] - MARGIN * 2;
-  let page = pdf.addPage(A4);
-  let y = A4[1] - MARGIN;
+  const width = PAGE[0] - MARGIN * 2;
+  let page = pdf.addPage(PAGE);
+  let y = PAGE[1] - MARGIN;
   page.drawText(plain(title), { x: MARGIN, y, size: 15, font: fonts.bold });
   y -= 20;
   if (subtitle) {
@@ -69,8 +73,8 @@ function textPages(pdf, fonts, title, body, subtitle) {
   }
   for (const line of wrap(body, fonts.regular, 10.5, width)) {
     if (y < MARGIN) {
-      page = pdf.addPage(A4);
-      y = A4[1] - MARGIN;
+      page = pdf.addPage(PAGE);
+      y = PAGE[1] - MARGIN;
     }
     page.drawText(line, { x: MARGIN, y, size: 10.5, font: fonts.regular });
     y -= 15;
@@ -86,13 +90,13 @@ async function appendPdf(pdf, bytes) {
 
 async function appendImage(pdf, bytes, png) {
   const image = png ? await pdf.embedPng(bytes) : await pdf.embedJpg(bytes);
-  const page = pdf.addPage(A4);
-  const maxW = A4[0] - MARGIN * 2;
-  const maxH = A4[1] - MARGIN * 2;
+  const page = pdf.addPage(PAGE);
+  const maxW = PAGE[0] - MARGIN * 2;
+  const maxH = PAGE[1] - MARGIN * 2;
   const scale = Math.min(maxW / image.width, maxH / image.height, 1);
   const w = image.width * scale;
   const h = image.height * scale;
-  page.drawImage(image, { x: (A4[0] - w) / 2, y: (A4[1] - h) / 2, width: w, height: h });
+  page.drawImage(image, { x: (PAGE[0] - w) / 2, y: (PAGE[1] - h) / 2, width: w, height: h });
   return 1;
 }
 
@@ -118,7 +122,7 @@ async function buildContractBundle(applicationId) {
   )?.[0];
   const contract = (
     await selectData(
-      `SELECT TOP (1) id, contract_no, effective_start, effective_end, certificate_path FROM dbo.contracts WHERE application_id = @param0`,
+      `SELECT TOP (1) id, contract_no, effective_start, effective_end FROM dbo.contracts WHERE application_id = @param0`,
       [appId]
     )
   )?.[0];
@@ -152,17 +156,24 @@ async function buildContractBundle(applicationId) {
   };
   pdf.setTitle(`Contract ${contract.contract_no} — ${app.business_name}`);
 
-  // 1. The contract.
-  const certAbs = contract.certificate_path ? resolveStoredPath(contract.certificate_path) : null;
-  if (certAbs && fs.existsSync(certAbs)) {
-    await appendPdf(pdf, fs.readFileSync(certAbs));
+  // 1. The lease agreement.
+  let agreementPdf = null;
+  try {
+    const docx = await LeaseAgreement.current(appId);
+    agreementPdf = docx ? await docxToPdf(docx.bytes) : null;
+  } catch (error) {
+    console.error("Lease agreement PDF error:", error.message || error);
+  }
+  if (agreementPdf) {
+    await appendPdf(pdf, agreementPdf);
   } else {
-    const fmt = (d) => (d ? new Date(d).toISOString().slice(0, 10) : "-");
     textPages(
       pdf,
       fonts,
-      `Contract ${contract.contract_no}`,
-      `Locator: ${app.business_name}\nApplication: ${app.application_no}\nEffective: ${fmt(contract.effective_start)} to ${fmt(contract.effective_end)}`
+      `Lease Agreement - ${app.business_name}`,
+      `The lease agreement couldn't be added to this PDF (LibreOffice isn't installed on the server).\n\n` +
+        `Download it as a Word file from the Contract tab (Lease agreement), print it, and attach it here.`,
+      `${app.application_no} - Contract ${contract.contract_no}`
     );
   }
 
