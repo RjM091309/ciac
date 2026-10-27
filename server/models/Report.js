@@ -287,6 +287,9 @@ async function listStockholders() {
   return {
     companies: list.filter((c) => c.total > 0),
     companies_without: list.filter((c) => c.total === 0).length,
+    without: list
+      .filter((c) => c.total === 0)
+      .map(({ proponent_id, ref_no, business_name }) => ({ proponent_id, ref_no, business_name })),
     nationalities: [...byNationality.values()].sort((a, b) => b.stockholders - a.stockholders || a.nationality.localeCompare(b.nationality)),
   };
 }

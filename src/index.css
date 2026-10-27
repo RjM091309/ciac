@@ -902,3 +902,11 @@ fieldset:disabled .app-select__control,
 fieldset:disabled .app-select__indicators {
   pointer-events: none;
 }
+
+/* Recharts makes the chart focusable; a click left a black focus box around
+   the plot. The data is also in a table/list next to every chart. */
+.recharts-wrapper:focus,
+.recharts-surface:focus,
+.recharts-wrapper *:focus {
+  outline: none;
+}

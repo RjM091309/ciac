@@ -324,7 +324,7 @@ export function ReportsAnalytics({ navigate }: { navigate?: (to: string, opts?: 
           </button>
         ))}
       </div>
-      {report === 'stockholders' ? <StockholdersReport /> : <ApplicationsReport navigate={navigate} />}
+      {report === 'stockholders' ? <StockholdersReport navigate={navigate} /> : <ApplicationsReport navigate={navigate} />}
     </div>
   );
 }
