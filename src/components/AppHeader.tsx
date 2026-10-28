@@ -343,6 +343,8 @@ export function AppHeader({
         item.eventType === 'approval_ready' ||
         item.eventType === 'assessment_assigned' ||
         item.eventType === 'locator_assigned' ||
+        // BDO Level 1 sent this Level 2 a new proponent to file.
+        item.eventType === 'proponent_intake' ||
         // Admin: something broke and needs fixing (server lib/systemAlerts.js).
         item.eventType === 'system';
       if (!isPersistentToastEvent || item.isRead) continue;
@@ -355,7 +357,7 @@ export function AppHeader({
         closeButton: true,
         toasterId: 'locator-events',
         action:
-          item.targetPath && item.applicationId
+          item.targetPath && (item.applicationId || item.eventType === 'proponent_intake')
             ? { label: 'View', onClick: () => handleNotificationClick(item) }
             : undefined,
         onDismiss: () => {
@@ -597,6 +599,13 @@ export function AppHeader({
   }
 
   function handleNotificationClick(item: NotificationItem) {
+    if (item.targetPath && item.eventType === 'proponent_intake') {
+      // No application yet — just open New Proponent.
+      if (!item.isRead) markOneAsRead(item.id);
+      navigate(item.targetPath);
+      setNotificationOpen(false);
+      return;
+    }
     if (!item.targetPath || !item.applicationId) return;
     if (!item.isRead) markOneAsRead(item.id);
     const requirementParam = item.requirementId ? `&requirementId=${item.requirementId}` : '';
@@ -987,7 +996,9 @@ export function AppHeader({
                 <span className="text-xs font-bold truncate max-w-[6rem] md:max-w-[8rem] lg:max-w-[12rem]">
                   {displayName || 'Not signed in'}
                 </span>
-                {displayRole ? (
+                {myProfile?.role_label ? (
+                  <span className="text-[9px] font-medium text-[var(--text-muted)] truncate">{myProfile.role_label}</span>
+                ) : displayRole ? (
                   <span className="text-[9px] font-medium text-[var(--text-muted)] capitalize truncate">
                     {displayRole}
                   </span>

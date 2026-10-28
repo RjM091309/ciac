@@ -7,7 +7,7 @@ const ActivityLog = require("../models/ActivityLog");
 const Workflow = require("../models/ApplicationWorkflow");
 const ApplicationType = require("../models/ApplicationType");
 const Department = require("../models/Department");
-const { updateData } = require("../config/database");
+const { selectData, updateData } = require("../config/database");
 const { validatePasswordStrength, generateTempPassword } = require("../lib/password");
 const { sendMail } = require("../lib/mailer");
 const { escapeHtml } = require("../lib/html");
@@ -16,6 +16,11 @@ const { publicErrorMessage } = require("../lib/httpError");
 const { scopeFor, inScope } = require("../lib/userScope");
 const { checkPassword } = require("../lib/reauth");
 const { getters: site } = require("../lib/siteSettings");
+const { departmentOf } = require("../lib/departments");
+const { syncStaffName, formalName } = require("../lib/staffName");
+const Intake = require("../models/ProponentIntake");
+const { scopeFor: intakeScopeFor, assignFromIntake } = require("./c_intakes");
+const { resolveAvatar, avatarContentType } = require("../lib/avatarStorage");
 
 /** Translates a raw MSSQL unique-constraint violation (error 2627/2601) on
  * dbo.users into a friendly message plus which field it belongs to, so the
@@ -48,7 +53,7 @@ async function userAuditSnapshot(id) {
     full_name: user.full_name,
     is_active: Boolean(user.is_active),
     role: (user.roles || []).map((r) => r.name).join(", ") || null,
-    assessment_level: user.assessment_level === 1 ? "Level 1" : "Level 2",
+    assessment_level: user.assessment_level === 1 ? "Manager" : "Officer",
     department: user.department_name ?? null,
     business_name: proponent?.business_name ?? null,
     address: proponent?.address ?? null,
@@ -66,15 +71,17 @@ async function userAuditSnapshot(id) {
  * password they're required to replace on first login. Includes the
  * username (the password alone isn't enough to sign in) and a direct link
  * to the portal. */
-function sendTempPasswordEmail({ to, name, username, tempPassword, isNewAccount }) {
+function sendTempPasswordEmail({ to, name, username, tempPassword, isNewAccount, staff = false }) {
+  // Staff sign in to the portal itself; locators to the Locator Portal.
+  const portal = staff ? site.portalLabel() : site.locatorPortalLabel();
   const intro = isNewAccount
-    ? `An account was created for you on the ${site.locatorPortalLabel()}.`
+    ? `An account was created for you on ${staff ? portal : `the ${portal}`}.`
     : "An administrator reset your password.";
   const loginUrl = `${String(process.env.FRONTEND_URL || "").replace(/\/+$/, "")}/`;
   const contact = site.contactPhrase();
   return sendMail({
     to,
-    subject: isNewAccount ? `Your ${site.locatorPortalLabel()} account` : `Your ${site.locatorPortalLabel()} password was reset`,
+    subject: isNewAccount ? `Your ${portal} account` : `Your ${portal} password was reset`,
     text:
       `Hello ${name},\n\n${intro}\n\n` +
       `Username: ${username}\n` +
@@ -153,6 +160,26 @@ exports.checkAvailability = async (req, res) => {
   }
 };
 
+/** Another user's photo, for User Management's list (own photo: /api/profile/avatar). */
+exports.getAvatar = async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).end();
+    const rows = await selectData(`SELECT avatar_path FROM dbo.users WHERE id = @param0`, [id]);
+    const stored = rows?.[0]?.avatar_path;
+    const abs = resolveAvatar(stored);
+    if (!abs) return res.status(404).end();
+    res.set("Cache-Control", "private, max-age=86400");
+    res.type(avatarContentType(stored));
+    return res.sendFile(abs, (err) => {
+      if (err && !res.headersSent) res.status(404).end();
+    });
+  } catch (error) {
+    console.error("Get user avatar error:", error);
+    return res.status(500).end();
+  }
+};
+
 exports.getById = async (req, res) => {
   try {
     const id = Number(req.params.id);
@@ -217,6 +244,9 @@ exports.create = async (req, res) => {
       email,
       phone,
       full_name,
+      first_name,
+      middle_name,
+      last_name,
       password,
       is_active,
       role_id,
@@ -273,11 +303,17 @@ exports.create = async (req, res) => {
       if (passwordError) return res.status(400).json({ success: false, message: passwordError });
     }
 
+    // Staff: First / Middle / Surname; full_name becomes the "AO - Jane_IP"
+    // label right after (lib/staffName.js). Locators keep full_name as typed.
+    const nameParts = !isLocatorAccount && String(first_name || "").trim() ? { first: first_name, middle: middle_name, last: last_name } : null;
+    if (!isLocatorAccount && !nameParts && !String(full_name || "").trim()) {
+      return res.status(400).json({ success: false, message: "First name is required.", field: "first_name" });
+    }
     const row = await User.createUser({
       username,
       email,
       phone,
-      full_name,
+      full_name: nameParts ? formalName(nameParts) : full_name,
       password: effectivePassword,
       is_active: isDeferredLocator ? 0 : is_active,
       role_id,
@@ -285,6 +321,11 @@ exports.create = async (req, res) => {
       assessment_level,
       department_id: department.value,
     });
+
+    if (row && !isLocatorAccount) {
+      const label = await syncStaffName(row.id, nameParts || undefined);
+      if (label) row.full_name = label;
+    }
 
     // Create the linked proponent record now so it's pickable from the New
     // Application locator dropdown right away. Best-effort: a failure here
@@ -318,6 +359,7 @@ exports.create = async (req, res) => {
         username: row.username,
         tempPassword: effectivePassword,
         isNewAccount: true,
+        staff: !isLocatorAccount,
       });
     }
 
@@ -372,6 +414,7 @@ exports.create = async (req, res) => {
 exports.createLocatorWithApplication = async (req, res) => {
   let createdUserId = null;
   let createdProponentId = null;
+  let claimedIntakeId = null;
   try {
     const {
       username,
@@ -390,7 +433,24 @@ exports.createLocatorWithApplication = async (req, res) => {
       is_renewal,
       save_as_draft,
       contract_type_id,
+      intake_id,
     } = req.body || {};
+    // A new proponent starts from BDO Level 1's intake (letter + the Level 2
+    // assigned); the Level 2 files it from there, under its business name.
+    let intake = null;
+    if (intake_id) {
+      intake = await Intake.getById(intake_id);
+      const intakeScope = await intakeScopeFor(req);
+      if (!intake || intake.status !== "OPEN") {
+        return res.status(409).json({ success: false, message: "This proponent was already filed or cancelled." });
+      }
+      if (!intakeScope.manager && Number(intake.assigned_to) !== Number(req.user?.id)) {
+        return res.status(403).json({ success: false, message: "This proponent is assigned to another BDO." });
+      }
+    } else if ((await departmentOf(req.user)) === "bdo") {
+      return res.status(400).json({ success: false, message: "New proponents start from the BDO - MANAGER (letter and assigned BDO)." });
+    }
+    const businessName = intake ? intake.business_name : business_name;
     if (land_use_id && !(await isKnownLandUse(land_use_id))) {
       return res.status(400).json({ success: false, message: "Unknown land use" });
     }
@@ -400,7 +460,7 @@ exports.createLocatorWithApplication = async (req, res) => {
 
     if (!username) return res.status(400).json({ success: false, message: "username is required" });
     if (!String(email || "").trim()) return res.status(400).json({ success: false, message: "email is required" });
-    if (!String(business_name || "").trim()) {
+    if (!String(businessName || "").trim()) {
       return res.status(400).json({ success: false, message: "business_name is required" });
     }
     if (!String(contact_no || "").trim()) {
@@ -434,6 +494,14 @@ exports.createLocatorWithApplication = async (req, res) => {
     const isDraft = Boolean(save_as_draft);
     const tempPassword = generateTempPassword();
 
+    // Taken before anything is made, so a second click/tab can't file it twice.
+    if (intake) {
+      if (!(await Intake.claim(intake.id))) {
+        return res.status(409).json({ success: false, message: "This proponent was already filed or cancelled." });
+      }
+      claimedIntakeId = intake.id;
+    }
+
     const user = await User.createUser({
       username,
       email,
@@ -450,7 +518,7 @@ exports.createLocatorWithApplication = async (req, res) => {
     try {
       proponent = await Proponent.createProponent({
         user_id: user.id,
-        business_name: String(business_name).trim(),
+        business_name: String(businessName).trim(),
         address: String(address).trim(),
         lease_address: lease_address ? String(lease_address).trim() : null,
           location: location ? String(location).trim() : null,
@@ -482,6 +550,13 @@ exports.createLocatorWithApplication = async (req, res) => {
       // message the admin can act on — only mask genuine failures.
       if (error?.status === 400) throw error;
       throw Object.assign(new Error("Failed to create the application."), { status: 500 });
+    }
+
+    if (intake) {
+      await Intake.attachApplication(intake.id, application.id);
+      claimedIntakeId = null;
+      // Saved as a draft, it reaches the Level 2 on submit (c_applications.submit).
+      if (!isDraft) await assignFromIntake(application.id);
     }
 
     let mailResult = { sent: false };
@@ -518,13 +593,15 @@ exports.createLocatorWithApplication = async (req, res) => {
       data: { user, proponent, application },
       emailSent: isDraft ? undefined : mailResult.sent,
       message: isDraft
-        ? "Saved as draft — the locator's login and temporary password will be emailed automatically once the application is submitted."
+        ? "Saved as draft — the proponent's login and temporary password will be emailed automatically once the application is submitted."
         : mailResult.sent
           ? `Application filed. A temporary password was emailed to ${user.email}.`
           : `Application filed, but the credentials email could not be sent (SMTP isn't configured on this server) — check the server console for the temporary password.`,
     });
   } catch (error) {
     console.error("Create locator with application error:", error);
+    // Not filed after all: back to the Level 2's list.
+    if (claimedIntakeId) await Intake.reopen(claimedIntakeId).catch(() => {});
     // Undo whatever this request already created, in reverse order, so a
     // partial failure never leaves an account without its application.
     if (createdProponentId) {
@@ -552,6 +629,9 @@ exports.update = async (req, res) => {
       email,
       phone,
       full_name,
+      first_name,
+      middle_name,
+      last_name,
       password,
       is_active,
       role_id,
@@ -581,6 +661,9 @@ exports.update = async (req, res) => {
       const passwordError = validatePasswordStrength(password);
       if (passwordError) return res.status(400).json({ success: false, message: passwordError });
     }
+    if (first_name !== undefined && !String(first_name || "").trim()) {
+      return res.status(400).json({ success: false, message: "First name is required.", field: "first_name" });
+    }
     const before = await userAuditSnapshot(id);
     const row = await User.updateUser(id, {
       username,
@@ -594,6 +677,9 @@ exports.update = async (req, res) => {
       department_id: department.value,
     });
     if (!row) return res.status(404).json({ success: false, message: "User not found" });
+    // Staff: new name parts and/or role → a fresh "AO - Jane_IP" label (no-op for locators).
+    const label = await syncStaffName(id, first_name !== undefined ? { first: first_name, middle: middle_name, last: last_name } : undefined);
+    if (label) row.full_name = label;
 
     // Mirrors exports.create's best-effort linked-proponent write: this is
     // the admin-direct edit path (gated by the same settings:locator-users
@@ -811,6 +897,7 @@ exports.resetPassword = async (req, res) => {
       username: user.username,
       tempPassword,
       isNewAccount: false,
+      staff: !(user.roles || []).some((r) => String(r?.name || "").trim().toLowerCase() === "proponent"),
     });
 
     await AuditLog.record({

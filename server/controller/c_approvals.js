@@ -117,7 +117,7 @@ exports.assignAccountOfficer = async (req, res) => {
     const id = appIdParam(req, res);
     if (id === null) return undefined;
     if (!(await isAccountOfficerLevel1(req))) {
-      return res.status(403).json({ success: false, message: "Only Level 1 can assign an Account Officer." });
+      return res.status(403).json({ success: false, message: "Only a Manager can assign an Account Officer." });
     }
     const data = await Approval.assignAccountOfficer(id, {
       accountOfficerId: req.body?.account_officer_id,
@@ -289,7 +289,7 @@ exports.saveContract = async (req, res) => {
     if (!(await ensureApprovalAccess(req, res, id))) return undefined;
     // Level 2 makes the contract in the evaluation; Level 1 only checks it.
     if (String(req.user?.role || "").toLowerCase() !== "admin") {
-      return res.status(403).json({ success: false, message: "The contract is made by Level 2 on the evaluation's Contract tab." });
+      return res.status(403).json({ success: false, message: "The contract is made by the evaluator on the evaluation's Contract tab." });
     }
     const row = await Approval.saveContract(id, req.body || {}, req.user?.id ?? null);
     if (!row) return res.status(404).json({ success: false, message: "Application not found" });

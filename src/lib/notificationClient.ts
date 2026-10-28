@@ -22,8 +22,8 @@ function mapNotificationRows(rows: any[], userRole: Role, userId?: number | null
           ? 'approval'
           : rawCategory === 'assessment_assigned'
             ? 'assessment'
-            : rawCategory === 'locator_assigned'
-              ? 'locator_assigned'
+            : rawCategory === 'locator_assigned' || rawCategory === 'proponent_intake'
+              ? rawCategory
               : rawCategory === 'system'
                 ? 'system'
                 : 'application_status';
@@ -56,7 +56,10 @@ function mapNotificationRows(rows: any[], userRole: Role, userId?: number | null
               : Number(row?.application_is_renewal) === 1
                 ? '/applications/renewals'
                 : '/applications/new'
-      : undefined;
+      : // A new proponent to file (no application yet): New Proponent.
+        category === 'proponent_intake'
+        ? '/applications/new-proponent'
+        : undefined;
     const isRead =
       statusNum === 2 || statusText === 'READ' || statusText === 'SEEN' || statusText === 'READ_BY_USER';
     const rawActorRole = String(row?.actor_role ?? '').trim().toLowerCase();
@@ -201,6 +204,8 @@ export function getNotificationCategoryLabel(value: string | undefined) {
       return 'New Assignment';
     case 'locator_assigned':
       return 'New Locator';
+    case 'proponent_intake':
+      return 'New Proponent';
     case 'system':
       return 'System alert';
     case 'contract':

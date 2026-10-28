@@ -6,6 +6,7 @@ const { departmentOf } = require("../lib/departments");
 const { checkMenuAllowed } = require("../middleware/m_auth");
 const Proponent = require("../models/Proponent");
 const Notification = require("../models/Notification");
+const { partyOf } = require("../lib/party");
 
 function fail(res, error, label) {
   console.error(`${label} error:`, error);
@@ -191,7 +192,7 @@ exports.assign = async (req, res) => {
     const id = appIdParam(req, res);
     if (id === null) return undefined;
     if (!(await scopeFor(req)).manager) {
-      return res.status(403).json({ success: false, message: "Only Level 1 can assign evaluators." });
+      return res.status(403).json({ success: false, message: "Only a Manager can assign evaluators." });
     }
     if (!(await ensureCanAct(req, res, id))) return undefined;
     const { evaluator_id } = req.body || {};
@@ -286,7 +287,7 @@ exports.officerReview = async (req, res) => {
     if (!signed?.document_id) {
       return res.status(409).json({
         success: false,
-        message: "Upload the signed contract first (Contract tab) — the review goes to Level 1 with it.",
+        message: "Upload the signed contract first (Contract tab) — the review goes to the Manager with it.",
       });
     }
     const { recommendation, summary } = req.body || {};
@@ -321,7 +322,7 @@ exports.returnToOfficer = async (req, res) => {
     const id = appIdParam(req, res);
     if (id === null) return undefined;
     if (!(await scopeFor(req)).manager) {
-      return res.status(403).json({ success: false, message: "Only Level 1 can return a review." });
+      return res.status(403).json({ success: false, message: "Only a Manager can return a review." });
     }
     if (!(await ensureCanAct(req, res, id))) return undefined;
     const { note } = req.body || {};
@@ -349,7 +350,7 @@ exports.forApproval = async (req, res) => {
     const id = appIdParam(req, res);
     if (id === null) return undefined;
     if (!(await scopeFor(req)).manager) {
-      return res.status(403).json({ success: false, message: "Only Level 1 can send an application for approval." });
+      return res.status(403).json({ success: false, message: "Only a Manager can send an application for approval." });
     }
     if (!(await ensureCanAct(req, res, id))) return undefined;
     const data = await Assessment.sendForApproval(id, { summary: req.body?.summary, actorId: req.user?.id ?? null });
@@ -378,7 +379,7 @@ const Terms = require("../models/ApplicationTerms");
 async function ensureTermsEditable(res, applicationId, req) {
   // Level 2 writes the terms and makes the contract; Level 1 only checks them.
   if (req && String(req.user?.role || "").toLowerCase() !== "admin" && (await scopeFor(req)).manager) {
-    res.status(403).json({ success: false, message: "The terms and the contract are done by the assigned Level 2." });
+    res.status(403).json({ success: false, message: "The terms and the contract are done by the assigned evaluator." });
     return false;
   }
   const asm = await Assessment.getOrCreateAssessment(applicationId, null);
@@ -466,7 +467,7 @@ exports.saveContract = async (req, res) => {
     if (!(await ensureTermsEditable(res, id, req))) return undefined;
     const terms = await Terms.getForApplication(id);
     if (terms?.status !== "AGREED") {
-      return res.status(409).json({ success: false, message: "The locator hasn't agreed to the terms and conditions yet." });
+      return res.status(409).json({ success: false, message: `The ${await partyOf(id)} hasn't agreed to the terms and conditions yet.` });
     }
     // The signed scan must be a file uploaded to this same application.
     const documentId = req.body?.document_id == null || req.body?.document_id === "" ? undefined : Number(req.body.document_id);
@@ -542,7 +543,7 @@ exports.generateLeaseAgreement = async (req, res) => {
     if (!(await ensureCanAct(req, res, id))) return undefined;
     const terms = await Terms.getForApplication(id);
     if (terms?.status !== "AGREED") {
-      return res.status(409).json({ success: false, message: "The locator hasn't agreed to the terms and conditions yet." });
+      return res.status(409).json({ success: false, message: `The ${await partyOf(id)} hasn't agreed to the terms and conditions yet.` });
     }
     const doc = await require("../lib/leaseAgreement").generate(id, req.body?.values, req.user?.id);
     if (!doc) return res.status(404).json({ success: false, message: "Application not found" });

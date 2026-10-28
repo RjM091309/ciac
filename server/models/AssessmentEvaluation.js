@@ -9,6 +9,7 @@ const Notification = require("./Notification");
 const Workflow = require("./ApplicationWorkflow");
 const ControlPanelPermission = require("./ControlPanelPermission");
 const Role = require("./Role");
+const { partyOf } = require("../lib/party");
 
 function toInt(v) {
   const n = Number(v);
@@ -710,7 +711,7 @@ async function setStage(applicationId, { stage, actorId }) {
   const next = pick(stage, ["ASSIGNED", "IN_REVIEW"]);
   if (!next) throw new Error("Invalid stage");
   if (asm.stage === "FOR_RECOMMENDATION") {
-    throw businessError("This assessment is waiting for Level 1's recommendation — Level 1 can return it to Level 2.");
+    throw businessError("This assessment is waiting for the Manager's recommendation — the Manager can return it to the evaluator.");
   }
   if (!asm.assigned_evaluator_id) {
     throw businessError("Assign an evaluator first.");
@@ -899,7 +900,7 @@ async function submitOfficerReview(applicationId, { recommendation, summary, act
   if (!asm) return null;
   if (!asm.assigned_evaluator_id) throw businessError("Assign an evaluator before submitting a review.");
   if (!["ASSIGNED", "IN_REVIEW"].includes(asm.stage)) {
-    throw businessError("This review has already been submitted to Level 1.");
+    throw businessError("This review has already been submitted to the Manager.");
   }
   // Everything the locator uploaded must be verified or rejected first.
   // Requirements with no upload don't block (they can be noted in the remarks).
@@ -918,7 +919,9 @@ async function submitOfficerReview(applicationId, { recommendation, summary, act
   const n = Number(unchecked?.[0]?.n || 0);
   if (n > 0) {
     throw businessError(
-      `Verify or reject the ${n} uploaded requirement${n === 1 ? "" : "s"} first — the locator's upload${n === 1 ? " hasn't" : "s haven't"} been checked yet.`
+      `Verify or reject the ${n} uploaded requirement${n === 1 ? "" : "s"} first — the ${await partyOf(applicationId)}'s upload${
+        n === 1 ? " hasn't" : "s haven't"
+      } been checked yet.`
     );
   }
   // Level 2 submits a summary only; a recommendation is optional (Level 1
@@ -939,7 +942,7 @@ async function submitOfficerReview(applicationId, { recommendation, summary, act
     [asm.id, rec, note || null, toInt(actorId)]
   );
   if (!result?.rowsAffected?.[0]) {
-    throw businessError("This review has already been submitted to Level 1.");
+    throw businessError("This review has already been submitted to the Manager.");
   }
   await logActivity(
     asm.id,
@@ -953,7 +956,7 @@ async function submitOfficerReview(applicationId, { recommendation, summary, act
     applicationId,
     actorId,
     subject: `For recommendation: ${app?.application_no || ""}`.trim(),
-    body: `${await userName(actorId)} finished reviewing application ${app?.application_no || ""}${rec ? ` (${rec})` : ""} — it's waiting for Level 1's recommendation.`,
+    body: `${await userName(actorId)} finished reviewing application ${app?.application_no || ""}${rec ? ` (${rec})` : ""} — it's waiting for the Manager's recommendation.`,
   });
   return getAssessmentDetail(applicationId);
 }
@@ -975,7 +978,7 @@ async function returnToOfficer(applicationId, { note, actorId }) {
     [asm.id, toInt(actorId)]
   );
   if (!result?.rowsAffected?.[0]) {
-    throw businessError("Only a review waiting for Level 1's recommendation can be returned to Level 2.");
+    throw businessError("Only a review waiting for the Manager's recommendation can be returned to the evaluator.");
   }
   await logActivity(asm.id, "RETURNED_TO_OFFICER", text ? text.slice(0, 1000) : null, actorId);
 
@@ -984,7 +987,7 @@ async function returnToOfficer(applicationId, { note, actorId }) {
     applicationId,
     actorId,
     subject: `Returned for review: ${app?.application_no || ""}`.trim(),
-    body: `Level 1 returned application ${app?.application_no || ""} for further review${text ? `: ${text.slice(0, 300)}` : "."}`,
+    body: `The Manager returned application ${app?.application_no || ""} for further review${text ? `: ${text.slice(0, 300)}` : "."}`,
   });
   return getAssessmentDetail(applicationId);
 }
@@ -1015,7 +1018,7 @@ async function returnFromApproval(applicationId, { note, actorId }) {
     applicationId,
     actorId,
     subject: `Returned for review: ${app?.application_no || ""}`.trim(),
-    body: `Level 1 returned application ${app?.application_no || ""} for further review${text ? `: ${text.slice(0, 300)}` : "."}`,
+    body: `The Manager returned application ${app?.application_no || ""} for further review${text ? `: ${text.slice(0, 300)}` : "."}`,
   });
   return getAssessmentDetail(applicationId);
 }
@@ -1036,7 +1039,7 @@ async function submitRecommendation(applicationId, { recommendation, summary, ac
     throw businessError("A recommendation has already been submitted for this assessment. An admin must reopen it first.");
   }
   if (asm.stage !== "FOR_RECOMMENDATION") {
-    throw businessError("The assigned Level 2 must submit their review before Level 1's recommendation.");
+    throw businessError("The assigned evaluator must submit their review before the Manager's recommendation.");
   }
   const rec = pick(recommendation, RECOMMENDATIONS);
   if (!rec) throw new Error("Invalid recommendation");
@@ -1050,7 +1053,7 @@ async function submitRecommendation(applicationId, { recommendation, summary, ac
     approver = rows?.[0] || null;
     if (!approver) throw businessError("Couldn't find your account to assign the approval to.");
   } else if (rec === "ENDORSE") {
-    throw businessError("Use For Approval — Level 1 approves the application themselves.");
+    throw businessError("Use For Approval — the Manager approves the application themselves.");
   }
 
   const nextStage = "COMPLETED";

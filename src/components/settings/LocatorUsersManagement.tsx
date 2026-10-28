@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ArrowRight, Ban, KeyRound, LogOut, Pencil, RotateCcw, Search, ShieldCheck, ShieldOff, Smartphone, UserX, X } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { toast } from 'sonner';
@@ -9,10 +9,10 @@ import { Skeleton, TableSkeleton } from '../ui/Skeleton';
 import { EmptyState } from '../ui/EmptyState';
 import { AddressAutocomplete } from '../ui/AddressAutocomplete';
 import { AppSelect } from '../ui/AppSelect';
+import { IntakeLetterLink, type Intake } from '../applications/intakeShared';
 import { RowActionsMenu, type RowActionItem } from '../ui/RowActionsMenu';
 import { useSessionStorageCachedResource } from '../../hooks/useSessionStorageCachedResource';
 import { useControlPanelAccess } from '../../context/ControlPanelAccessContext';
-import { loadProgressForApplications, type ProgressSummary } from '../../lib/applicationProgress';
 import { useLiveRefresh } from '../../lib/liveData';
 
 const MENU_KEY = 'settings:locator-users';
@@ -77,14 +77,25 @@ function isLocatorRoleName(name: string) {
   return String(name || '').trim().toUpperCase() === 'PROPONENT';
 }
 
-const EMPTY_PROGRESS: Record<number, ProgressSummary> = {};
+
 
 export function LocatorUsersManagement({
   locationSearch = '',
   navigate,
+  panelsOnly = false,
+  startIntake = null,
+  continueApplicationId = null,
+  onPanelsDone,
 }: {
   locationSearch?: string;
   navigate?: (to: string, opts?: { replace?: boolean }) => void;
+  /** New Proponent: render only the form panels, opened for `startIntake`
+   * (Start application) or `continueApplicationId` (Continue draft);
+   * `onPanelsDone` once they close. */
+  panelsOnly?: boolean;
+  startIntake?: Intake | null;
+  continueApplicationId?: number | null;
+  onPanelsDone?: () => void;
 } = {}) {
   const { fullAccess, crudPermissions } = useControlPanelAccess();
   const perm = crudPermissions[MENU_KEY] || { can_add: false, can_edit: false, can_delete: false };
@@ -109,6 +120,24 @@ export function LocatorUsersManagement({
   }, []);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<UserRow | null>(null);
+  // A BDO (or admin: `allowed`) starts new proponents on New Proponent —
+  // BDO Level 1 records them, the assigned Level 2 files them from there with
+  // this page's form (panelsOnly). Other roles keep the plain New Record form.
+  const [intakeAccess, setIntakeAccess] = useState({ allowed: false, loaded: false });
+  const [startingIntake, setStartingIntake] = useState<Intake | null>(null);
+  const loadIntakes = useCallback(async () => {
+    try {
+      const res = await fetch(api('/api/intakes?mine=1'), { credentials: 'include' });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error();
+      setIntakeAccess({ allowed: Boolean(json?.allowed), loaded: true });
+    } catch {
+      setIntakeAccess((p) => ({ ...p, loaded: true }));
+    }
+  }, []);
+  useEffect(() => {
+    void loadIntakes();
+  }, [loadIntakes]);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [confirmDeactivateId, setConfirmDeactivateId] = useState<number | null>(null);
   // A DRAFT application has nowhere else to be finished now that New
@@ -265,7 +294,10 @@ export function LocatorUsersManagement({
     },
   });
   // Live: re-fetch quietly when something changes for this user (lib/liveData.ts).
-  useLiveRefresh(() => refresh({ showLoading: false }).catch(() => {}));
+  useLiveRefresh(() => {
+    refresh({ showLoading: false }).catch(() => {});
+    void loadIntakes();
+  });
 
   // Type of Contract decides which requirements get attached when the
   // application is created (see ApplicationWorkflow.createApplication).
@@ -299,10 +331,6 @@ export function LocatorUsersManagement({
   const companyByUserId = usersRoles?.companyByUserId ?? {};
   const applicationByUserId = usersRoles?.applicationByUserId ?? {};
   const statusRefByUserId = usersRoles?.statusRefByUserId ?? {};
-  const applicationTypeNameByCode = useMemo(
-    () => Object.fromEntries(applicationTypeOptions.map((t) => [t.code, t.name])),
-    [applicationTypeOptions]
-  );
   const activeBusinessUserIds = useMemo(
     () => new Set<number>(usersRoles?.activeBusinessUserIds ?? []),
     [usersRoles?.activeBusinessUserIds]
@@ -314,8 +342,7 @@ export function LocatorUsersManagement({
   // "holds Locator among possibly several roles" instead would also sweep in
   // a multi-role staff account (e.g. admin also holding Proponent, for the
   // dashboard role-preview switcher) that isn't really a locator.
-  // Memoized: a fresh array every render would cascade through
-  // filteredUsers/pagedUsers and re-fire the per-row progress fetch below.
+  // Memoized: a fresh array every render would recompute filteredUsers/pagedUsers.
   const userRows = useMemo(
     () =>
       (Array.isArray(usersRoles?.users) ? usersRoles.users : []).filter(
@@ -338,7 +365,6 @@ export function LocatorUsersManagement({
     contact_no: '',
     application_type: 'DIRECT_LEASE',
     contract_type_id: '',
-    save_as_draft: false,
   });
   const [originalForm, setOriginalForm] = useState<typeof form | null>(null);
   const landUseOptions = useMemo(
@@ -463,59 +489,6 @@ export function LocatorUsersManagement({
     return filteredUsers.slice(start, start + pageSize);
   }, [filteredUsers, page, pageSize, totalPages]);
 
-  // Requirements-verification progress for the linked application of each
-  // VISIBLE row only (not the full filtered set) — same computation
-  // ApplicationsWorkflow.tsx uses, but this page can list hundreds of
-  // accounts, so it's scoped to the current page to avoid firing that many
-  // parallel requirement/document fetches at once.
-  // Keyed on the visible application ids (not the pagedUsers array itself),
-  // and results are merged into a cache, so typing in the search box only
-  // fetches applications that weren't already loaded. The cache is tied to
-  // the usersRoles snapshot it was built for, so a data reload starts fresh
-  // (progress may have changed) without a separate reset effect racing the
-  // fetch below.
-  const [progressCache, setProgressCache] = useState<{
-    source: UsersRolesData | null | undefined;
-    data: Record<number, ProgressSummary>;
-  }>({ source: null, data: {} });
-  const progressByApp = progressCache.source === usersRoles ? progressCache.data : EMPTY_PROGRESS;
-  const visibleAppIdsKey = useMemo(
-    () =>
-      Array.from(
-        new Set(pagedUsers.map((u) => applicationByUserId[u.id]?.id).filter((id): id is number => Boolean(id)))
-      )
-        .sort((a, b) => a - b)
-        .join(','),
-    [pagedUsers, applicationByUserId]
-  );
-  useEffect(() => {
-    const missing = visibleAppIdsKey
-      ? visibleAppIdsKey
-          .split(',')
-          .map(Number)
-          .filter((id) => !(id in progressByApp))
-      : [];
-    if (!missing.length) return;
-    let cancelled = false;
-    const source = usersRoles;
-    loadProgressForApplications(missing, api)
-      .then((next) => {
-        if (cancelled) return;
-        setProgressCache((prev) => ({
-          source,
-          data: { ...(prev.source === source ? prev.data : {}), ...next },
-        }));
-      })
-      .catch(() => {
-        // keep the table usable even if the progress fetch fails
-      });
-    return () => {
-      cancelled = true;
-    };
-    // progressByApp is read, not tracked: including it would re-run this
-    // after every merge.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visibleAppIdsKey, usersRoles]);
 
   const showingRange = useMemo(() => {
     if (filteredUsers.length === 0) return { from: 0, to: 0 };
@@ -593,7 +566,8 @@ export function LocatorUsersManagement({
     if (page > totalPages) setPage(totalPages);
   }, [page, totalPages]);
 
-  function openCreate() {
+  function openCreate(intake: Intake | null = null) {
+    setStartingIntake(intake);
     setEditing(null);
     setOriginalForm(null);
     setFieldErrors({});
@@ -601,7 +575,7 @@ export function LocatorUsersManagement({
       username: '',
       email: '',
       full_name: '',
-      business_name: '',
+      business_name: intake?.business_name ?? '',
       address: '',
       lease_address: '',
       location: '',
@@ -611,12 +585,12 @@ export function LocatorUsersManagement({
       contact_no: '',
       application_type: 'DIRECT_LEASE',
       contract_type_id: '',
-      save_as_draft: false,
-    });
+      });
     setIsCreateOpen(true);
   }
 
   async function openEdit(u: UserRow) {
+    setStartingIntake(null);
     setIsCreateOpen(true);
     setEditing(u);
     setFieldErrors({});
@@ -637,8 +611,7 @@ export function LocatorUsersManagement({
       // one consistent shape between create and edit.
       application_type: 'DIRECT_LEASE',
       contract_type_id: '',
-      save_as_draft: false,
-    };
+      };
     setForm(baseline);
     setOriginalForm(baseline);
 
@@ -668,7 +641,7 @@ export function LocatorUsersManagement({
     }
   }
 
-  async function save() {
+  async function save(asDraft = false) {
     if (!locatorRole) {
       toast.error('No Locator role found — set it up in Manage Roles first.');
       return;
@@ -697,7 +670,8 @@ export function LocatorUsersManagement({
           contact_no: form.contact_no.trim(),
           application_type: form.application_type,
           contract_type_id: form.contract_type_id ? Number(form.contract_type_id) : null,
-          save_as_draft: form.save_as_draft,
+          save_as_draft: asDraft,
+          intake_id: startingIntake?.id,
         };
 
         if (!payload.username) throw new Error('Username is required');
@@ -720,8 +694,10 @@ export function LocatorUsersManagement({
         }
 
         setIsCreateOpen(false);
+        setStartingIntake(null);
         await refresh({ showLoading: false });
-        if (form.save_as_draft) {
+        void loadIntakes();
+        if (asDraft) {
           toast.success(json.message || 'Locator account and draft application created.');
         } else if (json.emailSent) {
           toast.success(json.message || 'Locator account and application created — a temporary password was emailed.');
@@ -1174,353 +1150,74 @@ export function LocatorUsersManagement({
     return renderUserActions(u);
   }
 
-  return (
-    <div className="space-y-4 sm:space-y-5">
-      <div className="grid grid-cols-4 gap-2 sm:gap-4 mt-3">
-        <StatCard label="Active Accounts" value={String(stats.active)} />
-        <StatCard label="Total Accounts" value={String(stats.total)} />
-        <StatCard label="Suspended" value={String(stats.suspended)} />
-        <StatCard label="Deactivated" value={String(stats.inactive)} />
-      </div>
+  // BDO and admin start new proponents on New Proponent (Level 1 records,
+  // Level 2 files), so no New Record here; only other roles keep it. Hidden
+  // until that's known, so it never flashes.
+  const newRecordAllowed = intakeAccess.loaded && !intakeAccess.allowed;
+  const onNewRecord = () => openCreate();
 
-      <div
-        className="glass-card p-4 sm:p-5 !border-transparent"
-        style={{ backgroundColor: 'var(--surface)' }}
-      >
-        <div className="flex items-center justify-between mb-3 gap-2">
-          <h3 className="text-sm font-bold tracking-tight" style={{ color: 'var(--text)' }}>
-            Locator Account List
-          </h3>
-          {canAdd ? (
-            <button
-              className="shrink-0 whitespace-nowrap inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-semibold shadow-sm cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-              style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
-              onClick={openCreate}
-              disabled={!locatorRole}
-              title={locatorRole ? undefined : 'No Locator role found — set it up in Manage Roles first.'}
-            >
-              + New Record
-            </button>
-          ) : null}
-        </div>
 
-        {error && (
-          <div className="mb-3 rounded-lg border px-3 py-2 text-xs" style={{ borderColor: 'var(--border-subtle)', color: '#fca5a5' }}>
-            {error}
-          </div>
-        )}
+  // panelsOnly: open the asked-for form once the data it needs is in, and
+  // report back when it's closed (saved or cancelled).
+  // Fresh data, not the 5-minute cache: a draft just saved must be found.
+  const [panelsDataReady, setPanelsDataReady] = useState(!panelsOnly);
+  useEffect(() => {
+    if (!panelsOnly) return;
+    refresh({ showLoading: false })
+      .catch(() => {})
+      .finally(() => setPanelsDataReady(true));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const startIntakeId = startIntake?.id ?? null;
+  useEffect(() => {
+    if (!panelsOnly || !startIntake || !panelsDataReady) return;
+    if (locatorRole) openCreate(startIntake);
+    else {
+      toast.error('No Locator role found — set it up in Manage Roles first.');
+      onPanelsDone?.();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [panelsOnly, startIntakeId, panelsDataReady]);
+  const draftUser = useMemo(() => {
+    if (!panelsOnly || !continueApplicationId) return null;
+    const uid = Object.keys(applicationByUserId).find((k) => applicationByUserId[Number(k)]?.id === continueApplicationId);
+    return uid ? userRows.find((u) => u.id === Number(uid)) || null : null;
+  }, [panelsOnly, continueApplicationId, applicationByUserId, userRows]);
+  useEffect(() => {
+    if (!panelsOnly || !continueApplicationId || !panelsDataReady) return;
+    if (draftUser) goToApplication(draftUser, applicationByUserId[draftUser.id]);
+    else {
+      toast.error("Couldn't open this draft — refresh the page and try again.");
+      onPanelsDone?.();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [panelsOnly, continueApplicationId, panelsDataReady]);
+  const panelOpen = isCreateOpen || continuingDraft !== null;
+  const [panelWasOpen, setPanelWasOpen] = useState(false);
+  useEffect(() => {
+    if (!panelsOnly) return;
+    if (panelOpen) setPanelWasOpen(true);
+    else if (panelWasOpen) {
+      setPanelWasOpen(false);
+      onPanelsDone?.();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [panelOpen]);
 
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-3">
-          <div className="relative group w-full sm:w-72">
-            <Search
-              className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)] group-focus-within:text-[var(--text)] transition-colors pointer-events-none"
-              size={14}
-            />
-            <input
-              type="text"
-              placeholder="Search locator accounts..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="h-9 rounded-full pl-9 pr-3 text-xs w-full focus:outline-none focus:ring-1 focus:ring-[var(--border)] text-[var(--text)] placeholder:text-[var(--text-muted)] transition-all"
-              style={{
-                backgroundColor: 'color-mix(in oklab, var(--control-bg) 70%, transparent)',
-              }}
-            />
-          </div>
-          {statusFilterCodes.length > 0 ? (
-            <button
-              type="button"
-              onClick={() => setStatusFilterCodes([])}
-              className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[11px] font-semibold cursor-pointer shrink-0"
-              style={{ backgroundColor: 'rgba(59,130,246,.14)', color: '#3b82f6', border: '1px solid rgba(59,130,246,.38)' }}
-              title="Clear status filter"
-            >
-              Filtered: {statusFilterCodes.map((c) => c.charAt(0) + c.slice(1).toLowerCase()).join(', ')}
-              <X size={12} />
-            </button>
-          ) : null}
-          {hasBusinessFilter ? (
-            <button
-              type="button"
-              onClick={() => setHasBusinessFilter(false)}
-              className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[11px] font-semibold cursor-pointer shrink-0"
-              style={{ backgroundColor: 'rgba(59,130,246,.14)', color: '#3b82f6', border: '1px solid rgba(59,130,246,.38)' }}
-              title="Clear filter"
-            >
-              Filtered: Has registered business
-              <X size={12} />
-            </button>
-          ) : null}
-        </div>
-
-        {isLoading ? (
-          <div className="py-2">
-            <TableSkeleton columns={5} rows={5} />
-          </div>
-        ) : filteredUsers.length === 0 ? (
-          <EmptyState
-            title="No locator accounts found"
-            description={
-              searchQuery
-                ? 'Try adjusting your search filters.'
-                : 'There are no locator accounts to show here yet. Create one to get started.'
-            }
-            action={
-              !searchQuery && canAdd ? (
-                <button
-                  className="rounded-lg px-4 py-2 text-sm font-semibold shadow-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                  style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
-                  onClick={openCreate}
-                  disabled={!locatorRole}
-                >
-                  Create Locator Account
-                </button>
-              ) : undefined
-            }
-          />
-        ) : (
-          <>
-          {/* Phones: one card per account instead of a 6-column table */}
-          <div className="sm:hidden space-y-2">
-            {pagedUsers.map((u) => (
-              <div
-                key={u.id}
-                className="rounded-xl p-3"
-                style={{
-                  border: '1px solid var(--border-subtle)',
-                  backgroundColor: 'color-mix(in oklab, var(--control-bg) 35%, transparent)',
-                }}
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0 flex-1">
-                    <div className="text-[13px] font-semibold leading-snug break-words" style={{ color: 'var(--text)' }}>
-                      {u.full_name || u.username}
-                    </div>
-                    <div className="mt-0.5 text-[11px] text-secondary break-all">@{u.username}</div>
-                    {u.email ? <div className="text-[11px] text-secondary break-all">{u.email}</div> : null}
-                  </div>
-                  <div className="shrink-0 flex flex-wrap justify-end gap-1 max-w-[45%]">{renderStatusBadges(u)}</div>
-                </div>
-
-                {companyByUserId[u.id] ? (
-                  <div
-                    className="mt-2 pt-2 border-t"
-                    style={{ borderColor: 'var(--border-subtle)' }}
-                  >
-                    <div className="text-[9px] uppercase tracking-wider text-secondary mb-1">Company / Locator</div>
-                    {applicationByUserId[u.id] ? (
-                      <button
-                        type="button"
-                        // Registered (LOC/REN): the Account Officer's now — not opened from here.
-                        disabled={Boolean(statusRefByUserId[u.id])}
-                        className={`w-full text-left rounded-md -mx-1.5 -my-1 px-1.5 py-1 transition-colors ${
-                          statusRefByUserId[u.id]
-                            ? 'cursor-default'
-                            : 'cursor-pointer hover:bg-[var(--control-bg)] active:bg-[var(--selected-bg)]'
-                        }`}
-                        onClick={() => goToApplication(u, applicationByUserId[u.id])}
-                      >
-                        <div className="text-[12px] font-semibold break-words" style={{ color: 'var(--text)' }}>
-                          {companyByUserId[u.id]}
-                        </div>
-                        <div className="mt-0.5 flex items-center gap-1.5 flex-wrap">
-                          {/* NEW-/APP- while in process; the LOC Ref No once registered. */}
-                          <span className="text-[11px] text-secondary">
-                            {statusRefByUserId[u.id] || applicationByUserId[u.id].application_no}
-                          </span>
-                          <span
-                            className="inline-flex items-center rounded-full border px-1.5 py-0.5 text-[9px] font-medium"
-                            style={{ borderColor: 'var(--border-subtle)', color: 'var(--text-muted)' }}
-                          >
-                            {applicationTypeNameByCode[applicationByUserId[u.id].application_type] ||
-                              applicationByUserId[u.id].application_type}
-                          </span>
-                        </div>
-                      </button>
-                    ) : (
-                      <div className="text-[12px] font-semibold break-words" style={{ color: 'var(--text)' }}>
-                        {companyByUserId[u.id]}
-                      </div>
-                    )}
-                  </div>
-                ) : null}
-
-                <div className="mt-2.5 flex items-center justify-between gap-2">
-                  <div className="min-w-0">
-                    {u.totp_enabled === 1 ? (
-                      <span
-                        className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold"
-                        style={{ backgroundColor: 'rgba(34,197,94,.14)', color: 'rgba(34,197,94,.95)' }}
-                      >
-                        <ShieldCheck size={11} /> 2FA
-                      </span>
-                    ) : (
-                      <span className="text-[10px] text-secondary">2FA off</span>
-                    )}
-                  </div>
-                  <div className="shrink-0 flex items-center gap-0.5 -mr-1.5">{renderRowActions(u)}</div>
-                </div>
-              </div>
-            ))}
-          </div>
-
-          <div className="hidden sm:block overflow-x-auto">
-            <table className="min-w-full text-left text-xs">
-              <thead>
-                <tr>
-                  {['Company / Locator', 'Username', 'Full Name', 'Email', 'Industry Type', '2FA', 'Status', 'Progress', 'Actions'].map((col) => (
-                    <th
-                      key={col}
-                      className={cn(
-                        'px-3 py-2 font-semibold text-[10px] uppercase tracking-widest text-secondary border-b',
-                        col === 'Actions' && 'text-right pr-2'
-                      )}
-                      style={{ borderColor: 'var(--border-subtle)' }}
-                    >
-                      {col}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {pagedUsers.map((u) => (
-                  <tr key={u.id} className="border-b last:border-b-0" style={{ borderColor: 'var(--border-subtle)' }}>
-                    <td className="px-3 py-2 text-[11px]">
-                      {companyByUserId[u.id] ? (
-                        applicationByUserId[u.id] ? (
-                          <button
-                            type="button"
-                            // Registered (LOC/REN): the Account Officer's now — not opened from here.
-                            disabled={Boolean(statusRefByUserId[u.id])}
-                            className={`text-left rounded-md -mx-1.5 -my-1 px-1.5 py-1 transition-colors ${
-                              statusRefByUserId[u.id]
-                                ? 'cursor-default'
-                                : 'cursor-pointer hover:bg-[var(--control-bg)] active:bg-[var(--selected-bg)]'
-                            }`}
-                            onClick={() => goToApplication(u, applicationByUserId[u.id])}
-                          >
-                            <div className="font-semibold" style={{ color: 'var(--text)' }}>{companyByUserId[u.id]}</div>
-                            {/* NEW-/APP- while in process; LOC- once registered; REN- while renewing. */}
-                            <div className="mt-0.5 text-secondary">
-                              {statusRefByUserId[u.id] || applicationByUserId[u.id].application_no}
-                            </div>
-                          </button>
-                        ) : (
-                          <div style={{ color: 'var(--text)' }}>{companyByUserId[u.id]}</div>
-                        )
-                      ) : (
-                        <span className="text-secondary">-</span>
-                      )}
-                    </td>
-                    <td className="px-3 py-2 text-[11px]" style={{ color: 'var(--text)' }}>
-                      {u.username}
-                    </td>
-                    <td className="px-3 py-2 text-[11px] text-secondary">{u.full_name || '-'}</td>
-                    <td className="px-3 py-2 text-[11px] text-secondary">{u.email || '-'}</td>
-                    <td className="px-3 py-2 text-[11px] text-secondary">
-                      {applicationByUserId[u.id]
-                        ? applicationTypeNameByCode[applicationByUserId[u.id].application_type] ||
-                          applicationByUserId[u.id].application_type
-                        : '-'}
-                    </td>
-                    <td className="px-3 py-2 text-[11px]">
-                      {u.totp_enabled === 1 ? (
-                        <span
-                          className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold"
-                          style={{ backgroundColor: 'rgba(34,197,94,.14)', color: 'rgba(34,197,94,.95)' }}
-                        >
-                          <ShieldCheck size={11} /> On
-                        </span>
-                      ) : (
-                        <span className="text-secondary">-</span>
-                      )}
-                    </td>
-                    <td className="px-3 py-2 text-[11px]">
-                      {renderStatusBadges(u)}
-                    </td>
-                    <td className="px-3 py-2 text-[11px] min-w-[150px]">
-                      {applicationByUserId[u.id] ? (
-                        (() => {
-                          const progress = progressByApp[applicationByUserId[u.id].id];
-                          const percent = progress?.percent ?? 0;
-                          const submittedPercent = progress?.submittedPercent ?? 0;
-                          // Uploaded by the locator and not checked yet (rejected ones wait for a re-upload instead).
-                          const waiting = Math.max(0, (progress?.submitted ?? 0) - (progress?.verified ?? 0) - (progress?.rejected ?? 0));
-                          const barColor = percent >= 100 ? '#10b981' : percent >= 50 ? '#3b82f6' : '#f59e0b';
-                          return (
-                            <div>
-                              <div
-                                className="flex items-center gap-2"
-                                title={`${progress?.verified ?? 0} of ${progress?.total ?? 0} requirements verified · ${progress?.submitted ?? 0} uploaded by the locator`}
-                              >
-                                {/* Faint layer = submitted (uploaded), solid layer = verified. */}
-                                <div className="relative h-2 rounded-full overflow-hidden w-[90px]" style={{ backgroundColor: 'var(--input-border)' }}>
-                                  <div className="absolute inset-y-0 left-0 rounded-full opacity-35" style={{ width: `${submittedPercent}%`, backgroundColor: '#3b82f6' }} />
-                                  <div className="relative h-full rounded-full transition-all" style={{ width: `${percent}%`, backgroundColor: barColor }} />
-                                </div>
-                                <span className="font-semibold">{percent}%</span>
-                              </div>
-                              {/* The number is verified; a note only when uploads are waiting for the evaluator. */}
-                              {waiting > 0 ? (
-                                <div className="mt-0.5 text-[10px] text-secondary">
-                                  {waiting} uploaded, waiting for review
-                                </div>
-                              ) : null}
-                            </div>
-                          );
-                        })()
-                      ) : (
-                        <span className="text-secondary">-</span>
-                      )}
-                    </td>
-                    <td className="px-3 py-2 pr-2">
-                      <div className="flex items-center justify-end gap-1.5">
-                        {renderRowActions(u)}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-            <DataTableControls
-              page={page}
-              totalPages={totalPages}
-              totalItems={filteredUsers.length}
-              showingFrom={showingRange.from}
-              showingTo={showingRange.to}
-              visiblePageNumbers={visiblePageNumbers}
-              pageSize={pageSize}
-              pageSizeOptions={[20, 50, 100, 200]}
-              onPageSizeChange={(value) => setPageSize(value)}
-              onPageChange={(p) => setPage(p)}
-              loading={isLoading || isRevalidating}
-            />
-          </>
-        )}
-      </div>
-
+  // The account form and Continue Draft — also opened from New Proponent (panelsOnly).
+  const formPanels = (
+    <>
       <SidePanel
         open={isCreateOpen}
-        title={editing ? 'Edit Locator Account' : 'New Locator Account'}
+        title={editing ? 'Edit Locator Account' : startingIntake ? `New Application — ${startingIntake.business_name}` : 'New Locator Account'}
         subtitle="Users table, locked to the Locator role"
         onClose={() => setIsCreateOpen(false)}
-        onSave={save}
+        onSave={() => save(false)}
         saving={saving}
         saveDisabled={!canSubmit}
-        footerNote={
-          !editing ? (
-            <label className="flex items-center gap-2 text-[12px] cursor-pointer" style={{ color: 'var(--text)' }}>
-              <input
-                type="checkbox"
-                checked={form.save_as_draft}
-                onChange={(e) => setForm((p) => ({ ...p, save_as_draft: e.target.checked }))}
-              />
-              Save as draft — finish and submit later
-            </label>
-          ) : undefined
-        }
+        saveLabel={editing ? 'Save' : 'Submit Application'}
+        secondaryLabel={editing ? undefined : 'Save as draft'}
+        onSecondary={editing ? undefined : () => save(true)}
       >
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Field label="Username" error={fieldErrors.username} hint={checkingField === 'username' ? 'Checking availability…' : null}>
@@ -1623,10 +1320,15 @@ export function LocatorUsersManagement({
                   value={form.business_name}
                   onChange={(e) => setForm((p) => ({ ...p, business_name: e.target.value }))}
                   placeholder="e.g. SkyPort Logistics Inc."
-                  disabled={loadingProfile}
+                  disabled={loadingProfile || Boolean(startingIntake)}
                   required={!editing}
                 />
               </Field>
+              {startingIntake ? (
+                <div className="mt-2">
+                  <IntakeLetterLink intake={startingIntake} label={`View the letter (${startingIntake.letter_name || 'PDF'})`} />
+                </div>
+              ) : null}
             </div>
             <div className="sm:col-span-2">
               <Field label={editing ? 'Principal Address' : 'Principal Address *'}>
@@ -1677,6 +1379,8 @@ export function LocatorUsersManagement({
         onSave={() => saveContinueDraft(true)}
         saving={continuingDraftSaving}
         saveLabel="Submit Application"
+        secondaryLabel="Save as draft"
+        onSecondary={() => saveContinueDraft(false)}
         hideSave={!canEdit}
       >
         {continuingDraft ? (
@@ -1820,20 +1524,295 @@ export function LocatorUsersManagement({
               </div>
             </div>
 
-            {canEdit ? (
-            <button
-              type="button"
-              className="mt-4 w-full rounded-lg border px-3 py-2 text-[12px] font-semibold disabled:opacity-50 cursor-pointer"
-              style={{ borderColor: 'var(--border-subtle)', color: 'var(--text)' }}
-              disabled={continuingDraftSaving}
-              onClick={() => saveContinueDraft(false)}
-            >
-              Save Draft (don't submit yet)
-            </button>
-            ) : null}
           </fieldset>
         ) : null}
       </SidePanel>
+    </>
+  );
+
+  if (panelsOnly) return formPanels;
+
+  return (
+    <div className="space-y-4 sm:space-y-5">
+      <div className="grid grid-cols-4 gap-2 sm:gap-4 mt-3">
+        <StatCard label="Active Accounts" value={String(stats.active)} />
+        <StatCard label="Total Accounts" value={String(stats.total)} />
+        <StatCard label="Suspended" value={String(stats.suspended)} />
+        <StatCard label="Deactivated" value={String(stats.inactive)} />
+      </div>
+
+
+      <div
+        className="glass-card p-4 sm:p-5 !border-transparent"
+        style={{ backgroundColor: 'var(--surface)' }}
+      >
+        <div className="flex items-center justify-between mb-3 gap-2">
+          <h3 className="text-sm font-bold tracking-tight" style={{ color: 'var(--text)' }}>
+            Locator Account List
+          </h3>
+          {canAdd && newRecordAllowed ? (
+            <button
+              className="shrink-0 whitespace-nowrap inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-semibold shadow-sm cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+              style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
+              onClick={onNewRecord}
+              disabled={!locatorRole}
+              title={locatorRole ? undefined : 'No Locator role found — set it up in Manage Roles first.'}
+            >
+              + New Record
+            </button>
+          ) : null}
+        </div>
+
+        {error && (
+          <div className="mb-3 rounded-lg border px-3 py-2 text-xs" style={{ borderColor: 'var(--border-subtle)', color: '#fca5a5' }}>
+            {error}
+          </div>
+        )}
+
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-3">
+          <div className="relative group w-full sm:w-72">
+            <Search
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)] group-focus-within:text-[var(--text)] transition-colors pointer-events-none"
+              size={14}
+            />
+            <input
+              type="text"
+              placeholder="Search locator accounts..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="h-9 rounded-full pl-9 pr-3 text-xs w-full focus:outline-none focus:ring-1 focus:ring-[var(--border)] text-[var(--text)] placeholder:text-[var(--text-muted)] transition-all"
+              style={{
+                backgroundColor: 'color-mix(in oklab, var(--control-bg) 70%, transparent)',
+              }}
+            />
+          </div>
+          {statusFilterCodes.length > 0 ? (
+            <button
+              type="button"
+              onClick={() => setStatusFilterCodes([])}
+              className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[11px] font-semibold cursor-pointer shrink-0"
+              style={{ backgroundColor: 'rgba(59,130,246,.14)', color: '#3b82f6', border: '1px solid rgba(59,130,246,.38)' }}
+              title="Clear status filter"
+            >
+              Filtered: {statusFilterCodes.map((c) => c.charAt(0) + c.slice(1).toLowerCase()).join(', ')}
+              <X size={12} />
+            </button>
+          ) : null}
+          {hasBusinessFilter ? (
+            <button
+              type="button"
+              onClick={() => setHasBusinessFilter(false)}
+              className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[11px] font-semibold cursor-pointer shrink-0"
+              style={{ backgroundColor: 'rgba(59,130,246,.14)', color: '#3b82f6', border: '1px solid rgba(59,130,246,.38)' }}
+              title="Clear filter"
+            >
+              Filtered: Has registered business
+              <X size={12} />
+            </button>
+          ) : null}
+        </div>
+
+        {isLoading ? (
+          <div className="py-2">
+            <TableSkeleton columns={5} rows={5} />
+          </div>
+        ) : filteredUsers.length === 0 ? (
+          <EmptyState
+            title="No locator accounts found"
+            description={
+              searchQuery
+                ? 'Try adjusting your search filters.'
+                : 'There are no locator accounts to show here yet. Create one to get started.'
+            }
+            action={
+              !searchQuery && canAdd && newRecordAllowed ? (
+                <button
+                  className="rounded-lg px-4 py-2 text-sm font-semibold shadow-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
+                  onClick={onNewRecord}
+                  disabled={!locatorRole}
+                >
+                  Create Locator Account
+                </button>
+              ) : undefined
+            }
+          />
+        ) : (
+          <>
+          {/* Phones: one card per account instead of a 6-column table */}
+          <div className="sm:hidden space-y-2">
+            {pagedUsers.map((u) => (
+              <div
+                key={u.id}
+                className="rounded-xl p-3"
+                style={{
+                  border: '1px solid var(--border-subtle)',
+                  backgroundColor: 'color-mix(in oklab, var(--control-bg) 35%, transparent)',
+                }}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0 flex-1">
+                    <div className="text-[13px] font-semibold leading-snug break-words" style={{ color: 'var(--text)' }}>
+                      {u.full_name || u.username}
+                    </div>
+                    <div className="mt-0.5 text-[11px] text-secondary break-all">@{u.username}</div>
+                    {u.email ? <div className="text-[11px] text-secondary break-all">{u.email}</div> : null}
+                  </div>
+                  <div className="shrink-0 flex flex-wrap justify-end gap-1 max-w-[45%]">{renderStatusBadges(u)}</div>
+                </div>
+
+                {companyByUserId[u.id] ? (
+                  <div
+                    className="mt-2 pt-2 border-t"
+                    style={{ borderColor: 'var(--border-subtle)' }}
+                  >
+                    <div className="text-[9px] uppercase tracking-wider text-secondary mb-1">Company / Locator</div>
+                    {applicationByUserId[u.id] ? (
+                      <button
+                        type="button"
+                        // Registered (LOC/REN): the Account Officer's now — not opened from here.
+                        disabled={Boolean(statusRefByUserId[u.id])}
+                        className={`w-full text-left rounded-md -mx-1.5 -my-1 px-1.5 py-1 transition-colors ${
+                          statusRefByUserId[u.id]
+                            ? 'cursor-default'
+                            : 'cursor-pointer hover:bg-[var(--control-bg)] active:bg-[var(--selected-bg)]'
+                        }`}
+                        onClick={() => goToApplication(u, applicationByUserId[u.id])}
+                      >
+                        <div className="text-[12px] font-semibold break-words" style={{ color: 'var(--text)' }}>
+                          {companyByUserId[u.id]}
+                        </div>
+                        <div className="mt-0.5 flex items-center gap-1.5 flex-wrap">
+                          {/* NEW-/APP- while in process; the LOC Ref No once registered. */}
+                          <span className="text-[11px] text-secondary">
+                            {statusRefByUserId[u.id] || applicationByUserId[u.id].application_no}
+                          </span>
+                        </div>
+                      </button>
+                    ) : (
+                      <div className="text-[12px] font-semibold break-words" style={{ color: 'var(--text)' }}>
+                        {companyByUserId[u.id]}
+                      </div>
+                    )}
+                  </div>
+                ) : null}
+
+                <div className="mt-2.5 flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    {u.totp_enabled === 1 ? (
+                      <span
+                        className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold"
+                        style={{ backgroundColor: 'rgba(34,197,94,.14)', color: 'rgba(34,197,94,.95)' }}
+                      >
+                        <ShieldCheck size={11} /> 2FA
+                      </span>
+                    ) : (
+                      <span className="text-[10px] text-secondary">2FA off</span>
+                    )}
+                  </div>
+                  <div className="shrink-0 flex items-center gap-0.5 -mr-1.5">{renderRowActions(u)}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="hidden sm:block overflow-x-auto">
+            <table className="min-w-full text-left text-xs">
+              <thead>
+                <tr>
+                  {['Company / Locator', 'Username', 'Full Name', 'Email', '2FA', 'Status', 'Actions'].map((col) => (
+                    <th
+                      key={col}
+                      className={cn(
+                        'px-3 py-2 font-semibold text-[10px] uppercase tracking-widest text-secondary border-b',
+                        col === 'Actions' && 'text-right pr-2'
+                      )}
+                      style={{ borderColor: 'var(--border-subtle)' }}
+                    >
+                      {col}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {pagedUsers.map((u) => (
+                  <tr key={u.id} className="border-b last:border-b-0" style={{ borderColor: 'var(--border-subtle)' }}>
+                    <td className="px-3 py-2 text-[11px]">
+                      {companyByUserId[u.id] ? (
+                        applicationByUserId[u.id] ? (
+                          <button
+                            type="button"
+                            // Registered (LOC/REN): the Account Officer's now — not opened from here.
+                            disabled={Boolean(statusRefByUserId[u.id])}
+                            className={`text-left rounded-md -mx-1.5 -my-1 px-1.5 py-1 transition-colors ${
+                              statusRefByUserId[u.id]
+                                ? 'cursor-default'
+                                : 'cursor-pointer hover:bg-[var(--control-bg)] active:bg-[var(--selected-bg)]'
+                            }`}
+                            onClick={() => goToApplication(u, applicationByUserId[u.id])}
+                          >
+                            <div className="font-semibold" style={{ color: 'var(--text)' }}>{companyByUserId[u.id]}</div>
+                            {/* NEW-/APP- while in process; LOC- once registered; REN- while renewing. */}
+                            <div className="mt-0.5 text-secondary">
+                              {statusRefByUserId[u.id] || applicationByUserId[u.id].application_no}
+                            </div>
+                          </button>
+                        ) : (
+                          <div style={{ color: 'var(--text)' }}>{companyByUserId[u.id]}</div>
+                        )
+                      ) : (
+                        <span className="text-secondary">-</span>
+                      )}
+                    </td>
+                    <td className="px-3 py-2 text-[11px]" style={{ color: 'var(--text)' }}>
+                      {u.username}
+                    </td>
+                    <td className="px-3 py-2 text-[11px] text-secondary">{u.full_name || '-'}</td>
+                    <td className="px-3 py-2 text-[11px] text-secondary">{u.email || '-'}</td>
+                    <td className="px-3 py-2 text-[11px]">
+                      {u.totp_enabled === 1 ? (
+                        <span
+                          className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold"
+                          style={{ backgroundColor: 'rgba(34,197,94,.14)', color: 'rgba(34,197,94,.95)' }}
+                        >
+                          <ShieldCheck size={11} /> On
+                        </span>
+                      ) : (
+                        <span className="text-secondary">-</span>
+                      )}
+                    </td>
+                    <td className="px-3 py-2 text-[11px]">
+                      {renderStatusBadges(u)}
+                    </td>
+                    <td className="px-3 py-2 pr-2">
+                      <div className="flex items-center justify-end gap-1.5">
+                        {renderRowActions(u)}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+            <DataTableControls
+              page={page}
+              totalPages={totalPages}
+              totalItems={filteredUsers.length}
+              showingFrom={showingRange.from}
+              showingTo={showingRange.to}
+              visiblePageNumbers={visiblePageNumbers}
+              pageSize={pageSize}
+              pageSizeOptions={[20, 50, 100, 200]}
+              onPageSizeChange={(value) => setPageSize(value)}
+              onPageChange={(p) => setPage(p)}
+              loading={isLoading || isRevalidating}
+            />
+          </>
+        )}
+      </div>
+
+      {formPanels}
 
       <ConfirmModal
         open={confirmDeactivateId !== null}

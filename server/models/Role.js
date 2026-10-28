@@ -172,7 +172,7 @@ async function createSchema() {
     -- Level 1 / Level 2 is the per-user level (users.assessment_level).
     IF NOT EXISTS (SELECT 1 FROM dbo.roles WHERE LOWER(name) IN ('bdo', 'assessment officer'))
       INSERT INTO dbo.roles (name, description, is_active)
-      VALUES ('BDO', 'Locator applications and evaluation (Level 1 assigns, Level 2 evaluates)', 1);
+      VALUES ('BDO', 'Locator applications and evaluation (the Manager assigns, officers evaluate)', 1);
 
     IF NOT EXISTS (SELECT 1 FROM dbo.roles WHERE LOWER(name) = 'viewer')
       INSERT INTO dbo.roles (name, description, is_active)

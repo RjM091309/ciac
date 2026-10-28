@@ -1181,7 +1181,7 @@ exports.update = async (req, res) => {
       if (!nextOfficer) return res.status(400).json({ success: false, message: "Choose the locator's Account Officer." });
       const me = await accountOfficerScope(req);
       if (me !== null && nextOfficer !== me) {
-        return res.status(403).json({ success: false, message: "Only Level 1 can change a locator's Account Officer." });
+        return res.status(403).json({ success: false, message: "Only a Manager can change a locator's Account Officer." });
       }
     }
     // undefined = "not sent, leave alone"; null = "cleared".

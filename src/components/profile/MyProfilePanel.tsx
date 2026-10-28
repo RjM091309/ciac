@@ -216,8 +216,8 @@ function PhoneInput({ digits, onChange }: { digits: string; onChange: (digits: s
 
 function IdentityHeader({ profile }: { profile: MyProfile }) {
   const [editorOpen, setEditorOpen] = useState(false);
-  const displayName = profile.full_name || profile.username;
-  const role = profile.role ? roleDisplayName(profile.role) : null;
+  const displayName = profile.formal_name || profile.full_name || profile.username;
+  const role = profile.role_label || (profile.role ? roleDisplayName(profile.role) : null);
 
   return (
     <div className="space-y-5">
@@ -508,12 +508,12 @@ function TwoFactorCard({ profile }: { profile: MyProfile }) {
 
 // --- Panel ---
 
-type Form = { full_name: string; email: string; phone: string; currentPassword: string };
+type Form = { first_name: string; middle_name: string; last_name: string; email: string; phone: string; currentPassword: string };
 
 // Change Password isn't repeated here — it's already in the account menu.
 export function MyProfilePanel({ open, onClose }: { open: boolean; onClose: () => void }) {
   const profile = useMyProfile(open);
-  const [form, setForm] = useState<Form>({ full_name: '', email: '', phone: '', currentPassword: '' });
+  const [form, setForm] = useState<Form>({ first_name: '', middle_name: '', last_name: '', email: '', phone: '', currentPassword: '' });
   const [errors, setErrors] = useState<Partial<Record<keyof Form, string>>>({});
   const [saving, setSaving] = useState(false);
 
@@ -526,7 +526,14 @@ export function MyProfilePanel({ open, onClose }: { open: boolean; onClose: () =
   const loaded = profile !== null;
   useEffect(() => {
     if (!open || !profile) return;
-    setForm({ full_name: profile.full_name || '', email: profile.email || '', phone: toLocalDigits(profile.phone), currentPassword: '' });
+    setForm({
+      first_name: profile.first_name || '',
+      middle_name: profile.middle_name || '',
+      last_name: profile.last_name || '',
+      email: profile.email || '',
+      phone: toLocalDigits(profile.phone),
+      currentPassword: '',
+    });
     setErrors({});
     // Only when the panel opens or a different account loads — not on every
     // profile patch (e.g. a photo upload), which would wipe unsaved edits.
@@ -539,11 +546,16 @@ export function MyProfilePanel({ open, onClose }: { open: boolean; onClose: () =
   );
   const dirty =
     !!profile &&
-    (form.full_name.trim() !== (profile.full_name || '') || emailChanged || form.phone !== toLocalDigits(profile.phone));
+    (form.first_name.trim() !== (profile.first_name || '') ||
+      form.middle_name.trim() !== (profile.middle_name || '') ||
+      form.last_name.trim() !== (profile.last_name || '') ||
+      emailChanged ||
+      form.phone !== toLocalDigits(profile.phone));
 
   const validation = useMemo(() => {
     const v: Partial<Record<keyof Form, string>> = {};
-    if (!form.full_name.trim()) v.full_name = 'Full name is required.';
+    if (!form.first_name.trim()) v.first_name = 'First name is required.';
+    if (!form.last_name.trim()) v.last_name = 'Surname is required.';
     if (!form.email.trim()) v.email = 'Email is required.';
     else if (!EMAIL_RE.test(form.email.trim())) v.email = 'Enter a valid email address.';
     if (form.phone && !LOCAL_PHONE_RE.test(form.phone)) v.phone = 'Enter a 10-digit mobile number starting with 9.';
@@ -564,7 +576,9 @@ export function MyProfilePanel({ open, onClose }: { open: boolean; onClose: () =
       const json = await postJson(
         '/api/profile',
         {
-          full_name: form.full_name.trim(),
+          first_name: form.first_name.trim(),
+          middle_name: form.middle_name.trim(),
+          last_name: form.last_name.trim(),
           email: form.email.trim(),
           phone: form.phone ? `+63${form.phone}` : '',
           ...(emailChanged ? { currentPassword: form.currentPassword } : {}),
@@ -634,9 +648,17 @@ export function MyProfilePanel({ open, onClose }: { open: boolean; onClose: () =
                 void save();
               }}
             >
-              <Field label="Full name" error={shown('full_name')}>
-                <input className="app-input" value={form.full_name} onChange={set('full_name')} autoComplete="name" />
-              </Field>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <Field label="First name" error={shown('first_name')}>
+                  <input className="app-input" value={form.first_name} onChange={set('first_name')} autoComplete="given-name" />
+                </Field>
+                <Field label="Middle name" error={shown('middle_name')}>
+                  <input className="app-input" value={form.middle_name} onChange={set('middle_name')} autoComplete="additional-name" />
+                </Field>
+                <Field label="Surname" error={shown('last_name')}>
+                  <input className="app-input" value={form.last_name} onChange={set('last_name')} autoComplete="family-name" />
+                </Field>
+              </div>
               <Field
                 label="Email"
                 error={shown('email')}

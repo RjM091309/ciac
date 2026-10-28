@@ -10,6 +10,9 @@ type SidePanelProps = {
   saveLabel?: string;
   /** View-only (no edit permission): no Save button. */
   hideSave?: boolean;
+  /** A second action between Cancel and Save (e.g. "Save as draft"); hidden with hideSave. */
+  secondaryLabel?: string;
+  onSecondary?: () => void | Promise<void>;
   widthClassName?: string;
   /** Small print shown in the footer, to the left of Cancel/Save (e.g. a
    * "derived automatically" disclaimer) instead of taking up body space. */
@@ -29,6 +32,8 @@ export function SidePanel({
   saveDisabled = false,
   saveLabel = 'Save',
   hideSave = false,
+  secondaryLabel,
+  onSecondary,
   widthClassName = 'max-w-[44rem]',
   footerNote,
   headerExtra,
@@ -94,7 +99,7 @@ export function SidePanel({
                 style={{ borderColor: 'var(--input-border)' }}
               >
                 {footerNote ? <div className="text-[10px] text-secondary">{footerNote}</div> : null}
-                <div className="flex items-center gap-2 shrink-0">
+                <div className="flex flex-wrap items-center justify-end gap-2 min-w-0">
                 <button
                   className={`rounded-lg px-3 py-2 text-sm font-semibold border ${
                     saving ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
@@ -105,6 +110,18 @@ export function SidePanel({
                 >
                   Cancel
                 </button>
+{!hideSave && secondaryLabel && onSecondary ? (
+                <button
+                  className={`rounded-lg px-3 py-2 text-sm font-semibold border ${
+                    saving || saveDisabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
+                  }`}
+                  style={{ borderColor: 'var(--border-subtle)', color: 'var(--text)' }}
+                  onClick={onSecondary}
+                  disabled={saving || saveDisabled}
+                >
+                  {secondaryLabel}
+                </button>
+                ) : null}
 {hideSave ? null : (
                 <button
                   className={`rounded-lg px-3 py-2 text-sm font-semibold ${

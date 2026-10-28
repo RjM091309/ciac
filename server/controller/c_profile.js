@@ -7,6 +7,8 @@ const { saveAvatar, resolveAvatar, avatarContentType, deleteAvatar } = require("
 const { publicErrorMessage } = require("../lib/httpError");
 const { guardedCheck, checkPassword } = require("../lib/reauth");
 const { getters: site } = require("../lib/siteSettings");
+const { syncStaffName, formalName, primaryStaffRole } = require("../lib/staffName");
+const { departmentOf } = require("../lib/departments");
 
 // My Profile — the signed-in user's own account (staff only on the frontend;
 // Locators keep "Settings" → My Business Profile). Every route here acts on
@@ -38,6 +40,10 @@ function toProfileResponse(profile, extra = {}) {
     id: profile.id,
     username: profile.username,
     full_name: profile.full_name,
+    first_name: profile.first_name,
+    middle_name: profile.middle_name,
+    last_name: profile.last_name,
+    formal_name: profile.formal_name,
     email: profile.email,
     phone: profile.phone,
     role: profile.roles[0] || null,
@@ -49,6 +55,17 @@ function toProfileResponse(profile, extra = {}) {
   };
 }
 
+/** "BDO - MANAGER" for a BDO / Account Officer manager, else the role
+ * ("BDO", "ADMIN"; the proponent role reads "LOCATOR"). */
+async function roleLabelFor(user, roleName) {
+  const name = String(roleName || "").trim().toUpperCase();
+  if (!name) return null;
+  if (name === "PROPONENT") return "LOCATOR";
+  const dept = await departmentOf(user);
+  if ((dept === "bdo" || dept === "ao") && (await require("../models/AssessmentEvaluation").isManager(user))) return `${name} - MANAGER`;
+  return name;
+}
+
 exports.get = async (req, res) => {
   try {
     const profile = await User.getOwnProfile(req.user.id);
@@ -56,7 +73,11 @@ exports.get = async (req, res) => {
     const previousLogin = await AuditLog.previousLoginFor(req.user.id, req.user.sid).catch(() => null);
     return res.json({
       success: true,
-      data: toProfileResponse(profile, { is_admin: isAdminRole(req.user.role), previous_login: previousLogin }),
+      data: toProfileResponse(profile, {
+        is_admin: isAdminRole(req.user.role),
+        role_label: await roleLabelFor(req.user, profile.roles[0]),
+        previous_login: previousLogin,
+      }),
     });
   } catch (error) {
     return serverError(res, "Get profile", error);
@@ -111,7 +132,15 @@ exports.update = async (req, res) => {
     const before = await User.getOwnProfile(userId);
     if (!before) return fail(res, 404, "Account not found");
 
-    const fullName = String(req.body?.full_name ?? "").trim();
+    // Staff edit First / Middle / Surname (their full_name is the "AO - Jane_IP"
+    // label, lib/staffName.js); locators their full name.
+    const staff = Boolean(await primaryStaffRole(userId));
+    const parts = staff
+      ? { first: String(req.body?.first_name ?? "").trim(), middle: String(req.body?.middle_name ?? "").trim(), last: String(req.body?.last_name ?? "").trim() }
+      : null;
+    const fullName = parts ? formalName(parts) : String(req.body?.full_name ?? "").trim();
+    if (parts && !parts.first) return fail(res, 400, "First name is required.", "first_name");
+    if (parts && !parts.last) return fail(res, 400, "Surname is required.", "last_name");
     const email = String(req.body?.email ?? "").trim();
     // Stored without spaces so "+63 912…" and "+63912…" can't both pass the unique index.
     const phoneRaw = String(req.body?.phone ?? "").replace(/\s/g, "");
@@ -139,6 +168,7 @@ exports.update = async (req, res) => {
 
     try {
       await User.updateUser(userId, { full_name: fullName, email, phone });
+      if (parts) await syncStaffName(userId, parts);
     } catch (error) {
       if (error?.number === 2627 || error?.number === 2601) {
         const msg = String(error.message || "");
@@ -181,7 +211,10 @@ exports.update = async (req, res) => {
       }).catch((error) => console.error("Email change notice failed:", error));
     }
 
-    return res.json({ success: true, data: toProfileResponse(after, { is_admin: isAdminRole(req.user.role) }) });
+    return res.json({
+      success: true,
+      data: toProfileResponse(after, { is_admin: isAdminRole(req.user.role), role_label: await roleLabelFor(req.user, after.roles[0]) }),
+    });
   } catch (error) {
     return serverError(res, "Update profile", error);
   }

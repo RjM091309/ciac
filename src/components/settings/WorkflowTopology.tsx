@@ -27,14 +27,20 @@ import { cn } from '../../lib/utils';
 type LaneId = 'bdo2' | 'bdo1' | 'locator' | 'ao1' | 'ao2' | 'co' | 'system';
 
 const LANES: Record<LaneId, { label: string; sub: string; color: string }> = {
-  bdo2: { label: 'BDO', sub: 'Level 2', color: '#3b82f6' },
-  bdo1: { label: 'BDO', sub: 'Level 1', color: '#6366f1' },
+  bdo2: { label: 'BDO', sub: '', color: '#3b82f6' },
+  bdo1: { label: 'BDO', sub: 'Manager', color: '#6366f1' },
   locator: { label: 'Locator', sub: 'Portal', color: '#f59e0b' },
-  ao1: { label: 'Account Officer', sub: 'Level 1', color: '#10b981' },
-  ao2: { label: 'Account Officer', sub: 'Level 2', color: '#14b8a6' },
+  ao1: { label: 'Account Officer', sub: 'Manager', color: '#10b981' },
+  ao2: { label: 'Account Officer', sub: '', color: '#14b8a6' },
   co: { label: 'Compliance Officer', sub: 'Inspections', color: '#f43f5e' },
   system: { label: 'System', sub: 'Automatic', color: '#94a3b8' },
 };
+
+/** "BDO", "BDO - MANAGER", "Locator · Portal". */
+function laneTitle(lane: { label: string; sub: string }) {
+  if (!lane.sub) return lane.label;
+  return lane.sub === 'Manager' ? `${lane.label.toUpperCase()} - MANAGER` : `${lane.label} · ${lane.sub}`;
+}
 
 type Step = {
   lane: LaneId;
@@ -83,17 +89,17 @@ const SCENARIOS: Scenario[] = [
           'One application per locator — a second one is refused.',
           'Submitting activates the locator and emails their login.',
         ],
-        notifies: 'BDO Level 1, the locator (email)',
+        notifies: 'BDO - MANAGER, the locator (email)',
       },
       {
         lane: 'bdo1',
         title: 'Assign evaluator',
-        auto: ["Moves the stage to ASSIGNED.", "Shows the application to that Level 2 only — hidden from other Level 2s, in lists and notifications.", "Sends the evaluator a “New assignment” pop-up.", "When the evaluator opens it, the stage moves to IN_REVIEW and the locator sees “In review”."],
+        auto: ["Moves the stage to ASSIGNED.", "Shows the application to that evaluator only — hidden from the other BDOs, in lists and notifications.", "Sends the evaluator a “New assignment” pop-up.", "When the evaluator opens it, the stage moves to IN_REVIEW and the locator sees “In review”."],
         status: 'UNASSIGNED → ASSIGNED',
         where: 'Evaluation Queue',
         details: [
-          'Level 1 sees every new application; Level 2 sees nothing until it is assigned to them.',
-          'Only Level 2 BDO users are offered as evaluators.',
+          'The Manager sees every new application; a BDO sees nothing until it is assigned to them.',
+          'Only BDO users (not the Manager) are offered as evaluators.',
         ],
         notifies: 'The evaluator (pop-up)',
       },
@@ -128,7 +134,7 @@ const SCENARIOS: Scenario[] = [
         status: 'Terms SENT',
         where: 'Evaluation Queue · Terms',
         details: [
-          'Level 2 writes the terms and conditions negotiated with the locator, then sends them.',
+          'The evaluator writes the terms and conditions negotiated with the locator, then sends them.',
           'The locator needs a portal login to see them.',
         ],
         notifies: 'The locator (email + in-app)',
@@ -159,54 +165,54 @@ const SCENARIOS: Scenario[] = [
       {
         lane: 'bdo2',
         title: 'Submit review',
-        auto: ["Blocks the submit until every uploaded requirement is checked and the signed contract is uploaded.", "Moves the stage to FOR_RECOMMENDATION.", "Tells Level 1 the review is waiting."],
+        auto: ["Blocks the submit until every uploaded requirement is checked and the signed contract is uploaded.", "Moves the stage to FOR_RECOMMENDATION.", "Tells the Manager the review is waiting."],
         status: 'FOR_RECOMMENDATION',
         where: 'Evaluation Queue · Recommendation',
         details: [
-          'Summary of the review; the signed contract goes to Level 1 with it.',
+          'Summary of the review; the signed contract goes to the Manager with it.',
           'Requirements still to follow (not uploaded yet) can be noted in the remarks.',
         ],
-        notifies: 'BDO Level 1',
+        notifies: 'BDO - MANAGER',
       },
       {
         lane: 'bdo1',
         title: 'Check → Approve',
-        auto: ["Starts the approval and assigns it to that Level 1.", "Keeps Approve locked until the signed contract is there; asks to confirm if mandatory requirements aren’t all verified (to follow).", "On Approve: status APPROVED; the locator is emailed the decision and now sees the contract and permit. A new application goes to the Approved Queue."],
+        auto: ["Starts the approval and assigns it to that Manager.", "Keeps Approve locked until the signed contract is there; asks to confirm if mandatory requirements aren’t all verified (to follow).", "On Approve: status APPROVED; the locator is emailed the decision and now sees the contract and permit. A new application goes to the Approved Queue."],
         status: 'FOR_APPROVAL → APPROVED',
         where: 'Evaluation Queue · approval panel',
         details: [
           'Clicking the row sends it For Approval and opens the approval panel.',
-          'Level 1 checks the uploads, the terms and the signed contract (read-only), then Approves.',
-          'Something wrong: Return to Evaluator sends it back to Level 2 with remarks.',
+          'The Manager checks the uploads, the terms and the signed contract (read-only), then Approves.',
+          'Something wrong: Return to Evaluator sends it back to the evaluator with remarks.',
         ],
-        notifies: 'Account Officer Level 1 (pop-up + email)',
+        notifies: 'ACCOUNT OFFICER - MANAGER (pop-up + email)',
       },
       {
         // The outcome of BDO Level 1's Approve, so it sits on their row.
         lane: 'bdo1',
         title: 'Approved Queue',
-        auto: ["Lists approved new applications without an Account Officer, newest first.", "Tells Level 1 Account Officers it’s waiting (pop-up + email)."],
+        auto: ["Lists approved new applications without an Account Officer, newest first.", "Tells ACCOUNT OFFICER - MANAGERS it’s waiting (pop-up + email)."],
         status: 'Waiting for an Account Officer',
         where: 'Approved Queue',
-        details: ['Newest approvals on top, until Level 1 Account Officer assigns a Level 2.'],
+        details: ['Newest approvals on top, until the ACCOUNT OFFICER - MANAGER assigns an Account Officer.'],
       },
       {
         lane: 'ao1',
         title: 'Assign Account Officer',
-        auto: ["Sets the locator’s Account Officer and takes it off the Approved Queue.", "Sends the Level 2 Account Officer a “New locator assigned” pop-up and email."],
-        status: 'Level 2 assigned',
+        auto: ["Sets the locator’s Account Officer and takes it off the Approved Queue.", "Sends the Account Officer a “New locator assigned” pop-up and email."],
+        status: 'Account Officer assigned',
         where: 'Approved Queue',
-        details: ['Only Level 1 can assign. The Level 2 becomes the locator\'s Account Officer.', 'Reassigning later (Registered Locator) emails both the new and the previous officer.'],
-        notifies: 'The Level 2 Account Officer (pop-up + email)',
+        details: ['Only the Manager can assign. The Account Officer becomes the locator\'s Account Officer.', 'Reassigning later (Registered Locator) emails both the new and the previous officer.'],
+        notifies: 'The assigned Account Officer (pop-up + email)',
       },
       {
         lane: 'ao2',
         title: 'Registered Locator',
-        auto: ["Adds the locator to Registered Locator (one row), with the lease term from the contract; from now on it's shown by its LOC-… Ref No (also on Locator Accounts).", "Scopes it so a Level 2 Account Officer sees only their own locators.", "Counts the permit down to expiry; within 6 months it shows on Renewal Tracking and in Needs Attention.", "At 6 months left, emails the locator to renew (and tells the Account Officer), then a follow-up every month until the renewal is filed — each one logged."],
+        auto: ["Adds the locator to Registered Locator (one row), with the lease term from the contract; from now on it's shown by its LOC-… Ref No (also on Locator Accounts).", "Scopes it so an Account Officer sees only their own locators.", "Counts the permit down to expiry; within 6 months it shows on Renewal Tracking and in Needs Attention.", "At 6 months left, emails the locator to renew (and tells the Account Officer), then a follow-up every month until the renewal is filed — each one logged."],
         status: 'One row per locator',
         where: 'Registered Locator',
         details: [
-          'The locator now appears in Registered Locator; a Level 2 Account Officer sees only their own locators.',
+          'The locator now appears in Registered Locator; an Account Officer sees only their own locators.',
           'The contract permit counts down to expiry — it shows on Renewal Tracking once expiring (6 months left).',
           'The locator gets a renewal reminder email then, and monthly after that, until the renewal is filed.',
           'The locator can still upload requirements that were to follow.',
@@ -243,7 +249,7 @@ const SCENARIOS: Scenario[] = [
         where: 'Renewal Tracking',
         details: [
           'Files and submits the renewal for that permit\'s locator — no form.',
-          'Account Officers only; a Level 2 only for their own locators. One open renewal at a time.',
+          'Account Officers only; each only for their own locators. One open renewal at a time.',
           'Goes straight to the locator\'s own Account Officer — no BDO, no assigning step.',
           'The locator\'s Ref No reads REN-… instead of LOC-… (same number) until the renewal is decided.',
         ],
@@ -274,7 +280,7 @@ const SCENARIOS: Scenario[] = [
         status: 'Terms SENT',
         where: 'Renewal Queue · Terms',
         details: [
-          'Level 2 writes the terms and conditions negotiated with the locator, then sends them.',
+          'The evaluator writes the terms and conditions negotiated with the locator, then sends them.',
           'The locator needs a portal login to see them.',
         ],
         notifies: 'The locator (email + in-app)',
@@ -305,25 +311,25 @@ const SCENARIOS: Scenario[] = [
       {
         lane: 'ao2',
         title: 'Submit review',
-        auto: ["Blocks the submit until every uploaded requirement is checked and the signed contract is uploaded.", "Moves the stage to FOR_RECOMMENDATION.", "Tells Level 1 the review is waiting."],
+        auto: ["Blocks the submit until every uploaded requirement is checked and the signed contract is uploaded.", "Moves the stage to FOR_RECOMMENDATION.", "Tells the Manager the review is waiting."],
         status: 'FOR_RECOMMENDATION',
         where: 'Renewal Queue · Recommendation',
         details: [
-          'Summary of the review; the signed contract goes to Level 1 with it.',
+          'Summary of the review; the signed contract goes to the Manager with it.',
           'Requirements still to follow (not uploaded yet) can be noted in the remarks.',
         ],
-        notifies: 'Account Officer Level 1',
+        notifies: 'ACCOUNT OFFICER - MANAGER',
       },
       {
         lane: 'ao1',
         title: 'Check → Approve',
-        auto: ["Starts the approval and assigns it to that Level 1.", "Keeps Approve locked until the signed contract is there; asks to confirm if mandatory requirements aren’t all verified (to follow).", "On Approve: status APPROVED; the locator is emailed the decision and now sees the contract and permit. The old permit becomes RENEWED."],
+        auto: ["Starts the approval and assigns it to that Manager.", "Keeps Approve locked until the signed contract is there; asks to confirm if mandatory requirements aren’t all verified (to follow).", "On Approve: status APPROVED; the locator is emailed the decision and now sees the contract and permit. The old permit becomes RENEWED."],
         status: 'FOR_APPROVAL → APPROVED',
         where: 'Renewal Queue · approval panel',
         details: [
           'Clicking the row sends it For Approval and opens the approval panel.',
-          'Level 1 checks the uploads, the terms and the signed contract (read-only), then Approves.',
-          'Something wrong: Return to Evaluator sends it back to Level 2 with remarks.',
+          'The Manager checks the uploads, the terms and the signed contract (read-only), then Approves.',
+          'Something wrong: Return to Evaluator sends it back to the evaluator with remarks.',
         ],
         notifies: 'The locator (email: decision)',
       },
@@ -683,7 +689,7 @@ export function WorkflowTopology() {
               const y2 = cardTop(i);
               const reached = i <= step;
               const color = LANES[st.lane].color;
-              const laneText = `${LANES[st.lane].label}${st.lane === 'system' ? '' : ` · ${LANES[st.lane].sub.replace('Level ', 'L')}`}`;
+              const laneText = st.lane === 'system' ? LANES[st.lane].label : laneTitle(LANES[st.lane]);
               return (
                 <g key={`edge-${i}`}>
                   <line
@@ -924,7 +930,7 @@ export function WorkflowTopology() {
                 className="rounded-full px-2 py-0.5 text-[11px] font-semibold"
                 style={{ backgroundColor: `color-mix(in oklab, ${lane.color} 16%, transparent)`, color: lane.color }}
               >
-                {lane.label} · {lane.sub}
+                {laneTitle(lane)}
               </span>
             </div>
             <div className="text-[16px] font-bold" style={{ color: 'var(--text)' }}>{current.title}</div>

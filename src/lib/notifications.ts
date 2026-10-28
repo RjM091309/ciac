@@ -10,6 +10,7 @@ export type NotificationCategory =
   | 'approval'
   | 'contract'
   | 'locator_assigned'
+  | 'proponent_intake'
   | 'system';
 
 export interface NotificationItem {

@@ -1765,14 +1765,14 @@ export function ProponentsManagement({
                 </Field>
               </div>
               <div>
-                <Field compact label={officerLevel === 1 ? 'Account Officer (Level 2)' : 'Account Officer'}>
+                <Field compact label={officerLevel === 1 ? 'Account Officer' : 'Account Officer'}>
                   {officerLocked ? (
                     <input
                       className="app-form-control app-form-control-sm"
                       readOnly
                       tabIndex={-1}
                       value={officerName(form.account_officer_id || (myUserId != null ? String(myUserId) : ''))}
-                      title="Your locators are assigned to you — Level 1 can reassign them"
+                      title="Your locators are assigned to you — the Manager can reassign them"
                     />
                   ) : (
                     <div className="app-form-control app-form-control-sm p-0 overflow-hidden flex items-stretch">

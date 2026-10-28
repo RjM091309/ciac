@@ -67,19 +67,19 @@ function widgetDescription(key: string, queue: QueueKind): string {
       return queue === 'approval'
         ? "Counts for the Account Officer's renewals and locators"
         : queue === 'assessment'
-          ? 'Counts for Level 2 assignments, or new applications for Level 1'
+          ? 'Counts for officers\' assignments, or new applications for the Manager'
           : 'Counts across every application';
     case 'dashboard:attention':
       return queue === 'approval'
         ? 'Renewals and locators waiting on the Account Officer, plus permits and contracts nearing expiry'
-        : 'Level 2: open assignments · Level 1: reviews to recommend and applications to assign';
+        : 'Officers: open assignments · Manager: reviews to recommend and applications to assign';
     case 'dashboard:expiry':
-      return "Locators whose lease expired or ends within 3 / 6 months, with a count for each (Level 2: their own)";
+      return "Locators whose lease expired or ends within 3 / 6 months, with a count for each (officers: their own)";
     case 'dashboard:table':
       return queue === 'approval'
-        ? "Renewals and approved locators (Level 2: their own)"
+        ? "Renewals and approved locators (officers: their own)"
         : queue === 'assessment'
-          ? 'Level 2: own assignments · Level 1: new applications'
+          ? 'Officers: own assignments · Manager: new applications'
           : 'Every application, read-only';
     case 'dashboard:status-chart':
       return 'Status split of the applications this role sees';

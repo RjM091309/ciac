@@ -370,6 +370,8 @@ exports.submit = async (req, res) => {
     const activation = await activateLocatorIfPending(row.proponent_id, req.user?.id ?? null);
     // A renewal saved as a draft reaches its Account Officer on first submit.
     await assignRenewalToAccountOfficer(row.id, req.user?.id ?? null);
+    // A new proponent's draft reaches the BDO Level 2 assigned at intake.
+    await require("./c_intakes").assignFromIntake(row.id);
 
     await AuditLog.record({
       actorId: req.user?.id,

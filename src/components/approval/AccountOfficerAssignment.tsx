@@ -139,7 +139,7 @@ export function AccountOfficerAssignment(_props: {
               />
             </div>
             {!canAssign ? (
-              <p className="text-[11px] text-secondary">Only Level 1 can assign an Account Officer.</p>
+              <p className="text-[11px] text-secondary">Only a Manager can assign an Account Officer.</p>
             ) : null}
           </div>
 
@@ -149,7 +149,7 @@ export function AccountOfficerAssignment(_props: {
             <EmptyState
               icon={<UserPlus size={40} className="opacity-40" />}
               title="Nothing to assign"
-              description="Applications (new and renewal) approved by BDO Level 1 appear here until a Level 2 Account Officer is assigned."
+              description="Applications (new and renewal) approved by the BDO - MANAGER appear here until an Account Officer is assigned."
             />
           ) : (
             <div className="space-y-2 sm:space-y-0">
@@ -173,7 +173,7 @@ export function AccountOfficerAssignment(_props: {
                         <div className="flex-1 min-w-0">
                           <AppSelect
                             compact
-                            placeholder="Level 2 Account Officer…"
+                            placeholder="Account Officer…"
                             value={picked[r.application_id] || ''}
                             onChange={(v) => setPicked((p) => ({ ...p, [r.application_id]: v }))}
                             options={officerOptions}
@@ -203,7 +203,7 @@ export function AccountOfficerAssignment(_props: {
                       <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary">Approved</th>
                       <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary">Approved by</th>
                       {canAssign ? (
-                        <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary w-[320px]">Assign Level 2 Account Officer</th>
+                        <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary w-[320px]">Assign Account Officer</th>
                       ) : null}
                     </tr>
                   </thead>
@@ -230,7 +230,7 @@ export function AccountOfficerAssignment(_props: {
                               <div className="flex-1 min-w-0">
                                 <AppSelect
                                   compact
-                                  placeholder="Select Level 2…"
+                                  placeholder="Select Account Officer…"
                                   value={picked[r.application_id] || ''}
                                   onChange={(v) => setPicked((p) => ({ ...p, [r.application_id]: v }))}
                                   options={officerOptions}
@@ -255,7 +255,7 @@ export function AccountOfficerAssignment(_props: {
               </div>
               {canAssign && officerOptions.length === 0 ? (
                 <p className="pt-3 text-[11px] text-secondary">
-                  No Level 2 Account Officer yet — set one up in User Management (role Account Officer, Level 2).
+                  No Account Officer yet — set one up in User Management (role Account Officer, not a Manager).
                 </p>
               ) : null}
             </div>

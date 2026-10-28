@@ -38,24 +38,19 @@ export const LANDING_CONFIG: Record<AppView, LandingConfig> = {
     stats: [],
     table: { columns: [], rows: [] },
   },
-  'settings:locator-users': {
-    title: 'Locator Accounts',
-    description: 'Manage login accounts for registered locators, kept separate from staff accounts.',
-    badge: 'System',
+  'applications:proponent-intake': {
+    title: 'New Proponent',
+    description: 'Record a new proponent from the letter received and send it to a BDO to file the application.',
+    badge: 'Applications',
     icon: Users,
     isCrud: true,
-    stats: [
-      { label: 'Active Accounts', value: '—' },
-      { label: 'Total Accounts', value: '—' },
-      { label: 'Deactivated', value: '—' },
-    ],
-    table: {
-      columns: ['Username', 'Full Name', 'Email', '2FA', 'Status'],
-      rows: [
-        ['jdelacruz', 'Juan Dela Cruz', 'j.delacruz@skyport.com', 'On', 'Active'],
-        ['mreyes', 'Maria Reyes', 'm.reyes@greenfuel.com', 'On', 'Active'],
-      ],
+    crudHints: {
+      add: 'Record a new proponent (business name, letter, BDO)',
+      edit: 'Reassign it to another BDO',
+      delete: 'Cancel one that has not been filed yet',
     },
+    stats: [],
+    table: { columns: [], rows: [] },
   },
   'applications:new': {
     title: 'New Applications Directory',
@@ -98,7 +93,7 @@ export const LANDING_CONFIG: Record<AppView, LandingConfig> = {
   },
   'approval:queue': {
     title: 'Approved Queue',
-    description: 'Approved applications waiting for Level 1 Account Officer to assign a Level 2. Assigned locators move to Registered Locator.',
+    description: 'Approved applications waiting for the ACCOUNT OFFICER - MANAGER to assign an Account Officer. Assigned locators move to Registered Locator.',
     badge: 'Approved Queue',
     icon: FileCheck,
     isCrud: true,
@@ -247,6 +242,25 @@ export const LANDING_CONFIG: Record<AppView, LandingConfig> = {
         ['Admin Demo', 'admin@bizreg.com', 'System Admin', 'Mar 11, 2026 09:18', 'Active'],
         ['Joan Cruz', 'j.cruz@ciac.gov', 'Verifier', 'Mar 10, 2026 16:02', 'Active'],
         ['Leo Dizon', 'l.dizon@ciac.gov', 'Account Officer', 'Mar 05, 2026 11:22', 'Active'],
+      ],
+    },
+  },
+  'settings:locator-users': {
+    title: 'Locator Accounts',
+    description: 'Manage login accounts for registered locators, kept separate from staff accounts.',
+    badge: 'System',
+    icon: Users,
+    isCrud: true,
+    stats: [
+      { label: 'Active Accounts', value: '—' },
+      { label: 'Total Accounts', value: '—' },
+      { label: 'Deactivated', value: '—' },
+    ],
+    table: {
+      columns: ['Username', 'Full Name', 'Email', '2FA', 'Status'],
+      rows: [
+        ['jdelacruz', 'Juan Dela Cruz', 'j.delacruz@skyport.com', 'On', 'Active'],
+        ['mreyes', 'Maria Reyes', 'm.reyes@greenfuel.com', 'On', 'Active'],
       ],
     },
   },

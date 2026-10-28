@@ -98,7 +98,7 @@ async function assertFilingAllowed(proponentId, isRenewal, { excludeId = null } 
   );
   if (rows?.[0]) {
     throw filingConflict(
-      `This locator already has an application (${rows[0].application_no}). A locator can only have one application.`
+      `This proponent already has an application (${rows[0].application_no}). A proponent can only have one application.`
     );
   }
 }
@@ -153,7 +153,7 @@ async function createStatusChangeNotifications({ application, toStatus, remarks,
         await Notification.createNotification({
           userId: id,
           subject: `Ready for Account Officer: ${appNo}`,
-          body: `${locator || "A locator"} (${appNo}) was approved and needs a Level 2 Account Officer assigned.`,
+          body: `${locator || "A locator"} (${appNo}) was approved and needs an Account Officer assigned.`,
           createdBy: changedBy,
           applicationId: application?.id,
           eventType: "approval_ready",
@@ -163,7 +163,7 @@ async function createStatusChangeNotifications({ application, toStatus, remarks,
           subject: `Locator ready for an Account Officer: ${locator || appNo}`,
           lines: [
             `${locator || "A locator"} (${appNo}) was approved by the BDO and is now in the Approved Queue.`,
-            "Please assign a Level 2 Account Officer to handle this locator.",
+            "Please assign an Account Officer to handle this locator.",
           ],
           linkPath: "/approval",
           linkLabel: "Open the Approved Queue",
@@ -1302,6 +1302,13 @@ async function deleteDraftApplication(id) {
     // notifications.application_id has no FK, but the "draft created" notice
     // would otherwise dangle — clear it so it doesn't surface a dead link.
     await tx.query(`DELETE FROM dbo.notifications WHERE application_id = @param0`, [id]);
+    // Filed from a New Proponent intake: back to "Not started" for its BDO.
+    await tx.query(
+      `IF OBJECT_ID('dbo.proponent_intakes', 'U') IS NOT NULL
+         UPDATE dbo.proponent_intakes SET status = 'OPEN', application_id = NULL, updated_at = SYSUTCDATETIME()
+         WHERE application_id = @param0`,
+      [id]
+    );
     await tx.query(`DELETE FROM dbo.applications WHERE id = @param0`, [id]);
   });
 

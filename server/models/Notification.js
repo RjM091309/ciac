@@ -35,6 +35,7 @@ function normalizeEventType(value) {
     raw === "approval_ready" ||
     raw === "assessment_assigned" ||
     raw === "locator_assigned" ||
+    raw === "proponent_intake" ||
     raw === "system" ||
     raw === "contract"
   ) {

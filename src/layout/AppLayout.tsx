@@ -17,6 +17,7 @@ import { ThemeProvider, createTheme } from '@mui/material/styles';
 export type AppView =
   | 'dashboard'
   | 'applications:new'
+  | 'applications:proponent-intake'
   | 'applications:renewals'
   | 'applications:requirements'
   | 'assessment:queue'

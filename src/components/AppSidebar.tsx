@@ -4,6 +4,7 @@ import {
   ChevronRight,
   ClipboardCheck,
   FileCheck,
+  FilePlus2,
   KeyRound,
   LayoutDashboard,
   LogOut,
@@ -354,7 +355,7 @@ export function AppSidebar({
     canView('applications:renewals') ||
     canView('compliance:permits') ||
     canView('settings:proponents') ||
-    canView('settings:locator-users') ||
+    canView('applications:proponent-intake') ||
     canView('assessment:queue') ||
     canView('approval:queue');
   const showComplianceInspection = canView('compliance:inspections');
@@ -366,6 +367,7 @@ export function AppSidebar({
   const showPortalSettings = fullAccess && !permissionOverride;
   const showSystemSettings =
     canView('settings:users') ||
+    canView('settings:locator-users') ||
     canView('settings:control-panel') ||
     canView('settings:audit-log') ||
     canView('settings:workflow') ||
@@ -388,7 +390,7 @@ export function AppSidebar({
   // New Application has no page of its own anymore — a locator account and
   // its one application are created together on Locator Accounts.
   const applicationsItems: SidebarLeaf[] = [
-    canView('settings:locator-users') && { key: 'settings:locator-users', label: 'Locator Accounts', active: view === 'settings:locator-users', onClick: () => onViewChange('settings:locator-users'), icon: KeyRound },
+    canView('applications:proponent-intake') && { key: 'applications:proponent-intake', label: 'New Proponent', active: view === 'applications:proponent-intake', onClick: () => onViewChange('applications:proponent-intake'), icon: FilePlus2 },
     canView('assessment:queue') && { key: 'assessment:queue', label: 'Evaluation Queue', active: view === 'assessment:queue', onClick: () => onViewChange('assessment:queue'), icon: ClipboardCheck },
     canView('approval:queue') && { key: 'approval:queue', label: 'Approved Queue', active: view === 'approval:queue', onClick: () => onViewChange('approval:queue'), icon: Stamp },
     canView('settings:proponents') && { key: 'settings:proponents', label: 'Registered Locator', active: view === 'settings:proponents', onClick: () => onViewChange('settings:proponents'), icon: Users },
@@ -407,6 +409,7 @@ export function AppSidebar({
 
   const systemSettingsItems: SidebarLeaf[] = [
     canView('settings:users') && { key: 'settings:users', label: 'User Management', active: view === 'settings:users', onClick: () => onViewChange('settings:users') },
+    canView('settings:locator-users') && { key: 'settings:locator-users', label: 'Locator Accounts', active: view === 'settings:locator-users', onClick: () => onViewChange('settings:locator-users') },
     canView('settings:control-panel') && { key: 'settings:control-panel', label: 'Control Panel', active: view === 'settings:control-panel', onClick: () => onViewChange('settings:control-panel') },
     canView('settings:audit-log') && { key: 'settings:audit-log', label: 'Audit Log', active: view === 'settings:audit-log', onClick: () => onViewChange('settings:audit-log') },
     showPortalSettings && { key: 'settings:portal', label: 'Portal Settings', active: view === 'settings:portal', onClick: () => onViewChange('settings:portal') },

@@ -8,10 +8,18 @@ import { useEffect, useSyncExternalStore } from 'react';
 export type MyProfile = {
   id: number;
   username: string;
+  /** Staff: the "AO - Jane_IP" label shown to everyone else. */
   full_name: string | null;
+  first_name: string | null;
+  middle_name: string | null;
+  last_name: string | null;
+  /** "Jane I. Pineda" */
+  formal_name: string | null;
   email: string | null;
   phone: string | null;
   role: string | null;
+  /** "BDO - MANAGER", "BDO", "ADMIN", "LOCATOR" — the role as shown. */
+  role_label: string | null;
   totp_enabled: number;
   avatar_version: string | null;
   created_at: string | null;

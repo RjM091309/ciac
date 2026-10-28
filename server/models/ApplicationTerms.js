@@ -4,6 +4,7 @@ const { sendMail } = require("../lib/mailer");
 const { escapeHtml } = require("../lib/html");
 const { emailStaffInBackground } = require("../lib/staffEmail");
 const { getters: site } = require("../lib/siteSettings");
+const { partyWord } = require("../lib/party");
 
 // Terms and conditions negotiated for an application, before its contract.
 // The Level 2 evaluator (BDO for a new application, Account Officer for a
@@ -137,11 +138,12 @@ async function send(applicationId, actorId) {
   const appId = toInt(applicationId);
   const current = await getForApplication(appId);
   if (!current) throw clientError("Write the terms and conditions first.");
-  if (current.status === "SENT") throw clientError("These terms were already sent — waiting for the locator.", 409);
-  if (current.status === "AGREED") throw clientError("The locator already agreed to these terms.", 409);
   const ctx = await appContext(appId);
+  const who = partyWord(ctx?.is_renewal);
+  if (current.status === "SENT") throw clientError(`These terms were already sent — waiting for the ${who}.`, 409);
+  if (current.status === "AGREED") throw clientError(`The ${who} already agreed to these terms.`, 409);
   if (!ctx?.locator_user_id) {
-    throw clientError("This locator has no portal login yet, so they can't see the terms. Add one on Registered Locator first.");
+    throw clientError(`This ${who} has no portal login yet, so they can't see the terms. Add one on Registered Locator first.`);
   }
   await updateData(
     `UPDATE dbo.application_terms
@@ -151,7 +153,7 @@ async function send(applicationId, actorId) {
      WHERE id = @param0`,
     [current.id, toInt(actorId)]
   );
-  await logActivity(appId, "TERMS_SENT", `Terms and conditions sent to the locator (version ${current.version + 1})`, actorId);
+  await logActivity(appId, "TERMS_SENT", `Terms and conditions sent to the ${who} (version ${current.version + 1})`, actorId);
 
   const what = Number(ctx.is_renewal) ? "renewal" : "application";
   await Notification.createNotification({
@@ -197,15 +199,16 @@ async function respond(applicationId, { action, remarks, userId }) {
     [current.id, agree ? "AGREED" : "CHANGES_REQUESTED", toInt(userId), note]
   );
   if (!result?.rowsAffected?.[0]) throw clientError("These terms were just changed — reload and try again.", 409);
+  const ctx = await appContext(appId);
+  const who = partyWord(ctx?.is_renewal);
   await logActivity(
     appId,
     agree ? "TERMS_AGREED" : "TERMS_CHANGES_REQUESTED",
-    agree ? `The locator agreed to the terms (version ${current.version})` : `The locator asked for changes: ${note}`,
+    agree ? `The ${who} agreed to the terms (version ${current.version})` : `The ${who} asked for changes: ${note}`,
     userId
   );
 
   // Tell the evaluator (in-app + email): agreed → make the contract.
-  const ctx = await appContext(appId);
   const evaluatorId = toInt(ctx?.assigned_evaluator_id);
   if (evaluatorId) {
     const subject = agree

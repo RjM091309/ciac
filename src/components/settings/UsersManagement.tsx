@@ -1,19 +1,19 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Ban, LogOut, Pencil, RotateCcw, Search, ShieldCheck, ShieldOff, Smartphone, UserX } from 'lucide-react';
+import { Ban, KeyRound, LogOut, Pencil, RotateCcw, Search, ShieldCheck, ShieldOff, Smartphone, UserX } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { toast } from 'sonner';
 import { SidePanel } from '../ui/SidePanel';
 import { ConfirmModal } from '../ui/ConfirmModal';
-import { NoAutofillPasswordInput } from '../ui/NoAutofillPasswordInput';
 import { AppSelect } from '../ui/AppSelect';
 import { DataTableControls } from '../ui/DataTableControls';
 import { Skeleton, TableSkeleton } from '../ui/Skeleton';
 import { EmptyState } from '../ui/EmptyState';
+import { RowActionsMenu, type RowActionItem } from '../ui/RowActionsMenu';
 import { useSessionStorageCachedResource } from '../../hooks/useSessionStorageCachedResource';
 import { RolesPanel } from './RolesPanel';
 import { DepartmentsPanel } from './DepartmentsPanel';
-import { passwordHint, validatePassword } from '../../lib/passwordPolicy';
-import { useSiteSettings } from '../../lib/siteSettings';
+import { formalName, staffLabel } from '../../lib/staffName';
+import { UserAvatar } from '../ui/UserAvatar';
 import { roleDisplayName } from '../../lib/roleDisplay';
 import { useControlPanelAccess } from '../../context/ControlPanelAccessContext';
 
@@ -36,7 +36,14 @@ type UserRow = {
   id: number;
   username: string;
   email: string | null;
+  /** Staff: the "AO - Jane_IP" label (see lib/staffName.ts). */
   full_name: string | null;
+  first_name?: string | null;
+  middle_name?: string | null;
+  last_name?: string | null;
+  /** "Jane I. Pineda" */
+  formal_name?: string | null;
+  avatar_version?: string | null;
   is_active: number;
   status?: AccountStatus;
   is_locked?: boolean;
@@ -90,12 +97,13 @@ export function UsersManagement({
   const [confirmReactivateId, setConfirmReactivateId] = useState<number | null>(null);
   const [confirmSuspendId, setConfirmSuspendId] = useState<number | null>(null);
   const [confirmRevokeId, setConfirmRevokeId] = useState<number | null>(null);
+  const [confirmResetPasswordId, setConfirmResetPasswordId] = useState<number | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [pageSize, setPageSize] = useState(20);
   const [page, setPage] = useState(1);
 
   const { data: usersRoles, isLoading, isRevalidating, refresh } = useSessionStorageCachedResource<UsersRolesData>({
-    cacheKey: 'ciac.users_roles.v3',
+    cacheKey: 'ciac.users_roles.v4',
     ttlMs: 5 * 60 * 1000, // 5 minutes
     fetcher: async () => {
       setError(null);
@@ -141,12 +149,12 @@ export function UsersManagement({
   );
   const roles = (usersRoles?.roles ?? []).filter((r) => !isLocatorRoleName(r.name));
 
-  useSiteSettings(); // re-render when the password rules change
   const [form, setForm] = useState({
     username: '',
     email: '',
-    full_name: '',
-    password: '',
+    first_name: '',
+    middle_name: '',
+    last_name: '',
     role_id: '',
     assessment_level: '2',
     department_id: '',
@@ -168,6 +176,7 @@ export function UsersManagement({
       return (
         (u.username || '').toLowerCase().includes(q) ||
         (u.full_name || '').toLowerCase().includes(q) ||
+        (u.formal_name || '').toLowerCase().includes(q) ||
         (u.email || '').toLowerCase().includes(q) ||
         roleStr.toLowerCase().includes(q) ||
         statusStr.includes(q)
@@ -222,35 +231,31 @@ export function UsersManagement({
     }
     return opts;
   }, [usersRoles?.departments, editing]);
+  // Manager (level 1) or the role itself, e.g. plain "BDO" (level 2).
+  const selectedRoleName = roleDisplayName(roles.find((r) => String(r.id) === form.role_id)?.name || '') || 'Officer';
   const levelOptions = [
-    { value: '1', label: 'Level 1 (manager — sees all, assigns)' },
-    { value: '2', label: 'Level 2 (works on what is assigned to them)' },
+    { value: '1', label: `${selectedRoleName} - MANAGER (sees all, assigns)` },
+    { value: '2', label: `${selectedRoleName} (works on what is assigned to them)` },
   ];
-  const passwordError = useMemo(
-    () => (form.password.trim() ? validatePassword(form.password.trim()) : null),
-    [form.password]
-  );
 
   const canSubmit = useMemo(() => {
     const username = form.username.trim();
     const email = form.email.trim();
-    const fullName = form.full_name.trim();
-    const password = form.password.trim();
+    const first = form.first_name.trim();
+    const last = form.last_name.trim();
     const roleId = form.role_id;
 
     if (!username) return false;
     if (!email) return false;
-    if (password && passwordError) return false;
+    if (!first || !last) return false;
 
-    if (!editing) {
-      // For create mode, require required fields and at least one input activity.
-      const hasAnyInput = Boolean(username || email || fullName || password || roleId);
-      return hasAnyInput && Boolean(password);
-    }
+    // New user: no password here — one is generated and emailed (and
+    // Reset password in the row menu sends a new one).
+    if (!editing) return Boolean(roleId);
 
     const originalUsername = (editing.username || '').trim();
     const originalEmail = (editing.email || '').trim();
-    const originalFullName = (editing.full_name || '').trim();
+    const originalParts = [editing.first_name, editing.middle_name, editing.last_name].map((v) => (v || '').trim()).join('|');
     const originalRoleId = editing.roles?.[0]?.id ? String(editing.roles[0].id) : roles[0]?.id ? String(roles[0].id) : '';
 
     const originalLevel = String(editing.assessment_level === 1 ? 1 : 2);
@@ -259,14 +264,13 @@ export function UsersManagement({
     const hasChanged =
       username !== originalUsername ||
       email !== originalEmail ||
-      fullName !== originalFullName ||
+      [first, form.middle_name.trim(), last].join('|') !== originalParts ||
       roleId !== originalRoleId ||
       form.assessment_level !== originalLevel ||
-      form.department_id !== originalDepartment ||
-      Boolean(password);
+      form.department_id !== originalDepartment;
 
     return hasChanged;
-  }, [editing, form.email, form.full_name, form.password, form.role_id, form.username, form.assessment_level, form.department_id, roles, passwordError]);
+  }, [editing, form.email, form.first_name, form.middle_name, form.last_name, form.role_id, form.username, form.assessment_level, form.department_id, roles]);
 
   useEffect(() => {
     setPage(1);
@@ -281,8 +285,9 @@ export function UsersManagement({
     setForm({
       username: '',
       email: '',
-      full_name: '',
-      password: '',
+      first_name: '',
+      middle_name: '',
+      last_name: '',
       role_id: roles[0]?.id ? String(roles[0].id) : '',
       assessment_level: '2',
       department_id: '',
@@ -296,8 +301,9 @@ export function UsersManagement({
     setForm({
       username: u.username || '',
       email: u.email || '',
-      full_name: u.full_name || '',
-      password: '',
+      first_name: u.first_name || '',
+      middle_name: u.middle_name || '',
+      last_name: u.last_name || '',
       role_id: u.roles?.[0]?.id ? String(u.roles[0].id) : roles[0]?.id ? String(roles[0].id) : '',
       assessment_level: String(u.assessment_level === 1 ? 1 : 2),
       department_id: u.department_id != null ? String(u.department_id) : '',
@@ -311,16 +317,16 @@ export function UsersManagement({
       const payload: any = {
         username: form.username.trim(),
         email: form.email.trim(),
-        full_name: form.full_name.trim() || null,
+        first_name: form.first_name.trim(),
+        middle_name: form.middle_name.trim(),
+        last_name: form.last_name.trim(),
         role_id: form.role_id ? Number(form.role_id) : null,
         department_id: form.department_id ? Number(form.department_id) : null,
       };
-      if (form.password.trim()) payload.password = form.password;
       if (showAssessmentLevel) payload.assessment_level = Number(form.assessment_level);
 
       if (!payload.username) throw new Error('Username is required');
       if (!payload.email) throw new Error('Email is required');
-      if (!editing && !payload.password) throw new Error('Password is required');
 
       const res = await fetch(api(editing ? `/api/users/${editing.id}` : '/api/users'), {
         method: editing ? 'PUT' : 'POST',
@@ -333,7 +339,9 @@ export function UsersManagement({
 
       setIsCreateOpen(false);
       await refresh({ showLoading: false });
-      toast.success(editing ? 'User updated successfully' : 'User created successfully');
+      if (editing) toast.success('User updated successfully');
+      else if (json?.emailSent) toast.success(json?.message || 'User created — a temporary password was emailed.');
+      else toast.warning(json?.message || 'User created, but the email could not be sent.');
     } catch (e: any) {
       const message = e?.message || 'Save failed';
       setError(message);
@@ -447,15 +455,15 @@ export function UsersManagement({
     }
   }
 
-  // A role with the Evaluation Queue (BDO) carries the user's level in its
-  // name: BDO-L1 / BDO-L2, ACCOUNT OFFICER-L1 / -L2.
+  // A role with the Evaluation Queue (BDO) shows its Managers as such:
+  // "BDO - MANAGER" / "BDO", "ACCOUNT OFFICER - MANAGER" / "ACCOUNT OFFICER".
   function userRolesLabel(u: UserRow) {
     if (!u.roles || !u.roles.length) return null;
     const level = u.assessment_level === 1 ? 1 : 2;
     return u.roles
       .map((r) => {
         const name = roleDisplayName(r.name);
-        return roleHasAssessment(String(r.id)) ? `${name}-L${level}` : name;
+        return roleHasAssessment(String(r.id)) && level === 1 ? `${name} - MANAGER` : name;
       })
       .join(', ');
   }
@@ -488,99 +496,56 @@ export function UsersManagement({
     );
   }
 
+  // Same "..." menu as Locator Accounts.
   function renderUserActions(u: UserRow) {
+    const statusActions: (RowActionItem | null)[] =
+      u.is_active === 1
+        ? [
+            canDelete
+              ? { key: 'suspend', label: 'Suspend', icon: Ban, onClick: () => setConfirmSuspendId(u.id), disabled: saving }
+              : null,
+            canDelete
+              ? { key: 'deactivate', label: 'Deactivate', icon: UserX, onClick: () => setConfirmDeactivateId(u.id), disabled: saving, danger: true }
+              : null,
+            canEdit
+              ? { key: 'revoke', label: 'Revoke sessions', icon: LogOut, onClick: () => setConfirmRevokeId(u.id), disabled: saving }
+              : null,
+          ]
+        : u.status === 'SUSPENDED'
+          ? [canEdit ? { key: 'unsuspend', label: 'Lift suspension', icon: RotateCcw, onClick: () => void unsuspend(u.id), disabled: saving } : null]
+          : [canEdit ? { key: 'reactivate', label: 'Reactivate', icon: RotateCcw, onClick: () => setConfirmReactivateId(u.id), disabled: saving } : null];
+
     return (
-      <>
-        {canEdit ? (
-          <button
-            className={cn(
-              'inline-flex items-center justify-center rounded-md p-1.5 text-secondary',
-              saving ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
-            )}
-            onClick={() => openEdit(u)}
-            disabled={saving}
-            aria-label={`Edit ${u.username}`}
-            title="Edit"
-          >
-            <Pencil size={14} />
-          </button>
-        ) : null}
-        {u.is_active === 1 ? (
-          <>
-            {canDelete ? (
-              <button
-                className={cn(
-                  'inline-flex items-center justify-center rounded-md p-1.5 text-secondary',
-                  saving ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
-                )}
-                onClick={() => setConfirmSuspendId(u.id)}
-                disabled={saving}
-                aria-label={`Suspend ${u.username}`}
-                title="Suspend (temporary hold)"
-              >
-                <Ban size={14} />
-              </button>
-            ) : null}
-            {canDelete ? (
-              <button
-                className={cn(
-                  'inline-flex items-center justify-center rounded-md p-1.5 text-secondary',
-                  saving ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
-                )}
-                onClick={() => setConfirmDeactivateId(u.id)}
-                disabled={saving}
-                aria-label={`Deactivate ${u.username}`}
-                title="Deactivate"
-              >
-                <UserX size={14} />
-              </button>
-            ) : null}
-            {canEdit ? (
-              <button
-                className={cn(
-                  'inline-flex items-center justify-center rounded-md p-1.5 text-secondary',
-                  saving ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
-                )}
-                onClick={() => setConfirmRevokeId(u.id)}
-                disabled={saving}
-                aria-label={`Revoke sessions for ${u.username}`}
-                title="Revoke active sessions"
-              >
-                <LogOut size={14} />
-              </button>
-            ) : null}
-          </>
-        ) : u.status === 'SUSPENDED' ? (
-          canEdit ? (
-            <button
-              className={cn(
-                'inline-flex items-center justify-center rounded-md p-1.5 text-secondary',
-                saving ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
-              )}
-              onClick={() => void unsuspend(u.id)}
-              disabled={saving}
-              aria-label={`Reinstate ${u.username}`}
-              title="Lift suspension"
-            >
-              <RotateCcw size={14} />
-            </button>
-          ) : null
-        ) : canEdit ? (
-          <button
-            className={cn(
-              'inline-flex items-center justify-center rounded-md p-1.5 text-secondary',
-              saving ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
-            )}
-            onClick={() => setConfirmReactivateId(u.id)}
-            disabled={saving}
-            aria-label={`Reactivate ${u.username}`}
-            title="Reactivate"
-          >
-            <RotateCcw size={14} />
-          </button>
-        ) : null}
-      </>
+      <RowActionsMenu
+        ariaLabel={`Actions for ${u.username}`}
+        actions={[
+          canEdit ? { key: 'edit', label: 'Edit', icon: Pencil, onClick: () => openEdit(u), disabled: saving } : null,
+          canEdit && u.is_active === 1
+            ? { key: 'reset-password', label: 'Reset password', icon: KeyRound, onClick: () => setConfirmResetPasswordId(u.id), disabled: saving }
+            : null,
+          ...statusActions,
+        ]}
+      />
     );
+  }
+
+  async function resetPassword(id: number) {
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await fetch(api(`/api/users/${id}/reset-password`), { method: 'POST', credentials: 'include' });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.message || 'Failed to reset password');
+      if (json.emailSent) toast.success(json.message || 'Password reset — a new temporary password was emailed.');
+      else toast.warning(json.message || 'Password reset, but the email could not be sent.');
+      setConfirmResetPasswordId(null);
+    } catch (e: any) {
+      const message = e?.message || 'Failed to reset password';
+      setError(message);
+      toast.error(message);
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
@@ -688,9 +653,10 @@ export function UsersManagement({
                 }}
               >
                 <div className="flex items-start justify-between gap-2">
+                  <PersonAvatar u={u} className="w-9 h-9 text-[12px] mt-0.5" />
                   <div className="min-w-0 flex-1">
                     <div className="text-[13px] font-semibold leading-snug break-words" style={{ color: 'var(--text)' }}>
-                      {u.full_name || u.username}
+                      {u.formal_name || u.full_name || u.username}
                     </div>
                     <div className="mt-0.5 text-[11px] text-secondary break-all">@{u.username}</div>
                     {u.email ? <div className="text-[11px] text-secondary break-all">{u.email}</div> : null}
@@ -719,10 +685,21 @@ export function UsersManagement({
           </div>
 
           <div className="hidden sm:block overflow-x-auto">
-            <table className="min-w-full text-left text-xs">
+            <table className="w-full min-w-[960px] text-left text-xs table-fixed">
+              {/* Even spread over the full width: text left, Actions at the far right. */}
+              <colgroup>
+                <col style={{ width: '20%' }} />
+                <col style={{ width: '10%' }} />
+                <col style={{ width: '17%' }} />
+                <col style={{ width: '20%' }} />
+                <col style={{ width: '14%' }} />
+                <col style={{ width: '6%' }} />
+                <col style={{ width: '8%' }} />
+                <col style={{ width: '5%' }} />
+              </colgroup>
               <thead>
                 <tr>
-                  {['Username', 'Full Name', 'Email', 'Role', '2FA', 'Status', 'Actions'].map((col) => (
+                  {['Full Name', 'Username', 'Department', 'Email', 'Role', '2FA', 'Status', 'Actions'].map((col) => (
                     <th
                       key={col}
                       className={cn(
@@ -739,11 +716,30 @@ export function UsersManagement({
               <tbody>
                 {pagedUsers.map((u) => (
                   <tr key={u.id} className="border-b last:border-b-0" style={{ borderColor: 'var(--border-subtle)' }}>
+                    <td className="px-3 py-2 text-[11px] text-secondary">
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <PersonAvatar u={u} className="w-8 h-8 text-[11px]" />
+                        <div className="min-w-0">
+                          <div className="font-semibold truncate" style={{ color: 'var(--text)' }}>
+                            {u.formal_name || u.full_name || u.username}
+                          </div>
+                          {u.formal_name && u.full_name && u.formal_name !== u.full_name ? (
+                            <div className="text-[10px] truncate">{u.full_name}</div>
+                          ) : null}
+                        </div>
+                      </div>
+                    </td>
                     <td className="px-3 py-2 text-[11px]" style={{ color: 'var(--text)' }}>
                       {u.username}
                     </td>
-                    <td className="px-3 py-2 text-[11px] text-secondary">{u.full_name || '-'}</td>
-                    <td className="px-3 py-2 text-[11px] text-secondary">{u.email || '-'}</td>
+                    <td className="px-3 py-2 text-[11px] text-secondary">
+                      <div className="truncate" title={u.department_name || undefined}>
+                        {u.department_name || '-'}
+                      </div>
+                    </td>
+                    <td className="px-3 py-2 text-[11px] text-secondary">
+                      <div className="truncate" title={u.email || undefined}>{u.email || '-'}</div>
+                    </td>
                     <td className="px-3 py-2 text-[11px] text-secondary">
                       {userRolesLabel(u) ?? '-'}
                     </td>
@@ -798,6 +794,14 @@ export function UsersManagement({
         onSave={save}
         saving={saving}
         saveDisabled={!canSubmit}
+        footerNote={
+          editing ? undefined : (
+            <span className="block max-w-[22rem] leading-snug">
+              <span className="font-semibold uppercase tracking-widest">Password</span> — a temporary password is generated and emailed with the
+              username. They set their own at first sign-in.
+            </span>
+          )
+        }
       >
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-start">
           <Field label="Role" className={showAssessmentLevel ? undefined : 'sm:col-span-2'}>
@@ -811,7 +815,7 @@ export function UsersManagement({
             />
           </Field>
           {showAssessmentLevel ? (
-            <Field label="Level">
+            <Field label="Position">
               <AppSelect
                 options={levelOptions}
                 value={form.assessment_level}
@@ -837,13 +841,6 @@ export function UsersManagement({
               onChange={(e) => setForm((p) => ({ ...p, username: e.target.value }))}
             />
           </Field>
-          <Field label="Full name">
-            <input
-              className="app-input"
-              value={form.full_name}
-              onChange={(e) => setForm((p) => ({ ...p, full_name: e.target.value }))}
-            />
-          </Field>
           <Field label="Email">
             <input
               type="email"
@@ -853,16 +850,39 @@ export function UsersManagement({
               onChange={(e) => setForm((p) => ({ ...p, email: e.target.value }))}
             />
           </Field>
-          <Field label={editing ? 'Password (leave blank to keep)' : 'Password'}>
-            <NoAutofillPasswordInput
-              className="app-input"
-              style={{ borderColor: passwordError ? '#f87171' : undefined }}
-              value={form.password}
-              onChange={(e) => setForm((p) => ({ ...p, password: e.target.value }))}
+          <div className="sm:col-span-2 grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <Field label="First name *">
+              <input
+                className="app-input"
+                value={form.first_name}
+                onChange={(e) => setForm((p) => ({ ...p, first_name: e.target.value }))}
+                placeholder="e.g. Jane"
+              />
+            </Field>
+            <Field label="Middle name">
+              <input
+                className="app-input"
+                value={form.middle_name}
+                onChange={(e) => setForm((p) => ({ ...p, middle_name: e.target.value }))}
+                placeholder="e.g. Ilagan"
+              />
+            </Field>
+            <Field label="Surname *">
+              <input
+                className="app-input"
+                value={form.last_name}
+                onChange={(e) => setForm((p) => ({ ...p, last_name: e.target.value }))}
+                placeholder="e.g. Pineda"
+              />
+            </Field>
+          </div>
+          <Field label="Shown as" className="sm:col-span-2">
+            <NamePreview
+              first={form.first_name}
+              middle={form.middle_name}
+              last={form.last_name}
+              roleName={roles.find((r) => String(r.id) === form.role_id)?.name}
             />
-            <p className="text-[10px] mt-1" style={{ color: passwordError ? '#f87171' : 'var(--text-muted)' }}>
-              {passwordError || passwordHint()}
-            </p>
           </Field>
         </div>
 
@@ -928,6 +948,18 @@ export function UsersManagement({
           if (confirmRevokeId !== null) void revokeSessions(confirmRevokeId);
         }}
       />
+      <ConfirmModal
+        open={confirmResetPasswordId !== null}
+        title="Reset this user's password?"
+        description="A new temporary password is generated and emailed to the user. They'll be required to set their own password the next time they sign in."
+        confirmText="Reset & Email"
+        danger
+        loading={saving}
+        onCancel={() => setConfirmResetPasswordId(null)}
+        onConfirm={() => {
+          if (confirmResetPasswordId !== null) void resetPassword(confirmResetPasswordId);
+        }}
+      />
     </div>
   );
 }
@@ -946,6 +978,58 @@ function StatCard({ label, value }: { label: string; value: string }) {
       <span className="text-lg font-bold leading-tight" style={{ color: 'var(--text)' }}>
         {value}
       </span>
+    </div>
+  );
+}
+
+/** The user's photo, or their initials (from the formal name). */
+function PersonAvatar({ u, className }: { u: UserRow; className?: string }) {
+  return (
+    <UserAvatar
+      url={`/api/users/${u.id}/avatar`}
+      version={u.avatar_version}
+      name={u.formal_name || u.username}
+      className={cn('font-bold', className)}
+      style={{ backgroundColor: 'var(--control-bg)', color: 'var(--text)', border: '1px solid var(--border-subtle)' }}
+    />
+  );
+}
+
+/** How the new name reads: the "AO - Jane_IP" label everyone sees, and the
+ * formal name — a faded example until a first name is typed. */
+function NamePreview({ first, middle, last, roleName }: { first: string; middle: string; last: string; roleName?: string }) {
+  const filled = Boolean(first.trim());
+  const parts = filled ? { first, middle, last } : { first: 'Jane', middle: 'Ilagan', last: 'Pineda' };
+  const label = staffLabel(parts, roleName || 'ACCOUNT OFFICER');
+  const initials = `${parts.first.trim().charAt(0)}${String(parts.last || '').trim().charAt(0)}`.toUpperCase();
+  return (
+    <div
+      className="flex items-center gap-3 rounded-xl px-3 py-2.5 border"
+      style={{
+        borderColor: 'var(--border-subtle)',
+        borderStyle: filled ? 'solid' : 'dashed',
+        backgroundColor: 'color-mix(in oklab, var(--control-bg) 45%, transparent)',
+      }}
+    >
+      <div
+        className="w-9 h-9 shrink-0 rounded-full grid place-items-center text-[12px] font-bold"
+        style={{
+          backgroundColor: filled ? 'var(--nav-active-bg)' : 'var(--input-border)',
+          color: filled ? 'var(--nav-active-text)' : 'var(--text-muted)',
+        }}
+        aria-hidden
+      >
+        {initials}
+      </div>
+      <div className={cn('min-w-0 flex-1', !filled && 'opacity-55')}>
+        <div className="text-[13px] font-semibold truncate" style={{ color: 'var(--text)' }}>
+          {label}
+        </div>
+        <div className="text-[11px] text-secondary truncate">{formalName(parts)}</div>
+      </div>
+      <div className="hidden sm:block text-[10px] text-secondary text-right leading-snug max-w-[11rem]">
+        {filled ? 'In dropdowns, notifications, toasts and emails' : 'Example — fill in the name'}
+      </div>
     </div>
   );
 }

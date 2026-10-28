@@ -13,6 +13,18 @@ function normalizeStatus(value) {
   return USER_STATUSES.includes(raw) ? raw : "ACTIVE";
 }
 
+/** Staff name parts and the formal "Jane I. Pineda" (lib/staffName.js);
+ * full_name is the "AO - Jane_IP" label for staff. */
+function nameParts(row) {
+  const { formalName } = require("../lib/staffName");
+  return {
+    first_name: row.first_name ?? null,
+    middle_name: row.middle_name ?? null,
+    last_name: row.last_name ?? null,
+    formal_name: row.first_name ? formalName({ first: row.first_name, middle: row.middle_name, last: row.last_name }) : row.full_name ?? null,
+  };
+}
+
 function toInt(v) {
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
@@ -293,6 +305,7 @@ async function listUserRolesMap() {
 }
 
 async function listUsers() {
+  await require("../lib/staffName").ensureSchema();
   const includePhone = await hasPhoneColumn();
   const includeTotp = await hasTotpColumns();
   const includeStatus = await hasStatusColumn();
@@ -305,13 +318,14 @@ async function listUsers() {
       ${includePhone ? "u.phone" : "NULL AS phone"},
       ${includeTotp ? "u.totp_enabled" : "CAST(0 AS BIT) AS totp_enabled"},
       ${includeStatus ? "u.status, u.registration_note, u.locked_until" : "'ACTIVE' AS status, NULL AS registration_note, NULL AS locked_until"},
-      u.full_name,
+      u.full_name, u.first_name, u.middle_name, u.last_name,
       u.is_active,
       u.assessment_level,
       u.department_id,
       d.name AS department_name,
       u.created_at,
       u.updated_at,
+      u.avatar_path,
       u.password_hash
     FROM users u
     LEFT JOIN dbo.department d ON d.id = u.department_id
@@ -331,6 +345,7 @@ async function listUsers() {
     status: normalizeStatus(u.status),
     registration_note: u.registration_note ?? null,
     full_name: u.full_name ?? null,
+    ...nameParts(u),
     is_active: u.is_active,
     is_locked: Boolean(u.locked_until && new Date(u.locked_until).getTime() > now),
     assessment_level: normalizeAssessmentLevel(u.assessment_level),
@@ -339,10 +354,13 @@ async function listUsers() {
     created_at: u.created_at ?? null,
     updated_at: u.updated_at ?? null,
     roles: rolesMap.get(u.id) || [],
+    // The stored file name changes per upload — doubles as a cache-buster.
+    avatar_version: u.avatar_path || null,
   }));
 }
 
 async function getUserById(id) {
+  await require("../lib/staffName").ensureSchema();
   const includePhone = await hasPhoneColumn();
   const includeTotp = await hasTotpColumns();
   const includeStatus = await hasStatusColumn();
@@ -355,7 +373,7 @@ async function getUserById(id) {
       ${includePhone ? "u.phone" : "NULL AS phone"},
       ${includeTotp ? "u.totp_enabled" : "CAST(0 AS BIT) AS totp_enabled"},
       ${includeStatus ? "u.status, u.registration_note, u.locked_until" : "'ACTIVE' AS status, NULL AS registration_note, NULL AS locked_until"},
-      u.full_name,
+      u.full_name, u.first_name, u.middle_name, u.last_name,
       u.is_active,
       u.assessment_level,
       u.department_id,
@@ -391,6 +409,7 @@ async function getUserById(id) {
     status: normalizeStatus(user.status),
     registration_note: user.registration_note ?? null,
     full_name: user.full_name ?? null,
+    ...nameParts(user),
     is_active: user.is_active,
     is_locked: Boolean(user.locked_until && new Date(user.locked_until).getTime() > Date.now()),
     assessment_level: normalizeAssessmentLevel(user.assessment_level),
@@ -739,10 +758,11 @@ async function disableTotp(userId, { optOut = false } = {}) {
 
 /** The signed-in user's own account, as the My Profile panel shows it. */
 async function getOwnProfile(userId) {
+  await require("../lib/staffName").ensureSchema();
   const rows = await selectData(
     `
     SELECT TOP (1)
-      u.id, u.username, u.email, u.phone, u.full_name, u.totp_enabled,
+      u.id, u.username, u.email, u.phone, u.full_name, u.first_name, u.middle_name, u.last_name, u.totp_enabled,
       u.avatar_path, u.created_at, u.updated_at
     FROM users u
     WHERE u.id = @param0
@@ -767,6 +787,7 @@ async function getOwnProfile(userId) {
     email: row.email ?? null,
     phone: row.phone ?? null,
     full_name: row.full_name ?? null,
+    ...nameParts(row),
     totp_enabled: Number(row.totp_enabled) ? 1 : 0,
     avatar_path: row.avatar_path ?? null,
     created_at: row.created_at ?? null,

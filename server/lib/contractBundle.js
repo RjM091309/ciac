@@ -14,6 +14,7 @@ const { selectData } = require("../config/database");
 const { resolveStoredPath } = require("./fileStorage");
 const LeaseAgreement = require("./leaseAgreement");
 const { docxToPdf } = require("./docxToPdf");
+const { partyWord } = require("./party");
 
 // Long bond (8.5 × 13 in), the lease agreement's paper.
 const PAGE = [612, 936];
@@ -115,7 +116,7 @@ async function buildContractBundle(applicationId) {
   const appId = Number(applicationId);
   const app = (
     await selectData(
-      `SELECT TOP (1) a.id, a.application_no, p.business_name
+      `SELECT TOP (1) a.id, a.application_no, a.is_renewal, p.business_name
        FROM dbo.applications a INNER JOIN dbo.proponents p ON p.id = a.proponent_id WHERE a.id = @param0`,
       [appId]
     )
@@ -179,7 +180,7 @@ async function buildContractBundle(applicationId) {
 
   // 2. The agreed terms.
   if (terms?.body) {
-    const agreed = terms.status === "AGREED" && terms.responded_at ? `Agreed by the locator on ${new Date(terms.responded_at).toISOString().slice(0, 10)} (version ${terms.version})` : `Status: ${terms.status}`;
+    const agreed = terms.status === "AGREED" && terms.responded_at ? `Agreed by the ${partyWord(app.is_renewal)} on ${new Date(terms.responded_at).toISOString().slice(0, 10)} (version ${terms.version})` : `Status: ${terms.status}`;
     textPages(pdf, fonts, "Terms and Conditions", terms.body, `${app.business_name} - ${app.application_no}. ${agreed}`);
   }
 
@@ -213,7 +214,7 @@ async function buildContractBundle(applicationId) {
   ].join("\n");
   // Build the list on a scratch document, then move its pages to the index spot.
   const scratch = await PDFDocument.create();
-  textPages(scratch, { regular: await scratch.embedFont(StandardFonts.Helvetica), bold: await scratch.embedFont(StandardFonts.HelveticaBold) }, "Attachments - Locator Requirements", list, `${app.business_name} - ${app.application_no}`);
+  textPages(scratch, { regular: await scratch.embedFont(StandardFonts.Helvetica), bold: await scratch.embedFont(StandardFonts.HelveticaBold) }, `Attachments - ${partyWord(app.is_renewal) === "locator" ? "Locator" : "Proponent"} Requirements`, list, `${app.business_name} - ${app.application_no}`);
   const listPages = await pdf.copyPages(scratch, scratch.getPageIndices());
   listPages.forEach((p, i) => pdf.insertPage(index + i, p));
 

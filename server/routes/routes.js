@@ -26,6 +26,7 @@ router.get("/dashboard", isAuthenticated, (req, res) => {
 module.exports = function pageRouter(app) {
   app.use("/api/auth", require("./r_auth"));
   app.use("/api/users", require("./r_users"));
+  app.use("/api/intakes", require("./r_intakes"));
   app.use("/api/profile", require("./r_profile"));
   app.use("/api/roles", require("./r_roles"));
   app.use("/api/proponents", require("./r_proponents"));

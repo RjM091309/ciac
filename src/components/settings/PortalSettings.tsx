@@ -1390,7 +1390,7 @@ export function PortalSettings() {
           {renderField('cc_account_officer')}
         </section>
         <section className="space-y-4">
-          <GroupHeader title="Lease agreement signatory" hint="CIAC's signatory on the lease agreement Level 2 generates (Word)" />
+          <GroupHeader title="Lease agreement signatory" hint="CIAC's signatory on the lease agreement the evaluator generates (Word)" />
           <div className="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-4">
             {renderField('contract_signatory_name')}
             {renderField('contract_signatory_title')}

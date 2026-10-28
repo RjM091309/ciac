@@ -1,5 +1,6 @@
 ﻿import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { motion } from 'motion/react';
+import { PartyContext, partyFor, useParty } from '../../lib/party';
 import {
   CheckCircle2,
   Clock3,
@@ -282,6 +283,7 @@ export function ApprovalDetail({
   const a = data?.approval;
 
   return (
+    <PartyContext.Provider value={partyFor(a?.is_renewal)}>
     <div className="fixed inset-0 z-50 flex items-stretch justify-end">
       <motion.div
         className="absolute inset-0"
@@ -363,7 +365,7 @@ export function ApprovalDetail({
                     {data.contract
                       ? "The signed contract isn't uploaded yet."
                       : 'There is no contract yet.'}{' '}
-                    Level 2 makes it on the evaluation's Contract tab — use Return to Evaluator below.
+                    The evaluator makes it on the evaluation's Contract tab — use Return to Evaluator below.
                   </div>
                 ) : null}
                 <ContractTab data={data} canEdit={perms.canEdit && contractAdmin} busy={busy} run={run} />
@@ -383,6 +385,7 @@ export function ApprovalDetail({
         </div>
       </motion.div>
     </div>
+    </PartyContext.Provider>
   );
 }
 
@@ -412,6 +415,7 @@ const REQ_STATUS_STYLE: Record<string, { bg: string; color: string; border: stri
 };
 
 function ComplianceReviewTab({ applicationId }: { applicationId: number }) {
+  const { p } = useParty();
   const [data, setData] = useState<{ requirements: ComplianceRequirement[]; documents: ComplianceDocument[] } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -456,7 +460,7 @@ function ComplianceReviewTab({ applicationId }: { applicationId: number }) {
           className="rounded-lg border px-3 py-2 text-[12px]"
           style={{ borderColor: '#f59e0b55', backgroundColor: '#f59e0b1a', color: 'var(--text)' }}
         >
-          The locator hasn't uploaded {notUploaded} requirement{notUploaded === 1 ? '' : 's'} yet.
+          The {p} hasn't uploaded {notUploaded} requirement{notUploaded === 1 ? '' : 's'} yet.
         </div>
       ) : null}
       <div className="rounded-xl border overflow-hidden" style={{ borderColor: 'var(--border-subtle)' }}>
@@ -586,6 +590,7 @@ function ChainTab({
   busy: boolean;
   run: RunFn;
 }) {
+  const { p } = useParty();
   const current = data.current_step;
   const latest = data.steps.length ? data.steps[data.steps.length - 1] : null;
   // The contract comes first, for new applications and renewals alike (same rule on the server).
@@ -741,7 +746,7 @@ function ChainTab({
               className="rounded-lg px-3 py-1.5 text-[12px] font-semibold disabled:opacity-50"
               style={{ backgroundColor: 'rgba(59,130,246,.14)', color: '#3b82f6', border: '1px solid rgba(59,130,246,.38)' }}
               disabled={busy}
-              title="Undo For Approval — the review goes back to the evaluator (the locator isn't notified)"
+              title={`Undo For Approval — the review goes back to the evaluator (the ${p} isn't notified)`}
               onClick={() =>
                 run(
                   () =>
@@ -972,6 +977,7 @@ function ContractTab({
   busy: boolean;
   run: RunFn;
 }) {
+  const { p } = useParty();
   const a = data.approval;
   const c = data.contract;
   const [form, setForm] = useState({
@@ -1089,7 +1095,7 @@ function ContractTab({
               type="button"
               className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[12px] font-semibold border cursor-pointer"
               style={{ borderColor: 'var(--border)', color: 'var(--text)' }}
-              title="The contract, the agreed terms and the locator's requirements in one PDF"
+              title={`The contract, the agreed terms and the ${p}'s requirements in one PDF`}
               onClick={() => window.open(`/api/assessments/${a.application_id}/contract/print`, '_blank')}
             >
               <Package size={13} /> Contract package

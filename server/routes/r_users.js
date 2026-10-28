@@ -33,6 +33,7 @@ router.get("/", requireAnyMenuAccess(USER_MENU_KEYS, "view"), usersController.li
 router.get("/check-availability", requireAnyMenuAccess(USER_MENU_KEYS, "view"), usersController.checkAvailability);
 router.get("/departments", requireAnyMenuAccess(USER_MENU_KEYS, "view"), usersController.listDepartmentOptions);
 router.get("/:id", requireUserMenuAccess("view"), usersController.getById);
+router.get("/:id/avatar", requireUserMenuAccess("view"), usersController.getAvatar);
 router.post("/", requireUserMenuAccess("add"), usersController.create);
 // Locator Accounts' merged create flow (account + business profile +
 // application in one step) — gated the same as a plain locator create

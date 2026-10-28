@@ -187,6 +187,8 @@ initializeDatabase()
       ["type of contract", () => TypeOfContract.ensureSchema()],
       ["contracts (+ contract_type_id FK)", () => Contract.ensureSchema()], // after type of contract
       ["legacy account officers", () => AccountOfficer.applyLegacyOfficerDefaults()], // after users + departments
+      // Staff names: first / middle / surname, and the "AO - Jane_IP" label (lib/staffName.js).
+      ["staff names", () => require("./lib/staffName").syncAll()], // after users + roles
       ["stockholder", () => Stockholder.ensureSchema()], // creates proponents first (FK)
       ["contact person", () => ContactPerson.ensureSchema()],
       ["signatory", () => Signatory.ensureSchema()],

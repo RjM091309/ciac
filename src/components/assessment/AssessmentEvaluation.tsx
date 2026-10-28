@@ -1,4 +1,5 @@
 ﻿import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { PartyContext, partyFor, useParty, type Party } from '../../lib/party';
 import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'motion/react';
 import {
@@ -22,6 +23,7 @@ import {
   XCircle,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { PdfDropzone } from '../ui/PdfDropzone';
 import { RequirementGroupTabs, useRequirementGroups } from '../ui/RequirementGroupTabs';
 import { cn } from '../../lib/utils';
 import { AppSelect } from '../ui/AppSelect';
@@ -700,7 +702,7 @@ export function AssessmentEvaluation({
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search application / locator..."
+              placeholder={`Search application / ${partyFor(track === 'renewal').p}...`}
               className="h-9 rounded-full pl-9 pr-3 text-xs w-full focus:outline-none focus:ring-1 focus:ring-[var(--border)] text-[var(--text)] placeholder:text-[var(--text-muted)] transition-all"
               style={{ backgroundColor: 'color-mix(in oklab, var(--control-bg) 70%, transparent)' }}
             />
@@ -837,7 +839,7 @@ export function AssessmentEvaluation({
               <thead>
                 <tr style={{ borderBottom: '1px solid var(--border-subtle)' }}>
                   <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary">Application</th>
-                  <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary">Locator</th>
+                  <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary">{partyFor(track === 'renewal').P}</th>
                   <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary">Stage</th>
                   <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary">Evaluator</th>
                   <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary">Compliance Progress</th>
@@ -949,6 +951,7 @@ export function AssessmentEvaluation({
         {completedOpen ? (
           <CompletedQueueModal
             rows={completedRows}
+            track={track}
             onClose={() => setCompletedOpen(false)}
             onSelect={(id) => {
               setCompletedOpen(false);
@@ -964,10 +967,12 @@ export function AssessmentEvaluation({
 
 function CompletedQueueModal({
   rows,
+  track,
   onClose,
   onSelect,
 }: {
   rows: AssessmentRow[];
+  track: 'new' | 'renewal';
   onClose: () => void;
   onSelect: (applicationId: number) => void;
 }) {
@@ -1028,7 +1033,7 @@ function CompletedQueueModal({
               autoFocus
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search application / locator..."
+              placeholder={`Search application / ${partyFor(track === 'renewal').p}...`}
               className="h-9 rounded-full pl-9 pr-3 text-xs w-full focus:outline-none focus:ring-1 focus:ring-[var(--border)] text-[var(--text)] placeholder:text-[var(--text-muted)] transition-all"
               style={{ backgroundColor: 'color-mix(in oklab, var(--control-bg) 70%, transparent)' }}
             />
@@ -1210,6 +1215,7 @@ function AssessmentDetail({
   const a = data?.assessment;
 
   return (
+    <PartyContext.Provider value={partyFor(a?.is_renewal)}>
     <div className="fixed inset-0 z-50 flex items-stretch justify-end">
       <motion.div
         className="absolute inset-0"
@@ -1287,6 +1293,7 @@ function AssessmentDetail({
         </div>
       </motion.div>
     </div>
+    </PartyContext.Provider>
   );
 }
 
@@ -1338,7 +1345,7 @@ function OverviewTab({
           <RotateCcw size={15} className="shrink-0 mt-0.5" style={{ color: '#f59e0b' }} />
           <div className="min-w-0 space-y-0.5">
             <div className="font-semibold" style={{ color: '#f59e0b' }}>
-              Returned to you by Level 1
+              Returned to you by the Manager
             </div>
             <div className="whitespace-pre-wrap" style={{ color: 'var(--text)' }}>
               {returnedNote.detail && returnedNote.detail !== 'Returned from approval'
@@ -1446,6 +1453,7 @@ function ComplianceTab({
   busy: boolean;
   run: RunFn;
 }) {
+  const { p, P } = useParty();
   const [confirmTarget, setConfirmTarget] = useState<{
     id: number;
     status: 'VERIFIED' | 'REJECTED';
@@ -1569,7 +1577,7 @@ function ComplianceTab({
                         !hasDocument
                           ? 'No document uploaded yet'
                           : r.status === 'REJECTED'
-                            ? 'Waiting for the locator to reupload — this auto-returns to Pending once they do'
+                            ? `Waiting for the ${p} to reupload — this auto-returns to Pending once they do`
                             : undefined
                       }
                       onClick={() => {
@@ -1622,7 +1630,7 @@ function ComplianceTab({
                   className="rounded px-2 py-1 text-[11px] border cursor-pointer inline-flex items-center gap-1"
                   style={{ borderColor: 'var(--border)' }}
                   onClick={() => setThreadRequirement(r)}
-                  title="Discuss with the Locator"
+                  title={`Discuss with the ${P}`}
                 >
                   <MessageSquare size={12} /> Discuss
                 </button>
@@ -1644,7 +1652,7 @@ function ComplianceTab({
           confirmTarget
             ? confirmTarget.status === 'VERIFIED'
               ? `Marks "${confirmTarget.label}" as verified.`
-              : `Marks "${confirmTarget.label}" as rejected — the locator will need to resubmit it.`
+              : `Marks "${confirmTarget.label}" as rejected — the ${p} will need to resubmit it.`
             : undefined
         }
         confirmText={confirmTarget?.status === 'VERIFIED' ? 'Verify' : 'Reject'}
@@ -1688,11 +1696,11 @@ function ComplianceTab({
               autoFocus
               className="app-input mt-1 resize-none"
               rows={3}
-              placeholder="Tell the locator what's missing or wrong so they can fix and resubmit…"
+              placeholder={`Tell the ${p} what's missing or wrong so they can fix and resubmit…`}
               value={rejectRemarks}
               onChange={(e) => setRejectRemarks(e.target.value)}
             />
-            <div className="mt-1 text-[10px] text-secondary">Sent to the locator by email along with an in-app notification.</div>
+            <div className="mt-1 text-[10px] text-secondary">Sent to the {p} by email along with an in-app notification.</div>
           </div>
         ) : null}
       </ConfirmModal>
@@ -1743,6 +1751,7 @@ function RequirementThreadModal({
   canReply: boolean;
   onClose: () => void;
 }) {
+  const { p, P } = useParty();
   const [comments, setComments] = useState<RequirementComment[]>([]);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState('');
@@ -1831,7 +1840,7 @@ function RequirementThreadModal({
                     }}
                   >
                     <div className="text-[10px] opacity-70 mb-0.5">
-                      {isStaff ? c.author_name || 'Staff' : c.author_name || 'Locator'}
+                      {isStaff ? c.author_name || 'Staff' : c.author_name || P}
                     </div>
                     <div className="text-[12px] whitespace-pre-wrap">{c.message}</div>
                   </div>
@@ -1849,7 +1858,7 @@ function RequirementThreadModal({
             onKeyDown={(e) => {
               if (e.key === 'Enter') void sendReply();
             }}
-            placeholder="Reply to the locator…"
+            placeholder={`Reply to the ${p}…`}
             className="app-input flex-1"
           />
           <button
@@ -1878,12 +1887,14 @@ type TermsRow = {
   locator_remarks: string | null;
 };
 
-const TERMS_STATUS: Record<TermsRow['status'], { label: string; color: string }> = {
-  DRAFT: { label: 'Draft — not sent', color: '#94a3b8' },
-  SENT: { label: 'Sent — waiting for the locator', color: '#3b82f6' },
-  CHANGES_REQUESTED: { label: 'Locator asked for changes', color: '#f59e0b' },
-  AGREED: { label: 'Agreed by the locator', color: '#10b981' },
-};
+function termsStatus({ p, P }: Party): Record<TermsRow['status'], { label: string; color: string }> {
+  return {
+    DRAFT: { label: 'Draft — not sent', color: '#94a3b8' },
+    SENT: { label: `Sent — waiting for the ${p}`, color: '#3b82f6' },
+    CHANGES_REQUESTED: { label: `${P} asked for changes`, color: '#f59e0b' },
+    AGREED: { label: `Agreed by the ${p}`, color: '#10b981' },
+  };
+}
 
 /** Level 2 can change terms / the contract while the review is open. */
 function useLevel2Editable(data: DetailPayload, canEdit: boolean) {
@@ -1896,6 +1907,7 @@ function useLevel2Editable(data: DetailPayload, canEdit: boolean) {
 /** Terms and conditions: Level 2 writes them and sends them to the locator,
  * who agrees (or asks for changes) in the portal. Agreed terms unlock the contract. */
 function TermsTab({ data, canEdit, busy, run }: { data: DetailPayload; canEdit: boolean; busy: boolean; run: RunFn }) {
+  const { p, P } = useParty();
   const appId = data.assessment.application_id;
   const editable = useLevel2Editable(data, canEdit);
   const locked = Boolean(data.contract_progress?.contract_no);
@@ -1916,7 +1928,7 @@ function TermsTab({ data, canEdit, busy, run }: { data: DetailPayload; canEdit: 
   }, [load, data.contract_progress?.terms_status]);
 
   if (loading) return <Loader2 className="animate-spin text-secondary mx-auto my-10" />;
-  const status = terms ? TERMS_STATUS[terms.status] : null;
+  const status = terms ? termsStatus({ p, P })[terms.status] : null;
   const dirty = draft.trim() !== (terms?.body || '').trim();
   const canWrite = editable && !locked;
 
@@ -1938,13 +1950,13 @@ function TermsTab({ data, canEdit, busy, run }: { data: DetailPayload; canEdit: 
           ) : null}
           {terms?.status === 'CHANGES_REQUESTED' && terms.locator_remarks ? (
             <div className="mt-1 rounded-lg px-2.5 py-2" style={{ backgroundColor: 'rgba(245,158,11,.1)' }}>
-              <span className="font-semibold">Locator:</span> {terms.locator_remarks}
+              <span className="font-semibold">{P}:</span> {terms.locator_remarks}
             </div>
           ) : null}
         </div>
       ) : (
         <div className="text-[12px] text-secondary">
-          Write the terms and conditions agreed with the locator, then send them for the locator to agree in the portal.
+          Write the terms and conditions agreed with the {p}, then send them for the {p} to agree in the portal.
         </div>
       )}
 
@@ -1972,7 +1984,7 @@ function TermsTab({ data, canEdit, busy, run }: { data: DetailPayload; canEdit: 
               run(async () => {
                 await apiFetch(`/api/assessments/${appId}/terms`, { method: 'PUT', body: JSON.stringify({ body: draft }) });
                 await load();
-              }, terms && terms.status !== 'DRAFT' ? 'Saved — send them again for the locator to agree' : 'Draft saved')
+              }, terms && terms.status !== 'DRAFT' ? `Saved — send them again for the ${p} to agree` : 'Draft saved')
             }
           >
             Save draft
@@ -1983,15 +1995,15 @@ function TermsTab({ data, canEdit, busy, run }: { data: DetailPayload; canEdit: 
             disabled={busy || !draft.trim() || terms?.status === 'SENT' || (terms?.status === 'AGREED' && !dirty)}
             onClick={() => setConfirmSend(true)}
           >
-            <Send size={13} className="inline mr-1" /> Send to locator
+            <Send size={13} className="inline mr-1" /> Send to {p}
           </button>
         </div>
       ) : null}
 
       <ConfirmModal
         open={confirmSend}
-        title="Send the terms to the locator?"
-        description="They're emailed and shown in the locator's portal to agree, or to ask for changes."
+        title={`Send the terms to the ${p}?`}
+        description={`They're emailed and shown in the ${p}'s portal to agree, or to ask for changes.`}
         confirmText="Send"
         loading={busy}
         onCancel={() => setConfirmSend(false)}
@@ -2003,7 +2015,7 @@ function TermsTab({ data, canEdit, busy, run }: { data: DetailPayload; canEdit: 
             await apiFetch(`/api/assessments/${appId}/terms/send`, { method: 'POST', body: '{}' });
             setConfirmSend(false);
             await load();
-          }, 'Terms sent to the locator')
+          }, `Terms sent to the ${p}`)
         }
       />
     </div>
@@ -2011,94 +2023,6 @@ function TermsTab({ data, canEdit, busy, run }: { data: DetailPayload; canEdit: 
 }
 
 /** A large box to drop a PDF on, or click to pick one. */
-function PdfDropzone({ file, onFile, disabled }: { file: File | null; onFile: (file: File | null) => void; disabled?: boolean }) {
-  const inputRef = useRef<HTMLInputElement | null>(null);
-  const [over, setOver] = useState(false);
-  const take = (f: File | undefined | null) => {
-    if (!f) return;
-    if (f.type !== 'application/pdf' && !/\.pdf$/i.test(f.name)) {
-      toast.error('Upload the signed contract as a PDF.');
-      return;
-    }
-    onFile(f);
-  };
-  return (
-    <div
-      role="button"
-      tabIndex={disabled ? -1 : 0}
-      onClick={() => !disabled && inputRef.current?.click()}
-      onKeyDown={(e) => {
-        if (!disabled && (e.key === 'Enter' || e.key === ' ')) {
-          e.preventDefault();
-          inputRef.current?.click();
-        }
-      }}
-      onDragOver={(e) => {
-        e.preventDefault();
-        if (!disabled) setOver(true);
-      }}
-      onDragLeave={(e) => {
-        // Moving onto the text inside the box isn't leaving it.
-        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setOver(false);
-      }}
-      onDrop={(e) => {
-        e.preventDefault();
-        setOver(false);
-        if (!disabled) take(e.dataTransfer.files?.[0]);
-      }}
-      className={cn(
-        'rounded-xl border-2 border-dashed px-4 py-6 flex flex-col items-center justify-center gap-1.5 text-center transition-colors',
-        disabled ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer hover:bg-[var(--control-bg)]/40'
-      )}
-      style={{
-        borderColor: over ? 'var(--nav-active-bg)' : 'var(--border)',
-        backgroundColor: over ? 'color-mix(in oklab, var(--nav-active-bg) 6%, transparent)' : undefined,
-      }}
-    >
-      <input
-        ref={inputRef}
-        type="file"
-        accept="application/pdf,.pdf"
-        className="hidden"
-        onChange={(e) => {
-          take(e.target.files?.[0]);
-          e.target.value = '';
-        }}
-      />
-      {file ? (
-        <>
-          <img src="/images/pdf.png" alt="" className="w-10 h-10" />
-          <div className="text-[12px] font-semibold break-all" style={{ color: 'var(--text)' }}>
-            {file.name}
-          </div>
-          <div className="text-[11px] text-secondary">
-            {(file.size / 1024 / 1024).toFixed(2)} MB ·{' '}
-            <button
-              type="button"
-              className="underline"
-              onClick={(e) => {
-                e.stopPropagation();
-                onFile(null);
-              }}
-            >
-              Remove
-            </button>{' '}
-            · click or drop to change
-          </div>
-        </>
-      ) : (
-        <>
-          <Upload size={22} className="text-secondary" />
-          <div className="text-[12px] font-semibold" style={{ color: 'var(--text)' }}>
-            Drop the signed PDF here, or click to choose
-          </div>
-          <div className="text-[11px] text-secondary">PDF only</div>
-        </>
-      )}
-    </div>
-  );
-}
-
 type LeaseAgreementField = {
   key: string;
   label: string;
@@ -2256,6 +2180,7 @@ type ContractInfo = {
  * (contract + terms + the locator's requirements in one PDF), have it signed,
  * then upload the signed scan. Level 1 sees it read-only. */
 function ContractTab({ data, canEdit, busy, run }: { data: DetailPayload; canEdit: boolean; busy: boolean; run: RunFn }) {
+  const { p } = useParty();
   const appId = data.assessment.application_id;
   const editable = useLevel2Editable(data, canEdit);
   const [info, setInfo] = useState<ContractInfo | null>(null);
@@ -2286,7 +2211,7 @@ function ContractTab({ data, canEdit, busy, run }: { data: DetailPayload; canEdi
   if (!agreed && !c) {
     return (
       <div className="rounded-xl border p-4 text-[12px] text-secondary" style={{ borderColor: 'var(--border)' }}>
-        The contract can be made once the locator agrees to the terms and conditions (Terms tab).
+        The contract can be made once the {p} agrees to the terms and conditions (Terms tab).
       </div>
     );
   }
@@ -2401,7 +2326,7 @@ function ContractTab({ data, canEdit, busy, run }: { data: DetailPayload; canEdi
           <Printer size={12} /> 3 · Print for signing
         </div>
         <div className="text-[12px] text-secondary">
-          One PDF: the lease agreement (with the details from step 2), the agreed terms, and the locator's uploaded requirements. Print it and have it signed.
+          One PDF: the lease agreement (with the details from step 2), the agreed terms, and the {p}'s uploaded requirements. Print it and have it signed.
         </div>
         <div>
           <button
@@ -2447,7 +2372,7 @@ function ContractTab({ data, canEdit, busy, run }: { data: DetailPayload; canEdi
         )}
         {editable && c ? (
           <div className="flex flex-col gap-2">
-            <PdfDropzone file={file} onFile={setFile} disabled={busy} />
+            <PdfDropzone file={file} onFile={setFile} disabled={busy} what="the signed PDF" />
             <div className="flex justify-end">
               <button
                 className="rounded-lg px-3 py-1.5 text-[12px] font-semibold disabled:opacity-50"
@@ -2477,6 +2402,7 @@ function RecommendationTab({
   busy: boolean;
   run: RunFn;
 }) {
+  const { p } = useParty();
   const a = data.assessment;
   const { isManager } = useAssessmentLevel();
   // Step 1 (Level 2 Officer) is open while the officer is working; step 2
@@ -2537,7 +2463,7 @@ function RecommendationTab({
 
       {/* Step 1 — Level 2 Officer's review */}
       <div className="rounded-xl border p-3 flex flex-col gap-2" style={{ borderColor: 'var(--border)' }}>
-        <div className="text-[11px] font-bold uppercase tracking-wide text-secondary">Step 1 · Level 2 review</div>
+        <div className="text-[11px] font-bold uppercase tracking-wide text-secondary">Step 1 · Evaluator's review</div>
         {a.officer_recommended_at ? (
           <DecisionCard
             label={
@@ -2560,7 +2486,7 @@ function RecommendationTab({
                 style={{ borderColor: '#f59e0b55', backgroundColor: '#f59e0b1a', color: 'var(--text)' }}
               >
                 Verify or reject the {uncheckedUploads} uploaded requirement{uncheckedUploads === 1 ? '' : 's'} on the
-                Compliance tab first. Requirements the locator hasn't uploaded don't block submitting.
+                Compliance tab first. Requirements the {p} hasn't uploaded don't block submitting.
               </div>
             ) : null}
             {!data.contract_progress?.signed ? (
@@ -2568,7 +2494,7 @@ function RecommendationTab({
                 className="rounded-lg border px-3 py-2 text-[12px]"
                 style={{ borderColor: '#f59e0b55', backgroundColor: '#f59e0b1a', color: 'var(--text)' }}
               >
-                Upload the signed contract on the Contract tab first — the review goes to Level 1 with it.
+                Upload the signed contract on the Contract tab first — the review goes to the Manager with it.
               </div>
             ) : null}
             <Field label="Summary / basis">
@@ -2611,7 +2537,7 @@ function RecommendationTab({
           outcome, or Level 2's "waiting" note. */}
       {a.recommendation || (managerOpen && !isManager) ? (
       <div className="rounded-xl border p-3 flex flex-col gap-2" style={{ borderColor: 'var(--border)' }}>
-        <div className="text-[11px] font-bold uppercase tracking-wide text-secondary">Step 2 · Level 1 recommendation</div>
+        <div className="text-[11px] font-bold uppercase tracking-wide text-secondary">Step 2 · Manager's recommendation</div>
         {a.recommendation ? (
           <>
             <DecisionCard
@@ -2627,7 +2553,7 @@ function RecommendationTab({
             />
           </>
         ) : (
-          <div className="text-[12px] text-secondary">Submitted — waiting for Level 1's recommendation.</div>
+          <div className="text-[12px] text-secondary">Submitted — waiting for the Manager's recommendation.</div>
         )}
       </div>
       ) : null}

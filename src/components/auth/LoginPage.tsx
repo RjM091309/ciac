@@ -819,13 +819,13 @@ export function LoginPage(props: {
                 <motion.div variants={revealItem} className="space-y-2">
                   <div className="flex items-center justify-between ml-1">
                     <label className="text-xs font-bold uppercase tracking-widest text-secondary" htmlFor="username">
-                      Username
+                      Username or email
                     </label>
                   </div>
                   <input
                     id="username"
                     type="text"
-                    placeholder="your.username"
+                    placeholder="your.username or you@email.com"
                     value={username}
                     onChange={(e) => {
                       setUsername(e.target.value);

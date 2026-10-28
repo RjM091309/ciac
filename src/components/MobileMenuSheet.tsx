@@ -139,7 +139,11 @@ export function MobileMenuSheet({
                   <div className="text-sm font-bold truncate" style={{ color: 'var(--text)' }}>
                     {name || '—'}
                   </div>
-                  {role ? <div className="text-[11px] text-secondary capitalize truncate">{role}</div> : null}
+                  {profile?.role_label ? (
+                    <div className="text-[11px] text-secondary truncate">{profile.role_label}</div>
+                  ) : role ? (
+                    <div className="text-[11px] text-secondary capitalize truncate">{role}</div>
+                  ) : null}
                 </div>
                 <span
                   aria-hidden

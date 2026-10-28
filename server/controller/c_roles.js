@@ -157,6 +157,8 @@ exports.update = async (req, res) => {
       throw error;
     }
     if (!row) return res.status(404).json({ success: false, message: "Role not found" });
+    // Renamed: its staff's "AO - Jane_IP" labels start with the role's short name.
+    if (current?.name !== row?.name) await require("../lib/staffName").syncAll({ roleId: id });
     await AuditLog.record({
       actorId: req.user?.id,
       actorUsername: req.user?.username,

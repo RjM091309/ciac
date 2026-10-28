@@ -24,6 +24,7 @@ const ProponentCompliance = lazy(() => import('./components/proponent/ProponentC
 const ProponentActivity = lazy(() => import('./components/proponent/ProponentActivity').then((m) => ({ default: m.ProponentActivity })));
 const PermitsManagement = lazy(() => import('./components/compliance/PermitsManagement').then((m) => ({ default: m.PermitsManagement })));
 const UsersManagement = lazy(() => import('./components/settings/UsersManagement').then((m) => ({ default: m.UsersManagement })));
+const ProponentIntake = lazy(() => import('./components/applications/ProponentIntake').then((m) => ({ default: m.ProponentIntake })));
 const LocatorUsersManagement = lazy(() => import('./components/settings/LocatorUsersManagement').then((m) => ({ default: m.LocatorUsersManagement })));
 const ControlPanelManagement = lazy(() => import('./components/settings/ControlPanelManagement').then((m) => ({ default: m.ControlPanelManagement })));
 const ProponentsManagement = lazy(() => import('./components/proponent/ProponentsManagement').then((m) => ({ default: m.ProponentsManagement })));
@@ -127,6 +128,7 @@ interface UserData {
 const VIEW_TO_PATH: Record<AppView, string> = {
   dashboard: '/dashboard',
   'applications:new': '/applications/new',
+  'applications:proponent-intake': '/applications/new-proponent',
   'applications:renewals': '/applications/renewals',
   'applications:requirements': '/applications/requirements',
   'assessment:queue': '/assessment',
@@ -678,6 +680,8 @@ export default function App() {
                 <MenuGate menuKey={view} navigate={navigate}>
               {view === 'settings:users' ? (
                 <UsersManagement navigate={navigate} />
+              ) : view === 'applications:proponent-intake' ? (
+                <ProponentIntake />
               ) : view === 'settings:locator-users' ? (
                 <LocatorUsersManagement locationSearch={locationSearch} navigate={navigate} />
               ) : view === 'applications:new' ? (
@@ -748,6 +752,14 @@ const LANDING_CONFIG: Record<AppView, LandingConfig> = {
     description: 'High-level overview of applications, permits, and daily tasks.',
     badge: 'Overview',
     icon: FolderTree,
+    stats: [],
+    table: { columns: [], rows: [] },
+  },
+  'applications:proponent-intake': {
+    title: 'New Proponent',
+    description: 'Record a new proponent from the letter received and send it to a BDO to file the application.',
+    badge: 'Applications',
+    icon: Users,
     stats: [],
     table: { columns: [], rows: [] },
   },
@@ -829,7 +841,7 @@ const LANDING_CONFIG: Record<AppView, LandingConfig> = {
   },
   'approval:queue': {
     title: 'Approved Queue',
-    description: 'Approved applications waiting for Level 1 Account Officer to assign a Level 2. Assigned locators move to Registered Locator.',
+    description: 'Approved applications waiting for the ACCOUNT OFFICER - MANAGER to assign an Account Officer. Assigned locators move to Registered Locator.',
     badge: 'Approved Queue',
     icon: FileCheck,
     stats: [

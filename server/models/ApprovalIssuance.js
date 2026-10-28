@@ -569,8 +569,8 @@ async function actOnStep(stepId, { action, remarks, actorId, override_unverified
     if (!recorded?.document_id) {
       throw businessError(
         recorded
-          ? "The signed contract isn't uploaded yet — Return to Evaluator so Level 2 can upload it."
-          : "There's no contract yet — Return to Evaluator so Level 2 can make it."
+          ? "The signed contract isn't uploaded yet — Return to Evaluator so the evaluator can upload it."
+          : "There's no contract yet — Return to Evaluator so the evaluator can make it."
       );
     }
     await assertMandatoryRequirementsVerified(approval.application_id, { override: override_unverified });
@@ -921,11 +921,11 @@ async function listAssignableAccountOfficers() {
 async function assignAccountOfficer(applicationId, { accountOfficerId, actorId }) {
   const appId = toInt(applicationId);
   const officerId = toInt(accountOfficerId);
-  if (!officerId) throw businessError("Choose the Level 2 Account Officer.");
+  if (!officerId) throw businessError("Choose the Account Officer.");
   const row = (await listAssignmentQueue()).find((r) => Number(r.application_id) === appId);
   if (!row) throw businessError("This application isn't waiting for an Account Officer anymore.");
   const officer = (await listAssignableAccountOfficers()).find((u) => Number(u.id) === officerId);
-  if (!officer) throw businessError("The selected user can't be assigned as the Level 2 Account Officer.");
+  if (!officer) throw businessError("The selected user can't be assigned as the Account Officer.");
 
   // Clearing the flag is the compare-and-swap: only one assign wins.
   const result = await updateData(

@@ -6,6 +6,7 @@ const Role = require("../models/Role");
 const { validatePasswordStrength, generateTempPassword } = require("../lib/password");
 const { sendTempPasswordEmail } = require("./c_users");
 const { publicErrorMessage } = require("../lib/httpError");
+const { syncStaffName, splitName } = require("../lib/staffName");
 
 function fail(res, label, error) {
   console.error(`${label} error:`, error);
@@ -74,6 +75,12 @@ exports.create = async (req, res) => {
       department_id,
     });
 
+    // Its full_name becomes the "AO - Jane_IP" label (lib/staffName.js).
+    if (row) {
+      const label = await syncStaffName(row.id, splitName(full_name));
+      if (label) row.full_name = label;
+    }
+
     let mailResult = { sent: false };
     if (autoGenerate && row) {
       await User.setMustChangePassword(row.id, true);
@@ -83,6 +90,7 @@ exports.create = async (req, res) => {
         username: row.username,
         tempPassword: effectivePassword,
         isNewAccount: true,
+        staff: true,
       });
     }
 
@@ -128,6 +136,10 @@ exports.update = async (req, res) => {
       department_id,
     });
     if (!row) return res.status(404).json({ success: false, message: "Account officer not found" });
+    if (full_name !== undefined) {
+      const label = await syncStaffName(id, splitName(full_name));
+      if (label) row.full_name = label;
+    }
     await audit(req, "USER_UPDATED", id, {
       username: row?.username,
       changes: diffChanges(before, row, ["username", "email", "phone", "full_name", "department_id"]),
