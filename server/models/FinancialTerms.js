@@ -60,6 +60,12 @@ async function createSchema() {
       -- No separate proponent_id index: the unique constraint above leads with it.
     END
   `);
+  // Total = Months MGL × Amount, kept by upsertForProponent on every save
+  // (same text format as amount). Existing rows get it on their next save.
+  await updateSchema(`
+    IF COL_LENGTH('dbo.proponent_financial_terms', 'total_amount') IS NULL
+      ALTER TABLE dbo.proponent_financial_terms ADD total_amount NVARCHAR(50) NULL;
+  `);
   await carryOverLegacyColumns();
 }
 
@@ -116,7 +122,7 @@ function toInt(v) {
 async function getForProponent(proponentId) {
   await ensureSchema();
   const rows = await selectData(
-    `SELECT term_type, months, amount, currency FROM dbo.proponent_financial_terms WHERE proponent_id = @param0 AND is_active = 1`,
+    `SELECT term_type, months, amount, currency, total_amount FROM dbo.proponent_financial_terms WHERE proponent_id = @param0 AND is_active = 1`,
     [proponentId]
   );
   const byType = new Map(rows.map((r) => [r.term_type, r]));
@@ -126,8 +132,24 @@ async function getForProponent(proponentId) {
     result[`${prefix}_months`] = row?.months ?? null;
     result[`${prefix}_amount`] = row?.amount ?? null;
     result[`${prefix}_currency`] = row?.currency ?? null;
+    result[`${prefix}_total_amount`] = row?.total_amount ?? null;
   }
   return result;
+}
+
+/** "1,234.50" -> 1234.5 (null when blank / not a number). */
+function parseAmount(value) {
+  if (value === null || value === undefined || String(value).trim() === "") return null;
+  const n = Number(String(value).replace(/,/g, ""));
+  return Number.isFinite(n) ? n : null;
+}
+
+/** Months MGL × Amount, formatted like the amount field ("12,345.00"). */
+function computeTotal(months, amount) {
+  const m = parseAmount(months);
+  const a = parseAmount(amount);
+  if (m === null || a === null) return null;
+  return (Math.round(m * a * 100) / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 /** Applies whichever of the nine flat fields are present in `fields` (create sends all
@@ -165,11 +187,27 @@ async function upsertForProponent(tx, proponentId, fields, actorId) {
         `UPDATE dbo.proponent_financial_terms SET ${sets.join(", ")}, updated_at = GETDATE() WHERE id = @param0`,
         params
       );
+      // Recompute the total from the row as it now stands (only some fields
+      // may have been sent).
+      const current = await tx.query(`SELECT months, amount FROM dbo.proponent_financial_terms WHERE id = @param0`, [id]);
+      const row = current.recordset?.[0] || {};
+      await tx.query(`UPDATE dbo.proponent_financial_terms SET total_amount = @param1 WHERE id = @param0`, [
+        id,
+        computeTotal(row.months, row.amount),
+      ]);
     } else {
       await tx.query(
-        `INSERT INTO dbo.proponent_financial_terms (proponent_id, term_type, months, amount, currency, created_by)
-         VALUES (@param0, @param1, @param2, @param3, @param4, @param5)`,
-        [proponentId, type, fields[monthsKey] ?? null, fields[amountKey] ?? null, fields[currencyKey] ?? null, actor]
+        `INSERT INTO dbo.proponent_financial_terms (proponent_id, term_type, months, amount, currency, total_amount, created_by)
+         VALUES (@param0, @param1, @param2, @param3, @param4, @param5, @param6)`,
+        [
+          proponentId,
+          type,
+          fields[monthsKey] ?? null,
+          fields[amountKey] ?? null,
+          fields[currencyKey] ?? null,
+          computeTotal(fields[monthsKey], fields[amountKey]),
+          actor,
+        ]
       );
     }
   }

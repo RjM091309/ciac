@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Plus, Save, Search, Send } from 'lucide-react';
+import { Plus, Save, Search, Send, Trash2 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { toast } from 'sonner';
 import { SidePanel } from '../ui/SidePanel';
@@ -123,10 +123,94 @@ type PropertyRow = {
   rate_currency: string;
   mgl_mo: string;
   mgl_currency: string;
+  // STANDARD: MGL/MO = Area × Rate/SQM/MO (computed, read-only).
+  // NON_STANDARD: every amount entered by hand.
+  // '': not chosen yet (rows from before the type existed) — no default.
+  rate_type: PropertyRateType | '';
 };
 
-function blankPropertyRow(): PropertyRow {
+type PropertyRateType = 'STANDARD' | 'NON_STANDARD';
+
+// Property schedule dropdowns.
+const PROPERTY_YEARS = Array.from({ length: 11 }, (_, k) => String(2020 + k)); // 2020–2030
+const PROPERTY_TYPES = ['OPEN SPACE', 'STRUCTURE'];
+// Year / Type of Property only take values from their lists (any case):
+// an older free-text value that isn't one of them shows as "Select ..." and
+// has to be picked again before the schedule can be saved.
+const asOption = (options: string[], current: string) =>
+  options.find((o) => o.toUpperCase() === String(current || '').trim().toUpperCase()) ?? '';
+
+/** "1,234.50" -> 1234.5, or null. */
+function parseAmount(value: string): number | null {
+  const n = Number(String(value || '').replace(/,/g, ''));
+  return value && Number.isFinite(n) ? n : null;
+}
+
+/** Standard rows: Area × Rate, formatted like the other amount inputs. */
+function computeStandardMgl(row: Pick<PropertyRow, 'area_sqm' | 'rate_sqm_mo'>): string {
+  const area = parseAmount(row.area_sqm);
+  const rate = parseAmount(row.rate_sqm_mo);
+  if (area === null || rate === null) return '';
+  return (Math.round(area * rate * 100) / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+/** Applies a field change; a Standard row keeps its MGL (and its currency)
+ * in step with Area × Rate. */
+function updatePropertyRow(row: PropertyRow, patch: Partial<PropertyRow>): PropertyRow {
+  const next = { ...row, ...patch };
+  if (next.rate_type === 'STANDARD') {
+    next.mgl_mo = computeStandardMgl(next);
+    next.mgl_currency = next.rate_currency;
+  }
+  return next;
+}
+
+// Every column of a property row is required before the schedule can be saved.
+const PROPERTY_REQUIRED: [keyof PropertyRow, string][] = [
+  ['year', 'Year'],
+  ['date_from', 'Date From'],
+  ['date_to', 'Date To'],
+  ['rate_type', 'Rate'],
+  ['type_of_property', 'Type of Property'],
+  ['area_sqm', 'Area (SQM)'],
+  ['rate_sqm_mo', 'Rate/SQM/MO'],
+  ['rate_currency', 'Currency'],
+  ['mgl_mo', 'MGL/MO'],
+  ['mgl_currency', 'MGL Currency'],
+];
+const PROPERTY_NUMERIC = new Set<keyof PropertyRow>(['area_sqm', 'rate_sqm_mo', 'mgl_mo']);
+
+/** The fields of a row that are blank (or not a number where one is expected). */
+function missingPropertyFields(row: PropertyRow): Set<keyof PropertyRow> {
+  const missing = new Set<keyof PropertyRow>();
+  for (const [key] of PROPERTY_REQUIRED) {
+    const value = String(row[key] ?? '').trim();
+    if (!value || (PROPERTY_NUMERIC.has(key) && parseAmount(value) === null)) missing.add(key);
+  }
+  if (!asOption(PROPERTY_YEARS, row.year)) missing.add('year');
+  if (!asOption(PROPERTY_TYPES, row.type_of_property)) missing.add('type_of_property');
+  if (row.date_from && row.date_to && row.date_to < row.date_from) missing.add('date_to');
+  return missing;
+}
+
+/** First problem in the schedule as a message, or null when every row is complete. */
+function propertyScheduleError(rows: PropertyRow[]): string | null {
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    const missing = missingPropertyFields(row);
+    if (!missing.size) continue;
+    if (missing.size === 1 && missing.has('date_to') && row.date_to) {
+      return `Property row ${i + 1}: Date To can't be before Date From.`;
+    }
+    const labels = PROPERTY_REQUIRED.filter(([k]) => missing.has(k)).map(([, label]) => label);
+    return `Property row ${i + 1}: fill in ${labels.join(', ')}.`;
+  }
+  return null;
+}
+
+function blankPropertyRow(rateType: PropertyRateType = 'STANDARD'): PropertyRow {
   return {
+    rate_type: rateType,
     year: '',
     date_from: '',
     date_to: '',
@@ -252,10 +336,12 @@ function mapContactRows(rows: any): ContactPersonRow[] {
   }));
 }
 
+// No rows = the table stays hidden until "+" adds one.
 function mapPropertyRows(rows: any): PropertyRow[] {
-  if (!Array.isArray(rows) || !rows.length) return [blankPropertyRow()];
+  if (!Array.isArray(rows) || !rows.length) return [];
   return rows.map((row: any) => ({
     id: row.id,
+    rate_type: row.rate_type === 'STANDARD' || row.rate_type === 'NON_STANDARD' ? row.rate_type : '',
     year: row.year || '',
     date_from: toDateInputValue(row.date_from),
     date_to: toDateInputValue(row.date_to),
@@ -294,8 +380,9 @@ const toPropertyPayload = (row: PropertyRow) => ({
   area_sqm: row.area_sqm.trim() || null,
   rate_sqm_mo: row.rate_sqm_mo.trim() || null,
   rate_currency: row.rate_currency || null,
-  mgl_mo: row.mgl_mo.trim() || null,
-  mgl_currency: row.mgl_currency || null,
+  mgl_mo: (row.rate_type === 'STANDARD' ? computeStandardMgl(row) : row.mgl_mo.trim()) || null,
+  mgl_currency: (row.rate_type === 'STANDARD' ? row.rate_currency : row.mgl_currency) || null,
+  rate_type: row.rate_type || null,
 });
 
 function api(path: string) {
@@ -435,7 +522,7 @@ const BLANK_PROFILE_FORM = {
   investment_actual: '',
   employee_commitment: '',
   employee_actual: '',
-  properties: [blankPropertyRow()],
+  properties: [] as PropertyRow[],
   land_use_id: '',
   stockholders: [blankStockholderRow()],
   contact_persons: [blankContactPersonRow()],
@@ -469,6 +556,18 @@ export function ProponentsManagement({
   // No Add/Edit right for this panel (new vs. existing locator) = view only.
   const formLocked = editing ? !canEdit : !canAdd;
   const [isCreateOpen, setIsCreateOpen] = useState(false);
+  // "+" on the property schedule asks Standard vs Non-standard first.
+  const [propertyTypePickerOpen, setPropertyTypePickerOpen] = useState(false);
+  // A section's own save on a New Locator: creates the locator (with what's
+  // entered so far) and keeps the panel open on it, instead of closing.
+  // A ref so it survives the duplicate-check confirm, which calls save again.
+  const keepOpenAfterCreateRef = useRef(false);
+  // Set after a save is blocked by an incomplete property row: outlines the
+  // blank fields in red until they're filled in.
+  const [showPropertyErrors, setShowPropertyErrors] = useState(false);
+  // Switching a row to Standard replaces its MGL with Area × Rate — asked
+  // in the app's own confirm dialog first.
+  const [standardSwitch, setStandardSwitch] = useState<{ index: number; current: string; computed: string } | null>(null);
   // Documents picked on the Documents tab while creating a New Locator —
   // uploaded once the POST returns the new locator's id.
   const [pendingDocs, setPendingDocs] = useState<PendingLocatorDocument[]>([]);
@@ -1111,7 +1210,23 @@ export function ProponentsManagement({
   // their ids and replace the form's copy, so the next save updates them instead of
   // adding duplicates. Only available for a locator that already exists.
   async function saveSection(section: SectionKey) {
-    if (!editing) return;
+    if (section === 'properties') {
+      const problem = propertyScheduleError(form.properties);
+      if (problem) {
+        setShowPropertyErrors(true);
+        toast.error(problem);
+        return;
+      }
+    }
+    if (!editing) {
+      if (!form.business_name.trim()) {
+        toast.error("Enter the Locator's Name first — this is saved under the locator.");
+        return;
+      }
+      keepOpenAfterCreateRef.current = true;
+      await save();
+      return;
+    }
     setSavingSection(section);
     try {
       const body =
@@ -1168,6 +1283,7 @@ export function ProponentsManagement({
               ? 'Investment figures saved'
               : 'Property schedule saved',
       );
+      if (section === 'properties') setShowPropertyErrors(false);
     } catch (e: any) {
       toast.error(e?.message || 'Save failed');
     } finally {
@@ -1176,6 +1292,15 @@ export function ProponentsManagement({
   }
 
   async function save(skipDuplicateCheck = false) {
+    if (sectionDirty.properties || (!editing && form.properties.length > 0)) {
+      const problem = propertyScheduleError(form.properties);
+      if (problem) {
+        keepOpenAfterCreateRef.current = false;
+        setShowPropertyErrors(true);
+        toast.error(problem);
+        return;
+      }
+    }
     // Registered Locator only lists locators with an Account Officer (an
     // Account Officer's own new locator defaults to them on the server).
     if (!officerLocked && !form.account_officer_id.trim()) {
@@ -1303,11 +1428,21 @@ export function ProponentsManagement({
         toast.warning(`Locator saved, but ${failedUploads} document(s) failed to upload — re-upload them from the Documents tab.`);
       }
 
-      setIsCreateOpen(false);
       setError(null);
       await refresh({ showLoading: false });
+      if (!editing && keepOpenAfterCreateRef.current && json?.data?.id) {
+        keepOpenAfterCreateRef.current = false;
+        // Stay on the new locator: reload it in edit mode, so further section
+        // saves only save that section.
+        openEdit(json.data as ProponentRow);
+        toast.success('Locator created — saved with this section');
+        return;
+      }
+      keepOpenAfterCreateRef.current = false;
+      setIsCreateOpen(false);
       toast.success(editing ? 'Locator updated successfully' : 'Locator created successfully');
     } catch (e: any) {
+      keepOpenAfterCreateRef.current = false;
       const message = e?.message || 'Save failed';
       setError(message);
       toast.error(message);
@@ -2346,11 +2481,19 @@ export function ProponentsManagement({
             {/* Property schedule (dbo.proponent_properties) — an inline editable
                 table synced wholesale on Save, add/remove-row buttons on the right. */}
             <div className="flex flex-col sm:flex-row gap-2 sm:items-start">
+              {form.properties.length === 0 ? (
+                <div
+                  className="flex-1 min-w-0 rounded-lg border border-dashed px-3 py-2.5 text-[11px] text-secondary"
+                  style={{ borderColor: 'var(--input-border)' }}
+                >
+                  No property schedule yet — use <span className="font-semibold">+</span> to add a Standard or Non-standard row.
+                </div>
+              ) : (
               <div className="flex-1 min-w-0 overflow-x-auto rounded-lg border" style={{ borderColor: 'var(--input-border)' }}>
                 <table className="w-full text-xs border-collapse">
                   <thead>
                     <tr style={{ backgroundColor: 'var(--control-bg)' }}>
-                      {['No.', 'Year', 'Date From', 'Date To', 'Type of Property', 'Area (SQM)', 'Rate/SQM/MO', 'Currency', 'MGL/MO', 'Currency'].map(
+                      {['No.', 'Year', 'Date From', 'Date To', 'Rate', 'Type of Property', 'Area (SQM)', 'Rate/SQM/MO', 'Currency', 'MGL/MO', 'Currency', ''].map(
                         (h, i) => (
                           <th
                             key={`${h}-${i}`}
@@ -2364,25 +2507,40 @@ export function ProponentsManagement({
                     </tr>
                   </thead>
                   <tbody>
-                    {form.properties.map((row, i) => (
+                    {form.properties.map((row, i) => {
+                      const missing = showPropertyErrors ? missingPropertyFields(row) : null;
+                      // Red outline on a blank required field after a blocked save.
+                      const miss = (key: keyof PropertyRow) =>
+                        missing?.has(key) ? ' [&>*]:rounded-md [&>*]:ring-1 [&>*]:ring-red-500' : '';
+                      return (
                       <tr key={i}>
                         <td className="px-2 py-1 border-b text-center" style={{ borderColor: 'var(--input-border)' }}>
                           {i + 1}
                         </td>
-                        <td className="px-1 py-1 border-b" style={{ borderColor: 'var(--input-border)' }}>
-                          <input
-                            className="app-form-control app-form-control-sm w-16"
-                            value={row.year}
+                        <td className={`px-1 py-1 border-b${miss('year')}`} style={{ borderColor: 'var(--input-border)' }}>
+                          <select
+                            className="app-form-control app-form-control-sm w-[136px] min-w-[136px]"
+                            style={{ color: asOption(PROPERTY_YEARS, row.year) ? 'var(--text)' : 'var(--text-muted)' }}
+                            value={asOption(PROPERTY_YEARS, row.year)}
                             disabled={loadingLocation}
                             onChange={(e) =>
                               setForm((p) => ({
                                 ...p,
-                                properties: p.properties.map((r, ri) => (ri === i ? { ...r, year: e.target.value } : r)),
+                                properties: p.properties.map((r, ri) => (ri === i ? updatePropertyRow(r, { year: e.target.value }) : r)),
                               }))
                             }
-                          />
+                          >
+                            <option value="" disabled>
+                              Select year
+                            </option>
+                            {PROPERTY_YEARS.map((y) => (
+                              <option key={y} value={y} style={{ color: 'var(--text)' }}>
+                                {y}
+                              </option>
+                            ))}
+                          </select>
                         </td>
-                        <td className="px-1 py-1 border-b w-36" style={{ borderColor: 'var(--input-border)' }}>
+                        <td className={`px-1 py-1 border-b w-36${miss('date_from')}`} style={{ borderColor: 'var(--input-border)' }}>
                           <DatePicker
                             mode="single"
                             fullWidth
@@ -2393,13 +2551,13 @@ export function ProponentsManagement({
                               setForm((p) => ({
                                 ...p,
                                 properties: p.properties.map((r, ri) =>
-                                  ri === i ? { ...r, date_from: dateToDateInputValue(d) } : r,
+                                  ri === i ? updatePropertyRow(r, { date_from: dateToDateInputValue(d) }) : r,
                                 ),
                               }))
                             }
                           />
                         </td>
-                        <td className="px-1 py-1 border-b w-36" style={{ borderColor: 'var(--input-border)' }}>
+                        <td className={`px-1 py-1 border-b w-36${miss('date_to')}`} style={{ borderColor: 'var(--input-border)' }}>
                           <DatePicker
                             mode="single"
                             fullWidth
@@ -2410,26 +2568,72 @@ export function ProponentsManagement({
                               setForm((p) => ({
                                 ...p,
                                 properties: p.properties.map((r, ri) =>
-                                  ri === i ? { ...r, date_to: dateToDateInputValue(d) } : r,
+                                  ri === i ? updatePropertyRow(r, { date_to: dateToDateInputValue(d) }) : r,
                                 ),
                               }))
                             }
                           />
                         </td>
-                        <td className="px-1 py-1 border-b" style={{ borderColor: 'var(--input-border)' }}>
-                          <input
-                            className="app-form-control app-form-control-sm w-full min-w-[10rem]"
-                            value={row.type_of_property}
+                        <td className={`px-1 py-1 border-b whitespace-nowrap${miss('rate_type')}`} style={{ borderColor: 'var(--input-border)' }}>
+                          {/* Switchable: Non-standard → Standard recomputes MGL, so it asks first. */}
+                          <select
+                            className="app-form-control app-form-control-sm w-[156px] min-w-[156px] font-semibold"
+                            style={row.rate_type === 'STANDARD' ? { color: '#059669' } : undefined}
+                            value={row.rate_type}
+                            disabled={loadingLocation}
+                            title={
+                              row.rate_type === 'STANDARD'
+                                ? 'MGL/MO = Area × Rate/SQM/MO'
+                                : row.rate_type === 'NON_STANDARD'
+                                  ? 'Amounts entered by hand'
+                                  : 'Choose Standard or Non-standard'
+                            }
+                            onChange={(e) => {
+                              const next = e.target.value as PropertyRateType;
+                              if (next === 'STANDARD') {
+                                const computed = computeStandardMgl(row);
+                                if (row.mgl_mo.trim() && row.mgl_mo !== computed) {
+                                  setStandardSwitch({ index: i, current: row.mgl_mo, computed });
+                                  return;
+                                }
+                              }
+                              setForm((p) => ({
+                                ...p,
+                                properties: p.properties.map((r, ri) => (ri === i ? updatePropertyRow(r, { rate_type: next }) : r)),
+                              }));
+                            }}
+                          >
+                            <option value="" disabled>
+                              Select type
+                            </option>
+                            <option value="STANDARD">Standard</option>
+                            <option value="NON_STANDARD">Non-standard</option>
+                          </select>
+                        </td>
+                        <td className={`px-1 py-1 border-b${miss('type_of_property')}`} style={{ borderColor: 'var(--input-border)' }}>
+                          <select
+                            className="app-form-control app-form-control-sm w-[150px] min-w-[150px]"
+                            style={{ color: asOption(PROPERTY_TYPES, row.type_of_property) ? 'var(--text)' : 'var(--text-muted)' }}
+                            value={asOption(PROPERTY_TYPES, row.type_of_property)}
                             disabled={loadingLocation}
                             onChange={(e) =>
                               setForm((p) => ({
                                 ...p,
-                                properties: p.properties.map((r, ri) => (ri === i ? { ...r, type_of_property: e.target.value } : r)),
+                                properties: p.properties.map((r, ri) => (ri === i ? updatePropertyRow(r, { type_of_property: e.target.value }) : r)),
                               }))
                             }
-                          />
+                          >
+                            <option value="" disabled>
+                              Select type
+                            </option>
+                            {PROPERTY_TYPES.map((t) => (
+                              <option key={t} value={t} style={{ color: 'var(--text)' }}>
+                                {t}
+                              </option>
+                            ))}
+                          </select>
                         </td>
-                        <td className="px-1 py-1 border-b" style={{ borderColor: 'var(--input-border)' }}>
+                        <td className={`px-1 py-1 border-b${miss('area_sqm')}`} style={{ borderColor: 'var(--input-border)' }}>
                           <input
                             className="app-form-control app-form-control-sm w-20"
                             value={row.area_sqm}
@@ -2437,12 +2641,12 @@ export function ProponentsManagement({
                             onChange={(e) =>
                               setForm((p) => ({
                                 ...p,
-                                properties: p.properties.map((r, ri) => (ri === i ? { ...r, area_sqm: e.target.value } : r)),
+                                properties: p.properties.map((r, ri) => (ri === i ? updatePropertyRow(r, { area_sqm: e.target.value }) : r)),
                               }))
                             }
                           />
                         </td>
-                        <td className="px-1 py-1 border-b" style={{ borderColor: 'var(--input-border)' }}>
+                        <td className={`px-1 py-1 border-b${miss('rate_sqm_mo')}`} style={{ borderColor: 'var(--input-border)' }}>
                           <input
                             className="app-form-control app-form-control-sm w-24"
                             value={row.rate_sqm_mo}
@@ -2451,13 +2655,13 @@ export function ProponentsManagement({
                               setForm((p) => ({
                                 ...p,
                                 properties: p.properties.map((r, ri) =>
-                                  ri === i ? { ...r, rate_sqm_mo: formatAmountInput(e.target.value) } : r,
+                                  ri === i ? updatePropertyRow(r, { rate_sqm_mo: formatAmountInput(e.target.value) }) : r,
                                 ),
                               }))
                             }
                           />
                         </td>
-                        <td className="px-1 py-1 border-b" style={{ borderColor: 'var(--input-border)' }}>
+                        <td className={`px-1 py-1 border-b${miss('rate_currency')}`} style={{ borderColor: 'var(--input-border)' }}>
                           <select
                             className="app-form-control app-form-control-sm w-16"
                             value={row.rate_currency}
@@ -2465,7 +2669,7 @@ export function ProponentsManagement({
                             onChange={(e) =>
                               setForm((p) => ({
                                 ...p,
-                                properties: p.properties.map((r, ri) => (ri === i ? { ...r, rate_currency: e.target.value } : r)),
+                                properties: p.properties.map((r, ri) => (ri === i ? updatePropertyRow(r, { rate_currency: e.target.value }) : r)),
                               }))
                             }
                           >
@@ -2476,30 +2680,33 @@ export function ProponentsManagement({
                             ))}
                           </select>
                         </td>
-                        <td className="px-1 py-1 border-b" style={{ borderColor: 'var(--input-border)' }}>
+                        <td className={`px-1 py-1 border-b${miss('mgl_mo')}`} style={{ borderColor: 'var(--input-border)' }}>
                           <input
                             className="app-form-control app-form-control-sm w-24"
                             value={row.mgl_mo}
-                            disabled={loadingLocation}
+                            disabled={loadingLocation || row.rate_type === 'STANDARD'}
+                            readOnly={row.rate_type === 'STANDARD'}
+                            title={row.rate_type === 'STANDARD' ? 'Computed: Area × Rate/SQM/MO' : undefined}
                             onChange={(e) =>
                               setForm((p) => ({
                                 ...p,
                                 properties: p.properties.map((r, ri) =>
-                                  ri === i ? { ...r, mgl_mo: formatAmountInput(e.target.value) } : r,
+                                  ri === i ? updatePropertyRow(r, { mgl_mo: formatAmountInput(e.target.value) }) : r,
                                 ),
                               }))
                             }
                           />
                         </td>
-                        <td className="px-1 py-1 border-b" style={{ borderColor: 'var(--input-border)' }}>
+                        <td className={`px-1 py-1 border-b${miss('mgl_currency')}`} style={{ borderColor: 'var(--input-border)' }}>
                           <select
                             className="app-form-control app-form-control-sm w-16"
                             value={row.mgl_currency}
-                            disabled={loadingLocation}
+                            disabled={loadingLocation || row.rate_type === 'STANDARD'}
+                            title={row.rate_type === 'STANDARD' ? 'Same as the rate’s currency' : undefined}
                             onChange={(e) =>
                               setForm((p) => ({
                                 ...p,
-                                properties: p.properties.map((r, ri) => (ri === i ? { ...r, mgl_currency: e.target.value } : r)),
+                                properties: p.properties.map((r, ri) => (ri === i ? updatePropertyRow(r, { mgl_currency: e.target.value }) : r)),
                               }))
                             }
                           >
@@ -2510,33 +2717,76 @@ export function ProponentsManagement({
                             ))}
                           </select>
                         </td>
+                        <td className="px-1 py-1 border-b text-center" style={{ borderColor: 'var(--input-border)' }}>
+                          <button
+                            type="button"
+                            disabled={loadingLocation}
+                            onClick={() => setForm((p) => ({ ...p, properties: p.properties.filter((_, ri) => ri !== i) }))}
+                            className="inline-flex h-7 w-7 items-center justify-center rounded-md cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 hover:bg-[var(--selected-bg)]"
+                            style={{ color: '#ef4444' }}
+                            title={`Remove row ${i + 1}`}
+                            aria-label={`Remove row ${i + 1}`}
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </td>
                       </tr>
-                    ))}
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
+              )}
               <div className="flex flex-row sm:flex-col justify-end gap-1.5 shrink-0">
-                <button
-                  type="button"
-                  disabled={loadingLocation}
-                  onClick={() => setForm((p) => ({ ...p, properties: [...p.properties, blankPropertyRow()] }))}
-                  className="w-7 h-7 rounded-md flex items-center justify-center text-white font-bold cursor-pointer disabled:cursor-not-allowed disabled:opacity-60"
-                  style={{ backgroundColor: '#22c55e' }}
-                  title="Add row"
-                >
-                  +
-                </button>
-                <button
-                  type="button"
-                  disabled={loadingLocation || form.properties.length === 0}
-                  onClick={() => setForm((p) => ({ ...p, properties: p.properties.slice(0, -1) }))}
-                  className="w-7 h-7 rounded-md flex items-center justify-center text-white font-bold cursor-pointer disabled:cursor-not-allowed disabled:opacity-60"
-                  style={{ backgroundColor: '#ef4444' }}
-                  title="Remove last row"
-                >
-                  −
-                </button>
-                {form.properties.length > 0 && (
+                <div className="relative">
+                  <button
+                    type="button"
+                    disabled={loadingLocation}
+                    onClick={() => setPropertyTypePickerOpen((v) => !v)}
+                    className="w-7 h-7 rounded-md flex items-center justify-center text-white font-bold cursor-pointer disabled:cursor-not-allowed disabled:opacity-60"
+                    style={{ backgroundColor: '#22c55e' }}
+                    title="Add row"
+                    aria-haspopup="menu"
+                    aria-expanded={propertyTypePickerOpen}
+                  >
+                    +
+                  </button>
+                  {propertyTypePickerOpen ? (
+                    <>
+                      <div className="fixed inset-0 z-40" onClick={() => setPropertyTypePickerOpen(false)} />
+                      <div
+                        role="menu"
+                        className="absolute right-0 bottom-full sm:bottom-auto sm:top-0 sm:right-full mb-1 sm:mb-0 sm:mr-2 z-50 w-64 rounded-xl border p-1.5 shadow-xl"
+                        style={{ backgroundColor: 'var(--surface)', borderColor: 'var(--border)' }}
+                      >
+                        <div className="px-2 pt-1 pb-1.5 text-[10px] font-bold uppercase tracking-widest text-secondary">Select type</div>
+                        {(
+                          [
+                            { type: 'STANDARD', label: 'Standard', hint: 'MGL/MO = Area × Rate/SQM/MO (computed)' },
+                            { type: 'NON_STANDARD', label: 'Non-standard', hint: 'Enter every amount by hand — no computation' },
+                          ] as const
+                        ).map((opt) => (
+                          <button
+                            key={opt.type}
+                            type="button"
+                            role="menuitem"
+                            onClick={() => {
+                              setShowPropertyErrors(false);
+                              setForm((p) => ({ ...p, properties: [...p.properties, blankPropertyRow(opt.type)] }));
+                              setPropertyTypePickerOpen(false);
+                            }}
+                            className="w-full text-left rounded-lg px-2.5 py-2 cursor-pointer hover:bg-[var(--selected-bg)]"
+                          >
+                            <div className="text-[12px] font-semibold" style={{ color: 'var(--text)' }}>{opt.label}</div>
+                            <div className="text-[10px] text-secondary">{opt.hint}</div>
+                          </button>
+                        ))}
+                      </div>
+                    </>
+                  ) : null}
+                </div>
+                {/* Also shown after removing the last row, so that removal can be saved. */}
+                {(form.properties.length > 0 || sectionDirty.properties) && (
                   <SectionSaveBar
                     allowed={editing ? canEdit : canAdd}
                     label="Save Property Schedule"
@@ -2550,14 +2800,22 @@ export function ProponentsManagement({
               </div>
             </div>
 
-            {/* Row 6: Advance Lease Payment | Security Deposit | Performance Security */}
+            {/* Row 6: Advance Lease Payment | Security Deposit | Performance Security —
+                one card each so the labels read as separate groups. */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <div className="flex flex-col gap-2">
-                <div className="text-[9px] font-semibold uppercase tracking-widest sm:text-center" style={{ color: 'var(--nav-active-bg)' }}>
+              <div
+                className="flex flex-col gap-2 rounded-xl border p-3"
+                style={{ borderColor: 'var(--input-border)', backgroundColor: 'color-mix(in oklab, var(--control-bg) 55%, transparent)' }}
+              >
+                <div
+                  className="-mx-3 -mt-3 mb-1 rounded-t-xl border-b px-3 py-2 text-[10px] font-bold uppercase tracking-widest text-center"
+                  style={{ borderColor: 'var(--input-border)', backgroundColor: 'var(--control-bg)', color: 'var(--text)' }}
+                >
                   Advance Lease Payment
                 </div>
-                <Field compact label="Months MGL">
-                  <div className="app-form-control app-form-control-sm p-0 overflow-hidden flex items-stretch">
+                <div className="grid grid-cols-[max-content_minmax(0,1fr)] items-center gap-x-3 gap-y-2">
+                <Field compact inline label="Months MGL">
+                  <div className={cn('app-form-control app-form-control-sm p-0 overflow-hidden flex items-stretch', FIN_CARD_CONTROL_H)}>
                     <input
                       className="flex-1 min-w-0 border-0 bg-transparent outline-none px-2 py-1"
                       style={{ color: 'var(--text)' }}
@@ -2568,6 +2826,7 @@ export function ProponentsManagement({
                   </div>
                 </Field>
                 <CapitalField
+                  inline
                   label="Amount"
                   amount={form.advance_lease_payment_amount}
                   currency={form.advance_lease_payment_currency}
@@ -2575,14 +2834,27 @@ export function ProponentsManagement({
                   onAmountChange={(v) => setForm((p) => ({ ...p, advance_lease_payment_amount: v }))}
                   onCurrencyChange={(v) => setForm((p) => ({ ...p, advance_lease_payment_currency: v }))}
                 />
+                <TotalAmountField
+                  months={form.advance_lease_payment_months}
+                  amount={form.advance_lease_payment_amount}
+                  currency={form.advance_lease_payment_currency}
+                />
+                </div>
               </div>
 
-              <div className="flex flex-col gap-2">
-                <div className="text-[9px] font-semibold uppercase tracking-widest sm:text-center" style={{ color: 'var(--nav-active-bg)' }}>
+              <div
+                className="flex flex-col gap-2 rounded-xl border p-3"
+                style={{ borderColor: 'var(--input-border)', backgroundColor: 'color-mix(in oklab, var(--control-bg) 55%, transparent)' }}
+              >
+                <div
+                  className="-mx-3 -mt-3 mb-1 rounded-t-xl border-b px-3 py-2 text-[10px] font-bold uppercase tracking-widest text-center"
+                  style={{ borderColor: 'var(--input-border)', backgroundColor: 'var(--control-bg)', color: 'var(--text)' }}
+                >
                   Security Deposit
                 </div>
-                <Field compact label="Months MGL">
-                  <div className="app-form-control app-form-control-sm p-0 overflow-hidden flex items-stretch">
+                <div className="grid grid-cols-[max-content_minmax(0,1fr)] items-center gap-x-3 gap-y-2">
+                <Field compact inline label="Months MGL">
+                  <div className={cn('app-form-control app-form-control-sm p-0 overflow-hidden flex items-stretch', FIN_CARD_CONTROL_H)}>
                     <input
                       className="flex-1 min-w-0 border-0 bg-transparent outline-none px-2 py-1"
                       style={{ color: 'var(--text)' }}
@@ -2593,6 +2865,7 @@ export function ProponentsManagement({
                   </div>
                 </Field>
                 <CapitalField
+                  inline
                   label="Amount"
                   amount={form.security_deposit_amount}
                   currency={form.security_deposit_currency}
@@ -2600,14 +2873,27 @@ export function ProponentsManagement({
                   onAmountChange={(v) => setForm((p) => ({ ...p, security_deposit_amount: v }))}
                   onCurrencyChange={(v) => setForm((p) => ({ ...p, security_deposit_currency: v }))}
                 />
+                <TotalAmountField
+                  months={form.security_deposit_months}
+                  amount={form.security_deposit_amount}
+                  currency={form.security_deposit_currency}
+                />
+                </div>
               </div>
 
-              <div className="flex flex-col gap-2">
-                <div className="text-[9px] font-semibold uppercase tracking-widest sm:text-center" style={{ color: 'var(--nav-active-bg)' }}>
+              <div
+                className="flex flex-col gap-2 rounded-xl border p-3"
+                style={{ borderColor: 'var(--input-border)', backgroundColor: 'color-mix(in oklab, var(--control-bg) 55%, transparent)' }}
+              >
+                <div
+                  className="-mx-3 -mt-3 mb-1 rounded-t-xl border-b px-3 py-2 text-[10px] font-bold uppercase tracking-widest text-center"
+                  style={{ borderColor: 'var(--input-border)', backgroundColor: 'var(--control-bg)', color: 'var(--text)' }}
+                >
                   Performance Security
                 </div>
-                <Field compact label="Months MGL">
-                  <div className="app-form-control app-form-control-sm p-0 overflow-hidden flex items-stretch">
+                <div className="grid grid-cols-[max-content_minmax(0,1fr)] items-center gap-x-3 gap-y-2">
+                <Field compact inline label="Months MGL">
+                  <div className={cn('app-form-control app-form-control-sm p-0 overflow-hidden flex items-stretch', FIN_CARD_CONTROL_H)}>
                     <input
                       className="flex-1 min-w-0 border-0 bg-transparent outline-none px-2 py-1"
                       style={{ color: 'var(--text)' }}
@@ -2618,6 +2904,7 @@ export function ProponentsManagement({
                   </div>
                 </Field>
                 <CapitalField
+                  inline
                   label="Amount"
                   amount={form.performance_security_amount}
                   currency={form.performance_security_currency}
@@ -2625,6 +2912,12 @@ export function ProponentsManagement({
                   onAmountChange={(v) => setForm((p) => ({ ...p, performance_security_amount: v }))}
                   onCurrencyChange={(v) => setForm((p) => ({ ...p, performance_security_currency: v }))}
                 />
+                <TotalAmountField
+                  months={form.performance_security_months}
+                  amount={form.performance_security_amount}
+                  currency={form.performance_security_currency}
+                />
+                </div>
               </div>
             </div>
 
@@ -2636,6 +2929,30 @@ export function ProponentsManagement({
           );
         })()}
       </SidePanel>
+
+      <ConfirmModal
+        open={standardSwitch !== null}
+        title="Switch to Standard?"
+        description={
+          standardSwitch
+            ? `MGL/MO ${standardSwitch.current} will be replaced by Area × Rate${
+                standardSwitch.computed ? ` (${standardSwitch.computed})` : ' — blank until both Area and Rate are filled in'
+              }.`
+            : ''
+        }
+        confirmText="Switch to Standard"
+        onCancel={() => setStandardSwitch(null)}
+        onConfirm={() => {
+          if (standardSwitch) {
+            const { index } = standardSwitch;
+            setForm((p) => ({
+              ...p,
+              properties: p.properties.map((r, ri) => (ri === index ? updatePropertyRow(r, { rate_type: 'STANDARD' }) : r)),
+            }));
+          }
+          setStandardSwitch(null);
+        }}
+      />
 
       <ConfirmModal
         open={confirmDeactivateId !== null}
@@ -2770,6 +3087,34 @@ function ChangeRequestBadge() {
   );
 }
 
+/** Read-only Total Amount on the Advance Lease Payment / Security Deposit /
+ * Performance Security cards: Months MGL × Amount, live as you type. The
+ * server stores the same figure (proponent_financial_terms.total_amount). */
+// One height for the three controls on a financial card (Months MGL, Amount,
+// Total Amount), read-only or not.
+const FIN_CARD_CONTROL_H = 'h-9';
+
+function TotalAmountField({ months, amount, currency }: { months: string; amount: string; currency: string }) {
+  const m = parseAmount(months);
+  const a = parseAmount(amount);
+  const total =
+    m === null || a === null
+      ? ''
+      : (Math.round(m * a * 100) / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return (
+    <Field compact inline label="Total Amount">
+      <div
+        className={cn('app-form-control app-form-control-sm flex items-center justify-between gap-2 px-2 font-semibold tabular-nums', FIN_CARD_CONTROL_H)}
+        style={{ color: total ? 'var(--text)' : 'var(--text-muted)', backgroundColor: 'color-mix(in oklab, var(--control-bg) 70%, transparent)' }}
+        title="Months MGL × Amount"
+      >
+        <span>{total}</span>
+        <span className="text-[11px] font-semibold text-secondary">{currency || 'PHP'}</span>
+      </div>
+    </Field>
+  );
+}
+
 function SectionSaveBar({
   allowed = true,
   label,
@@ -2789,12 +3134,18 @@ function SectionSaveBar({
   onSave: () => void;
 }) {
   if (!allowed) return null;
+  // New Locator: no record yet, so this saves the locator together with the
+  // section (see saveSection) — always clickable. Existing locator: only
+  // when the section has unsaved changes.
+  const canClick = !isEditing || dirty;
   return (
     <button
       type="button"
       onClick={onSave}
-      disabled={!isEditing || !dirty || saving || disabled}
-      title={saving ? 'Saving…' : label}
+      disabled={!canClick || saving || disabled}
+      title={
+        saving ? 'Saving…' : !isEditing ? `${label} (creates the locator)` : dirty ? label : 'No changes to save'
+      }
       className="w-7 h-7 rounded-md flex items-center justify-center cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
       style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
     >
@@ -2912,23 +3263,43 @@ function Field({
   label,
   children,
   compact,
+  inline,
   className,
 }: {
   label: string;
   children: React.ReactNode;
   compact?: boolean;
+  /** Label on the left of the control. Place inline fields inside a
+   * `grid grid-cols-[max-content_minmax(0,1fr)]` parent: the label column
+   * then fits the longest label, so the rows line up with no dead space. */
+  inline?: boolean;
   className?: string;
 }) {
+  const labelEl = (
+    <div
+      className={cn(
+        'shrink-0 font-semibold',
+        inline
+          ? // Beside the control: readable size, as written ("Months MGL"), right-aligned against it.
+            'text-right text-[12px] leading-tight'
+          : cn('text-secondary uppercase tracking-widest', compact ? 'text-[9px]' : 'text-[11px]'),
+      )}
+      style={inline ? { color: 'var(--text)' } : undefined}
+    >
+      {label}
+    </div>
+  );
+  if (inline) {
+    return (
+      <div className={cn('contents', className)}>
+        {labelEl}
+        <div className="min-w-0">{children}</div>
+      </div>
+    );
+  }
   return (
     <div className={cn('flex flex-col', compact ? 'gap-0.5' : 'gap-1', className)}>
-      <div
-        className={cn(
-          'shrink-0 font-semibold text-secondary uppercase tracking-widest',
-          compact ? 'text-[9px]' : 'text-[11px]',
-        )}
-      >
-        {label}
-      </div>
+      {labelEl}
       {children}
     </div>
   );
@@ -2941,6 +3312,7 @@ function CapitalField({
   amount,
   currency,
   disabled,
+  inline,
   onAmountChange,
   onCurrencyChange,
 }: {
@@ -2948,14 +3320,15 @@ function CapitalField({
   amount: string;
   currency: string;
   disabled?: boolean;
+  inline?: boolean;
   onAmountChange: (value: string) => void;
   onCurrencyChange: (value: string) => void;
 }) {
   return (
-    <Field compact label={label}>
+    <Field compact inline={inline} label={label}>
       {/* One bordered box for both — amount and currency are borderless
           inside it, split by a thin divider, instead of two separate fields. */}
-      <div className="app-form-control app-form-control-sm flex items-stretch p-0 overflow-hidden">
+      <div className={cn('app-form-control app-form-control-sm flex items-stretch p-0 overflow-hidden', inline && FIN_CARD_CONTROL_H)}>
         <input
           className="flex-1 min-w-0 border-0 bg-transparent outline-none px-2 py-1"
           style={{ color: 'var(--text)' }}

@@ -255,6 +255,14 @@ async function createSchema() {
       CREATE INDEX IX_proponent_properties_proponent_id ON dbo.proponent_properties(proponent_id);
     END
   `);
+  // Property schedule row type: STANDARD (MGL/MO = Area × Rate/SQM/MO,
+  // computed) or NON_STANDARD (every amount entered by hand). NULL = not
+  // chosen yet (rows from before the type existed) — shown unselected so the
+  // user picks it; never auto-assigned.
+  await updateSchema(`
+    IF COL_LENGTH('dbo.proponent_properties', 'rate_type') IS NULL
+      ALTER TABLE dbo.proponent_properties ADD rate_type NVARCHAR(20) NULL;
+  `);
   // Walk-in/legacy locators registered by hand from the Registered Locator
   // page ("New Locator"). They have no approved application behind them, so
   // this flag is what keeps them in listProponents({ approvedOnly }).
@@ -344,19 +352,53 @@ async function ensureChildTables() {
  * add/remove-row buttons (no per-row identity worth preserving server-side
  * between saves). No-op (leaves existing rows alone) when `properties` is
  * undefined, so a caller that doesn't touch this table doesn't wipe it. */
+const PROPERTY_RATE_TYPES = ["STANDARD", "NON_STANDARD"];
+
+/** "1,234.50" -> 1234.5 (null when not a number). */
+function parseAmount(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const n = Number(String(value).replace(/,/g, ""));
+  return Number.isFinite(n) ? n : null;
+}
+
+/** STANDARD rows: MGL/MO is Area × Rate/SQM/MO (2 decimals), recomputed here
+ * so a stale or edited value from the client can't be saved. */
+function standardMgl(row) {
+  const area = parseAmount(row.area_sqm);
+  const rate = parseAmount(row.rate_sqm_mo);
+  if (area === null || rate === null) return null;
+  return (Math.round(area * rate * 100) / 100).toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+/** A row with nothing filled in. The form used to always start with one
+ * blank row, and saving the locator stored it — those are skipped on save
+ * and hidden on read, so the schedule shows only real entries. */
+function isEmptyPropertyRow(row) {
+  const filled = (v) => v !== null && v !== undefined && String(v).trim() !== "";
+  return !["year", "date_from", "date_to", "type_of_property", "area_sqm", "rate_sqm_mo", "mgl_mo"].some((k) => filled(row?.[k]));
+}
+
 async function replaceProponentProperties(tx, proponentId, properties) {
   if (properties === undefined) return;
   await tx.query(`DELETE FROM dbo.proponent_properties WHERE proponent_id = @param0`, [proponentId]);
   if (!Array.isArray(properties) || !properties.length) return;
+  const rows = properties.filter((row) => !isEmptyPropertyRow(row));
 
-  for (let i = 0; i < properties.length; i++) {
-    const row = properties[i] || {};
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i] || {};
+    // Not chosen yet stays NULL (no default).
+    const rateType = PROPERTY_RATE_TYPES.includes(String(row.rate_type || "").toUpperCase())
+      ? String(row.rate_type).toUpperCase()
+      : null;
     await tx.query(
       `
       INSERT INTO dbo.proponent_properties
-        (proponent_id, sort_order, year, date_from, date_to, type_of_property, area_sqm, rate_sqm_mo, rate_currency, mgl_mo, mgl_currency)
+        (proponent_id, sort_order, year, date_from, date_to, type_of_property, area_sqm, rate_sqm_mo, rate_currency, mgl_mo, mgl_currency, rate_type)
       VALUES
-        (@param0, @param1, @param2, @param3, @param4, @param5, @param6, @param7, @param8, @param9, @param10)
+        (@param0, @param1, @param2, @param3, @param4, @param5, @param6, @param7, @param8, @param9, @param10, @param11)
       `,
       [
         proponentId,
@@ -368,8 +410,10 @@ async function replaceProponentProperties(tx, proponentId, properties) {
         row.area_sqm || null,
         row.rate_sqm_mo || null,
         row.rate_currency || null,
-        row.mgl_mo || null,
-        row.mgl_currency || null,
+        rateType === "STANDARD" ? standardMgl(row) : row.mgl_mo || null,
+        // Standard: MGL is in the rate's currency.
+        rateType === "STANDARD" ? row.rate_currency || null : row.mgl_currency || null,
+        rateType,
       ]
     );
   }
@@ -378,14 +422,14 @@ async function replaceProponentProperties(tx, proponentId, properties) {
 async function getProponentProperties(proponentId) {
   const rows = await selectData(
     `
-    SELECT id, year, date_from, date_to, type_of_property, area_sqm, rate_sqm_mo, rate_currency, mgl_mo, mgl_currency
+    SELECT id, year, date_from, date_to, type_of_property, area_sqm, rate_sqm_mo, rate_currency, mgl_mo, mgl_currency, rate_type
     FROM dbo.proponent_properties
     WHERE proponent_id = @param0
     ORDER BY sort_order ASC, id ASC
     `,
     [proponentId]
   );
-  return (rows || []).map((r) => ({
+  return (rows || []).filter((r) => !isEmptyPropertyRow(r)).map((r) => ({
     id: r.id,
     year: r.year ?? null,
     date_from: r.date_from ?? null,
@@ -396,6 +440,7 @@ async function getProponentProperties(proponentId) {
     rate_currency: r.rate_currency ?? null,
     mgl_mo: r.mgl_mo ?? null,
     mgl_currency: r.mgl_currency ?? null,
+    rate_type: r.rate_type || null,
   }));
 }
 
