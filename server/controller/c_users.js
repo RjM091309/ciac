@@ -106,15 +106,15 @@ function leaseTermValue(v) {
 function leaseTermUnit(v) {
   return String(v || "").trim().toUpperCase() === "MONTHS" ? "MONTHS" : "YEARS";
 }
-/** Years: more than 0, up to 99 (halves allowed). Months: whole months, 1–1188 (99 years). */
+/** Years: more than 0, up to 99 (halves allowed). Months: whole months, 1–1199 (99 years 11 months). */
 function isValidLeaseTerm(v, unit) {
   const n = leaseTermValue(v);
   if (n === null) return true;
   if (!Number.isFinite(n) || n <= 0) return false;
-  return leaseTermUnit(unit) === "MONTHS" ? Number.isInteger(n) && n <= 1188 : n <= 99;
+  return leaseTermUnit(unit) === "MONTHS" ? Number.isInteger(n) && n <= 1199 : n <= 99;
 }
 const LEASE_TERM_MESSAGE =
-  "Proposed lease term must be more than 0 — up to 99 years, or a whole number of months (up to 1188).";
+  "Proposed lease term must be more than 0 and up to 99 years 11 months.";
 
 /** Land Use (File Maintenance) picked on the Locator Accounts form must exist. */
 async function isKnownLandUse(id) {

@@ -1950,13 +1950,26 @@ function Field({
   );
 }
 
-const LEASE_TERM_UNITS = [
-  { value: 'YEARS', label: 'Years' },
-  { value: 'MONTHS', label: 'Months' },
-];
+/** Stored value (years, halves allowed, or whole months) → whole years and months. */
+function splitLeaseTerm(value: string, unit: string) {
+  const n = Number(value);
+  if (String(value).trim() === '' || !Number.isFinite(n) || n <= 0) return { years: '', months: '' };
+  const total = unit === 'MONTHS' ? Math.round(n) : Math.round(n * 12);
+  const years = Math.floor(total / 12);
+  const months = total % 12;
+  return { years: years ? String(years) : '', months: months ? String(months) : '' };
+}
 
-/** Proposed lease term: a number plus its unit — years (halves allowed,
- * up to 99) or whole months for short-term leases (up to 1188). */
+/** Years and months → what's stored: whole years as YEARS, anything with
+ * months as total MONTHS (1 yr 2 mos = 14 months). */
+function joinLeaseTerm(years: string, months: string) {
+  const y = Number(years) || 0;
+  const m = Number(months) || 0;
+  if (!y && !m) return { value: '', unit: 'YEARS' };
+  return m ? { value: String(y * 12 + m), unit: 'MONTHS' } : { value: String(y), unit: 'YEARS' };
+}
+
+/** Proposed lease term as years plus months, e.g. 1 yr 2 mos (up to 99 years). */
 function LeaseTermInput({
   value,
   unit,
@@ -1966,27 +1979,59 @@ function LeaseTermInput({
   unit: string;
   onChange: (value: string, unit: string) => void;
 }) {
-  const months = unit === 'MONTHS';
+  const [parts, setParts] = useState(() => splitLeaseTerm(value, unit));
+
+  // Follow outside changes (a record loaded, the form reset) without
+  // rewriting what's being typed.
+  useEffect(() => {
+    setParts((cur) => {
+      const mine = joinLeaseTerm(cur.years, cur.months);
+      const theirs = splitLeaseTerm(value, unit);
+      const same = joinLeaseTerm(theirs.years, theirs.months);
+      return mine.value === same.value && mine.unit === same.unit ? cur : theirs;
+    });
+  }, [value, unit]);
+
+  function update(next: { years: string; months: string }) {
+    setParts(next);
+    const joined = joinLeaseTerm(next.years, next.months);
+    onChange(joined.value, joined.unit);
+  }
+
   return (
-    <div className="flex gap-2">
-      <input
-        type="number"
-        min={months ? 1 : 0}
-        max={months ? 1188 : 99}
-        step={months ? 1 : 0.5}
-        inputMode={months ? 'numeric' : 'decimal'}
-        className="app-input flex-1 min-w-0"
-        value={value}
-        onChange={(e) => onChange(e.target.value, unit)}
-        placeholder={months ? 'e.g. 6' : 'e.g. 5'}
-      />
-      <div className="w-32 shrink-0">
-        <AppSelect
-          isClearable={false}
-          options={LEASE_TERM_UNITS}
-          value={months ? 'MONTHS' : 'YEARS'}
-          onChange={(next) => onChange(value, next || 'YEARS')}
+    <div className="grid grid-cols-2 gap-2">
+      <div className="relative">
+        <input
+          type="number"
+          min={0}
+          max={99}
+          step={1}
+          inputMode="numeric"
+          className="app-input w-full pr-14"
+          value={parts.years}
+          onChange={(e) => update({ ...parts, years: e.target.value.replace(/\D/g, '').slice(0, 2) })}
+          placeholder="0"
+          aria-label="Years"
         />
+        <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-secondary">years</span>
+      </div>
+      <div className="relative">
+        <input
+          type="number"
+          min={0}
+          max={11}
+          step={1}
+          inputMode="numeric"
+          className="app-input w-full pr-16"
+          value={parts.months}
+          onChange={(e) => {
+            const v = e.target.value.replace(/\D/g, '').slice(0, 2);
+            update({ ...parts, months: v && Number(v) > 11 ? '11' : v });
+          }}
+          placeholder="0"
+          aria-label="Months"
+        />
+        <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-secondary">months</span>
       </div>
     </div>
   );
