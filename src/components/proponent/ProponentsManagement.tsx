@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronDown, ChevronRight, Minus, Plus, Save, Search, Send, Trash2 } from 'lucide-react';
+import { ChevronDown, ChevronRight, Copy, Minus, Plus, Save, Search, Send, Trash2 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { toast } from 'sonner';
 import { SidePanel } from '../ui/SidePanel';
@@ -750,6 +750,11 @@ export function ProponentsManagement({
   // "Delete this row?" — every table's trash button asks first.
   const [rowDelete, setRowDelete] = useState<{ what: string; proceed: () => void } | null>(null);
   const askRowDelete = (what: string, proceed: () => void) => setRowDelete({ what, proceed });
+  // "Same as Primary Purpose" on Business Activities asks first when it would
+  // replace text already there.
+  const [confirmCopyPurpose, setConfirmCopyPurpose] = useState(false);
+  const copyPrimaryPurpose = () =>
+    setForm((p) => ({ ...p, business_activities: p.sec_primary_purpose.trim() }));
   // Changing a row's Rate type changes how its MGL/MO works, so it's
   // confirmed first in the app's own dialog: to Standard replaces a typed MGL
   // with Area × Rate; to Non-standard stops computing it (value kept, typed by hand).
@@ -2870,14 +2875,47 @@ export function ProponentsManagement({
                 the two sit side by side, not stacked as separate full-width rows. */}
             <div className="flex flex-col md:flex-row gap-3 items-stretch">
               <div className="flex-[0.9] flex">
-                <Field compact label="Business Activities" className="h-full flex-1">
+                {/* Business Activities: what the locator does here, as approved by the
+                    board — often the same as the SEC Primary Purpose (Stockholders tab),
+                    which can be copied in with one click and then edited. Never copied
+                    automatically. */}
+                <div className="flex h-full flex-1 flex-col gap-0.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="shrink-0 text-[9px] font-semibold uppercase tracking-widest text-secondary">
+                      Business Activities
+                    </span>
+                    <button
+                      type="button"
+                      disabled={loadingLocation || !form.sec_primary_purpose.trim()}
+                      onClick={() => {
+                        const current = form.business_activities.trim();
+                        const primary = form.sec_primary_purpose.trim();
+                        if (current === primary) return;
+                        if (current) setConfirmCopyPurpose(true);
+                        else copyPrimaryPurpose();
+                      }}
+                      title={
+                        form.sec_primary_purpose.trim()
+                          ? 'Copy the Primary Purpose from the SEC Registration Information card'
+                          : 'No Primary Purpose yet — add it on the Stockholders tab (SEC Registration Information)'
+                      }
+                      className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-semibold cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 hover:bg-[var(--selected-bg)]"
+                      style={{ color: 'var(--text)' }}
+                    >
+                      <Copy size={11} /> Same as Primary Purpose
+                    </button>
+                  </div>
                   <textarea
                     className="app-form-control app-form-control-sm flex-1 min-h-[4.5rem] md:min-h-0"
                     value={form.business_activities}
+                    placeholder={form.sec_primary_purpose.trim() || undefined}
                     disabled={loadingLocation}
                     onChange={(e) => setForm((p) => ({ ...p, business_activities: e.target.value }))}
                   />
-                </Field>
+                  <span className="text-[10px] text-secondary">
+                    As approved by the board — often the same as the SEC Primary Purpose.
+                  </span>
+                </div>
               </div>
 
               <div className="flex-1 flex flex-col gap-2">
@@ -3468,6 +3506,18 @@ export function ProponentsManagement({
             }));
           }
           setRateSwitch(null);
+        }}
+      />
+
+      <ConfirmModal
+        open={confirmCopyPurpose}
+        title="Replace Business Activities?"
+        description="The Business Activities text will be replaced with the SEC Primary Purpose. You can still edit it after."
+        confirmText="Replace"
+        onCancel={() => setConfirmCopyPurpose(false)}
+        onConfirm={() => {
+          copyPrimaryPurpose();
+          setConfirmCopyPurpose(false);
         }}
       />
 
