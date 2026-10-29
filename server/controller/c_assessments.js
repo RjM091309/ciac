@@ -558,6 +558,109 @@ exports.saveCommitment = async (req, res) => {
   }
 };
 
+/* ------------- Stockholders + GIS (Evaluation Queue tab, B-11) ------------ */
+// The stockholders and the SEC registration details (as on the GIS), encoded
+// by the BDO while evaluating. Same dbo.stockholder / dbo.proponents /
+// dbo.proponent_sec_registration rows as the Registered Locator's Stockholders
+// tab. No Ref. Code here — it's set on the Registered Locator only. The GIS
+// file itself is the locator's "GIS" compliance document, shown read-only.
+// Same edit rule as Proponent Information.
+
+const SEC_FIELDS_BDO = [
+  "registration_no",
+  "tin",
+  "address",
+  "sec_registration_date",
+  "authorized_capital",
+  "authorized_capital_currency",
+  "subscribed_capital",
+  "subscribed_capital_currency",
+  "paid_up_capital",
+  "paid_up_capital_currency",
+];
+
+async function stockholdersPayload(req, applicationId) {
+  const app = await Workflow.getApplicationById(applicationId);
+  if (!app?.proponent_id) return null;
+  const p = await Proponent.getProponentById(app.proponent_id);
+  if (!p) return null;
+  const SecRegistration = require("../models/SecRegistration");
+  const data = { stockholders: p.stockholders || [] };
+  for (const key of [...SEC_FIELDS_BDO, ...Object.keys(SecRegistration.FIELDS)]) data[key] = p[key] ?? null;
+  // The latest GIS upload on the locator's Compliance page (read-only here).
+  let gis_document = null;
+  try {
+    const ComplianceDocument = require("../models/ComplianceDocument");
+    const [latest] = await ComplianceDocument.listForProponent(app.proponent_id, "GIS");
+    if (latest) {
+      gis_document = {
+        original_file_name: latest.original_file_name || latest.file_name || null,
+        status: latest.status || null,
+        validity_to: latest.validity_to || null,
+        uploaded_at: latest.uploaded_at || null,
+      };
+    }
+  } catch (error) {
+    console.error("GIS document lookup error:", error);
+  }
+  return { ...data, gis_document, ...(await profileEditState(req, applicationId)) };
+}
+
+exports.getStockholders = async (req, res) => {
+  try {
+    const id = appIdParam(req, res);
+    if (id === null) return undefined;
+    if (!(await ensureCanAct(req, res, id))) return undefined;
+    const data = await stockholdersPayload(req, id);
+    if (!data) return res.status(404).json({ success: false, message: "Proponent not found" });
+    return res.json({ success: true, data });
+  } catch (error) {
+    return fail(res, error, "Get stockholders");
+  }
+};
+
+exports.saveStockholders = async (req, res) => {
+  try {
+    const id = appIdParam(req, res);
+    if (id === null) return undefined;
+    if (!(await ensureCanAct(req, res, id))) return undefined;
+    const state = await profileEditState(req, id);
+    if (!state.editable) return res.status(409).json({ success: false, message: state.reason });
+    const app = await Workflow.getApplicationById(id);
+    if (!app?.proponent_id) return res.status(404).json({ success: false, message: "Proponent not found" });
+    const b = req.body || {};
+    for (const key of ["sec_registration_date", "sec_gis_date"]) {
+      if (b[key] && !/^\d{4}-\d{2}-\d{2}/.test(String(b[key]))) {
+        return res.status(400).json({ success: false, message: `${key} must be a date` });
+      }
+    }
+    const SecRegistration = require("../models/SecRegistration");
+    const patch = { updated_by: req.user?.id ?? null };
+    for (const key of SEC_FIELDS_BDO) if (b[key] !== undefined) patch[key] = b[key];
+    if (Array.isArray(b.stockholders)) patch.stockholders = b.stockholders;
+    patch.sec_registration = SecRegistration.pickFields(b);
+    // One transaction: stockholders, the SEC columns on proponents, and the
+    // proponent_sec_registration row.
+    await Proponent.updateProponent(app.proponent_id, patch);
+    await AuditLog.record({
+      actorId: req.user?.id,
+      actorUsername: req.user?.username,
+      action: "PROPONENT_STOCKHOLDERS_UPDATED",
+      entityType: "proponent",
+      entityId: app.proponent_id,
+      details: { application_no: app.application_no, section: "stockholders_gis", via: "evaluation" },
+      req,
+    });
+    return res.json({ success: true, data: await stockholdersPayload(req, id) });
+  } catch (error) {
+    // Amount fields that aren't numbers are the caller's mistake (Stockholder.toDecimal).
+    if (/must be a number/.test(error?.message || "")) {
+      return res.status(400).json({ success: false, message: error.message });
+    }
+    return fail(res, error, "Save stockholders");
+  }
+};
+
 /* ------------------------- Terms and conditions -------------------------- */
 
 const Terms = require("../models/ApplicationTerms");

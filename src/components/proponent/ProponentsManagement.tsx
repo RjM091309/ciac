@@ -290,7 +290,7 @@ type IndustryOption = { id: number; code: string; name: string; is_active: numbe
 
 // "Stockholders" tab / Contact Person section — child tables (dbo.stockholder,
 // dbo.contact_person) synced by id on every save (rows removed here are deactivated).
-type StockholderRow = {
+export type StockholderRow = {
   id?: number;
   name: string;
   nationality: string;
@@ -310,7 +310,7 @@ export type ContactPersonRow = {
 // Signatories have exactly the same columns as contact persons.
 type SignatoryRow = ContactPersonRow;
 
-function blankStockholderRow(): StockholderRow {
+export function blankStockholderRow(): StockholderRow {
   return { name: '', nationality: '', subscribed: '', paid: '', ownership: '' };
 }
 
@@ -332,7 +332,7 @@ export type RowRule<T> = {
 // Stockholder nationality: Filipino plus the nationalities most often seen
 // among locators / foreign investors in the Philippines (alphabetical after
 // Filipino), and OTHER. Stored as the uppercase text, as before.
-const NATIONALITIES = [
+export const NATIONALITIES = [
   'FILIPINO',
   'AMERICAN',
   'AUSTRALIAN',
@@ -367,7 +367,7 @@ const NATIONALITIES = [
   'VIETNAMESE',
   'OTHER',
 ] as const;
-const STOCKHOLDER_RULES: RowRule<StockholderRow>[] = [
+export const STOCKHOLDER_RULES: RowRule<StockholderRow>[] = [
   { key: 'name', label: 'Stockholder Name' },
   { key: 'nationality', label: 'Nationality', kind: 'option', options: NATIONALITIES },
   { key: 'subscribed', label: 'Subscribed', kind: 'amount' },
@@ -471,7 +471,7 @@ function secRegistrationPayload(f: Record<SecKey, string>): Record<SecKey, strin
 }
 
 // API rows -> form rows.
-function mapStockholderRows(rows: any): StockholderRow[] {
+export function mapStockholderRows(rows: any): StockholderRow[] {
   if (!Array.isArray(rows) || !rows.length) return [];
   return rows.map((r: any) => ({
     id: r.id,
@@ -514,7 +514,7 @@ function mapPropertyRows(rows: any): PropertyRow[] {
 }
 
 // Form rows -> API rows.
-const toStockholderPayload = (r: StockholderRow) => ({
+export const toStockholderPayload = (r: StockholderRow) => ({
   id: r.id,
   name: r.name.trim(),
   nationality: r.nationality.trim() || null,
@@ -594,7 +594,7 @@ function formatLeaseTerm(start?: string | null, end?: string | null): string | n
 // Stock, Advance Lease Payment/Security Deposit/Performance Security,
 // property schedule Rate/MGL) — strips everything but digits and a single
 // decimal point, then re-inserts commas every 3 digits on the integer part.
-function formatAmountInput(value: string): string {
+export function formatAmountInput(value: string): string {
   const cleaned = value.replace(/[^\d.]/g, '');
   const firstDot = cleaned.indexOf('.');
   const intPart = firstDot === -1 ? cleaned : cleaned.slice(0, firstDot);
@@ -3988,7 +3988,7 @@ function BoxSelect({
 
 // Vertical tab list for the SidePanel (mirrors a left-side tab-head layout),
 // styled with this app's own tokens rather than any reference screenshot's colors.
-function CapitalField({
+export function CapitalField({
   label,
   amount,
   currency,

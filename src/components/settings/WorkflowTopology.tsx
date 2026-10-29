@@ -124,10 +124,11 @@ const SCENARIOS: Scenario[] = [
           'Locked once the review is submitted.',
         ],
         status: 'IN_REVIEW',
-        where: 'Evaluation Queue · Proponent Information / Performance Commitment',
+        where: 'Evaluation Queue · Proponent Information / Performance Commitment / Stockholders + GIS',
         details: [
           'Proponent Information: business name, principal and lease address, location, land use, proposed lease term, contact no., business activities, contact person and authorized signatory.',
           'Performance Commitment: the investment and number of employees committed. The Actual figures are the Account Officer’s once it’s a Registered Locator.',
+          'Stockholders + GIS: the stockholders and the SEC registration details (capital, purposes, SEC contact person, latest GIS filing). The Ref. Code is set later on Registered Locator; the GIS file itself stays a Compliance document.',
         ],
       },
       {
