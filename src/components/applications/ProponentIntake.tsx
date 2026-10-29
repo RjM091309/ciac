@@ -312,8 +312,8 @@ export function ProponentIntake() {
               placeholder={officers.length ? 'Select a BDO' : 'No active BDO users'}
             />
           </Field>
-          <Field label="Letter *">
-            <PdfDropzone file={form.letter} onFile={(f) => setForm((p) => ({ ...p, letter: f }))} disabled={saving} what="the letter" />
+          <Field label="Letter of Intent (LOI) Attachment *">
+            <PdfDropzone file={form.letter} onFile={(f) => setForm((p) => ({ ...p, letter: f }))} disabled={saving} what="the Letter of Intent (LOI)" />
           </Field>
         </div>
       </SidePanel>

@@ -29,6 +29,7 @@ const ContactPerson = require("./models/ContactPerson");
 const Signatory = require("./models/Signatory");
 const FinancialTerms = require("./models/FinancialTerms");
 const Investment = require("./models/Investment");
+const SecRegistration = require("./models/SecRegistration");
 const Building = require("./models/Building");
 const LandUse = require("./models/LandUse");
 const Workflow = require("./models/ApplicationWorkflow");
@@ -194,6 +195,7 @@ initializeDatabase()
       ["signatory", () => Signatory.ensureSchema()],
       ["financial terms (+ legacy column carry-over)", () => FinancialTerms.ensureSchema()],
       ["investment", () => Investment.ensureSchema()],
+      ["SEC registration (Stockholders tab card)", () => SecRegistration.ensureSchema()],
       ["building", () => Building.ensureSchema()],
       ["land use", () => LandUse.ensureSchema()],
       // Compliance checklist columns (applicability) + uploaded documents —

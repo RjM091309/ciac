@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Plus, Save, Search, Send, Trash2 } from 'lucide-react';
+import { ChevronDown, ChevronRight, Minus, Plus, Save, Search, Send, Trash2 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { toast } from 'sonner';
 import { SidePanel } from '../ui/SidePanel';
@@ -288,7 +288,7 @@ type LocatorsData = {
 // Industry = Application Types catalog, keyed by code (what applications store).
 type IndustryOption = { id: number; code: string; name: string; is_active: number };
 
-// "SEC Registration Information" / "Contact Person" tabs — child tables (dbo.stockholder,
+// "Stockholders" tab / Contact Person section — child tables (dbo.stockholder,
 // dbo.contact_person) synced by id on every save (rows removed here are deactivated).
 type StockholderRow = {
   id?: number;
@@ -320,25 +320,172 @@ function blankContactPersonRow(): ContactPersonRow {
 
 const blankSignatoryRow = blankContactPersonRow;
 
+// Row tables (Stockholders, Contact Person, Signatory): like the property
+// schedule, every column of every listed row is required before saving.
+type RowRule<T> = {
+  key: keyof T & string;
+  label: string;
+  kind?: 'amount' | 'percent' | 'email' | 'option';
+  options?: readonly string[];
+};
+
+// Stockholder nationality: Filipino plus the nationalities most often seen
+// among locators / foreign investors in the Philippines (alphabetical after
+// Filipino), and OTHER. Stored as the uppercase text, as before.
+const NATIONALITIES = [
+  'FILIPINO',
+  'AMERICAN',
+  'AUSTRALIAN',
+  'BELGIAN',
+  'BRITISH',
+  'BRUNEIAN',
+  'CANADIAN',
+  'CHINESE',
+  'DANISH',
+  'DUTCH',
+  'EMIRATI',
+  'FRENCH',
+  'GERMAN',
+  'HONG KONG',
+  'INDIAN',
+  'INDONESIAN',
+  'ISRAELI',
+  'ITALIAN',
+  'JAPANESE',
+  'KOREAN',
+  'MALAYSIAN',
+  'NEW ZEALANDER',
+  'NORWEGIAN',
+  'RUSSIAN',
+  'SAUDI',
+  'SINGAPOREAN',
+  'SPANISH',
+  'SWEDISH',
+  'SWISS',
+  'TAIWANESE',
+  'THAI',
+  'VIETNAMESE',
+  'OTHER',
+] as const;
+const STOCKHOLDER_RULES: RowRule<StockholderRow>[] = [
+  { key: 'name', label: 'Stockholder Name' },
+  { key: 'nationality', label: 'Nationality', kind: 'option', options: NATIONALITIES },
+  { key: 'subscribed', label: 'Subscribed', kind: 'amount' },
+  { key: 'paid', label: 'Paid', kind: 'amount' },
+  { key: 'ownership', label: 'Ownership %', kind: 'percent' },
+];
+const CONTACT_RULES: RowRule<ContactPersonRow>[] = [
+  { key: 'name', label: 'Name' },
+  { key: 'designation', label: 'Designation' },
+  { key: 'contact_no', label: 'Contact No.' },
+  { key: 'email', label: 'Email Address', kind: 'email' },
+];
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/** A row added in this form (no id yet) with nothing typed in it: removed with a
+ * "−" right away, no "Delete?" prompt — there's nothing to lose. */
+function isBlankNewRow(row: { id?: number }, keys: string[]): boolean {
+  return row.id == null && keys.every((k) => String((row as any)[k] ?? '').trim() === '');
+}
+
+/** The keys of a row that are blank or not valid for their kind. */
+function invalidRowKeys<T>(row: T, rules: RowRule<T>[]): Set<string> {
+  const bad = new Set<string>();
+  for (const rule of rules) {
+    const value = String((row as any)[rule.key] ?? '').trim();
+    if (!value) {
+      bad.add(rule.key);
+      continue;
+    }
+    if (rule.kind === 'amount' && parseAmount(value) === null) bad.add(rule.key);
+    if (rule.kind === 'percent') {
+      const n = parseAmount(value);
+      if (n === null || n < 0 || n > 100) bad.add(rule.key);
+    }
+    if (rule.kind === 'email' && !EMAIL_RE.test(value)) bad.add(rule.key);
+    if (rule.kind === 'option' && rule.options && !asOption([...rule.options], value)) bad.add(rule.key);
+  }
+  return bad;
+}
+
+/** First problem in a table as a message ("Contact Person row 2: fill in Name, Email Address."), or null. */
+function rowsError<T>(title: string, rows: T[], rules: RowRule<T>[]): string | null {
+  for (let i = 0; i < rows.length; i++) {
+    const bad = invalidRowKeys(rows[i], rules);
+    if (!bad.size) continue;
+    // A filled-in but invalid value says what's expected.
+    const labels = rules
+      .filter((r) => bad.has(r.key))
+      .map((r) => {
+        const filled = String((rows[i] as any)[r.key] ?? '').trim() !== '';
+        if (!filled) return r.label;
+        if (r.kind === 'email') return `${r.label} (e.g. name@company.com)`;
+        if (r.kind === 'percent') return `${r.label} (0–100)`;
+        if (r.kind === 'option') return `${r.label} (pick from the list)`;
+        return `${r.label} (a number)`;
+      });
+    return `${title} row ${i + 1}: fill in ${labels.join(', ')}.`;
+  }
+  return null;
+}
+
 // The sections that can be saved on their own (see saveSection).
-type SectionKey = 'stockholders' | 'contacts' | 'properties' | 'investment';
+type SectionKey = 'stockholders' | 'contacts' | 'properties' | 'investment' | 'sec';
+
+// SEC Registration Information card: the SEC fields kept on dbo.proponents
+// plus the ones in dbo.proponent_sec_registration. Saved together by the
+// card's own Save (PUT /api/proponents/:id/sec-registration) and by the
+// panel's main Save.
+const SEC_PROPONENT_KEYS = [
+  'registration_no',
+  'tin',
+  'address',
+  'ref_code',
+  'sec_registration_date',
+  'authorized_capital',
+  'authorized_capital_currency',
+  'subscribed_capital',
+  'subscribed_capital_currency',
+  'paid_up_capital',
+  'paid_up_capital_currency',
+] as const;
+const SEC_DETAIL_KEYS = [
+  'sec_company_email',
+  'sec_company_telephone',
+  'sec_company_mobile',
+  'sec_primary_purpose',
+  'sec_secondary_purpose',
+  'sec_gis_date',
+  'sec_contact_name',
+  'sec_contact_email',
+  'sec_contact_telephone',
+  'sec_contact_mobile',
+] as const;
+type SecKey = (typeof SEC_PROPONENT_KEYS)[number] | (typeof SEC_DETAIL_KEYS)[number];
+
+/** The card's fields as the API takes them (blank -> null). */
+function secRegistrationPayload(f: Record<SecKey, string>): Record<SecKey, string | null> {
+  const out = {} as Record<SecKey, string | null>;
+  for (const key of [...SEC_PROPONENT_KEYS, ...SEC_DETAIL_KEYS]) out[key] = String(f[key] ?? '').trim() || null;
+  return out;
+}
 
 // API rows -> form rows.
 function mapStockholderRows(rows: any): StockholderRow[] {
-  if (!Array.isArray(rows) || !rows.length) return [blankStockholderRow()];
+  if (!Array.isArray(rows) || !rows.length) return [];
   return rows.map((r: any) => ({
     id: r.id,
     name: r.name || '',
     nationality: r.nationality || '',
-    subscribed: r.subscribed != null ? String(r.subscribed) : '',
-    paid: r.paid != null ? String(r.paid) : '',
+    subscribed: r.subscribed != null ? formatAmountInput(String(r.subscribed)) : '',
+    paid: r.paid != null ? formatAmountInput(String(r.paid)) : '',
     ownership: r.ownership != null ? String(r.ownership) : '',
   }));
 }
 
 // Contact persons and signatories share the same columns.
 function mapContactRows(rows: any): ContactPersonRow[] {
-  if (!Array.isArray(rows) || !rows.length) return [blankContactPersonRow()];
+  if (!Array.isArray(rows) || !rows.length) return [];
   return rows.map((r: any) => ({
     id: r.id,
     name: r.name || '',
@@ -385,6 +532,8 @@ const toContactPayload = (r: ContactPersonRow) => ({
 });
 
 const toPropertyPayload = (row: PropertyRow) => ({
+  // Kept rows are updated by id; rows left out are soft-deleted server-side.
+  id: row.id,
   year: row.year.trim() || null,
   date_from: row.date_from || null,
   date_to: row.date_to || null,
@@ -534,11 +683,23 @@ const BLANK_PROFILE_FORM = {
   investment_actual: '',
   employee_commitment: '',
   employee_actual: '',
+  // SEC Registration Information card (dbo.proponent_sec_registration)
+  sec_company_email: '',
+  sec_company_telephone: '',
+  sec_company_mobile: '',
+  sec_primary_purpose: '',
+  sec_secondary_purpose: '',
+  sec_gis_date: '',
+  sec_contact_name: '',
+  sec_contact_email: '',
+  sec_contact_telephone: '',
+  sec_contact_mobile: '',
   properties: [] as PropertyRow[],
   land_use_id: '',
-  stockholders: [blankStockholderRow()],
-  contact_persons: [blankContactPersonRow()],
-  signatories: [blankSignatoryRow()],
+  // Start empty, like the property schedule: every row listed must be complete.
+  stockholders: [] as StockholderRow[],
+  contact_persons: [] as ContactPersonRow[],
+  signatories: [] as SignatoryRow[],
 };
 
 export function ProponentsManagement({
@@ -577,6 +738,18 @@ export function ProponentsManagement({
   // Set after a save is blocked by an incomplete property row: outlines the
   // blank fields in red until they're filled in.
   const [showPropertyErrors, setShowPropertyErrors] = useState(false);
+  // Contact Person & Authorized Signatory card: collapsed to a one-line summary
+  // so the tabs stay in view. null = automatic (open while both lists are empty
+  // or have unsaved changes); a click pins it open / closed.
+  const [contactsOpen, setContactsOpen] = useState<boolean | null>(null);
+  // Set after a save is blocked by an incomplete row: outlines its fields in red.
+  const [showRowErrors, setShowRowErrors] = useState<{ stockholders: boolean; contacts: boolean }>({
+    stockholders: false,
+    contacts: false,
+  });
+  // "Delete this row?" — every table's trash button asks first.
+  const [rowDelete, setRowDelete] = useState<{ what: string; proceed: () => void } | null>(null);
+  const askRowDelete = (what: string, proceed: () => void) => setRowDelete({ what, proceed });
   // Changing a row's Rate type changes how its MGL/MO works, so it's
   // confirmed first in the app's own dialog: to Standard replaces a typed MGL
   // with Area × Rate; to Non-standard stops computing it (value kept, typed by hand).
@@ -592,7 +765,7 @@ export function ProponentsManagement({
   // Mirrors the legacy BRIDGE system's Locator's Information tab strip —
   // only Profile has content so far, the rest are placeholders.
   const [activeProfileTab, setActiveProfileTab] = useState<
-    'Profile' | 'SEC Registration Information' | 'Contact Person' | 'Documents' | 'Investment'
+    'Profile' | 'Stockholders' | 'Documents' | 'Investment'
   >('Profile');
   const [confirmDeactivateId, setConfirmDeactivateId] = useState<number | null>(null);
   const [confirmReactivateId, setConfirmReactivateId] = useState<number | null>(null);
@@ -903,11 +1076,18 @@ export function ProponentsManagement({
       investment_actual,
       employee_commitment,
       employee_actual,
-      ...rest
+      ...afterSections
     } = f;
+    const rest: Record<string, unknown> = { ...afterSections };
+    const sec: Record<string, unknown> = {};
+    for (const key of [...SEC_PROPONENT_KEYS, ...SEC_DETAIL_KEYS]) {
+      sec[key] = rest[key];
+      delete rest[key];
+    }
     return {
       rest: JSON.stringify(rest),
       sections: {
+        sec: JSON.stringify(sec),
         stockholders: JSON.stringify(stockholders),
         contacts: JSON.stringify([contact_persons, signatories]),
         properties: JSON.stringify(properties),
@@ -925,6 +1105,7 @@ export function ProponentsManagement({
     contacts: loaded !== null && currentParts.sections.contacts !== loaded.sections.contacts,
     properties: loaded !== null && currentParts.sections.properties !== loaded.sections.properties,
     investment: loaded !== null && currentParts.sections.investment !== loaded.sections.investment,
+    sec: loaded !== null && currentParts.sections.sec !== loaded.sections.sec,
   };
   const formChangedSinceLoad =
     loaded !== null && (currentParts.rest !== loaded.rest || Object.values(sectionDirty).some(Boolean));
@@ -1113,6 +1294,8 @@ export function ProponentsManagement({
       ...BLANK_PROFILE_FORM,
     });
     setActiveProfileTab('Profile');
+    setContactsOpen(null);
+    setShowRowErrors({ stockholders: false, contacts: false });
     setLoaded(null);
     setPendingDocs([]);
     locationRequestIdRef.current = null;
@@ -1126,6 +1309,8 @@ export function ProponentsManagement({
   function openEdit(p: ProponentRow) {
     setIsCreateOpen(true);
     setActiveProfileTab('Profile');
+    setContactsOpen(null);
+    setShowRowErrors({ stockholders: false, contacts: false });
     setLoaded(null);
     setEditing(p);
     setLoginInfo(null);
@@ -1185,6 +1370,16 @@ export function ProponentsManagement({
           investment_actual: data.investment_actual || '',
           employee_commitment: data.employee_commitment || '',
           employee_actual: data.employee_actual || '',
+          sec_company_email: data.sec_company_email || '',
+          sec_company_telephone: data.sec_company_telephone || '',
+          sec_company_mobile: data.sec_company_mobile || '',
+          sec_primary_purpose: data.sec_primary_purpose || '',
+          sec_secondary_purpose: data.sec_secondary_purpose || '',
+          sec_gis_date: toDateInputValue(data.sec_gis_date),
+          sec_contact_name: data.sec_contact_name || '',
+          sec_contact_email: data.sec_contact_email || '',
+          sec_contact_telephone: data.sec_contact_telephone || '',
+          sec_contact_mobile: data.sec_contact_mobile || '',
           properties: mapPropertyRows(data.properties),
           land_use_id: data.land_use_id != null ? String(data.land_use_id) : '',
           stockholders: mapStockholderRows(data.stockholders),
@@ -1228,7 +1423,28 @@ export function ProponentsManagement({
   // so it must not depend on re-saving the whole locator. The saved rows come back with
   // their ids and replace the form's copy, so the next save updates them instead of
   // adding duplicates. Only available for a locator that already exists.
+  /** Validates the row tables; on a problem shows it, outlines the fields and returns false. */
+  function checkRowTables(which: { stockholders?: boolean; contacts?: boolean }): boolean {
+    const problems: [keyof typeof showRowErrors, string | null][] = [];
+    if (which.stockholders) problems.push(['stockholders', rowsError('Stockholders', form.stockholders, STOCKHOLDER_RULES)]);
+    if (which.contacts) {
+      problems.push([
+        'contacts',
+        rowsError('Contact Person', form.contact_persons, CONTACT_RULES) ??
+          rowsError('Authorized Signatory', form.signatories, CONTACT_RULES),
+      ]);
+    }
+    const first = problems.find(([, problem]) => problem);
+    if (!first) return true;
+    setShowRowErrors((prev) => ({ ...prev, [first[0]]: true }));
+    if (first[0] === 'contacts') setContactsOpen(true);
+    if (first[0] === 'stockholders') setActiveProfileTab('Stockholders');
+    toast.error(first[1] as string);
+    return false;
+  }
+
   async function saveSection(section: SectionKey) {
+    if ((section === 'stockholders' || section === 'contacts') && !checkRowTables({ [section]: true })) return;
     if (section === 'properties') {
       const problem = propertyScheduleError(form.properties);
       if (problem) {
@@ -1256,6 +1472,8 @@ export function ProponentsManagement({
                 contact_persons: form.contact_persons.map(toContactPayload),
                 signatories: form.signatories.map(toContactPayload),
               }
+            : section === 'sec'
+              ? secRegistrationPayload(form)
             : section === 'investment'
               ? {
                   investment_commitment: form.investment_commitment.trim() || null,
@@ -1265,7 +1483,8 @@ export function ProponentsManagement({
                 }
               : { properties: form.properties.map(toPropertyPayload) };
 
-      const res = await fetch(api(`/api/proponents/${editing.id}/${section}`), {
+      const path = section === 'sec' ? 'sec-registration' : section;
+      const res = await fetch(api(`/api/proponents/${editing.id}/${path}`), {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -1280,6 +1499,17 @@ export function ProponentsManagement({
           ? { stockholders: mapStockholderRows(data.stockholders) }
           : section === 'contacts'
             ? { contact_persons: mapContactRows(data.contact_persons), signatories: mapContactRows(data.signatories) }
+            : section === 'sec'
+              ? Object.fromEntries(
+                  [...SEC_PROPONENT_KEYS, ...SEC_DETAIL_KEYS].map((key) => [
+                    key,
+                    key === 'sec_registration_date' || key === 'sec_gis_date'
+                      ? toDateInputValue(data[key])
+                      : key.endsWith('_currency')
+                        ? data[key] || 'PHP'
+                        : data[key] || '',
+                  ]),
+                )
             : section === 'investment'
               ? {
                   investment_commitment: data.investment_commitment || '',
@@ -1290,6 +1520,18 @@ export function ProponentsManagement({
               : { properties: mapPropertyRows(data.properties) };
       const nextForm = { ...form, ...saved };
       setForm(nextForm);
+      if (section === 'sec') {
+        setEditing((prev) =>
+          prev
+            ? {
+                ...prev,
+                registration_no: data.registration_no ?? null,
+                tin: data.tin ?? null,
+                address: data.address ?? null,
+              }
+            : prev,
+        );
+      }
       setLoaded((prev) =>
         prev ? { ...prev, sections: { ...prev.sections, [section]: splitForm(nextForm).sections[section] } } : prev,
       );
@@ -1298,11 +1540,14 @@ export function ProponentsManagement({
           ? 'Stockholders saved'
           : section === 'contacts'
             ? 'Contact persons and signatories saved'
+            : section === 'sec'
+              ? 'SEC registration information saved'
             : section === 'investment'
               ? 'Investment figures saved'
               : 'Property schedule saved',
       );
       if (section === 'properties') setShowPropertyErrors(false);
+      if (section === 'stockholders' || section === 'contacts') setShowRowErrors((prev) => ({ ...prev, [section]: false }));
     } catch (e: any) {
       toast.error(e?.message || 'Save failed');
     } finally {
@@ -1311,6 +1556,19 @@ export function ProponentsManagement({
   }
 
   async function save(skipDuplicateCheck = false) {
+    // Same rule as the property schedule below: only a table that was touched
+    // (or, on a New Locator, has rows) is checked, so untouched older rows
+    // don't block saving the rest.
+    if (
+      !checkRowTables({
+        stockholders: sectionDirty.stockholders || (!editing && form.stockholders.length > 0),
+        contacts:
+          sectionDirty.contacts || (!editing && (form.contact_persons.length > 0 || form.signatories.length > 0)),
+      })
+    ) {
+      keepOpenAfterCreateRef.current = false;
+      return;
+    }
     if (sectionDirty.properties || (!editing && form.properties.length > 0)) {
       const problem = propertyScheduleError(form.properties);
       if (problem) {
@@ -1405,6 +1663,7 @@ export function ProponentsManagement({
         investment_actual: form.investment_actual.trim() || null,
         employee_commitment: form.employee_commitment.trim() || null,
         employee_actual: form.employee_actual.trim() || null,
+        ...secRegistrationPayload(form),
         stockholders: form.stockholders.map(toStockholderPayload),
         contact_persons: form.contact_persons.map(toContactPayload),
         signatories: form.signatories.map(toContactPayload),
@@ -1517,6 +1776,30 @@ export function ProponentsManagement({
       setSaving(false);
     }
   }
+
+  const contactNames = (rows: ContactPersonRow[]) =>
+    rows.filter((r) => r.name.trim()).map((r) => ({ name: r.name.trim(), designation: r.designation.trim() }));
+  const contactSummary = { contacts: contactNames(form.contact_persons), signatories: contactNames(form.signatories) };
+  const contactsEmpty = contactSummary.contacts.length === 0 && contactSummary.signatories.length === 0;
+  // Collapsed by default (even when empty — the header says so); open while it
+  // has unsaved changes, or once clicked open.
+  const contactsExpanded = contactsOpen ?? sectionDirty.contacts;
+
+  // One-line text input on the SEC Registration Information card.
+  const secTextField = (key: SecKey, label: string, placeholder?: string) => (
+    <Field compact label={label}>
+      <div className="app-form-control app-form-control-sm p-0 overflow-hidden flex items-stretch">
+        <input
+          className="flex-1 min-w-0 border-0 bg-transparent outline-none px-2 py-1"
+          style={{ color: 'var(--text)' }}
+          value={form[key]}
+          placeholder={placeholder}
+          disabled={loadingLocation}
+          onChange={(e) => setForm((p) => ({ ...p, [key]: e.target.value }))}
+        />
+      </div>
+    </Field>
+  );
 
   return (
     <div className="space-y-4 sm:space-y-5">
@@ -1971,21 +2254,11 @@ export function ProponentsManagement({
               </div>
             </div>
 
-            {/* Row 2: same grid-cols-[1.8fr_1.6fr_0.7fr] track sizes as Row 1 (see note above) —
-                Principal/Lease Address share the first cell via a nested flex row instead of
-                being separate top-level columns, so Row 1/Row 2 edges stay pixel-aligned. */}
+            {/* Row 2: same grid-cols-[1.8fr_1.6fr_0.7fr] track sizes as Row 1 (see note above),
+                so Row 1/Row 2 edges stay pixel-aligned. Principal Address, TIN, SEC Registration
+                and Ref. Code are on the Stockholders tab's SEC Registration Information card. */}
             <div className="grid grid-cols-1 md:grid-cols-[1.8fr_1.6fr_0.7fr] gap-3 items-stretch">
               <div className="flex flex-col sm:flex-row gap-3 items-stretch">
-                <div className="flex-1 flex">
-                  <Field compact label="Principal Address" className="h-full flex-1">
-                    <textarea
-                      className="app-form-control app-form-control-sm flex-1 min-h-[4.5rem] md:min-h-0"
-                      value={form.address}
-                      onChange={(e) => setForm((p) => ({ ...p, address: e.target.value }))}
-                    />
-                  </Field>
-                </div>
-
                 <div className="flex-1 flex">
                   <Field compact label="Lease Address" className="h-full flex-1">
                     <textarea
@@ -2014,45 +2287,6 @@ export function ProponentsManagement({
                     />
                   </div>
                 </Field>
-                <div className="flex flex-col sm:flex-row gap-2">
-                  <div className="flex-1 min-w-0">
-                    <Field compact label="TIN Number">
-                      <div className="app-form-control app-form-control-sm p-0 overflow-hidden flex items-stretch">
-                        <input
-                          className="flex-1 min-w-0 border-0 bg-transparent outline-none px-2 py-1"
-                          style={{ color: 'var(--text)' }}
-                          value={form.tin}
-                          onChange={(e) => setForm((p) => ({ ...p, tin: e.target.value }))}
-                        />
-                      </div>
-                    </Field>
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <Field compact label="SEC Registration">
-                      <DatePicker
-                        mode="single"
-                        fullWidth
-                        boxed
-                        placeholder="Select date"
-                        value={dateInputToDate(form.sec_registration_date)}
-                        onChange={(d) => setForm((p) => ({ ...p, sec_registration_date: dateToDateInputValue(d) }))}
-                      />
-                    </Field>
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <Field compact label="Ref. Code">
-                      <div className="app-form-control app-form-control-sm p-0 overflow-hidden flex items-stretch">
-                        <input
-                          className="flex-1 min-w-0 border-0 bg-transparent outline-none px-2 py-1"
-                          style={{ color: 'var(--text)' }}
-                          value={form.ref_code}
-                          disabled={loadingLocation}
-                          onChange={(e) => setForm((p) => ({ ...p, ref_code: e.target.value }))}
-                        />
-                      </div>
-                    </Field>
-                  </div>
-                </div>
               </div>
 
               <div className="flex">
@@ -2067,38 +2301,9 @@ export function ProponentsManagement({
               </div>
             </div>
 
-            {/* Row 3: Authorized | Subscribed | Paid-up | Date Signed | Start/End/Lease Term */}
+            {/* Row 3: Date Signed | Start/End/Lease Term (the capital amounts are on the
+                Stockholders tab's SEC Registration Information card) */}
             <div className="grid grid-cols-1 sm:grid-cols-2 md:flex gap-3">
-              <div className="flex-1 min-w-0">
-                <CapitalField
-                  label="Authorized Capital Stock"
-                  amount={form.authorized_capital}
-                  currency={form.authorized_capital_currency}
-                  disabled={loadingLocation}
-                  onAmountChange={(v) => setForm((p) => ({ ...p, authorized_capital: v }))}
-                  onCurrencyChange={(v) => setForm((p) => ({ ...p, authorized_capital_currency: v }))}
-                />
-              </div>
-              <div className="flex-[0.7] min-w-0">
-                <CapitalField
-                  label="Subscribed Capital"
-                  amount={form.subscribed_capital}
-                  currency={form.subscribed_capital_currency}
-                  disabled={loadingLocation}
-                  onAmountChange={(v) => setForm((p) => ({ ...p, subscribed_capital: v }))}
-                  onCurrencyChange={(v) => setForm((p) => ({ ...p, subscribed_capital_currency: v }))}
-                />
-              </div>
-              <div className="flex-1 min-w-0">
-                <CapitalField
-                  label="Paid-up Capital"
-                  amount={form.paid_up_capital}
-                  currency={form.paid_up_capital_currency}
-                  disabled={loadingLocation}
-                  onAmountChange={(v) => setForm((p) => ({ ...p, paid_up_capital: v }))}
-                  onCurrencyChange={(v) => setForm((p) => ({ ...p, paid_up_capital_currency: v }))}
-                />
-              </div>
               <div className="flex-[0.6] min-w-0">
                 <Field compact label="Date Signed">
                   <DatePicker
@@ -2194,106 +2399,377 @@ export function ProponentsManagement({
                 Sub-Lease
               </label>
             </div>
+
+            {/* Contact Person + Authorized Person / Signatory — the locator's two people
+                lists (dbo.contact_person / dbo.signatory) in one card, same columns and
+                widths, saved together by the card's Save. */}
+            <div
+              className="flex flex-col gap-3 rounded-xl border p-3"
+              style={{ borderColor: 'var(--input-border)', backgroundColor: 'color-mix(in oklab, var(--control-bg) 55%, transparent)' }}
+            >
+              <div
+                role="button"
+                tabIndex={0}
+                aria-expanded={contactsExpanded}
+                onClick={() => setContactsOpen(!contactsExpanded)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    setContactsOpen(!contactsExpanded);
+                  }
+                }}
+                className={cn(
+                  '-mx-3 -mt-3 flex cursor-pointer select-none items-center justify-between gap-2 px-3 py-2',
+                  contactsExpanded ? 'mb-1 rounded-t-xl border-b' : '-mb-3 rounded-xl',
+                )}
+                style={{ borderColor: 'var(--input-border)', backgroundColor: 'var(--control-bg)' }}
+              >
+                <div className="flex min-w-0 items-center gap-2">
+                  {contactsExpanded ? (
+                    <ChevronDown size={14} className="shrink-0 text-secondary" />
+                  ) : (
+                    <ChevronRight size={14} className="shrink-0 text-secondary" />
+                  )}
+                  {contactsExpanded || contactsEmpty ? (
+                    <>
+                      <span className="shrink-0 text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--text)' }}>
+                        Contact Person &amp; Authorized Signatory
+                      </span>
+                      {!contactsExpanded ? (
+                        <span className="ml-1 truncate text-[12px] font-medium text-orange-500">
+                          No contact person or signatory yet — click to add.
+                        </span>
+                      ) : null}
+                    </>
+                  ) : (
+                    // Collapsed: each role's heading followed by its people, instead of the
+                    // combined title plus repeated "Contact:" / "Signatory:" labels.
+                    <div className="flex min-w-0 items-center gap-3 overflow-hidden text-[12px]">
+                      {(
+                        [
+                          ['Contact Person', contactSummary.contacts],
+                          ['Authorized Signatory', contactSummary.signatories],
+                        ] as const
+                      )
+                        .filter(([, people]) => people.length > 0)
+                        .map(([role, people], ri) => (
+                          <div key={role} className="flex min-w-0 items-center gap-3">
+                            {ri > 0 ? <span className="h-4 w-px shrink-0" style={{ backgroundColor: 'var(--input-border)' }} /> : null}
+                            <span className="shrink-0 text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--text)' }}>
+                              {role}
+                            </span>
+                            <span className="min-w-0 truncate">
+                              {people.map((person, pi) => (
+                                <span key={pi}>
+                                  {pi > 0 ? <span className="text-secondary">; </span> : null}
+                                  <span className="font-medium" style={{ color: 'var(--text)' }}>
+                                    {person.name}
+                                  </span>
+                                  {person.designation ? <span className="text-secondary">, {person.designation}</span> : null}
+                                </span>
+                              ))}
+                            </span>
+                          </div>
+                        ))}
+                    </div>
+                  )}
+                </div>
+                {/* Clicking Save shouldn't also fold the card. */}
+                <span className="shrink-0" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+                  <SectionSaveBar
+                    allowed={editing ? canEdit : canAdd}
+                    label="Save Contacts & Signatories"
+                    isEditing={Boolean(editing)}
+                    hasContent={form.contact_persons.length > 0 || form.signatories.length > 0}
+                    dirty={sectionDirty.contacts}
+                    saving={savingSection === 'contacts'}
+                    disabled={saving || loadingLocation}
+                    onSave={() => void saveSection('contacts')}
+                  />
+                </span>
+              </div>
+              {contactsExpanded && (
+                [
+                  {
+                    title: 'Contact Person',
+                    hint: 'Day-to-day contact for notices and follow-ups',
+                    nameLabel: 'Contact Person',
+                    addLabel: 'Add contact',
+                    rows: form.contact_persons,
+                    empty: 'No contact persons yet — use Add contact.',
+                    set: (next: ContactPersonRow[]) => setForm((p) => ({ ...p, contact_persons: next })),
+                    blank: blankContactPersonRow,
+                  },
+                  {
+                    title: 'Authorized Person / Signatory',
+                    hint: 'Signs the lease agreement for the locator (per Board Resolution)',
+                    nameLabel: 'Signatory',
+                    addLabel: 'Add signatory',
+                    rows: form.signatories,
+                    empty: 'No signatories yet — use Add signatory.',
+                    set: (next: SignatoryRow[]) => setForm((p) => ({ ...p, signatories: next })),
+                    blank: blankSignatoryRow,
+                  },
+                ] as const
+              ).map((group, gi) => (
+                <div
+                  key={group.title}
+                  className={cn('flex flex-col gap-2', gi > 0 && 'border-t pt-3')}
+                  style={{ borderColor: 'var(--input-border)' }}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[12px] font-semibold" style={{ color: 'var(--text)' }} title={group.hint}>
+                      {group.title}
+                      <span className="ml-1.5 text-[11px] font-normal text-secondary">({group.rows.length})</span>
+                    </span>
+                    <button
+                      type="button"
+                      disabled={loadingLocation}
+                      onClick={() => {
+                        setShowRowErrors((prev) => ({ ...prev, contacts: false }));
+                        group.set([...group.rows, group.blank()]);
+                      }}
+                      className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[11px] font-semibold cursor-pointer disabled:cursor-not-allowed disabled:opacity-60 hover:bg-[var(--selected-bg)]"
+                      style={{ borderColor: 'var(--input-border)', color: 'var(--text)', backgroundColor: 'var(--surface)' }}
+                    >
+                      <Plus size={12} /> {group.addLabel}
+                    </button>
+                  </div>
+                  <RowsEditor<ContactPersonRow>
+                    rows={group.rows}
+                    disabled={loadingLocation}
+                    emptyText={group.empty}
+                    hideSideActions
+                    rowNoun={group.nameLabel.toLowerCase()}
+                    confirmDelete={askRowDelete}
+                    invalidKeys={(row) => (showRowErrors.contacts ? invalidRowKeys(row, CONTACT_RULES) : null)}
+                    columns={[
+                      { key: 'name', label: group.nameLabel, width: '30%', placeholder: 'Full name' },
+                      { key: 'designation', label: 'Designation', width: '22%', placeholder: 'e.g. President' },
+                      { key: 'contact_no', label: 'Contact No.', width: '18%', placeholder: '09XX XXX XXXX' },
+                      { key: 'email', label: 'Email Address', width: '30%', placeholder: 'name@company.com' },
+                    ]}
+                    onChange={group.set}
+                    blankRow={group.blank}
+                  />
+                </div>
+              ))}
+            </div>
             </fieldset>
 
             {/* Folder-tab strip mirroring the legacy BRIDGE system's Locator's
-                Information form — only Profile has content built out so far. */}
-            <div className="folders">
-              <div className="tabs overflow-x-auto">
-                {(['Profile', 'SEC Registration Information', 'Contact Person', 'Documents', 'Investment'] as const).map((tab) => (
-                  <div
-                    key={tab}
-                    className={`tab ${activeProfileTab === tab ? 'active' : ''}`}
-                    onClick={() => setActiveProfileTab(tab)}
-                  >
-                    {tab}
-                  </div>
-                ))}
+                Information form. Sticks to the very top of the panel while scrolling,
+                so switching tabs is one click from anywhere in a long tab. The panel's
+                scroll area has 1rem top padding (py-4): the wrapper sticks at -1rem
+                and fills that strip (and the tabs' rounded corners) with the panel
+                background, so nothing scrolls into view above or behind the tabs.
+                -mt-3 only cancels this column's gap-3 (no more, or the wrapper's
+                background would paint over the bottom of the card above it). */}
+            <div className="sticky -top-4 z-20 -mt-3 pt-4" style={{ backgroundColor: 'var(--surface)' }}>
+              <div className="folders">
+                <div className="tabs overflow-x-auto">
+                  {(['Profile', 'Stockholders', 'Documents', 'Investment'] as const).map((tab) => (
+                    <div
+                      key={tab}
+                      className={`tab ${activeProfileTab === tab ? 'active' : ''}`}
+                      onClick={() => setActiveProfileTab(tab)}
+                    >
+                      {tab}
+                    </div>
+                  ))}
+                </div>
               </div>
             </div>
             <div className="contents">
               <fieldset disabled={formLocked && activeProfileTab !== 'Documents'} className="content min-w-0">
-                {activeProfileTab === 'SEC Registration Information' ? (
-                  <div className="flex flex-col gap-3">
-                    <RowsEditor<StockholderRow>
-                      rows={form.stockholders}
-                      disabled={loadingLocation}
-                      emptyText="No stockholders yet — use + to add one."
-                      columns={[
-                        { key: 'name', label: 'Stockholder Name', className: 'min-w-[14rem]' },
-                        { key: 'nationality', label: 'Nationality', className: 'w-40' },
-                        { key: 'subscribed', label: 'Subscribed', className: 'w-32', numeric: true },
-                        { key: 'paid', label: 'Paid', className: 'w-32', numeric: true },
-                        { key: 'ownership', label: 'Ownership %', className: 'w-28', numeric: true },
-                      ]}
-                      onChange={(next) => setForm((p) => ({ ...p, stockholders: next }))}
-                      blankRow={blankStockholderRow}
-                      extraActions={
-                        form.stockholders.length > 0 ? (
+                {activeProfileTab === 'Stockholders' ? (
+                  <div className="flex flex-col gap-4">
+                  {/* Stockholders (dbo.stockholder) — same card layout as the Profile's
+                      property schedule: Add and Save in the header. */}
+                  <div
+                    className="flex flex-col gap-3 rounded-xl border p-3"
+                    style={{ borderColor: 'var(--input-border)', backgroundColor: 'color-mix(in oklab, var(--control-bg) 55%, transparent)' }}
+                  >
+                    <div
+                      className="-mx-3 -mt-3 flex items-center justify-between gap-2 rounded-t-xl border-b px-3 py-2"
+                      style={{ borderColor: 'var(--input-border)', backgroundColor: 'var(--control-bg)' }}
+                    >
+                      <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--text)' }}>
+                        Stockholders
+                        <span className="ml-1.5 font-normal normal-case tracking-normal text-secondary">({form.stockholders.length})</span>
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          disabled={loadingLocation}
+                          onClick={() => {
+                            setShowRowErrors((prev) => ({ ...prev, stockholders: false }));
+                            setForm((p) => ({ ...p, stockholders: [...p.stockholders, blankStockholderRow()] }));
+                          }}
+                          className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[11px] font-semibold cursor-pointer disabled:cursor-not-allowed disabled:opacity-60 hover:bg-[var(--selected-bg)]"
+                          style={{ borderColor: 'var(--input-border)', color: 'var(--text)', backgroundColor: 'var(--surface)' }}
+                        >
+                          <Plus size={12} /> Add stockholder
+                        </button>
+                        {(form.stockholders.length > 0 || sectionDirty.stockholders) && (
                           <SectionSaveBar
                             allowed={editing ? canEdit : canAdd}
                             label="Save Stockholders"
                             isEditing={Boolean(editing)}
+                            hasContent={form.stockholders.length > 0}
                             dirty={sectionDirty.stockholders}
                             saving={savingSection === 'stockholders'}
                             disabled={saving || loadingLocation}
                             onSave={() => void saveSection('stockholders')}
                           />
-                        ) : undefined
-                      }
+                        )}
+                      </div>
+                    </div>
+                    <RowsEditor<StockholderRow>
+                      rows={form.stockholders}
+                      disabled={loadingLocation}
+                      emptyText="No stockholders yet — use Add stockholder."
+                      hideSideActions
+                      rowNoun="stockholder"
+                      confirmDelete={askRowDelete}
+                      invalidKeys={(row) => (showRowErrors.stockholders ? invalidRowKeys(row, STOCKHOLDER_RULES) : null)}
+                      columns={[
+                        { key: 'name', label: 'Stockholder Name', width: '30%', placeholder: 'Full name' },
+                        { key: 'nationality', label: 'Nationality', width: '18%', placeholder: 'Select nationality', options: NATIONALITIES },
+                        { key: 'subscribed', label: 'Subscribed', width: '18%', numeric: true, amount: true, placeholder: '0.00' },
+                        { key: 'paid', label: 'Paid', width: '18%', numeric: true, amount: true, placeholder: '0.00' },
+                        { key: 'ownership', label: 'Ownership %', width: '16%', numeric: true, placeholder: '0' },
+                      ]}
+                      onChange={(next) => setForm((p) => ({ ...p, stockholders: next }))}
+                      blankRow={blankStockholderRow}
                     />
                   </div>
-                ) : activeProfileTab === 'Contact Person' ? (
-                  <div className="flex flex-col gap-5">
-                    {/* Contact people on top, the locator's signatories below — two child tables, same tab. */}
-                    <div className="flex flex-col gap-2">
-                      <div className="text-sm font-bold" style={{ color: 'var(--text)' }}>
-                        Contact Person
+
+                    {/* SEC Registration Information — modelled on the SEC forms (Company
+                        Information, Contact Person Information, purposes, capital), below the
+                        stockholders table. Its own contact person, separate from the locator's
+                        Contact Person list. */}
+                    <div
+                      className="flex flex-col gap-3 rounded-xl border p-3"
+                      style={{ borderColor: 'var(--input-border)', backgroundColor: 'color-mix(in oklab, var(--control-bg) 55%, transparent)' }}
+                    >
+                      <div
+                        className="-mx-3 -mt-3 mb-1 flex items-center justify-between gap-2 rounded-t-xl border-b px-3 py-2"
+                        style={{ borderColor: 'var(--input-border)', backgroundColor: 'var(--control-bg)' }}
+                      >
+                        <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--text)' }}>
+                          SEC Registration Information
+                        </span>
+                        <SectionSaveBar
+                          allowed={editing ? canEdit : canAdd}
+                          label="Save SEC Registration Information"
+                          isEditing={Boolean(editing)}
+                          hasContent={[...SEC_PROPONENT_KEYS, ...SEC_DETAIL_KEYS].some((k) => !k.endsWith('_currency') && String(form[k] ?? '').trim() !== '')}
+                          dirty={sectionDirty.sec}
+                          saving={savingSection === 'sec'}
+                          disabled={saving || loadingLocation}
+                          onSave={() => void saveSection('sec')}
+                        />
                       </div>
-                      <RowsEditor<ContactPersonRow>
-                        rows={form.contact_persons}
-                        disabled={loadingLocation}
-                        emptyText="No contact persons yet — use + to add one."
-                        columns={[
-                          { key: 'name', label: 'Contact Person', className: 'min-w-[14rem]' },
-                          { key: 'designation', label: 'Designation', className: 'w-48' },
-                          { key: 'contact_no', label: 'Contact No.', className: 'w-40' },
-                          { key: 'email', label: 'Email Address', className: 'min-w-[14rem]' },
-                        ]}
-                        onChange={(next) => setForm((p) => ({ ...p, contact_persons: next }))}
-                        blankRow={blankContactPersonRow}
-                      />
-                    </div>
-                    <div className="flex flex-col gap-2">
-                      <div className="text-sm font-bold" style={{ color: 'var(--text)' }}>
-                        Authorized Person / Signatory
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+                        {secTextField('registration_no', 'SEC Registration No.', 'e.g. CS201811260')}
+                        <Field compact label="SEC Registration Date">
+                          <DatePicker
+                            mode="single"
+                            fullWidth
+                            boxed
+                            placeholder="Select date"
+                            value={dateInputToDate(form.sec_registration_date)}
+                            onChange={(d) => setForm((p) => ({ ...p, sec_registration_date: dateToDateInputValue(d) }))}
+                          />
+                        </Field>
+                        {secTextField('ref_code', 'Ref. Code')}
+                        {secTextField('tin', 'TIN Number')}
                       </div>
-                      <RowsEditor<SignatoryRow>
-                        rows={form.signatories}
-                        disabled={loadingLocation}
-                        emptyText="No signatories yet — use + to add one."
-                        columns={[
-                          { key: 'name', label: 'Signatory', className: 'min-w-[14rem]' },
-                          { key: 'designation', label: 'Designation', className: 'w-48' },
-                          { key: 'contact_no', label: 'Contact No.', className: 'w-40' },
-                          { key: 'email', label: 'Email Address', className: 'min-w-[14rem]' },
-                        ]}
-                        onChange={(next) => setForm((p) => ({ ...p, signatories: next }))}
-                        blankRow={blankSignatoryRow}
-                        extraActions={
-                          form.contact_persons.length > 0 || form.signatories.length > 0 ? (
-                            <SectionSaveBar
-                              allowed={editing ? canEdit : canAdd}
-                              label="Save Contacts & Signatories"
-                              isEditing={Boolean(editing)}
-                              dirty={sectionDirty.contacts}
-                              saving={savingSection === 'contacts'}
-                              disabled={saving || loadingLocation}
-                              onSave={() => void saveSection('contacts')}
-                            />
-                          ) : undefined
-                        }
-                      />
+
+                      <div className="grid grid-cols-1 md:grid-cols-[2fr_1fr] gap-3">
+                        <Field compact label="Principal Office Address">
+                          <textarea
+                            className="app-form-control app-form-control-sm min-h-[4.5rem]"
+                            placeholder="No. / Street / Barangay / City / Town / Province / Zip code"
+                            value={form.address}
+                            onChange={(e) => setForm((p) => ({ ...p, address: e.target.value }))}
+                          />
+                        </Field>
+                        <Field compact label="Latest GIS Filing">
+                          <DatePicker
+                            mode="single"
+                            fullWidth
+                            boxed
+                            placeholder="Select date"
+                            value={dateInputToDate(form.sec_gis_date)}
+                            onChange={(d) => setForm((p) => ({ ...p, sec_gis_date: dateToDateInputValue(d) }))}
+                          />
+                        </Field>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        {secTextField('sec_company_email', "Company's Email Address")}
+                        {secTextField('sec_company_telephone', "Company's Telephone No.")}
+                        {secTextField('sec_company_mobile', "Company's Mobile No.")}
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        <CapitalField
+                          label="Authorized Capital Stock"
+                          amount={form.authorized_capital}
+                          currency={form.authorized_capital_currency}
+                          disabled={loadingLocation}
+                          onAmountChange={(v) => setForm((p) => ({ ...p, authorized_capital: v }))}
+                          onCurrencyChange={(v) => setForm((p) => ({ ...p, authorized_capital_currency: v }))}
+                        />
+                        <CapitalField
+                          label="Subscribed Capital"
+                          amount={form.subscribed_capital}
+                          currency={form.subscribed_capital_currency}
+                          disabled={loadingLocation}
+                          onAmountChange={(v) => setForm((p) => ({ ...p, subscribed_capital: v }))}
+                          onCurrencyChange={(v) => setForm((p) => ({ ...p, subscribed_capital_currency: v }))}
+                        />
+                        <CapitalField
+                          label="Paid-up Capital"
+                          amount={form.paid_up_capital}
+                          currency={form.paid_up_capital_currency}
+                          disabled={loadingLocation}
+                          onAmountChange={(v) => setForm((p) => ({ ...p, paid_up_capital: v }))}
+                          onCurrencyChange={(v) => setForm((p) => ({ ...p, paid_up_capital_currency: v }))}
+                        />
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <Field compact label="Primary Purpose">
+                          <textarea
+                            className="app-form-control app-form-control-sm min-h-[4.5rem]"
+                            value={form.sec_primary_purpose}
+                            onChange={(e) => setForm((p) => ({ ...p, sec_primary_purpose: e.target.value }))}
+                          />
+                        </Field>
+                        <Field compact label="Secondary Purpose">
+                          <textarea
+                            className="app-form-control app-form-control-sm min-h-[4.5rem]"
+                            value={form.sec_secondary_purpose}
+                            onChange={(e) => setForm((p) => ({ ...p, sec_secondary_purpose: e.target.value }))}
+                          />
+                        </Field>
+                      </div>
+
+                      <div className="flex flex-col gap-2 rounded-lg border p-3" style={{ borderColor: 'var(--input-border)' }}>
+                        <div className="text-[10px] font-bold uppercase tracking-widest text-secondary">
+                          SEC Contact Person
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+                          {secTextField('sec_contact_name', 'Name of Contact Person')}
+                          {secTextField('sec_contact_email', 'Email Address')}
+                          {secTextField('sec_contact_telephone', 'Telephone No.')}
+                          {secTextField('sec_contact_mobile', 'Mobile No.')}
+                        </div>
+                      </div>
                     </div>
                   </div>
                 ) : activeProfileTab === 'Investment' ? (
@@ -2369,6 +2845,7 @@ export function ProponentsManagement({
                       allowed={editing ? canEdit : canAdd}
                       label="Save Investment"
                       isEditing={Boolean(editing)}
+                      hasContent={[form.investment_commitment, form.investment_actual, form.employee_commitment, form.employee_actual].some((v) => v.trim() !== '')}
                       dirty={sectionDirty.investment}
                       saving={savingSection === 'investment'}
                       disabled={saving || loadingLocation}
@@ -2509,18 +2986,94 @@ export function ProponentsManagement({
               </div>
             </div>
 
-            {/* Property schedule (dbo.proponent_properties) — an inline editable
-                table synced wholesale on Save, add/remove-row buttons on the right. */}
-            <div className="flex flex-col sm:flex-row gap-2 sm:items-stretch">
+            {/* Property schedule (dbo.proponent_properties) — an inline editable table in a
+                card; Add property (Standard / Non-standard) and the schedule's Save are in
+                the card header. */}
+            <div
+              className="flex flex-col gap-3 rounded-xl border p-3"
+              style={{ borderColor: 'var(--input-border)', backgroundColor: 'color-mix(in oklab, var(--control-bg) 55%, transparent)' }}
+            >
+              <div
+                className="-mx-3 -mt-3 flex items-center justify-between gap-2 rounded-t-xl border-b px-3 py-2"
+                style={{ borderColor: 'var(--input-border)', backgroundColor: 'var(--control-bg)' }}
+              >
+                <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--text)' }}>
+                  Property Schedule
+                  <span className="ml-1.5 font-normal normal-case tracking-normal text-secondary">({form.properties.length})</span>
+                </span>
+                <div className="flex items-center gap-2">
+                  <div className="relative">
+                    <button
+                      type="button"
+                      disabled={loadingLocation}
+                      onClick={() => setPropertyTypePickerOpen((v) => !v)}
+                      className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[11px] font-semibold cursor-pointer disabled:cursor-not-allowed disabled:opacity-60 hover:bg-[var(--selected-bg)]"
+                      style={{ borderColor: 'var(--input-border)', color: 'var(--text)', backgroundColor: 'var(--surface)' }}
+                      aria-haspopup="menu"
+                      aria-expanded={propertyTypePickerOpen}
+                    >
+                      <Plus size={12} /> Add property
+                    </button>
+                    {propertyTypePickerOpen ? (
+                      <>
+                        <div className="fixed inset-0 z-40" onClick={() => setPropertyTypePickerOpen(false)} />
+                        <div
+                          role="menu"
+                          className="absolute right-0 top-full mt-1 z-50 w-64 rounded-xl border p-1.5 shadow-xl"
+                          style={{ backgroundColor: 'var(--surface)', borderColor: 'var(--border)' }}
+                        >
+                          <div className="px-2 pt-1 pb-1.5 text-[10px] font-bold uppercase tracking-widest text-secondary">Select type</div>
+                          {(
+                            [
+                              { type: 'STANDARD', label: 'Standard', hint: 'MGL/MO = Area × Rate/SQM/MO (computed)' },
+                              { type: 'NON_STANDARD', label: 'Non-standard', hint: 'Enter every amount by hand — no computation' },
+                            ] as const
+                          ).map((opt) => (
+                            <button
+                              key={opt.type}
+                              type="button"
+                              role="menuitem"
+                              onClick={() => {
+                                setShowPropertyErrors(false);
+                                setForm((p) => ({ ...p, properties: [...p.properties, blankPropertyRow(opt.type)] }));
+                                setPropertyTypePickerOpen(false);
+                              }}
+                              className="w-full text-left rounded-lg px-2.5 py-2 cursor-pointer hover:bg-[var(--selected-bg)]"
+                            >
+                              <div className="text-[12px] font-semibold" style={{ color: 'var(--text)' }}>{opt.label}</div>
+                              <div className="text-[10px] text-secondary">{opt.hint}</div>
+                            </button>
+                          ))}
+                        </div>
+                      </>
+                    ) : null}
+                  </div>
+                  {/* Saves the whole schedule (every row). Also shown after removing the
+                      last row, so that removal can be saved. */}
+                  {(form.properties.length > 0 || sectionDirty.properties) && (
+                    <SectionSaveBar
+                      allowed={editing ? canEdit : canAdd}
+                      label="Save Property Schedule"
+                      isEditing={Boolean(editing)}
+                      hasContent={form.properties.length > 0}
+                      dirty={sectionDirty.properties}
+                      saving={savingSection === 'properties'}
+                      disabled={saving || loadingLocation}
+                      onSave={() => void saveSection('properties')}
+                    />
+                  )}
+                </div>
+              </div>
               {form.properties.length === 0 ? (
                 <div
-                  className="flex-1 min-w-0 rounded-lg border border-dashed px-3 py-2.5 text-[11px] text-secondary"
+                  className="rounded-lg border border-dashed px-3 py-2.5 text-[11px] text-secondary"
                   style={{ borderColor: 'var(--input-border)' }}
                 >
-                  No property schedule yet — use <span className="font-semibold">+</span> to add a Standard or Non-standard row.
+                  No property schedule yet — use <span className="font-semibold">Add property</span> to add a Standard or
+                  Non-standard row.
                 </div>
               ) : (
-              <div className="flex-1 min-w-0 overflow-x-auto rounded-lg border" style={{ borderColor: 'var(--input-border)' }}>
+              <div className="min-w-0 overflow-x-auto rounded-lg border" style={{ borderColor: 'var(--input-border)' }}>
                 <table className="w-full text-xs border-collapse">
                   <thead>
                     <tr style={{ backgroundColor: 'var(--control-bg)' }}>
@@ -2539,6 +3092,16 @@ export function ProponentsManagement({
                   </thead>
                   <tbody>
                     {form.properties.map((row, i) => {
+                      // Just added, nothing typed (Rate type / currencies are preset): "−", no prompt.
+                      const blankRow = isBlankNewRow(row, [
+                        'year',
+                        'date_from',
+                        'date_to',
+                        'type_of_property',
+                        'area_sqm',
+                        'rate_sqm_mo',
+                        'mgl_mo',
+                      ]);
                       const missing = showPropertyErrors ? missingPropertyFields(row) : null;
                       // Red outline on a blank required field after a blocked save.
                       const miss = (key: keyof PropertyRow) =>
@@ -2549,27 +3112,19 @@ export function ProponentsManagement({
                           {i + 1}
                         </td>
                         <td className={`px-1 py-1 border-b${miss('year')}`} style={{ borderColor: 'var(--input-border)' }}>
-                          <select
-                            className="app-form-control app-form-control-sm w-[136px] min-w-[136px]"
-                            style={{ color: asOption(PROPERTY_YEARS, row.year) ? 'var(--text)' : 'var(--text-muted)' }}
+                          <BoxSelect
+                            className="w-[136px] min-w-[136px]"
+                            options={PROPERTY_YEARS}
                             value={asOption(PROPERTY_YEARS, row.year)}
+                            placeholder="Select year"
                             disabled={loadingLocation}
-                            onChange={(e) =>
+                            onChange={(value) =>
                               setForm((p) => ({
                                 ...p,
-                                properties: p.properties.map((r, ri) => (ri === i ? updatePropertyRow(r, { year: e.target.value }) : r)),
+                                properties: p.properties.map((r, ri) => (ri === i ? updatePropertyRow(r, { year: value }) : r)),
                               }))
                             }
-                          >
-                            <option value="" disabled>
-                              Select year
-                            </option>
-                            {PROPERTY_YEARS.map((y) => (
-                              <option key={y} value={y} style={{ color: 'var(--text)' }}>
-                                {y}
-                              </option>
-                            ))}
-                          </select>
+                          />
                         </td>
                         <td className={`px-1 py-1 border-b w-36${miss('date_from')}`} style={{ borderColor: 'var(--input-border)' }}>
                           <DatePicker
@@ -2607,10 +3162,14 @@ export function ProponentsManagement({
                         </td>
                         <td className={`px-1 py-1 border-b whitespace-nowrap${miss('rate_type')}`} style={{ borderColor: 'var(--input-border)' }}>
                           {/* Switchable: Non-standard → Standard recomputes MGL, so it asks first. */}
-                          <select
-                            className="app-form-control app-form-control-sm w-[156px] min-w-[156px] font-semibold"
-                            style={row.rate_type === 'STANDARD' ? { color: '#059669' } : undefined}
+                          <BoxSelect
+                            className="w-[156px] min-w-[156px]"
+                            options={[
+                              { value: 'STANDARD', label: 'Standard' },
+                              { value: 'NON_STANDARD', label: 'Non-standard' },
+                            ]}
                             value={row.rate_type}
+                            placeholder="Select type"
                             disabled={loadingLocation}
                             title={
                               row.rate_type === 'STANDARD'
@@ -2619,8 +3178,9 @@ export function ProponentsManagement({
                                   ? 'Amounts entered by hand'
                                   : 'Choose Standard or Non-standard'
                             }
-                            onChange={(e) => {
-                              const next = e.target.value as PropertyRateType;
+                            onChange={(value) => {
+                              const next = value as PropertyRateType;
+                              if (next === row.rate_type) return;
                               const computed = computeStandardMgl(row);
                               const ask =
                                 next === 'STANDARD'
@@ -2635,36 +3195,22 @@ export function ProponentsManagement({
                                 properties: p.properties.map((r, ri) => (ri === i ? updatePropertyRow(r, { rate_type: next }) : r)),
                               }));
                             }}
-                          >
-                            <option value="" disabled>
-                              Select type
-                            </option>
-                            <option value="STANDARD">Standard</option>
-                            <option value="NON_STANDARD">Non-standard</option>
-                          </select>
+                          />
                         </td>
                         <td className={`px-1 py-1 border-b${miss('type_of_property')}`} style={{ borderColor: 'var(--input-border)' }}>
-                          <select
-                            className="app-form-control app-form-control-sm w-[150px] min-w-[150px]"
-                            style={{ color: asOption(PROPERTY_TYPES, row.type_of_property) ? 'var(--text)' : 'var(--text-muted)' }}
+                          <BoxSelect
+                            className="w-[150px] min-w-[150px]"
+                            options={PROPERTY_TYPES}
                             value={asOption(PROPERTY_TYPES, row.type_of_property)}
+                            placeholder="Select type"
                             disabled={loadingLocation}
-                            onChange={(e) =>
+                            onChange={(value) =>
                               setForm((p) => ({
                                 ...p,
-                                properties: p.properties.map((r, ri) => (ri === i ? updatePropertyRow(r, { type_of_property: e.target.value }) : r)),
+                                properties: p.properties.map((r, ri) => (ri === i ? updatePropertyRow(r, { type_of_property: value }) : r)),
                               }))
                             }
-                          >
-                            <option value="" disabled>
-                              Select type
-                            </option>
-                            {PROPERTY_TYPES.map((t) => (
-                              <option key={t} value={t} style={{ color: 'var(--text)' }}>
-                                {t}
-                              </option>
-                            ))}
-                          </select>
+                          />
                         </td>
                         <td className={`px-1 py-1 border-b${miss('area_sqm')}`} style={{ borderColor: 'var(--input-border)' }}>
                           <input
@@ -2695,23 +3241,18 @@ export function ProponentsManagement({
                           />
                         </td>
                         <td className={`px-1 py-1 border-b${miss('rate_currency')}`} style={{ borderColor: 'var(--input-border)' }}>
-                          <select
-                            className="app-form-control app-form-control-sm w-16"
+                          <BoxSelect
+                            className="w-[86px] min-w-[86px]"
+                            options={CURRENCY_OPTIONS}
                             value={row.rate_currency}
                             disabled={loadingLocation}
-                            onChange={(e) =>
+                            onChange={(value) =>
                               setForm((p) => ({
                                 ...p,
-                                properties: p.properties.map((r, ri) => (ri === i ? updatePropertyRow(r, { rate_currency: e.target.value }) : r)),
+                                properties: p.properties.map((r, ri) => (ri === i ? updatePropertyRow(r, { rate_currency: value }) : r)),
                               }))
                             }
-                          >
-                            {CURRENCY_OPTIONS.map((c) => (
-                              <option key={c} value={c}>
-                                {c}
-                              </option>
-                            ))}
-                          </select>
+                          />
                         </td>
                         <td className={`px-1 py-1 border-b${miss('mgl_mo')}`} style={{ borderColor: 'var(--input-border)' }}>
                           <input
@@ -2731,36 +3272,36 @@ export function ProponentsManagement({
                           />
                         </td>
                         <td className={`px-1 py-1 border-b${miss('mgl_currency')}`} style={{ borderColor: 'var(--input-border)' }}>
-                          <select
-                            className="app-form-control app-form-control-sm w-16"
+                          <BoxSelect
+                            className="w-[86px] min-w-[86px]"
+                            options={CURRENCY_OPTIONS}
                             value={row.mgl_currency}
                             disabled={loadingLocation || row.rate_type === 'STANDARD'}
                             title={row.rate_type === 'STANDARD' ? 'Same as the rate’s currency' : undefined}
-                            onChange={(e) =>
+                            onChange={(value) =>
                               setForm((p) => ({
                                 ...p,
-                                properties: p.properties.map((r, ri) => (ri === i ? updatePropertyRow(r, { mgl_currency: e.target.value }) : r)),
+                                properties: p.properties.map((r, ri) => (ri === i ? updatePropertyRow(r, { mgl_currency: value }) : r)),
                               }))
                             }
-                          >
-                            {CURRENCY_OPTIONS.map((c) => (
-                              <option key={c} value={c}>
-                                {c}
-                              </option>
-                            ))}
-                          </select>
+                          />
                         </td>
                         <td className="px-1 py-1 border-b text-center" style={{ borderColor: 'var(--input-border)' }}>
                           <button
                             type="button"
                             disabled={loadingLocation}
-                            onClick={() => setForm((p) => ({ ...p, properties: p.properties.filter((_, ri) => ri !== i) }))}
+                            onClick={() => {
+                              const remove = () =>
+                                setForm((p) => ({ ...p, properties: p.properties.filter((_, ri) => ri !== i) }));
+                              if (blankRow) remove();
+                              else askRowDelete(`property row ${i + 1}`, remove);
+                            }}
                             className="inline-flex h-7 w-7 items-center justify-center rounded-md cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 hover:bg-[var(--selected-bg)]"
-                            style={{ color: '#ef4444' }}
-                            title={`Remove row ${i + 1}`}
-                            aria-label={`Remove row ${i + 1}`}
+                            style={{ color: blankRow ? 'var(--text-muted)' : '#ef4444' }}
+                            title={blankRow ? `Remove empty row ${i + 1}` : `Delete row ${i + 1}`}
+                            aria-label={blankRow ? `Remove empty row ${i + 1}` : `Delete row ${i + 1}`}
                           >
-                            <Trash2 size={14} />
+                            {blankRow ? <Minus size={14} /> : <Trash2 size={14} />}
                           </button>
                         </td>
                       </tr>
@@ -2770,69 +3311,6 @@ export function ProponentsManagement({
                 </table>
               </div>
               )}
-              <div className="flex flex-row sm:flex-col justify-end sm:justify-between gap-1.5 shrink-0">
-                <div className="relative">
-                  <button
-                    type="button"
-                    disabled={loadingLocation}
-                    onClick={() => setPropertyTypePickerOpen((v) => !v)}
-                    className="w-7 h-7 rounded-md flex items-center justify-center text-white font-bold cursor-pointer disabled:cursor-not-allowed disabled:opacity-60"
-                    style={{ backgroundColor: '#22c55e' }}
-                    title="Add row"
-                    aria-haspopup="menu"
-                    aria-expanded={propertyTypePickerOpen}
-                  >
-                    +
-                  </button>
-                  {propertyTypePickerOpen ? (
-                    <>
-                      <div className="fixed inset-0 z-40" onClick={() => setPropertyTypePickerOpen(false)} />
-                      <div
-                        role="menu"
-                        className="absolute right-0 bottom-full sm:bottom-auto sm:top-0 sm:right-full mb-1 sm:mb-0 sm:mr-2 z-50 w-64 rounded-xl border p-1.5 shadow-xl"
-                        style={{ backgroundColor: 'var(--surface)', borderColor: 'var(--border)' }}
-                      >
-                        <div className="px-2 pt-1 pb-1.5 text-[10px] font-bold uppercase tracking-widest text-secondary">Select type</div>
-                        {(
-                          [
-                            { type: 'STANDARD', label: 'Standard', hint: 'MGL/MO = Area × Rate/SQM/MO (computed)' },
-                            { type: 'NON_STANDARD', label: 'Non-standard', hint: 'Enter every amount by hand — no computation' },
-                          ] as const
-                        ).map((opt) => (
-                          <button
-                            key={opt.type}
-                            type="button"
-                            role="menuitem"
-                            onClick={() => {
-                              setShowPropertyErrors(false);
-                              setForm((p) => ({ ...p, properties: [...p.properties, blankPropertyRow(opt.type)] }));
-                              setPropertyTypePickerOpen(false);
-                            }}
-                            className="w-full text-left rounded-lg px-2.5 py-2 cursor-pointer hover:bg-[var(--selected-bg)]"
-                          >
-                            <div className="text-[12px] font-semibold" style={{ color: 'var(--text)' }}>{opt.label}</div>
-                            <div className="text-[10px] text-secondary">{opt.hint}</div>
-                          </button>
-                        ))}
-                      </div>
-                    </>
-                  ) : null}
-                </div>
-                {/* Saves the whole schedule (every row), so it sits at the bottom of the
-                    table rather than beside any one row. Also shown after removing the
-                    last row, so that removal can be saved. */}
-                {(form.properties.length > 0 || sectionDirty.properties) && (
-                  <SectionSaveBar
-                    allowed={editing ? canEdit : canAdd}
-                    label="Save Property Schedule"
-                    isEditing={Boolean(editing)}
-                    dirty={sectionDirty.properties}
-                    saving={savingSection === 'properties'}
-                    disabled={saving || loadingLocation}
-                    onSave={() => void saveSection('properties')}
-                  />
-                )}
-              </div>
             </div>
 
             {/* Row 6: Advance Lease Payment | Security Deposit | Performance Security —
@@ -2990,6 +3468,19 @@ export function ProponentsManagement({
             }));
           }
           setRateSwitch(null);
+        }}
+      />
+
+      <ConfirmModal
+        open={rowDelete !== null}
+        title={`Delete ${rowDelete?.what ?? 'row'}?`}
+        description="It's removed from the list now and from the locator when you click Save. Cancel to keep it."
+        confirmText="Delete"
+        danger
+        onCancel={() => setRowDelete(null)}
+        onConfirm={() => {
+          rowDelete?.proceed();
+          setRowDelete(null);
         }}
       />
 
@@ -3166,6 +3657,7 @@ function SectionSaveBar({
   saving,
   disabled,
   onSave,
+  hasContent = true,
 }: {
   /** No edit permission: no save button. */
   allowed?: boolean;
@@ -3175,20 +3667,23 @@ function SectionSaveBar({
   saving: boolean;
   disabled?: boolean;
   onSave: () => void;
+  /** New Locator: whether the section has anything entered yet. */
+  hasContent?: boolean;
 }) {
   if (!allowed) return null;
-  // New Locator: no record yet, so this saves the locator together with the
-  // section (see saveSection) — always clickable. Existing locator: only
-  // when the section has unsaved changes.
-  const canClick = !isEditing || dirty;
+  // Only shown when there's something to save:
+  //  - existing locator: the section has unsaved changes;
+  //  - New Locator (no record yet — this creates it, see saveSection): the
+  //    section has something entered.
+  // Kept while a save is running so the button doesn't vanish mid-click.
+  const visible = saving || (isEditing ? dirty : hasContent);
+  if (!visible) return null;
   return (
     <button
       type="button"
       onClick={onSave}
-      disabled={!canClick || saving || disabled}
-      title={
-        saving ? 'Saving…' : !isEditing ? `${label} (creates the locator)` : dirty ? label : 'No changes to save'
-      }
+      disabled={saving || disabled}
+      title={saving ? 'Saving…' : !isEditing ? `${label} (creates the locator)` : label}
       className="w-7 h-7 rounded-md flex items-center justify-center cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
       style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
     >
@@ -3208,9 +3703,27 @@ function RowsEditor<T extends { id?: number }>({
   blankRow,
   onChange,
   extraActions,
+  hideSideActions,
+  invalidKeys,
+  confirmDelete,
+  rowNoun = 'row',
 }: {
   rows: T[];
-  columns: { key: keyof T & string; label: string; className?: string; numeric?: boolean }[];
+  /** width: fixed column width (e.g. '30%'); when any column sets one the table
+   * uses a fixed layout, so two editors with the same widths line up. */
+  /** amount: a money figure, shown with comma separators as it's typed ("4,000,000"). */
+  columns: {
+    key: keyof T & string;
+    label: string;
+    className?: string;
+    numeric?: boolean;
+    amount?: boolean;
+    width?: string;
+    placeholder?: string;
+    /** A fixed dropdown instead of a text box; a saved value that isn't in the list
+     * shows as the placeholder (must be picked again). */
+    options?: readonly string[];
+  }[];
   disabled?: boolean;
   emptyText: string;
   blankRow: () => T;
@@ -3218,15 +3731,24 @@ function RowsEditor<T extends { id?: number }>({
   /** Extra buttons (e.g. a section's SectionSaveBar) stacked below +/- in the
    * same vertical column — same layout as the Profile tab's Property Schedule. */
   extraActions?: React.ReactNode;
+  /** No side column: the caller renders its own Add button. */
+  hideSideActions?: boolean;
+  /** Keys of a row to outline in red (a blocked save). */
+  invalidKeys?: (row: T) => Set<string> | null;
+  /** Asks before a row is deleted; `proceed` removes it. */
+  confirmDelete?: (what: string, proceed: () => void) => void;
+  /** Used in the delete prompt, e.g. "contact person". */
+  rowNoun?: string;
 }) {
+  const fixed = columns.some((c) => c.width);
   return (
     <div className="flex flex-col sm:flex-row gap-2 sm:items-start">
       <div className="flex-1 min-w-0 overflow-x-auto rounded-lg border" style={{ borderColor: 'var(--input-border)' }}>
-        <table className="w-full text-xs border-collapse">
+        <table className={cn('w-full text-xs border-collapse', fixed && 'table-fixed min-w-[40rem]')}>
           <thead>
             <tr style={{ backgroundColor: 'var(--control-bg)' }}>
               <th
-                className="px-2 py-1.5 text-left font-semibold uppercase tracking-wide text-[9px] border-b w-10"
+                className="px-2 py-1.5 text-center font-semibold uppercase tracking-wide text-[9px] border-b w-10"
                 style={{ borderColor: 'var(--input-border)', color: 'var(--text-muted)' }}
               >
                 No.
@@ -3235,46 +3757,96 @@ function RowsEditor<T extends { id?: number }>({
                 <th
                   key={c.key}
                   className="px-2 py-1.5 text-left font-semibold uppercase tracking-wide text-[9px] border-b"
-                  style={{ borderColor: 'var(--input-border)', color: 'var(--text-muted)' }}
+                  style={{ borderColor: 'var(--input-border)', color: 'var(--text-muted)', width: c.width }}
                 >
                   {c.label}
                 </th>
               ))}
+              <th className="border-b w-10" style={{ borderColor: 'var(--input-border)' }} aria-label="Delete" />
             </tr>
           </thead>
           <tbody>
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={columns.length + 1} className="px-2 py-6 text-center text-secondary">
+                <td colSpan={columns.length + 2} className="px-2 py-6 text-center text-secondary">
                   {emptyText}
                 </td>
               </tr>
             ) : (
-              rows.map((row, i) => (
+              rows.map((row, i) => {
+                const blank = isBlankNewRow(row, columns.map((c) => c.key));
+                const bad = blank ? null : invalidKeys?.(row) ?? null;
+                return (
                 <tr key={row.id ?? `new-${i}`}>
                   <td className="px-2 py-1 border-b text-center" style={{ borderColor: 'var(--input-border)' }}>
                     {i + 1}
                   </td>
                   {columns.map((c) => (
-                    <td key={c.key} className="px-1 py-1 border-b" style={{ borderColor: 'var(--input-border)' }}>
+                    <td
+                      key={c.key}
+                      className={cn('px-1 py-1 border-b', bad?.has(c.key) && '[&>*]:rounded-md [&>*]:ring-1 [&>*]:ring-red-500')}
+                      style={{ borderColor: 'var(--input-border)' }}
+                    >
+                      {c.options ? (
+                        // Searchable: typing filters the list (a native <select>
+                        // only jumps by first letter, and not while it's open).
+                        <div className={cn('app-form-control app-form-control-sm p-0 overflow-hidden flex items-stretch', c.className)}>
+                          <AppSelect
+                            options={c.options.map((o) => ({ value: o, label: o }))}
+                            value={asOption([...c.options], String(row[c.key] ?? ''))}
+                            onChange={(value) => onChange(rows.map((r, ri) => (ri === i ? { ...r, [c.key]: value } : r)))}
+                            placeholder={c.placeholder || 'Select'}
+                            isClearable={false}
+                            isDisabled={disabled}
+                            compact
+                            boxed
+                            minHeight={26}
+                          />
+                        </div>
+                      ) : (
                       <input
                         className={cn('app-form-control app-form-control-sm w-full', c.className)}
                         inputMode={c.numeric ? 'decimal' : undefined}
+                        placeholder={c.placeholder}
                         value={String(row[c.key] ?? '')}
                         disabled={disabled}
                         onChange={(e) => {
-                          const value = c.numeric ? e.target.value.replace(/[^0-9.,]/g, '') : e.target.value;
+                          const value = c.amount
+                            ? formatAmountInput(e.target.value)
+                            : c.numeric
+                              ? e.target.value.replace(/[^0-9.,]/g, '')
+                              : e.target.value;
                           onChange(rows.map((r, ri) => (ri === i ? { ...r, [c.key]: value } : r)));
                         }}
                       />
+                      )}
                     </td>
                   ))}
+                  <td className="px-1 py-1 border-b text-center" style={{ borderColor: 'var(--input-border)' }}>
+                    <button
+                      type="button"
+                      disabled={disabled}
+                      onClick={() => {
+                        const remove = () => onChange(rows.filter((_, ri) => ri !== i));
+                        if (confirmDelete && !blank) confirmDelete(`${rowNoun} ${i + 1}`, remove);
+                        else remove();
+                      }}
+                      className="inline-flex h-7 w-7 items-center justify-center rounded-md cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 hover:bg-[var(--selected-bg)]"
+                      style={{ color: blank ? 'var(--text-muted)' : '#ef4444' }}
+                      title={blank ? `Remove empty row ${i + 1}` : `Delete row ${i + 1}`}
+                      aria-label={blank ? `Remove empty row ${i + 1}` : `Delete row ${i + 1}`}
+                    >
+                      {blank ? <Minus size={14} /> : <Trash2 size={14} />}
+                    </button>
+                  </td>
                 </tr>
-              ))
+                );
+              })
             )}
           </tbody>
         </table>
       </div>
+      {hideSideActions ? null : (
       <div className="flex flex-row sm:flex-col justify-end gap-1.5 shrink-0">
         <button
           type="button"
@@ -3286,18 +3858,9 @@ function RowsEditor<T extends { id?: number }>({
         >
           +
         </button>
-        <button
-          type="button"
-          disabled={disabled || rows.length === 0}
-          onClick={() => onChange(rows.slice(0, -1))}
-          className="w-7 h-7 rounded-md flex items-center justify-center text-white font-bold cursor-pointer disabled:cursor-not-allowed disabled:opacity-60"
-          style={{ backgroundColor: '#ef4444' }}
-          title="Remove last row"
-        >
-          −
-        </button>
         {extraActions}
       </div>
+      )}
     </div>
   );
 }
@@ -3348,6 +3911,46 @@ function Field({
   );
 }
 
+/** The Locator panel's dropdown: a searchable AppSelect (type to filter) in an
+ * app-form-control box, same as Account Officer / Type of Contract / Nationality.
+ * A value not in `options` shows the placeholder. */
+function BoxSelect({
+  options,
+  value,
+  onChange,
+  placeholder = 'Select',
+  disabled,
+  className,
+  title,
+  clearable = false,
+}: {
+  options: readonly (string | { value: string; label: string })[];
+  value: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+  disabled?: boolean;
+  className?: string;
+  title?: string;
+  clearable?: boolean;
+}) {
+  const opts = options.map((o) => (typeof o === 'string' ? { value: o, label: o } : o));
+  return (
+    <div className={cn('app-form-control app-form-control-sm p-0 overflow-hidden flex items-stretch', className)} title={title}>
+      <AppSelect
+        options={opts}
+        value={value}
+        onChange={onChange}
+        placeholder={placeholder}
+        isClearable={clearable}
+        isDisabled={disabled}
+        compact
+        boxed
+        minHeight={26}
+      />
+    </div>
+  );
+}
+
 // Vertical tab list for the SidePanel (mirrors a left-side tab-head layout),
 // styled with this app's own tokens rather than any reference screenshot's colors.
 function CapitalField({
@@ -3380,19 +3983,18 @@ function CapitalField({
           placeholder="0.00"
           onChange={(e) => onAmountChange(formatAmountInput(e.target.value))}
         />
-        <select
-          className="shrink-0 border-0 bg-transparent outline-none px-1.5 py-1"
-          style={{ color: 'var(--text)', borderLeft: '1px solid var(--input-border)', width: '4.25rem' }}
-          value={currency}
-          disabled={disabled}
-          onChange={(e) => onCurrencyChange(e.target.value)}
-        >
-          {CURRENCY_OPTIONS.map((c) => (
-            <option key={c} value={c}>
-              {c}
-            </option>
-          ))}
-        </select>
+        <div className="shrink-0 flex items-stretch" style={{ borderLeft: '1px solid var(--input-border)', width: '5.5rem' }}>
+          <AppSelect
+            options={CURRENCY_OPTIONS.map((c) => ({ value: c, label: c }))}
+            value={currency}
+            onChange={onCurrencyChange}
+            isClearable={false}
+            isDisabled={disabled}
+            compact
+            boxed
+            minHeight={26}
+          />
+        </div>
       </div>
     </Field>
   );

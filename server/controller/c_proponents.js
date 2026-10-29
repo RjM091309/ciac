@@ -11,6 +11,7 @@ const LandUse = require("../models/LandUse");
 const ApplicationType = require("../models/ApplicationType");
 const Workflow = require("../models/ApplicationWorkflow");
 const ProponentDocument = require("../models/ProponentDocument");
+const SecRegistration = require("../models/SecRegistration");
 const fs = require("fs");
 const path = require("path");
 const { resolveStoredPath, relativeStoragePath, contentDisposition } = require("../lib/fileStorage");
@@ -1003,6 +1004,7 @@ exports.create = async (req, res) => {
       stockholders,
       contact_persons,
       signatories,
+      sec_registration: SecRegistration.pickFields(req.body),
       created_by: req.user?.id ?? null,
       is_active,
       // POST / is only called from the Registered Locator page's New Locator
@@ -1089,7 +1091,7 @@ exports.saveContacts = sectionHandler("contacts", "PROPONENT_CONTACTS_UPDATED", 
 
 exports.saveProperties = sectionHandler("properties", "PROPONENT_PROPERTIES_UPDATED", {
   validate: (b) => (Array.isArray(b.properties) ? null : "properties must be a list"),
-  save: (id, b) => Proponent.saveProperties(id, b.properties),
+  save: (id, b, actor) => Proponent.saveProperties(id, b.properties, actor),
 });
 
 exports.saveInvestment = sectionHandler("investment", "PROPONENT_INVESTMENT_UPDATED", {
@@ -1110,6 +1112,17 @@ exports.saveInvestment = sectionHandler("investment", "PROPONENT_INVESTMENT_UPDA
       },
       actor
     ),
+});
+
+exports.saveSecRegistration = sectionHandler("sec_registration", "PROPONENT_SEC_REGISTRATION_UPDATED", {
+  validate: (b) => {
+    if (b.sec_gis_date && !/^\d{4}-\d{2}-\d{2}/.test(String(b.sec_gis_date))) return "sec_gis_date must be a date";
+    if (b.sec_registration_date && !/^\d{4}-\d{2}-\d{2}/.test(String(b.sec_registration_date))) {
+      return "sec_registration_date must be a date";
+    }
+    return null;
+  },
+  save: (id, b, actor) => Proponent.saveSecRegistration(id, b, actor),
 });
 
 exports.update = async (req, res) => {
@@ -1239,6 +1252,7 @@ exports.update = async (req, res) => {
       stockholders,
       contact_persons,
       signatories,
+      sec_registration: SecRegistration.pickFields(req.body),
       is_active,
       updated_by: req.user?.id ?? null,
     });

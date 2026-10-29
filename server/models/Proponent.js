@@ -10,6 +10,7 @@ const ContactPerson = () => require("./ContactPerson");
 const Signatory = () => require("./Signatory");
 const FinancialTerms = () => require("./FinancialTerms");
 const Investment = () => require("./Investment");
+const SecRegistration = () => require("./SecRegistration");
 
 function toInt(v) {
   if (v === null || v === undefined || v === "") return null; // Number(null) is 0, not "no value"
@@ -263,6 +264,21 @@ async function createSchema() {
     IF COL_LENGTH('dbo.proponent_properties', 'rate_type') IS NULL
       ALTER TABLE dbo.proponent_properties ADD rate_type NVARCHAR(20) NULL;
   `);
+  // Soft delete + audit trail, same as dbo.stockholder / dbo.contact_person:
+  // a row removed from the schedule is deactivated (is_active = 0), never
+  // deleted. Existing rows default to active.
+  await updateSchema(`
+    IF COL_LENGTH('dbo.proponent_properties', 'is_active') IS NULL
+      ALTER TABLE dbo.proponent_properties ADD is_active BIT NOT NULL
+        CONSTRAINT DF_proponent_properties_is_active DEFAULT (1);
+  `);
+  await updateSchema(`
+    IF COL_LENGTH('dbo.proponent_properties', 'created_by') IS NULL
+      ALTER TABLE dbo.proponent_properties ADD
+        created_by INT NULL,
+        updated_by INT NULL,
+        updated_at DATETIME2(3) NULL;
+  `);
   // Walk-in/legacy locators registered by hand from the Registered Locator
   // page ("New Locator"). They have no approved application behind them, so
   // this flag is what keeps them in listProponents({ approvedOnly }).
@@ -345,6 +361,7 @@ async function ensureChildTables() {
   await Signatory().ensureSchema();
   await FinancialTerms().ensureSchema();
   await Investment().ensureSchema();
+  await SecRegistration().ensureSchema();
 }
 
 /** Replaces every property-schedule row for a proponent with the given list
@@ -381,11 +398,20 @@ function isEmptyPropertyRow(row) {
   return !["year", "date_from", "date_to", "type_of_property", "area_sqm", "rate_sqm_mo", "mgl_mo"].some((k) => filled(row?.[k]));
 }
 
-async function replaceProponentProperties(tx, proponentId, properties) {
+async function replaceProponentProperties(tx, proponentId, properties, actorId = null) {
   if (properties === undefined) return;
-  await tx.query(`DELETE FROM dbo.proponent_properties WHERE proponent_id = @param0`, [proponentId]);
-  if (!Array.isArray(properties) || !properties.length) return;
-  const rows = properties.filter((row) => !isEmptyPropertyRow(row));
+  const actor = toInt(actorId);
+  const rows = (Array.isArray(properties) ? properties : []).filter((row) => !isEmptyPropertyRow(row));
+
+  // Synced by id (like Stockholder.syncForProponent): a row with a known id is
+  // updated, a new one inserted, and an active row no longer listed is
+  // soft-deleted (is_active = 0) — never removed from the table.
+  const existing = await tx.query(
+    `SELECT id FROM dbo.proponent_properties WHERE proponent_id = @param0 AND is_active = 1`,
+    [proponentId]
+  );
+  const existingIds = new Set((existing.recordset || []).map((r) => r.id));
+  const keptIds = new Set();
 
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i] || {};
@@ -393,28 +419,52 @@ async function replaceProponentProperties(tx, proponentId, properties) {
     const rateType = PROPERTY_RATE_TYPES.includes(String(row.rate_type || "").toUpperCase())
       ? String(row.rate_type).toUpperCase()
       : null;
+    const values = [
+      i,
+      row.year || null,
+      row.date_from || null,
+      row.date_to || null,
+      row.type_of_property || null,
+      row.area_sqm || null,
+      row.rate_sqm_mo || null,
+      row.rate_currency || null,
+      rateType === "STANDARD" ? standardMgl(row) : row.mgl_mo || null,
+      // Standard: MGL is in the rate's currency.
+      rateType === "STANDARD" ? row.rate_currency || null : row.mgl_currency || null,
+      rateType,
+      actor,
+    ];
+    const id = toInt(row.id);
+    if (id !== null && existingIds.has(id)) {
+      keptIds.add(id);
+      await tx.query(
+        `
+        UPDATE dbo.proponent_properties
+        SET sort_order = @param1, year = @param2, date_from = @param3, date_to = @param4, type_of_property = @param5,
+            area_sqm = @param6, rate_sqm_mo = @param7, rate_currency = @param8, mgl_mo = @param9, mgl_currency = @param10,
+            rate_type = @param11, updated_by = @param12, updated_at = GETDATE()
+        WHERE id = @param0
+        `,
+        [id, ...values]
+      );
+    } else {
+      await tx.query(
+        `
+        INSERT INTO dbo.proponent_properties
+          (proponent_id, sort_order, year, date_from, date_to, type_of_property, area_sqm, rate_sqm_mo, rate_currency, mgl_mo, mgl_currency, rate_type, created_by)
+        VALUES
+          (@param0, @param1, @param2, @param3, @param4, @param5, @param6, @param7, @param8, @param9, @param10, @param11, @param12)
+        `,
+        [proponentId, ...values]
+      );
+    }
+  }
+
+  for (const id of existingIds) {
+    if (keptIds.has(id)) continue;
     await tx.query(
-      `
-      INSERT INTO dbo.proponent_properties
-        (proponent_id, sort_order, year, date_from, date_to, type_of_property, area_sqm, rate_sqm_mo, rate_currency, mgl_mo, mgl_currency, rate_type)
-      VALUES
-        (@param0, @param1, @param2, @param3, @param4, @param5, @param6, @param7, @param8, @param9, @param10, @param11)
-      `,
-      [
-        proponentId,
-        i,
-        row.year || null,
-        row.date_from || null,
-        row.date_to || null,
-        row.type_of_property || null,
-        row.area_sqm || null,
-        row.rate_sqm_mo || null,
-        row.rate_currency || null,
-        rateType === "STANDARD" ? standardMgl(row) : row.mgl_mo || null,
-        // Standard: MGL is in the rate's currency.
-        rateType === "STANDARD" ? row.rate_currency || null : row.mgl_currency || null,
-        rateType,
-      ]
+      `UPDATE dbo.proponent_properties SET is_active = 0, updated_by = @param1, updated_at = GETDATE() WHERE id = @param0`,
+      [id, actor]
     );
   }
 }
@@ -424,7 +474,7 @@ async function getProponentProperties(proponentId) {
     `
     SELECT id, year, date_from, date_to, type_of_property, area_sqm, rate_sqm_mo, rate_currency, mgl_mo, mgl_currency, rate_type
     FROM dbo.proponent_properties
-    WHERE proponent_id = @param0
+    WHERE proponent_id = @param0 AND is_active = 1
     ORDER BY sort_order ASC, id ASC
     `,
     [proponentId]
@@ -609,12 +659,13 @@ async function getProponentById(id) {
   const p = rows?.[0] || null;
   if (!p) return null;
   const properties = await getProponentProperties(id);
-  const [stockholders, contact_persons, signatories, financialTerms, investment] = await Promise.all([
+  const [stockholders, contact_persons, signatories, financialTerms, investment, secRegistration] = await Promise.all([
     Stockholder().listForProponent(id),
     ContactPerson().listForProponent(id),
     Signatory().listForProponent(id),
     FinancialTerms().getForProponent(id),
     Investment().getForProponent(id),
+    SecRegistration().getForProponent(id),
   ]);
   return {
     id: p.id,
@@ -654,6 +705,7 @@ async function getProponentById(id) {
     business_activities: p.business_activities ?? null,
     ...financialTerms,
     ...investment,
+    ...secRegistration,
     start_term: p.start_term ?? null,
     end_term: p.end_term ?? null,
     lease_term: formatLeaseTerm(p.start_term, p.end_term),
@@ -822,6 +874,7 @@ async function createProponent({
   stockholders,
   contact_persons,
   signatories,
+  sec_registration,
   created_by,
   is_active = 1,
   is_manual_registration = false,
@@ -873,10 +926,11 @@ async function createProponent({
       ]
     );
     const insertedId = result?.recordset?.[0]?.id;
-    await replaceProponentProperties(tx, insertedId, properties);
+    await replaceProponentProperties(tx, insertedId, properties, createdBy);
     await Stockholder().syncForProponent(tx, insertedId, stockholders, createdBy);
     await ContactPerson().syncForProponent(tx, insertedId, contact_persons, createdBy);
     await Signatory().syncForProponent(tx, insertedId, signatories, createdBy);
+    await SecRegistration().upsertForProponent(tx, insertedId, sec_registration, createdBy);
     await FinancialTerms().upsertForProponent(
       tx,
       insertedId,
@@ -1002,6 +1056,7 @@ async function updateProponent(
     stockholders,
     contact_persons,
     signatories,
+    sec_registration,
     updated_by,
     is_active,
   }
@@ -1063,10 +1118,11 @@ async function updateProponent(
       `;
       await tx.query(query, [...params, id]);
     }
-    await replaceProponentProperties(tx, id, properties);
+    await replaceProponentProperties(tx, id, properties, updatedBy);
     await Stockholder().syncForProponent(tx, id, stockholders, updatedBy);
     await ContactPerson().syncForProponent(tx, id, contact_persons, updatedBy);
     await Signatory().syncForProponent(tx, id, signatories, updatedBy);
+    await SecRegistration().upsertForProponent(tx, id, sec_registration, updatedBy);
     await FinancialTerms().upsertForProponent(
       tx,
       id,
@@ -1238,10 +1294,10 @@ async function saveContacts(id, { contact_persons, signatories }, actorId) {
   return { contact_persons: contacts, signatories: signers };
 }
 
-async function saveProperties(id, properties) {
+async function saveProperties(id, properties, actorId = null) {
   await ensureSchema();
   if (!(await proponentExists(id))) return null;
-  await runInTransaction((tx) => replaceProponentProperties(tx, id, properties));
+  await runInTransaction((tx) => replaceProponentProperties(tx, id, properties, actorId));
   return { properties: await getProponentProperties(id) };
 }
 
@@ -1251,6 +1307,35 @@ async function saveInvestment(id, fields, actorId) {
   if (!(await proponentExists(id))) return null;
   await runInTransaction((tx) => Investment().upsertForProponent(tx, id, fields, actorId));
   return Investment().getForProponent(id);
+}
+
+// The SEC Registration Information card's own Save: the SEC fields kept on
+// dbo.proponents plus the ones in dbo.proponent_sec_registration, in one go.
+const SEC_PROPONENT_FIELDS = [
+  "registration_no",
+  "tin",
+  "address",
+  "ref_code",
+  "sec_registration_date",
+  "authorized_capital",
+  "authorized_capital_currency",
+  "subscribed_capital",
+  "subscribed_capital_currency",
+  "paid_up_capital",
+  "paid_up_capital_currency",
+];
+
+async function saveSecRegistration(id, body, actorId) {
+  await ensureSchema();
+  await ensureChildTables();
+  if (!(await proponentExists(id))) return null;
+  const patch = {};
+  for (const key of SEC_PROPONENT_FIELDS) if (body[key] !== undefined) patch[key] = body[key];
+  const row = await updateProponent(id, { ...patch, sec_registration: SecRegistration().pickFields(body), updated_by: actorId });
+  if (!row) return null;
+  const data = {};
+  for (const key of [...SEC_PROPONENT_FIELDS, ...Object.keys(SecRegistration().FIELDS)]) data[key] = row[key] ?? null;
+  return data;
 }
 
 /** Ids of the locators assigned to one Account Officer. */
@@ -1267,6 +1352,7 @@ module.exports = {
   saveContacts,
   saveProperties,
   saveInvestment,
+  saveSecRegistration,
   listProponents,
   listProponentsForLocatorList,
   setManualClassification,

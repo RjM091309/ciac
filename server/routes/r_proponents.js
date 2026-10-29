@@ -94,6 +94,7 @@ router.put("/:id/stockholders", requireMenuAccess(MENU_KEY, "edit"), proponentsC
 router.put("/:id/contacts", requireMenuAccess(MENU_KEY, "edit"), proponentsController.requireOwnLocator, proponentsController.saveContacts);
 router.put("/:id/properties", requireMenuAccess(MENU_KEY, "edit"), proponentsController.requireOwnLocator, proponentsController.saveProperties);
 router.put("/:id/investment", requireMenuAccess(MENU_KEY, "edit"), proponentsController.requireOwnLocator, proponentsController.saveInvestment);
+router.put("/:id/sec-registration", requireMenuAccess(MENU_KEY, "edit"), proponentsController.requireOwnLocator, proponentsController.saveSecRegistration);
 router.patch("/:id/deactivate", requireMenuAccess(MENU_KEY, "delete"), proponentsController.requireOwnLocator, proponentsController.deactivate);
 router.patch("/:id/reactivate", requireMenuAccess(MENU_KEY, "edit"), proponentsController.requireOwnLocator, proponentsController.reactivate);
 
