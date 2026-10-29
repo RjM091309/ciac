@@ -708,8 +708,9 @@ export function LocatorUsersManagement({
       }
 
       // Edit stays a plain account/profile update — no application involved.
+      // The username is fixed once the account exists (read-only on this
+      // form), so it isn't sent.
       const payload: any = {
-        username: form.username.trim(),
         email: form.email.trim(),
         full_name: form.full_name.trim() || null,
         role_id: locatorRole.id,
@@ -725,7 +726,6 @@ export function LocatorUsersManagement({
       // No password field on this form: the backend generates one and emails
       // it when none is supplied, same as an admin-triggered reset.
 
-      if (!payload.username) throw new Error('Username is required');
       if (!payload.email) throw new Error('Email is required');
 
       const res = await fetch(api(`/api/users/${editing.id}`), {
@@ -1220,25 +1220,42 @@ export function LocatorUsersManagement({
         onSecondary={editing ? undefined : () => save(true)}
       >
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <Field label="Username" error={fieldErrors.username} hint={checkingField === 'username' ? 'Checking availability…' : null}>
+          <Field
+            label="Username"
+            error={fieldErrors.username}
+            hint={editing ? null : checkingField === 'username' ? 'Checking availability…' : null}
+          >
+            {/* Set when the account is created; read-only from then on. */}
             <input
               className="app-input"
               value={form.username}
-              placeholder={suggestUsername(form.business_name) || undefined}
+              placeholder={editing ? undefined : suggestUsername(form.business_name) || undefined}
+              readOnly={Boolean(editing)}
+              title={editing ? "The username can't be changed once the account is created." : undefined}
               onChange={(e) => {
+                if (editing) return;
                 setForm((p) => ({ ...p, username: e.target.value }));
                 if (fieldErrors.username) setFieldErrors((p) => ({ ...p, username: undefined }));
               }}
-              style={fieldErrors.username ? { borderColor: '#ef4444' } : undefined}
+              style={
+                fieldErrors.username
+                  ? { borderColor: '#ef4444' }
+                  : editing
+                    ? { color: 'var(--text-muted)', backgroundColor: 'var(--control-bg)', cursor: 'not-allowed' }
+                    : undefined
+              }
             />
-            <UsernameSuggestion
-              businessName={form.business_name}
-              username={form.username}
-              onUse={(value) => {
-                setForm((p) => ({ ...p, username: value }));
-                if (fieldErrors.username) setFieldErrors((p) => ({ ...p, username: undefined }));
-              }}
-            />
+            {/* Only while creating: the username is fixed once the account exists. */}
+            {!editing && (
+              <UsernameSuggestion
+                businessName={form.business_name}
+                username={form.username}
+                onUse={(value) => {
+                  setForm((p) => ({ ...p, username: value }));
+                  if (fieldErrors.username) setFieldErrors((p) => ({ ...p, username: undefined }));
+                }}
+              />
+            )}
           </Field>
           <Field label="Full name">
             <input
