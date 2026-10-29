@@ -81,7 +81,7 @@ async function getOverview(filters = {}) {
   const permitFilter = buildLinkedFilter(filters, "p");
   const inspectionFilter = buildLinkedFilter(filters, "i");
 
-  const [statusRows, typeRows, renewalRows, trendRows, totalRow, permitStatusRows, inspectionStatusRows, inspectionResultRows, contractRows] =
+  const [statusRows, typeRows, renewalRows, trendRows, totalRow, permitStatusRows, inspectionStatusRows, inspectionResultRows, contractRows, topInvestments, leaseArea] =
     await Promise.all([
       selectData(
         `SELECT a.status, COUNT(1) AS total FROM dbo.applications a ${whereSql} GROUP BY a.status`,
@@ -160,6 +160,8 @@ async function getOverview(filters = {}) {
         `,
         params
       ),
+      getTopInvestments(3),
+      getLeaseArea(),
     ]);
 
   const byStatus = {};
@@ -204,6 +206,8 @@ async function getOverview(filters = {}) {
     inspections_by_status: inspectionsByStatus,
     inspections_by_result: inspectionsByResult,
     contracts_issued: Number(contractRows?.[0]?.total || 0),
+    top_investments: topInvestments,
+    lease_area: leaseArea,
   };
 }
 
@@ -294,8 +298,95 @@ async function listStockholders() {
   };
 }
 
+/** Investment figures are free text on the Investment tab ("1,500,000.00",
+ * "₱ 1500000") — keep the digits and decimal point; anything that isn't a
+ * positive number doesn't rank. */
+function parseAmount(v) {
+  const n = Number(String(v ?? "").replace(/[^0-9.]/g, ""));
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+/** Top N registered locators by committed investment (G-11). Registered =
+ * the Registered Locator list's rule (manually registered, or has an approved
+ * application). Not tied to the applications filters: it's the current
+ * standing of every locator. */
+async function getTopInvestments(limit = 3) {
+  await require("./Investment").ensureSchema();
+  const rows = await selectData(`
+    SELECT p.id AS proponent_id, p.ref_no, p.business_name, i.commitment, i.actual
+    FROM dbo.proponent_investment i
+    INNER JOIN dbo.proponents p ON p.id = i.proponent_id
+    WHERE i.metric_type = 'INVESTMENT' AND i.is_active = 1 AND p.is_active = 1
+      AND (p.is_manual_registration = 1
+           OR EXISTS (SELECT 1 FROM dbo.applications a WHERE a.proponent_id = p.id AND a.status = 'APPROVED'))
+  `);
+  return rows
+    .map((r) => ({
+      proponent_id: r.proponent_id,
+      ref_no: r.ref_no || null,
+      business_name: r.business_name,
+      commitment: parseAmount(r.commitment),
+      actual: parseAmount(r.actual),
+    }))
+    .filter((r) => r.commitment !== null)
+    .sort((a, b) => b.commitment - a.commitment || a.business_name.localeCompare(b.business_name))
+    .slice(0, limit);
+}
+
+/** Total leased area in sqm across registered locators (G-12), split by
+ * type of property. A locator's schedule has one row per period, so adding
+ * every row would count the same lot once per year: per locator, only the
+ * rows in effect today count — or, when none is (schedule ended or not yet
+ * started), the rows of its latest period. */
+async function getLeaseArea() {
+  await require("./Proponent").ensureSchema(); // adds proponent_properties.is_active
+  const rows = await selectData(`
+    SELECT pp.proponent_id, pp.date_from, pp.date_to, pp.type_of_property, pp.area_sqm
+    FROM dbo.proponent_properties pp
+    INNER JOIN dbo.proponents p ON p.id = pp.proponent_id
+    WHERE pp.is_active = 1 AND p.is_active = 1
+      AND (p.is_manual_registration = 1
+           OR EXISTS (SELECT 1 FROM dbo.applications a WHERE a.proponent_id = p.id AND a.status = 'APPROVED'))
+  `);
+  // Compared as YYYY-MM-DD: DATE columns arrive as UTC midnight, so mixing
+  // them with a local-time "today" would drop a period on its first day.
+  const ymd = (d) => (d ? new Date(d).toISOString().slice(0, 10) : "");
+  const now = new Date();
+  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  const byLocator = new Map();
+  for (const r of rows) {
+    const area = parseAmount(r.area_sqm);
+    if (area === null) continue;
+    const list = byLocator.get(r.proponent_id) || [];
+    list.push({ ...r, area });
+    byLocator.set(r.proponent_id, list);
+  }
+  const byType = new Map();
+  let total = 0;
+  for (const list of byLocator.values()) {
+    let counted = list.filter((r) => r.date_from && r.date_to && ymd(r.date_from) <= today && today <= ymd(r.date_to));
+    if (counted.length === 0) {
+      const latest = list.map((r) => ymd(r.date_from)).sort().pop();
+      counted = list.filter((r) => ymd(r.date_from) === latest);
+    }
+    for (const r of counted) {
+      const type = String(r.type_of_property || "").trim().toUpperCase() || "NOT SPECIFIED";
+      byType.set(type, (byType.get(type) || 0) + r.area);
+      total += r.area;
+    }
+  }
+  const round = (n) => Math.round(n * 100) / 100;
+  return {
+    total_sqm: round(total),
+    locators: byLocator.size,
+    by_type: [...byType.entries()].map(([type, sqm]) => ({ type, sqm: round(sqm) })).sort((a, b) => b.sqm - a.sqm),
+  };
+}
+
 module.exports = {
   getOverview,
+  getTopInvestments,
+  getLeaseArea,
   listApplications,
   listStockholders,
 };

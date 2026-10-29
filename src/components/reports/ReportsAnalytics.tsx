@@ -148,6 +148,18 @@ type Overview = {
   inspections_by_status: Record<string, number>;
   inspections_by_result: Record<string, number>;
   contracts_issued: number;
+  /** Registered locators by committed investment; not tied to the filters. */
+  top_investments: TopInvestment[];
+  /** Leased area of registered locators, current period only; not tied to the filters. */
+  lease_area: { total_sqm: number; locators: number; by_type: { type: string; sqm: number }[] };
+};
+
+type TopInvestment = {
+  proponent_id: number;
+  ref_no: string | null;
+  business_name: string;
+  commitment: number;
+  actual: number | null;
 };
 
 type AppRow = {
@@ -365,6 +377,7 @@ function ApplicationsReport({ navigate }: { navigate?: (to: string, opts?: { rep
   const isPhone = useIsPhone();
   const { fullAccess, sidebarPermissions } = useControlPanelAccess();
   const canOpenAssessment = fullAccess || Boolean(sidebarPermissions['assessment:queue']);
+  const canOpenLocator = Boolean(navigate) && (fullAccess || Boolean(sidebarPermissions['settings:proponents']));
 
   function scrollToTable() {
     tableRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -860,7 +873,8 @@ function ApplicationsReport({ navigate }: { navigate?: (to: string, opts?: { rep
         <StatTile loading={initialLoading} label="Contracts Issued" value={overview?.contracts_issued ?? '—'} />
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+      {/* 4 cards: 2×2 on laptops, one row on wide screens — no half-empty row. */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 2xl:grid-cols-4 gap-4">
         <ChartCard title="Applications by Status">
           {initialLoading ? (
             <StatusSkeleton />
@@ -944,6 +958,17 @@ function ApplicationsReport({ navigate }: { navigate?: (to: string, opts?: { rep
           ) : (
             <TrendChart key={trendRange} points={trendSeries} onPick={drillToTrendPoint} isPhone={isPhone} />
           )}
+        </ChartCard>
+
+        <ChartCard title="Top 3 Investments">
+          <div className="flex flex-col gap-3" style={{ height: CHART_BODY_HEIGHT }}>
+            <TopInvestments
+              loading={initialLoading}
+              items={overview?.top_investments || []}
+              onOpen={canOpenLocator ? (id) => navigate?.(`/applications/proponents?proponentId=${id}`) : undefined}
+            />
+            <LeaseAreaTotal loading={initialLoading} area={overview?.lease_area} />
+          </div>
         </ChartCard>
       </div>
 
@@ -1272,6 +1297,94 @@ function ChartCard({ title, action, children }: { title: string; action?: React.
         {action}
       </div>
       {children}
+    </div>
+  );
+}
+
+function peso(v: number) {
+  return `₱${v.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+/** G-11: ranked by committed investment, with the actual figure beside it. */
+function TopInvestments({
+  items,
+  loading,
+  onOpen,
+}: {
+  items: TopInvestment[];
+  loading: boolean;
+  /** Absent without access to Registered Locator. */
+  onOpen?: (proponentId: number) => void;
+}) {
+  if (loading) {
+    return (
+      <div className="flex flex-col gap-2">
+        {[0, 1, 2].map((i) => (
+          <Skeleton key={i} className="h-[52px] w-full rounded-lg" />
+        ))}
+      </div>
+    );
+  }
+  if (items.length === 0) {
+    return (
+      <div className="flex flex-1 items-center justify-center text-[11px] text-secondary">
+        No investment commitments recorded yet
+      </div>
+    );
+  }
+  return (
+    <ol className="flex flex-col gap-2">
+      {items.map((it, i) => {
+        const Name: any = onOpen ? 'button' : 'span';
+        return (
+          <li key={it.proponent_id} className="flex items-center gap-3 rounded-lg px-3 py-2.5 min-w-0" style={{ backgroundColor: 'var(--control-bg)' }}>
+            <span className="text-sm font-bold w-4 shrink-0 text-secondary">{i + 1}</span>
+            <div className="min-w-0 flex-1">
+              <Name
+                type={onOpen ? 'button' : undefined}
+                onClick={onOpen ? () => onOpen(it.proponent_id) : undefined}
+                className={cn('block truncate text-left text-[12px] font-semibold max-w-full', onOpen && 'hover:underline cursor-pointer')}
+                style={{ color: 'var(--text)' }}
+                title={it.business_name}
+              >
+                {it.business_name}
+              </Name>
+              {it.ref_no && <span className="block text-[10px] text-secondary font-mono">{it.ref_no}</span>}
+            </div>
+            <div className="text-right shrink-0">
+              <span className="block text-[12px] font-bold" style={{ color: 'var(--text)' }}>{peso(it.commitment)}</span>
+              <span className="block text-[10px] text-secondary">Actual: {it.actual == null ? '—' : peso(it.actual)}</span>
+            </div>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+function sqm(v: number) {
+  return `${v.toLocaleString('en-PH', { maximumFractionDigits: 2 })} sqm`;
+}
+
+/** G-12: pinned to the bottom of the Top 3 Investments card. */
+function LeaseAreaTotal({ area, loading }: { area?: Overview['lease_area']; loading: boolean }) {
+  return (
+    <div className="mt-auto pt-3 border-t" style={{ borderColor: 'var(--border-subtle)' }}>
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="text-[10px] font-semibold text-secondary uppercase tracking-widest">Total Lease Area</span>
+        {loading ? (
+          <Skeleton className="h-[18px] w-20 rounded" />
+        ) : (
+          <span className="text-base font-bold" style={{ color: 'var(--text)' }}>{sqm(area?.total_sqm ?? 0)}</span>
+        )}
+      </div>
+      {!loading && area && area.by_type.length > 0 && (
+        <p className="text-[10px] text-secondary mt-0.5 truncate">
+          {area.by_type.map((t) => `${t.type.toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase())} ${sqm(t.sqm)}`).join(' · ')}
+          {' · '}
+          {area.locators} locator{area.locators === 1 ? '' : 's'}
+        </p>
+      )}
     </div>
   );
 }
