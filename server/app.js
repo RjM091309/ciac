@@ -30,6 +30,7 @@ const Signatory = require("./models/Signatory");
 const FinancialTerms = require("./models/FinancialTerms");
 const Investment = require("./models/Investment");
 const SecRegistration = require("./models/SecRegistration");
+const ProponentLease = require("./models/ProponentLease");
 const Building = require("./models/Building");
 const LandUse = require("./models/LandUse");
 const Workflow = require("./models/ApplicationWorkflow");
@@ -196,6 +197,8 @@ initializeDatabase()
       ["financial terms (+ legacy column carry-over)", () => FinancialTerms.ensureSchema()],
       ["investment", () => Investment.ensureSchema()],
       ["SEC registration (Stockholders tab card)", () => SecRegistration.ensureSchema()],
+      // After contracts + property schedule: a locator with no lease rows gets them (one-time backfill).
+      ["lease agreements (+ backfill)", () => ProponentLease.ensureSchema()],
       ["building", () => Building.ensureSchema()],
       ["land use", () => LandUse.ensureSchema()],
       // Compliance checklist columns (applicability) + uploaded documents —

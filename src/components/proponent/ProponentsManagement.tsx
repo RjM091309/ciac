@@ -440,7 +440,6 @@ const SEC_PROPONENT_KEYS = [
   'registration_no',
   'tin',
   'address',
-  'ref_code',
   'sec_registration_date',
   'authorized_capital',
   'authorized_capital_currency',
@@ -558,6 +557,22 @@ function fmtDate(value?: string | null) {
 }
 
 type LeaseStatus = 'active' | 'expired';
+
+/** One lease agreement (GET /api/proponents/:id/leases, A-02/A-03/A-04). */
+type LeaseRow = {
+  id: number;
+  ref_code: string | null;
+  is_current: boolean;
+  contract_no: string | null;
+  application_no: string | null;
+  is_renewal: boolean;
+  contract_type_name: string | null;
+  date_signed: string | null;
+  start_term: string | null;
+  end_term: string | null;
+  /** Earlier leases only: their property schedule (read-only). */
+  properties?: any[];
+};
 
 /** Lease status from the contract's End Term: Active through that day
  * (inclusive), Expired after. null = no contract/End Term yet. Shared by the
@@ -1012,7 +1027,7 @@ export function ProponentsManagement({
   // contract yet (encoded existing locator); otherwise the contract's dates show.
   const termEditable = !editing || Boolean(editing.term_editable);
   const [duplicateMatches, setDuplicateMatches] = useState<
-    { id: number; ref_no: string | null; business_name: string; match: 'name' | 'tin' }[]
+    { id: number; ref_no: string | null; business_name: string; match: 'name' | 'tin' | 'registration_no' }[]
   >([]);
   // Portal login for an encoded locator that has none (POST /:id/login).
   const [loginOpen, setLoginOpen] = useState(false);
@@ -1021,6 +1036,19 @@ export function ProponentsManagement({
   // The open locator's portal login (from GET /:id): PENDING = created but
   // not sent yet ("Send login now"), ACTIVE = the locator has it.
   const [loginInfo, setLoginInfo] = useState<{ status: string | null; email: string | null; username: string | null } | null>(null);
+  // Lease Agreements card: every lease of the open locator, and which earlier
+  // one's property schedule is being viewed (null = the current lease).
+  const [leases, setLeases] = useState<LeaseRow[]>([]);
+  const [viewLeaseId, setViewLeaseId] = useState<number | null>(null);
+  const loadLeases = useCallback(async (proponentId: number) => {
+    try {
+      const res = await fetch(api(`/api/proponents/${proponentId}/leases`), { credentials: 'include' });
+      const json = await res.json().catch(() => ({}));
+      setLeases(res.ok && Array.isArray(json?.data) ? json.data : []);
+    } catch {
+      setLeases([]);
+    }
+  }, []);
   const [sendLoginOpen, setSendLoginOpen] = useState(false);
   const [sendingLogin, setSendingLogin] = useState(false);
   // No username typed: the server makes one from the Ref No (shown as a hint).
@@ -1308,6 +1336,8 @@ export function ProponentsManagement({
     setActiveProfileTab('Profile');
     setContactsOpen(null);
     setShowRowErrors({ stockholders: false, contacts: false });
+    setLeases([]);
+    setViewLeaseId(null);
     setLoaded(null);
     setPendingDocs([]);
     locationRequestIdRef.current = null;
@@ -1323,6 +1353,8 @@ export function ProponentsManagement({
     setActiveProfileTab('Profile');
     setContactsOpen(null);
     setShowRowErrors({ stockholders: false, contacts: false });
+    setLeases([]);
+    setViewLeaseId(null);
     setLoaded(null);
     setEditing(p);
     setLoginInfo(null);
@@ -1399,6 +1431,8 @@ export function ProponentsManagement({
           signatories: mapContactRows(data.signatories),
         };
         setForm((prev) => ({ ...prev, ...profileFields }));
+        setViewLeaseId(null);
+        void loadLeases(p.id);
         setEditing((prev) =>
           prev && prev.id === p.id
             ? {
@@ -1457,6 +1491,12 @@ export function ProponentsManagement({
 
   async function saveSection(section: SectionKey) {
     if ((section === 'stockholders' || section === 'contacts') && !checkRowTables({ [section]: true })) return;
+    // The Ref. Code is a lease field now (saved by the panel's Save), so only
+    // the SEC Registration No. holds up the SEC card's own save.
+    if (section === 'sec' && secNoTaken) {
+      toast.error(secNoTaken);
+      return;
+    }
     if (section === 'properties') {
       const problem = propertyScheduleError(form.properties);
       if (problem) {
@@ -1568,6 +1608,11 @@ export function ProponentsManagement({
   }
 
   async function save(skipDuplicateCheck = false) {
+    if (refCodeTaken || secNoTaken) {
+      keepOpenAfterCreateRef.current = false;
+      toast.error((refCodeTaken || secNoTaken) as string);
+      return;
+    }
     // Same rule as the property schedule below: only a table that was touched
     // (or, on a New Locator, has rows) is checked, so untouched older rows
     // don't block saving the rest.
@@ -1796,6 +1841,39 @@ export function ProponentsManagement({
   // Collapsed by default (even when empty — the header says so); open while it
   // has unsaved changes, or once clicked open.
   const contactsExpanded = contactsOpen ?? sectionDirty.contacts;
+
+  // Ref. Code and SEC Registration No. are typed in but unique across
+  // locators: checked as they're typed (debounced) and again by the server on save.
+  const useTakenCheck = (field: 'ref_code' | 'registration_no', value: string, saved: string | null | undefined) => {
+    const [taken, setTaken] = useState<string | null>(null);
+    useEffect(() => {
+      const code = value.trim();
+      setTaken(null);
+      if (!code || (editing && code.toUpperCase() === String(saved || '').trim().toUpperCase())) return;
+      let cancelled = false;
+      const timer = window.setTimeout(async () => {
+        try {
+          const q = new URLSearchParams({ code, field });
+          if (editing) q.set('excludeId', String(editing.id));
+          const res = await fetch(api(`/api/proponents/ref-code-available?${q}`), { credentials: 'include' });
+          const json = await res.json().catch(() => ({}));
+          if (!cancelled && res.ok && json?.available === false) setTaken(json.message || 'Already used by another locator.');
+        } catch {
+          // Non-fatal: the save checks again.
+        }
+      }, 400);
+      return () => {
+        cancelled = true;
+        window.clearTimeout(timer);
+      };
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [value, editing, saved]);
+    return taken;
+  };
+  const refCodeTaken = useTakenCheck('ref_code', form.ref_code, editing?.ref_code);
+  const secNoTaken = useTakenCheck('registration_no', form.registration_no, editing?.registration_no);
+
+  const viewedLease = viewLeaseId !== null ? leases.find((l) => l.id === viewLeaseId) || null : null;
 
   // One-line text input on the SEC Registration Information card.
   const secTextField = (key: SecKey, label: string, placeholder?: string) => (
@@ -2313,89 +2391,161 @@ export function ProponentsManagement({
               </div>
             </div>
 
-            {/* Row 3: Date Signed | Start/End/Lease Term (the capital amounts are on the
-                Stockholders tab's SEC Registration Information card) */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:flex gap-3">
-              <div className="flex-[0.6] min-w-0">
-                <Field compact label="Date Signed">
-                  <DatePicker
-                    mode="single"
-                    fullWidth
-                    boxed
-                    placeholder="Select date"
-                    value={dateInputToDate(form.date_signed)}
-                    onChange={(d) => setForm((p) => ({ ...p, date_signed: dateToDateInputValue(d) }))}
-                  />
-                </Field>
+            {/* Lease Agreements (A-02/A-03/A-04): one row per lease — the current
+                one editable (Ref. Code, Date Signed, and Start/End while there's no
+                approved contract), earlier ones as history. The Ref. Code dictates
+                the dates, so they sit on one row with the SEC Registration No.
+                (the company's, fixed). Every renewal is a new lease with a new
+                Ref. Code; Ref. Codes are never reused. */}
+            <div
+              className="flex flex-col gap-2 rounded-xl border p-3"
+              style={{ borderColor: 'var(--input-border)', backgroundColor: 'color-mix(in oklab, var(--control-bg) 55%, transparent)' }}
+            >
+              <div
+                className="-mx-3 -mt-3 mb-1 flex items-center justify-between gap-2 rounded-t-xl border-b px-3 py-2"
+                style={{ borderColor: 'var(--input-border)', backgroundColor: 'var(--control-bg)' }}
+              >
+                <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--text)' }}>
+                  Lease Agreements
+                  <span className="ml-1.5 font-normal normal-case tracking-normal text-secondary">
+                    ({Math.max(leases.length, 1)})
+                  </span>
+                </span>
+                <span className="text-[10px] text-secondary">A renewal starts a new lease with its own Ref. Code</span>
               </div>
-              <div className="sm:col-span-2 flex-[1.2] min-w-0 flex gap-1.5">
-                <div className="flex-1 min-w-0">
-                  <Field compact label="Start Term">
-                    {termEditable ? (
-                      // Existing locator with no contract here yet: its current lease.
-                      <DatePicker
-                        mode="single"
-                        fullWidth
-                        boxed
-                        placeholder="Select date"
-                        value={dateInputToDate(form.start_term)}
-                        onChange={(d) => setForm((p) => ({ ...p, start_term: dateToDateInputValue(d) }))}
-                      />
-                    ) : (
-                      <div className="app-form-control app-form-control-sm p-0 overflow-hidden flex items-stretch">
+              <div className="min-w-0 overflow-x-auto rounded-lg border" style={{ borderColor: 'var(--input-border)' }}>
+                <table className="w-full min-w-[60rem] table-fixed text-xs border-collapse">
+                  <thead>
+                    <tr style={{ backgroundColor: 'var(--control-bg)' }}>
+                      {[
+                        ['Ref. Code', '15%'],
+                        ['SEC Reg. No.', '12%'],
+                        ['Type', '13%'],
+                        ['Date Signed', '13%'],
+                        ['Start Term', '13%'],
+                        ['End Term', '13%'],
+                        ['Lease Term', '10%'],
+                        ['Status', '11%'],
+                      ].map(([h, w]) => (
+                        <th
+                          key={h}
+                          className="px-2 py-1.5 text-left font-semibold uppercase tracking-wide text-[9px] border-b"
+                          style={{ borderColor: 'var(--input-border)', color: 'var(--text-muted)', width: w }}
+                        >
+                          {h}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {/* Current lease: the panel's own fields */}
+                    <tr style={{ backgroundColor: viewLeaseId === null ? 'var(--surface)' : undefined }}>
+                      <td className="px-1 py-1 border-b align-top" style={{ borderColor: 'var(--input-border)' }}>
                         <input
-                          className="flex-1 min-w-0 border-0 bg-transparent outline-none px-2 py-1"
-                          style={{ color: 'var(--text)' }}
-                          value={fmtDate(editing?.start_term)}
-                          title="From the approved contract"
-                          disabled
-                          readOnly
+                          className="app-form-control app-form-control-sm h-9 w-full"
+                          style={refCodeTaken ? { borderColor: '#ef4444' } : undefined}
+                          value={form.ref_code}
+                          placeholder="Type the Ref. Code"
+                          disabled={loadingLocation}
+                          onChange={(e) => setForm((p) => ({ ...p, ref_code: e.target.value }))}
                         />
-                      </div>
-                    )}
-                  </Field>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <Field compact label="End Term">
-                    {termEditable ? (
-                      <DatePicker
-                        mode="single"
-                        fullWidth
-                        boxed
-                        placeholder="Select date"
-                        value={dateInputToDate(form.end_term)}
-                        onChange={(d) => setForm((p) => ({ ...p, end_term: dateToDateInputValue(d) }))}
-                      />
-                    ) : (
-                      <div className="app-form-control app-form-control-sm p-0 overflow-hidden flex items-stretch">
-                        <input
-                          className="flex-1 min-w-0 border-0 bg-transparent outline-none px-2 py-1"
-                          style={{ color: 'var(--text)' }}
-                          value={fmtDate(editing?.end_term)}
-                          title="From the approved contract"
-                          disabled
-                          readOnly
+                        {refCodeTaken ? <div className="mt-0.5 px-1 text-[10px] leading-tight text-red-500">{refCodeTaken}</div> : null}
+                      </td>
+                      <td className="px-2 py-1 border-b align-top" style={{ borderColor: 'var(--input-border)' }}>
+                        <div className="flex h-9 items-center truncate" style={{ color: 'var(--text-muted)' }} title="From SEC Registration Information (fixed)">
+                          {form.registration_no || '—'}
+                        </div>
+                      </td>
+                      <td className="px-2 py-1 border-b align-top" style={{ borderColor: 'var(--input-border)' }}>
+                        <div className="flex h-9 items-center truncate" style={{ color: 'var(--text)' }}>
+                          {contractTypeOptions.find((o) => o.value === String(form.contract_type_id ?? ''))?.label || '—'}
+                        </div>
+                      </td>
+                      <td className="px-1 py-1 border-b align-top" style={{ borderColor: 'var(--input-border)' }}>
+                        <DatePicker
+                          mode="single"
+                          fullWidth
+                          boxed
+                          placeholder="Select date"
+                          value={dateInputToDate(form.date_signed)}
+                          onChange={(d) => setForm((p) => ({ ...p, date_signed: dateToDateInputValue(d) }))}
                         />
-                      </div>
-                    )}
-                  </Field>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <Field compact label="Lease Term">
-                    <div
-                      className="app-form-control app-form-control-sm p-0 overflow-hidden flex items-stretch"
-                      style={{ backgroundColor: 'color-mix(in oklab, #22c55e 18%, transparent)' }}
-                    >
-                      <input
-                        className="flex-1 min-w-0 border-0 bg-transparent outline-none px-2 py-1"
-                        style={{ color: 'var(--text)' }}
-                        value={(termEditable ? formatLeaseTerm(form.start_term, form.end_term) : editing?.lease_term) || '—'}
-                        disabled
-                        readOnly
-                      />
-                    </div>
-                  </Field>
-                </div>
+                      </td>
+                      {(['start_term', 'end_term'] as const).map((key) => (
+                        <td key={key} className="px-1 py-1 border-b align-top" style={{ borderColor: 'var(--input-border)' }}>
+                          {termEditable ? (
+                            // No approved contract yet: the encoded lease term.
+                            <DatePicker
+                              mode="single"
+                              fullWidth
+                              boxed
+                              placeholder="Select date"
+                              value={dateInputToDate(form[key])}
+                              onChange={(d) => setForm((p) => ({ ...p, [key]: dateToDateInputValue(d) }))}
+                            />
+                          ) : (
+                            <div className="flex h-9 items-center px-1" style={{ color: 'var(--text)' }} title="From the approved contract">
+                              {fmtDate(editing?.[key])}
+                            </div>
+                          )}
+                        </td>
+                      ))}
+                      <td className="px-1 py-1 border-b align-top" style={{ borderColor: 'var(--input-border)' }}>
+                        <div
+                          className="flex h-9 items-center rounded-md px-2 font-semibold tabular-nums"
+                          style={{ backgroundColor: 'color-mix(in oklab, #22c55e 18%, transparent)', color: 'var(--text)' }}
+                        >
+                          {(termEditable ? formatLeaseTerm(form.start_term, form.end_term) : editing?.lease_term) || '—'}
+                        </div>
+                      </td>
+                      <td className="px-2 py-1 border-b align-top" style={{ borderColor: 'var(--input-border)' }}>
+                        <div className="flex h-9 items-center">
+                          <span
+                            className="rounded-full px-2 py-0.5 text-[10px] font-semibold"
+                            style={{ backgroundColor: 'color-mix(in oklab, #22c55e 18%, transparent)', color: '#15803d' }}
+                          >
+                            ● Current
+                          </span>
+                        </div>
+                      </td>
+                    </tr>
+                    {/* Earlier leases: history, read-only */}
+                    {leases
+                      .filter((l) => !l.is_current)
+                      .map((l) => {
+                        const selected = viewLeaseId === l.id;
+                        return (
+                          <tr
+                            key={l.id}
+                            className="cursor-pointer hover:bg-[var(--selected-bg)]"
+                            style={{ backgroundColor: selected ? 'var(--selected-bg)' : undefined }}
+                            onClick={() => setViewLeaseId(selected ? null : l.id)}
+                            title="Show this lease's property schedule"
+                          >
+                            <td className="px-2 py-2 border-b font-medium" style={{ borderColor: 'var(--input-border)', color: 'var(--text)' }}>
+                              {l.ref_code || <span className="text-secondary">—</span>}
+                              <div className="text-[10px] font-normal text-secondary">{l.application_no || l.contract_no || 'Encoded lease'}</div>
+                            </td>
+                            <td className="px-2 py-2 border-b text-secondary" style={{ borderColor: 'var(--input-border)' }}>
+                              {form.registration_no || '—'}
+                            </td>
+                            <td className="px-2 py-2 border-b" style={{ borderColor: 'var(--input-border)' }}>{l.contract_type_name || '—'}</td>
+                            <td className="px-2 py-2 border-b" style={{ borderColor: 'var(--input-border)' }}>{fmtDate(l.date_signed)}</td>
+                            <td className="px-2 py-2 border-b" style={{ borderColor: 'var(--input-border)' }}>{fmtDate(l.start_term)}</td>
+                            <td className="px-2 py-2 border-b" style={{ borderColor: 'var(--input-border)' }}>{fmtDate(l.end_term)}</td>
+                            <td className="px-2 py-2 border-b tabular-nums" style={{ borderColor: 'var(--input-border)' }}>
+                              {formatLeaseTerm(l.start_term, l.end_term) || '—'}
+                            </td>
+                            <td className="px-2 py-2 border-b" style={{ borderColor: 'var(--input-border)' }}>
+                              <span className="rounded-full px-2 py-0.5 text-[10px] font-semibold text-secondary" style={{ backgroundColor: 'var(--control-bg)' }}>
+                                {l.is_renewal ? 'Renewed' : 'Previous'}
+                              </span>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                  </tbody>
+                </table>
               </div>
             </div>
 
@@ -2684,8 +2834,11 @@ export function ProponentsManagement({
                         />
                       </div>
 
-                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
-                        {secTextField('registration_no', 'SEC Registration No.', 'e.g. CS201811260')}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                        <div className="flex flex-col gap-1">
+                          {secTextField('registration_no', 'SEC Registration No.', 'e.g. CS201811260')}
+                          {secNoTaken ? <span className="text-[11px] text-red-500">{secNoTaken}</span> : null}
+                        </div>
                         <Field compact label="SEC Registration Date">
                           <DatePicker
                             mode="single"
@@ -2696,7 +2849,6 @@ export function ProponentsManagement({
                             onChange={(d) => setForm((p) => ({ ...p, sec_registration_date: dateToDateInputValue(d) }))}
                           />
                         </Field>
-                        {secTextField('ref_code', 'Ref. Code')}
                         {secTextField('tin', 'TIN Number')}
                       </div>
 
@@ -2964,9 +3116,14 @@ export function ProponentsManagement({
               >
                 <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--text)' }}>
                   Property Schedule
-                  <span className="ml-1.5 font-normal normal-case tracking-normal text-secondary">({form.properties.length})</span>
+                  <span className="ml-1.5 font-normal normal-case tracking-normal text-secondary">
+                    {viewedLease
+                      ? `— ${viewedLease.ref_code || viewedLease.application_no || 'earlier lease'} (earlier lease, read only)`
+                      : `(${form.properties.length})`}
+                  </span>
                 </span>
-                <div className="flex items-center gap-2">
+                {/* Editing is for the current lease only — hidden while an earlier one is shown. */}
+                <div className={cn('flex items-center gap-2', viewedLease && 'hidden')}>
                   <div className="relative">
                     <button
                       type="button"
@@ -3029,7 +3186,62 @@ export function ProponentsManagement({
                   )}
                 </div>
               </div>
-              {form.properties.length === 0 ? (
+              {viewedLease ? (
+                <div className="flex flex-col gap-2">
+                  {(viewedLease.properties || []).length === 0 ? (
+                    <div className="rounded-lg border border-dashed px-3 py-2.5 text-[11px] text-secondary" style={{ borderColor: 'var(--input-border)' }}>
+                      No property schedule on this lease.
+                    </div>
+                  ) : (
+                    <div className="min-w-0 overflow-x-auto rounded-lg border" style={{ borderColor: 'var(--input-border)' }}>
+                      <table className="w-full text-xs border-collapse">
+                        <thead>
+                          <tr style={{ backgroundColor: 'var(--control-bg)' }}>
+                            {['No.', 'Year', 'Date From', 'Date To', 'Rate', 'Type of Property', 'Area (SQM)', 'Rate/SQM/MO', 'MGL/MO'].map((h) => (
+                              <th
+                                key={h}
+                                className="px-2 py-1.5 text-left font-semibold uppercase tracking-wide text-[9px] border-b"
+                                style={{ borderColor: 'var(--input-border)', color: 'var(--text-muted)' }}
+                              >
+                                {h}
+                              </th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {(viewedLease.properties || []).map((r: any, i: number) => (
+                            <tr key={r.id}>
+                              {[
+                                String(i + 1),
+                                r.year || '—',
+                                fmtDate(r.date_from),
+                                fmtDate(r.date_to),
+                                r.rate_type === 'STANDARD' ? 'Standard' : r.rate_type === 'NON_STANDARD' ? 'Non-standard' : '—',
+                                r.type_of_property || '—',
+                                r.area_sqm || '—',
+                                r.rate_sqm_mo ? `${r.rate_sqm_mo} ${r.rate_currency || ''}` : '—',
+                                r.mgl_mo ? `${r.mgl_mo} ${r.mgl_currency || ''}` : '—',
+                              ].map((v, ci) => (
+                                <td key={ci} className="px-2 py-1.5 border-b" style={{ borderColor: 'var(--input-border)', color: 'var(--text)' }}>
+                                  {v}
+                                </td>
+                              ))}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setViewLeaseId(null)}
+                    className="self-start rounded-md border px-2 py-1 text-[11px] font-semibold cursor-pointer hover:bg-[var(--selected-bg)]"
+                    style={{ borderColor: 'var(--input-border)', color: 'var(--text)', backgroundColor: 'var(--surface)' }}
+                  >
+                    Back to the current lease
+                  </button>
+                </div>
+              ) : form.properties.length === 0 ? (
                 <div
                   className="rounded-lg border border-dashed px-3 py-2.5 text-[11px] text-secondary"
                   style={{ borderColor: 'var(--input-border)' }}
@@ -3554,7 +3766,7 @@ export function ProponentsManagement({
         open={duplicateMatches.length > 0}
         title="This locator may already exist"
         description={`Already in the system: ${duplicateMatches
-          .map((m) => `${m.ref_no || `#${m.id}`} ${m.business_name} (same ${m.match === 'tin' ? 'TIN' : 'name'})`)
+          .map((m) => `${m.ref_no || `#${m.id}`} ${m.business_name} (same ${m.match === 'tin' ? 'TIN' : m.match === 'registration_no' ? 'SEC Registration No.' : 'name'})`)
           .join('; ')}. Save anyway?`}
         confirmText="Save anyway"
         loading={saving}

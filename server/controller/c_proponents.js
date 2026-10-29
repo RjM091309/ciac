@@ -449,6 +449,7 @@ exports.approveChangeRequest = async (req, res) => {
 
     return res.json({ success: true, data: reviewed });
   } catch (error) {
+    if (error?.status === 409) return res.status(409).json({ success: false, message: error.message, field: error.field });
     console.error("Approve change request error:", error);
     return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
@@ -747,17 +748,22 @@ exports.findDuplicates = async (req, res) => {
   try {
     const name = normalizeName(req.query?.business_name);
     const tin = normalizeTin(req.query?.tin);
+    // SEC Registration No.: one per company for life, so a match is the strongest sign.
+    const secNo = String(req.query?.registration_no || "").trim().toUpperCase();
     const excludeId = Number(req.query?.excludeId) || null;
-    if (!name && tin.length < 9) return res.json({ success: true, data: [] });
+    if (!name && tin.length < 9 && !secNo) return res.json({ success: true, data: [] });
+    const sameSec = (p) => secNo && String(p.registration_no || "").trim().toUpperCase() === secNo;
     const rows = (await Proponent.listProponents())
       .filter((p) => Number(p.id) !== excludeId)
-      .filter((p) => (name && normalizeName(p.business_name) === name) || (tin.length >= 9 && normalizeTin(p.tin) === tin))
+      .filter(
+        (p) => sameSec(p) || (name && normalizeName(p.business_name) === name) || (tin.length >= 9 && normalizeTin(p.tin) === tin)
+      )
       .slice(0, 5)
       .map((p) => ({
         id: p.id,
         ref_no: p.ref_no,
         business_name: p.business_name,
-        match: name && normalizeName(p.business_name) === name ? "name" : "tin",
+        match: sameSec(p) ? "registration_no" : name && normalizeName(p.business_name) === name ? "name" : "tin",
       }));
     return res.json({ success: true, data: rows });
   } catch (error) {
@@ -1032,6 +1038,7 @@ exports.create = async (req, res) => {
     await notifyOfficerChange({ proponent: row, fromId: null, toId: accountOfficerId, actorId: req.user?.id });
     return res.status(201).json({ success: true, data: row });
   } catch (error) {
+    if (error?.status === 409) return res.status(409).json({ success: false, message: error.message, field: error.field });
     console.error("Create proponent error:", error);
     return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
@@ -1064,7 +1071,7 @@ function sectionHandler(label, action, run) {
     } catch (error) {
       console.error(`Save ${label} error:`, error);
       // Amount fields that aren't numbers are the caller's mistake, not a server fault.
-      const status = /must be a number/.test(error?.message || "") ? 400 : 500;
+      const status = error?.status === 409 ? 409 : /must be a number/.test(error?.message || "") ? 400 : 500;
       return res.status(status).json({ success: false, message: publicErrorMessage(error) });
     }
   };
@@ -1113,6 +1120,32 @@ exports.saveInvestment = sectionHandler("investment", "PROPONENT_INVESTMENT_UPDA
       actor
     ),
 });
+
+/** GET /api/proponents/:id/leases — the Lease Agreements card. */
+exports.listLeases = async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ success: false, message: "Invalid id" });
+    return res.json({ success: true, data: await Proponent.listLeases(id) });
+  } catch (error) {
+    console.error("List leases error:", error);
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
+  }
+};
+
+/** GET /api/proponents/ref-code-available?code=…&excludeId=…[&field=registration_no]
+ * — the as-you-type check of the Ref. Code (default) or the SEC Registration No.
+ * (the save checks again). */
+exports.refCodeAvailable = async (req, res) => {
+  try {
+    const field = req.query.field === "registration_no" ? "registration_no" : "ref_code";
+    const result = await Proponent.isFieldAvailable(field, req.query.code, req.query.excludeId);
+    return res.json({ success: true, ...result });
+  } catch (error) {
+    console.error("Ref code check error:", error);
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
+  }
+};
 
 exports.saveSecRegistration = sectionHandler("sec_registration", "PROPONENT_SEC_REGISTRATION_UPDATED", {
   validate: (b) => {
@@ -1296,6 +1329,7 @@ exports.update = async (req, res) => {
 
     return res.json({ success: true, data: refreshed || row });
   } catch (error) {
+    if (error?.status === 409) return res.status(409).json({ success: false, message: error.message, field: error.field });
     console.error("Update proponent error:", error);
     return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }

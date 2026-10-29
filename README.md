@@ -22,30 +22,46 @@ Org-chart nodes: **Assessment · Evaluation · Assignment · Compliance · Inspe
 Both are permission-gated by `requireMenuAccess(<menu key>)`; `admin` gets access
 via `fullAccess`, other roles need it switched on in **Settings → Control Panel**.
 
-### Assessment & Evaluation workflow (Module 4)
+### Assessment & Evaluation workflow (Module 4) — "Evaluation Queue"
 
-Sits between Business Registration (Module 3) and Approval & Issuance (Module 5).
-An Account Officer / evaluator processes each submitted application:
+The full, current rules (statuses, Level 1 / Level 2, terms & contract, approval)
+are in [`.claude/skills/ciac-project/SKILL.md`](.claude/skills/ciac-project/SKILL.md)
+and on **System Settings → Workflow Topology**. In short:
 
-1. **Assignment** — `PATCH /api/assessments/:applicationId/assign` gives the
-   application an evaluator; stage `UNASSIGNED → ASSIGNED`.
-2. **Review** — evaluator moves through stages
-   `ASSIGNED → IN_REVIEW → FOR_RECOMMENDATION` (`PATCH /:applicationId/stage`) and
-   verifies each documentary requirement
-   (`PATCH /api/assessments/requirements/:id/status`).
-3. **Evaluation** — records findings / deficiencies / recommendations
-   (`/:applicationId/findings`) and assesses fees, rentals, taxes and penalties as
-   charge line items (`/:applicationId/charges`; `charges_total` is recomputed in
-   a transaction on every write).
-4. **Recommendation** — `POST /:applicationId/recommendation` with
-   `ENDORSE` / `RETURN` / `DISAPPROVE`, which calls
-   `ApplicationWorkflow.updateApplicationStatus` (→ `FOR_APPROVAL` / `RETURNED` /
-   `DISAPPROVED`) and fires a notification (`eventType: "assessment"`). Stage
-   becomes `COMPLETED` or `RETURNED`; `PATCH /:applicationId/reopen` re-opens a
-   returned assessment.
+1. **Assignment** — BDO Level 1 assigns a Level 2 (`PATCH /api/assessments/:id/assign`);
+   stage `UNASSIGNED → ASSIGNED`, and the Level 2 opening it moves it to `IN_REVIEW`.
+2. **Encode the proponent** — drawer tabs **Proponent Information**,
+   **Performance Commitment** and **Stockholders + GIS**
+   (`/api/assessments/:id/profile | /commitment | /stockholders`). They write the
+   proponent's own records, so the same details show on Registered Locator once
+   approved. Only the assigned Level 2 edits, while the review is open.
+3. **Review** — the **Compliance** tab verifies / rejects each uploaded
+   requirement (remarks + a comment thread with the locator).
+4. **Terms & Contract** — Level 2 sends the terms; once the locator agrees, records
+   the contract, prints the package and uploads the signed copy.
+5. **Submit → For Approval** — Level 2 submits the review (`FOR_RECOMMENDATION`);
+   Level 1 returns it or clicks **For Approval** and approves in the Approval panel.
 
-Every action is written to an append-only `assessment_activity` log. Management
-watches progress on the queue's monitoring stat bar.
+Drawer tab order: `Overview | Proponent Information | Performance Commitment |
+Stockholders + GIS | Compliance | Terms | Contract | Recommendation | Activity Log`.
+
+### Registered Locator — Locator Information
+
+After approval the locator is edited by its Account Officer on Registered Locator
+(`src/components/proponent/ProponentsManagement.tsx`, `/api/proponents`):
+
+- **Lease Agreements** (`server/models/ProponentLease.js`, `dbo.proponent_leases`) —
+  one row per lease (first contract + one per approved renewal), the current one
+  editable: **Ref. Code** (typed in, never reused), SEC Reg. No. (read-only), Date
+  Signed, Start / End, Lease Term. A renewal starts a new lease with a copy of the
+  property schedule and needs its own Ref. Code.
+- **Profile** — Business Activities, Property Schedule (of the current lease;
+  earlier leases viewable), Advance Lease Payment / Security Deposit / Performance
+  Security (with Total Amount), Performance Commitment.
+- **Stockholders** — the stockholders and the SEC Registration Information card
+  (SEC Reg. No. — unique per company — capital, purposes, SEC contact person, GIS).
+- Deletes are soft (`is_active = 0`); new tables and columns are created on backend
+  start, so a `git pull` + restart is all another machine needs.
 
 ### Compliance & Inspection workflow (Module 10)
 

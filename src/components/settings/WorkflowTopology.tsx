@@ -229,6 +229,7 @@ const SCENARIOS: Scenario[] = [
         where: 'Registered Locator',
         details: [
           'The locator now appears in Registered Locator; an Account Officer sees only their own locators.',
+          'The Account Officer types the lease’s Ref. Code (never reused) and Date Signed under Lease Agreements; the proponent details the BDO encoded are already there.',
           'The contract permit counts down to expiry — it shows on Renewal Tracking once expiring (6 months left).',
           'The locator gets a renewal reminder email then, and monthly after that, until the renewal is filed.',
           'The locator can still upload requirements that were to follow.',
@@ -352,7 +353,7 @@ const SCENARIOS: Scenario[] = [
       {
         lane: 'system',
         title: 'Renewed',
-        auto: ["Updates the locator’s Registered Locator row with the new contract and term.", "The old permit (marked RENEWED at approval) drops off Renewal Tracking.", "Does not send the renewal to the Approved Queue."],
+        auto: ["Updates the locator’s Registered Locator row with the new contract and term.", "Starts a new lease under Lease Agreements: the earlier one becomes history, the property schedule is copied over to edit, and the new lease needs its own Ref. Code (never reused).", "The old permit (marked RENEWED at approval) drops off Renewal Tracking.", "Does not send the renewal to the Approved Queue."],
         status: 'Old permit RENEWED · new VALID',
         where: 'Registered Locator · Renewal Tracking',
         details: [

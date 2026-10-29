@@ -700,6 +700,16 @@ async function settleApproval(approvalId, applicationId, outcome, note, actorId,
 
   await logActivity(approvalId, `APPROVAL_${headerStatus}`, note ? note.slice(0, 200) : null, actorId);
 
+  // Lease Agreements: the approved contract becomes the locator's (new) lease —
+  // a renewal starts a new lease with a copy of the property schedule.
+  if (headerStatus === "APPROVED") {
+    try {
+      await require("./ProponentLease").recordApprovedApplication(applicationId, actorId);
+    } catch (error) {
+      console.error("Record lease for approved application error:", error);
+    }
+  }
+
   // The contract (saved before Approve) becomes visible to the locator now.
   // Not awaited: a slow mail server mustn't hold up the Approve request.
   if (headerStatus === "APPROVED") {

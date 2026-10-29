@@ -70,10 +70,12 @@ router.get("/type-of-contract", requireMenuAccess(MENU_KEY, "view"), proponentsC
 router.get("/document-requirements", requireMenuAccess(MENU_KEY, "view"), proponentsController.listDocumentRequirementOptions);
 router.get("/industries", requireMenuAccess(MENU_KEY, "view"), proponentsController.listIndustryOptions);
 // Also used by Locator Accounts' New Locator Account form.
+router.get("/ref-code-available", requireMenuAccess(MENU_KEY, "view"), proponentsController.refCodeAvailable);
 router.get("/land-uses", requireAnyMenuAccess([MENU_KEY, "settings:locator-users"], "view"), proponentsController.listLandUseOptions);
 // Before "/:id" so it isn't read as an id.
 router.get("/duplicates", requireMenuAccess(MENU_KEY, "view"), proponentsController.findDuplicates);
 router.get("/:id", requireMenuAccess(MENU_KEY, "view"), proponentsController.requireOwnLocator, proponentsController.getById);
+router.get("/:id/leases", requireMenuAccess(MENU_KEY, "view"), proponentsController.requireOwnLocator, proponentsController.listLeases);
 router.post("/:id/login", requireMenuAccess(MENU_KEY, "edit"), proponentsController.requireOwnLocator, proponentsController.createLogin);
 router.post("/:id/login/send", requireMenuAccess(MENU_KEY, "edit"), proponentsController.requireOwnLocator, proponentsController.sendLogin);
 router.get("/:id/documents", requireMenuAccess(MENU_KEY, "view"), proponentsController.requireOwnLocator, proponentsController.getDocuments);

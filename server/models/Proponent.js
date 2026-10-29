@@ -11,6 +11,7 @@ const Signatory = () => require("./Signatory");
 const FinancialTerms = () => require("./FinancialTerms");
 const Investment = () => require("./Investment");
 const SecRegistration = () => require("./SecRegistration");
+const ProponentLease = () => require("./ProponentLease");
 
 function toInt(v) {
   if (v === null || v === undefined || v === "") return null; // Number(null) is 0, not "no value"
@@ -362,6 +363,7 @@ async function ensureChildTables() {
   await FinancialTerms().ensureSchema();
   await Investment().ensureSchema();
   await SecRegistration().ensureSchema();
+  await ProponentLease().ensureSchema(); // after contracts / properties (it backfills from them)
 }
 
 /** Replaces every property-schedule row for a proponent with the given list
@@ -398,6 +400,61 @@ function isEmptyPropertyRow(row) {
   return !["year", "date_from", "date_to", "type_of_property", "area_sqm", "rate_sqm_mo", "mgl_mo"].some((k) => filled(row?.[k]));
 }
 
+// Typed-in identifiers that no two locators may share (compared ignoring case
+// and surrounding spaces; blank is always allowed):
+//  - ref_code: the Ref. Code (typed by hand, never reused);
+//  - registration_no: the SEC Registration No. (one company, one number — it
+//    never changes for the life of the company, so a repeat means the same
+//    company encoded twice, or a typo).
+const UNIQUE_FIELDS = { ref_code: "Ref. Code", registration_no: "SEC Registration No." };
+
+/** Throws a 409 naming the locator that already has this value. */
+async function assertUniqueField(field, value, excludeId = null) {
+  const label = UNIQUE_FIELDS[field];
+  if (!label) throw new Error(`Unknown unique field: ${field}`);
+  const text = String(value ?? "").trim();
+  if (!text) return;
+  let rows = await selectData(
+    `SELECT TOP (1) id, business_name FROM dbo.proponents
+     WHERE LTRIM(RTRIM(${field})) = @param0 AND id <> @param1`,
+    [text, toInt(excludeId) ?? 0]
+  );
+  // A Ref. Code is never reused — not even one from an earlier lease (of this
+  // or any locator). The locator's own current lease is the code itself.
+  if (!rows?.length && field === "ref_code") {
+    await ProponentLease().ensureSchema();
+    rows = await selectData(
+      `SELECT TOP (1) p.id, p.business_name FROM dbo.proponent_leases l
+       JOIN dbo.proponents p ON p.id = l.proponent_id
+       WHERE LTRIM(RTRIM(l.ref_code)) = @param0 AND l.is_active = 1
+         AND NOT (l.proponent_id = @param1 AND l.is_current = 1)`,
+      [text, toInt(excludeId) ?? 0]
+    );
+    if (rows?.length && Number(rows[0].id) === Number(excludeId)) {
+      rows[0].business_name = `an earlier lease of ${rows[0].business_name || "this locator"}`;
+    }
+  }
+  if (rows?.length) {
+    throw Object.assign(new Error(`${label} "${text}" is already used by ${rows[0].business_name || "another locator"}.`), {
+      status: 409,
+      field,
+    });
+  }
+}
+
+const assertRefCodeAvailable = (refCode, excludeId = null) => assertUniqueField("ref_code", refCode, excludeId);
+
+/** For the as-you-type checks: { available, message? }. */
+async function isFieldAvailable(field, value, excludeId = null) {
+  try {
+    await assertUniqueField(field, value, excludeId);
+    return { available: true };
+  } catch (error) {
+    if (error.status === 409) return { available: false, message: error.message };
+    throw error;
+  }
+}
+
 async function replaceProponentProperties(tx, proponentId, properties, actorId = null) {
   if (properties === undefined) return;
   const actor = toInt(actorId);
@@ -405,10 +462,13 @@ async function replaceProponentProperties(tx, proponentId, properties, actorId =
 
   // Synced by id (like Stockholder.syncForProponent): a row with a known id is
   // updated, a new one inserted, and an active row no longer listed is
-  // soft-deleted (is_active = 0) — never removed from the table.
+  // soft-deleted (is_active = 0) — never removed from the table. Only the
+  // current lease's schedule is edited; earlier leases' rows are history (A-03).
+  const leaseId = await ProponentLease().currentLeaseId(proponentId, tx);
   const existing = await tx.query(
-    `SELECT id FROM dbo.proponent_properties WHERE proponent_id = @param0 AND is_active = 1`,
-    [proponentId]
+    `SELECT id FROM dbo.proponent_properties
+     WHERE proponent_id = @param0 AND is_active = 1 AND (lease_id = @param1 OR lease_id IS NULL)`,
+    [proponentId, leaseId]
   );
   const existingIds = new Set((existing.recordset || []).map((r) => r.id));
   const keptIds = new Set();
@@ -442,20 +502,20 @@ async function replaceProponentProperties(tx, proponentId, properties, actorId =
         UPDATE dbo.proponent_properties
         SET sort_order = @param1, year = @param2, date_from = @param3, date_to = @param4, type_of_property = @param5,
             area_sqm = @param6, rate_sqm_mo = @param7, rate_currency = @param8, mgl_mo = @param9, mgl_currency = @param10,
-            rate_type = @param11, updated_by = @param12, updated_at = GETDATE()
+            rate_type = @param11, updated_by = @param12, updated_at = GETDATE(), lease_id = @param13
         WHERE id = @param0
         `,
-        [id, ...values]
+        [id, ...values, leaseId]
       );
     } else {
       await tx.query(
         `
         INSERT INTO dbo.proponent_properties
-          (proponent_id, sort_order, year, date_from, date_to, type_of_property, area_sqm, rate_sqm_mo, rate_currency, mgl_mo, mgl_currency, rate_type, created_by)
+          (proponent_id, sort_order, year, date_from, date_to, type_of_property, area_sqm, rate_sqm_mo, rate_currency, mgl_mo, mgl_currency, rate_type, created_by, lease_id)
         VALUES
-          (@param0, @param1, @param2, @param3, @param4, @param5, @param6, @param7, @param8, @param9, @param10, @param11, @param12)
+          (@param0, @param1, @param2, @param3, @param4, @param5, @param6, @param7, @param8, @param9, @param10, @param11, @param12, @param13)
         `,
-        [proponentId, ...values]
+        [proponentId, ...values, leaseId]
       );
     }
   }
@@ -469,15 +529,17 @@ async function replaceProponentProperties(tx, proponentId, properties, actorId =
   }
 }
 
+/** The current lease's property schedule (earlier leases': ProponentLease.listForProponent). */
 async function getProponentProperties(proponentId) {
+  const leaseId = await ProponentLease().currentLeaseId(proponentId);
   const rows = await selectData(
     `
     SELECT id, year, date_from, date_to, type_of_property, area_sqm, rate_sqm_mo, rate_currency, mgl_mo, mgl_currency, rate_type
     FROM dbo.proponent_properties
-    WHERE proponent_id = @param0 AND is_active = 1
+    WHERE proponent_id = @param0 AND is_active = 1 AND (lease_id = @param1 OR lease_id IS NULL)
     ORDER BY sort_order ASC, id ASC
     `,
-    [proponentId]
+    [proponentId, leaseId]
   );
   return (rows || []).filter((r) => !isEmptyPropertyRow(r)).map((r) => ({
     id: r.id,
@@ -890,6 +952,8 @@ async function createProponent({
   const createdBy = toInt(created_by);
   const accountOfficerId = toInt(account_officer_id);
   const isSublease = is_sublease === null || is_sublease === undefined ? null : is_sublease ? 1 : 0;
+  await assertRefCodeAvailable(ref_code);
+  await assertUniqueField("registration_no", registration_no);
 
   const newId = await runInTransaction(async (tx) => {
     // Minted here, never accepted from the caller — same reasoning as
@@ -919,8 +983,8 @@ async function createProponent({
          @param27,@param28,NULL,GETDATE(),NULL,@param29,@param30)
       `,
       [
-        userId, business_name, registration_no, encryptValue(tin), address, contact_no, location ?? null,
-        ref_code ?? null, lease_address ?? null, accountOfficerId, sec_registration_date ?? null, date_signed ?? null,
+        userId, business_name, String(registration_no ?? "").trim() || null, encryptValue(tin), address, contact_no, location ?? null,
+        String(ref_code ?? "").trim() || null, lease_address ?? null, accountOfficerId, sec_registration_date ?? null, date_signed ?? null,
         grace_period ?? null, isSublease, sub_pgro ?? null, sub_pgrr ?? null, land_use ?? null, extension_date ?? null, extension_remarks ?? null,
         authorized_capital ?? null, authorized_capital_currency ?? null, subscribed_capital ?? null, subscribed_capital_currency ?? null,
         paid_up_capital ?? null, paid_up_capital_currency ?? null,
@@ -930,6 +994,7 @@ async function createProponent({
       ]
     );
     const insertedId = result?.recordset?.[0]?.id;
+    await ProponentLease().currentLeaseId(insertedId, tx); // its first lease (current)
     await replaceProponentProperties(tx, insertedId, properties, createdBy);
     await Stockholder().syncForProponent(tx, insertedId, stockholders, createdBy);
     await ContactPerson().syncForProponent(tx, insertedId, contact_persons, createdBy);
@@ -994,10 +1059,15 @@ async function setManualClassification(id, { contract_type_id, industry_code } =
  * checks there's no approved contract first. */
 async function setManualLeaseTerm(id, { start_term, end_term }) {
   await ensureSchema();
-  await updateData(
-    `UPDATE dbo.proponents SET manual_start_term = @param1, manual_end_term = @param2 WHERE id = @param0`,
-    [toInt(id), start_term || null, end_term || null]
-  );
+  await ensureChildTables();
+  await runInTransaction(async (tx) => {
+    await tx.query(`UPDATE dbo.proponents SET manual_start_term = @param1, manual_end_term = @param2 WHERE id = @param0`, [
+      toInt(id),
+      start_term || null,
+      end_term || null,
+    ]);
+    await ProponentLease().syncCurrentFromProponent(tx, toInt(id));
+  });
 }
 
 /** Links a portal login to a locator that doesn't have one yet. Returns
@@ -1076,7 +1146,10 @@ async function updateProponent(
 
   if (user_id !== undefined) pushSet("user_id = ?", toInt(user_id));
   if (business_name !== undefined) pushSet("business_name = ?", business_name);
-  if (registration_no !== undefined) pushSet("registration_no = ?", registration_no);
+  if (registration_no !== undefined) {
+    await assertUniqueField("registration_no", registration_no, id);
+    pushSet("registration_no = ?", String(registration_no ?? "").trim() || null);
+  }
   if (tin !== undefined) pushSet("tin = ?", encryptValue(tin));
   if (address !== undefined) pushSet("address = ?", address);
   if (contact_no !== undefined) pushSet("contact_no = ?", contact_no);
@@ -1088,7 +1161,10 @@ async function updateProponent(
     );
   }
   if (proposed_lease_term_unit !== undefined) pushSet("proposed_lease_term_unit = ?", leaseTermUnit(proposed_lease_term_unit));
-  if (ref_code !== undefined) pushSet("ref_code = ?", ref_code);
+  if (ref_code !== undefined) {
+    await assertRefCodeAvailable(ref_code, id);
+    pushSet("ref_code = ?", String(ref_code ?? "").trim() || null);
+  }
   if (lease_address !== undefined) pushSet("lease_address = ?", lease_address);
   if (account_officer_id !== undefined) pushSet("account_officer_id = ?", toInt(account_officer_id));
   if (sec_registration_date !== undefined) pushSet("sec_registration_date = ?", sec_registration_date);
@@ -1122,6 +1198,7 @@ async function updateProponent(
       `;
       await tx.query(query, [...params, id]);
     }
+    await ProponentLease().syncCurrentFromProponent(tx, id, updatedBy);
     await replaceProponentProperties(tx, id, properties, updatedBy);
     await Stockholder().syncForProponent(tx, id, stockholders, updatedBy);
     await ContactPerson().syncForProponent(tx, id, contact_persons, updatedBy);
@@ -1300,6 +1377,7 @@ async function saveContacts(id, { contact_persons, signatories }, actorId) {
 
 async function saveProperties(id, properties, actorId = null) {
   await ensureSchema();
+  await ensureChildTables(); // the lease tables — the schedule is the current lease's
   if (!(await proponentExists(id))) return null;
   await runInTransaction((tx) => replaceProponentProperties(tx, id, properties, actorId));
   return { properties: await getProponentProperties(id) };
@@ -1357,6 +1435,9 @@ module.exports = {
   saveProperties,
   saveInvestment,
   saveSecRegistration,
+  listLeases: (id) => ProponentLease().listForProponent(id),
+  assertRefCodeAvailable,
+  isFieldAvailable,
   listProponents,
   listProponentsForLocatorList,
   setManualClassification,
