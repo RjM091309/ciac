@@ -1304,15 +1304,18 @@ export function ProponentsManagement({
     // Registered Locator only lists locators with an Account Officer (an
     // Account Officer's own new locator defaults to them on the server).
     if (!officerLocked && !form.account_officer_id.trim()) {
+      keepOpenAfterCreateRef.current = false;
       toast.error("Choose the locator's Account Officer.");
       return;
     }
     if (termEditable) {
       if (!form.start_term !== !form.end_term) {
+        keepOpenAfterCreateRef.current = false;
         toast.error('Enter both the Start Term and the End Term (or neither).');
         return;
       }
       if (form.start_term && form.end_term < form.start_term) {
+        keepOpenAfterCreateRef.current = false;
         toast.error("End Term can't be before Start Term.");
         return;
       }
@@ -2993,7 +2996,11 @@ export function ProponentsManagement({
           .join('; ')}. Save anyway?`}
         confirmText="Save anyway"
         loading={saving}
-        onCancel={() => setDuplicateMatches([])}
+        onCancel={() => {
+          // Not saved: a later full Save shouldn't keep the panel open.
+          keepOpenAfterCreateRef.current = false;
+          setDuplicateMatches([]);
+        }}
         onConfirm={() => {
           setDuplicateMatches([]);
           void save(true);
