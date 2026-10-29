@@ -1622,6 +1622,27 @@ async function updateApplicationRequirementRemarks(id, { remarks, updated_by }) 
     console.error("Log requirement activity error:", error);
   }
 
+  // BM-02: Level 1 hears about new or changed remarks (not a clear). Staff
+  // only — the locator isn't notified of Remarks.
+  const previousRemarks = row.remarks == null ? null : String(row.remarks).trim() || null;
+  if (nextRemarks && nextRemarks !== previousRemarks) {
+    try {
+      const app = await Notification.getApplicationContext(row.application_id);
+      const actorRows = await selectData(`SELECT TOP (1) full_name, username FROM dbo.users WHERE id = @param0`, [toInt(updated_by)]);
+      const actorName = actorRows?.[0]?.full_name || actorRows?.[0]?.username || "An officer";
+      await Notification.createLevel1Notifications({
+        applicationId: row.application_id,
+        actorId: updated_by,
+        eventType: "assessment",
+        subject: `Remarks: ${app?.application_no || ""}`.trim(),
+        body: `${actorName} added remarks on ${requirementLabel} (${app?.application_no || "application"}): ${nextRemarks.slice(0, 300)}`,
+        requirementId: id,
+      });
+    } catch (error) {
+      console.error("Remarks notification error:", error);
+    }
+  }
+
   return getApplicationRequirementById(id);
 }
 

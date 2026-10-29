@@ -412,6 +412,54 @@ async function createApplicationScopedNotifications({
   }
 }
 
+/** Only the Level 1 Managers (users.assessment_level = 1) of the
+ * application's track: the BDO Managers (assessment:queue) for a new
+ * application, the Account Officer Managers (applications:renewals) for a
+ * renewal. Not admins, not the actor. */
+async function createLevel1Notifications({ applicationId, actorId, eventType, subject, body, requirementId = null }) {
+  const application = await getApplicationContext(applicationId);
+  if (!application) return;
+  await ControlPanelPermission.ensureSchema();
+  const menuKey = Number(application.is_renewal) ? "applications:renewals" : "assessment:queue";
+  const rows = await selectData(
+    `
+    SELECT DISTINCT u.id
+    FROM dbo.users u
+    INNER JOIN dbo.user_roles ur ON ur.user_id = u.id
+    INNER JOIN dbo.roles r ON r.id = ur.role_id AND r.is_active = 1
+    INNER JOIN dbo.role_sidebar_menu_permissions p ON p.role_id = r.id
+    WHERE u.is_active = 1
+      AND u.assessment_level = 1
+      AND LOWER(LTRIM(RTRIM(r.name))) NOT IN ('admin', 'proponent')
+      AND p.is_enabled = 1
+      AND p.menu_key = @param0
+    `,
+    [menuKey]
+  );
+  const actor = toInt(actorId);
+  for (const row of rows) {
+    const recipientUserId = toInt(row?.id);
+    if (!recipientUserId || recipientUserId === actor) continue;
+    try {
+      await createNotification({
+        userId: recipientUserId,
+        subject,
+        body,
+        createdBy: actorId,
+        applicationId: application.id,
+        eventType,
+        requirementId,
+      });
+    } catch (error) {
+      console.error("Create Level 1 notification error:", {
+        applicationId: application.id,
+        recipientUserId,
+        message: error?.message || String(error),
+      });
+    }
+  }
+}
+
 async function listForUser(userId, limit = 50) {
   const uid = toInt(userId);
   const cappedLimit = Math.min(200, Math.max(1, toInt(limit) || 50));
@@ -586,6 +634,7 @@ module.exports = {
   getApplicationContext,
   createNotification,
   createApplicationScopedNotifications,
+  createLevel1Notifications,
   listForUser,
   markAsRead,
   markAllAsRead,
