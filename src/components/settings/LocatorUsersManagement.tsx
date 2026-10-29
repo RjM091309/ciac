@@ -9,7 +9,7 @@ import { Skeleton, TableSkeleton } from '../ui/Skeleton';
 import { EmptyState } from '../ui/EmptyState';
 import { AddressAutocomplete } from '../ui/AddressAutocomplete';
 import { AppSelect } from '../ui/AppSelect';
-import { IntakeLetterLink, type Intake } from '../applications/intakeShared';
+import { IntakeLetterLink, UsernameSuggestion, suggestUsername, type Intake } from '../applications/intakeShared';
 import { RowActionsMenu, type RowActionItem } from '../ui/RowActionsMenu';
 import { useSessionStorageCachedResource } from '../../hooks/useSessionStorageCachedResource';
 import { useControlPanelAccess } from '../../context/ControlPanelAccessContext';
@@ -1224,11 +1224,20 @@ export function LocatorUsersManagement({
             <input
               className="app-input"
               value={form.username}
+              placeholder={suggestUsername(form.business_name) || undefined}
               onChange={(e) => {
                 setForm((p) => ({ ...p, username: e.target.value }));
                 if (fieldErrors.username) setFieldErrors((p) => ({ ...p, username: undefined }));
               }}
               style={fieldErrors.username ? { borderColor: '#ef4444' } : undefined}
+            />
+            <UsernameSuggestion
+              businessName={form.business_name}
+              username={form.username}
+              onUse={(value) => {
+                setForm((p) => ({ ...p, username: value }));
+                if (fieldErrors.username) setFieldErrors((p) => ({ ...p, username: undefined }));
+              }}
             />
           </Field>
           <Field label="Full name">
@@ -1391,12 +1400,21 @@ export function LocatorUsersManagement({
                 <input
                   className="app-input"
                   value={continuingDraft.username}
+                  placeholder={suggestUsername(continuingDraft.business_name) || undefined}
                   onChange={(e) => {
                     const value = e.target.value;
                     setContinuingDraft((p) => (p ? { ...p, username: value } : p));
                     if (continuingDraftFieldErrors.username) setContinuingDraftFieldErrors((p) => ({ ...p, username: undefined }));
                   }}
                   style={continuingDraftFieldErrors.username ? { borderColor: '#ef4444' } : undefined}
+                />
+                <UsernameSuggestion
+                  businessName={continuingDraft.business_name}
+                  username={continuingDraft.username}
+                  onUse={(value) => {
+                    setContinuingDraft((p) => (p ? { ...p, username: value } : p));
+                    if (continuingDraftFieldErrors.username) setContinuingDraftFieldErrors((p) => ({ ...p, username: undefined }));
+                  }}
                 />
               </Field>
               <Field label="Full name">

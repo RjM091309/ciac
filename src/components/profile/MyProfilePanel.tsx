@@ -9,6 +9,7 @@ import { loadMyProfile, patchMyProfile, setMyProfile, useMyProfile, type MyProfi
 import { roleDisplayName } from '../../lib/roleDisplay';
 import { getSiteSettings } from '../../lib/siteSettings';
 import { PhotoEditorModal } from './PhotoEditorModal';
+import { AuthenticatorStoreLinks } from '../auth/AuthenticatorStoreLinks';
 
 // My Profile (staff): the signed-in user's own account. Opened from the
 // header's account menu and the mobile menu's account card (AppLayout).
@@ -463,6 +464,9 @@ function TwoFactorCard({ profile }: { profile: MyProfile }) {
           }}
         >
           <ol className="text-[11px] text-secondary space-y-1 list-decimal ml-4">
+            <li>
+              <AuthenticatorStoreLinks />
+            </li>
             <li>
               Scan this QR code with your authenticator app — or on this phone, tap{' '}
               <a href={step.enrollment.otpauthUrl} className="font-semibold underline" style={{ color: 'var(--text)' }}>

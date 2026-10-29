@@ -465,6 +465,7 @@ async function listProponents({ approvedOnly = false } = {}) {
       p.address,
       p.contact_no,
       p.ref_no,
+      p.ref_code,
       p.created_by,
       p.updated_by,
       p.created_at,
@@ -490,6 +491,8 @@ async function listProponents({ approvedOnly = false } = {}) {
     address: p.address ?? null,
     contact_no: p.contact_no ?? null,
     ref_no: p.ref_no ?? null,
+    // Listed (unlike the other profile fields) so the Registered Locator search finds it.
+    ref_code: p.ref_code ?? null,
     created_by: p.created_by ?? null,
     updated_by: p.updated_by ?? null,
     created_at: p.created_at ?? null,

@@ -5,6 +5,7 @@ import { passwordHint, validatePassword } from '../../lib/passwordPolicy';
 import { bannerHeading, resolveLogo, useSiteSettings } from '../../lib/siteSettings';
 import { getCookieConsent, markCookieConsentRecorded, saveCookieConsent, type CookieConsent as StoredConsent } from '../../lib/cookieConsent';
 import { CookieConsent } from './CookieConsent';
+import { AuthenticatorStoreLinks } from './AuthenticatorStoreLinks';
 import { switchTheme } from '../../lib/themeSwitch';
 
 type Enrollment = { otpauthUrl: string; secret: string; qrDataUrl: string };
@@ -892,6 +893,9 @@ export function LoginPage(props: {
                   className="space-y-4"
                 >
                   <ol className="text-[13px] text-secondary space-y-1.5 list-decimal ml-4">
+                    <li>
+                      <AuthenticatorStoreLinks />
+                    </li>
                     <li>
                       On this phone, tap{' '}
                       <a href={enrollment.otpauthUrl} className="font-semibold underline" style={{ color: 'var(--text)' }}>

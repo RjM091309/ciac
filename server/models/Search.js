@@ -15,7 +15,7 @@ const BUCKET_MENU_KEYS = {
   in_completed: "settings:proponents",
 };
 
-/** Finds applications by application number, locator Ref No or business name,
+/** Finds applications by application number, locator Ref No, Ref. Code or business name,
  * tagging each row with which queue(s) it would show up in — the caller
  * (c_search.js) keeps only the buckets the requesting role actually has
  * Control Panel sidebar access to. Admins get every bucket, so this never
@@ -55,7 +55,7 @@ async function searchApplications(term) {
     LEFT JOIN dbo.proponents p ON p.id = a.proponent_id
     LEFT JOIN dbo.application_assessments asm ON asm.application_id = a.id
     WHERE a.status <> 'DRAFT'
-      AND (a.application_no LIKE @param0 OR p.business_name LIKE @param0 OR p.ref_no LIKE @param0)
+      AND (a.application_no LIKE @param0 OR p.business_name LIKE @param0 OR p.ref_no LIKE @param0 OR p.ref_code LIKE @param0)
     ORDER BY a.id DESC
     `,
     [like]

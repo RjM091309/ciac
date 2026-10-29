@@ -996,6 +996,7 @@ export function ProponentsManagement({
       return (
         (p.ref_no || '').toLowerCase().includes(q) ||
         String(displayRef(p)).toLowerCase().includes(q) ||
+        (p.ref_code || '').toLowerCase().includes(q) ||
         (p.business_name || '').toLowerCase().includes(q) ||
         (p.tin || '').toLowerCase().includes(q) ||
         (p.registration_no || '').toLowerCase().includes(q) ||
