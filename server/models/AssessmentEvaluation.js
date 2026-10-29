@@ -588,7 +588,31 @@ async function getAssessmentDetail(applicationId) {
   const requirements = await Workflow.listApplicationRequirements(appId);
   const documents = await Workflow.listDocumentsByApplication(appId);
 
-  return { assessment: header, charges, activity, requirements, documents };
+  // B-14: every upload (with its time stamp) shows in the Activity Log, read
+  // straight from dbo.documents — so uploads made while filing, before the
+  // assessment existed, are listed too. Negative ids keep them apart from
+  // assessment_activity's own.
+  const uploaders = await selectData(
+    `SELECT d.id, u.full_name, u.username FROM dbo.documents d LEFT JOIN dbo.users u ON u.id = d.created_by WHERE d.application_id = @param0`,
+    [appId]
+  );
+  const uploaderOf = new Map(uploaders.map((r) => [r.id, r]));
+  const uploads = documents.map((d) => {
+    const label = [d.requirement_code, d.requirement_name].map((v) => String(v || "").trim()).filter(Boolean).join(" - ");
+    const file = String(d.original_file_name || d.file_name || "Document").trim();
+    return {
+      id: -d.id,
+      action: Number(d.version) > 1 ? "DOCUMENT_REUPLOADED" : "DOCUMENT_UPLOADED",
+      detail: `${label ? `${label} — ` : ""}${file}${Number(d.version) > 1 ? ` (V${d.version})` : ""}`,
+      actor_id: d.created_by ?? null,
+      actor_name: uploaderOf.get(d.id)?.full_name ?? null,
+      actor_username: uploaderOf.get(d.id)?.username ?? null,
+      created_at: d.created_at,
+    };
+  });
+  const timeline = [...activity, ...uploads].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+  return { assessment: header, charges, activity: timeline, requirements, documents };
 }
 
 async function assignEvaluator(applicationId, { evaluatorId, actorId }) {
