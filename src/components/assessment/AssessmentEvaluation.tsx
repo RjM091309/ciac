@@ -1915,6 +1915,8 @@ function TermsTab({ data, canEdit, busy, run }: { data: DetailPayload; canEdit: 
   const [loading, setLoading] = useState(true);
   const [draft, setDraft] = useState('');
   const [confirmSend, setConfirmSend] = useState(false);
+  const [confirmReopen, setConfirmReopen] = useState(false);
+  const [reopenReason, setReopenReason] = useState('');
 
   const load = useCallback(async () => {
     const json = await apiFetch(`/api/assessments/${appId}/terms`);
@@ -1976,6 +1978,20 @@ function TermsTab({ data, canEdit, busy, run }: { data: DetailPayload; canEdit: 
 
       {canWrite ? (
         <div className="flex flex-wrap gap-2 justify-end">
+          {/* B-16: a change of mind after the agreement — back to a draft to revise and send again. */}
+          {terms?.status === 'AGREED' ? (
+            <button
+              className="rounded-lg px-3 py-1.5 text-[12px] font-semibold border disabled:opacity-50 mr-auto"
+              style={{ borderColor: '#f59e0b88', color: '#f59e0b' }}
+              disabled={busy}
+              onClick={() => {
+                setReopenReason('');
+                setConfirmReopen(true);
+              }}
+            >
+              <RotateCcw size={13} className="inline mr-1" /> Reopen
+            </button>
+          ) : null}
           <button
             className="rounded-lg px-3 py-1.5 text-[12px] font-semibold border disabled:opacity-50"
             style={{ borderColor: 'var(--border)', color: 'var(--text)' }}
@@ -2018,6 +2034,35 @@ function TermsTab({ data, canEdit, busy, run }: { data: DetailPayload; canEdit: 
           }, `Terms sent to the ${p}`)
         }
       />
+
+      <ConfirmModal
+        open={confirmReopen}
+        title="Reopen the agreed terms?"
+        description={`They go back to a draft you can edit, and the ${p} is notified. The ${p} has to agree again before the contract.`}
+        confirmText="Reopen"
+        loading={busy}
+        onCancel={() => setConfirmReopen(false)}
+        onConfirm={() =>
+          void run(async () => {
+            await apiFetch(`/api/assessments/${appId}/terms/reopen`, {
+              method: 'POST',
+              body: JSON.stringify({ reason: reopenReason.trim() || null }),
+            });
+            setConfirmReopen(false);
+            await load();
+          }, 'Terms reopened — edit them and send again')
+        }
+      >
+        <Field label="Reason (optional)">
+          <textarea
+            className={cn(inputCls, 'min-h-[70px] resize-y font-[inherit]')}
+            value={reopenReason}
+            maxLength={500}
+            onChange={(e) => setReopenReason(e.target.value)}
+            placeholder={`e.g. The ${p} asked to change the lease term`}
+          />
+        </Field>
+      </ConfirmModal>
     </div>
   );
 }

@@ -235,4 +235,44 @@ async function respond(applicationId, { action, remarks, userId }) {
   return getForApplication(appId);
 }
 
-module.exports = { ensureSchema, STATUSES, getForApplication, saveDraft, send, respond };
+/** B-16: Level 2 takes agreed terms back to DRAFT after a change of mind, so
+ * they can be edited and sent again. Only before the contract is recorded. */
+async function reopen(applicationId, { reason, actorId }) {
+  await ensureSchema();
+  const appId = toInt(applicationId);
+  const current = await getForApplication(appId);
+  if (!current || current.status !== "AGREED") throw clientError("Only agreed terms can be reopened.", 409);
+  if (await hasContract(appId)) throw clientError("The contract is already recorded — the terms can't change anymore.", 409);
+  const note = String(reason || "").trim().slice(0, 500) || null;
+  const result = await updateData(
+    `UPDATE dbo.application_terms
+     SET status = 'DRAFT', updated_by = @param1, updated_at = SYSUTCDATETIME()
+     WHERE id = @param0 AND status = 'AGREED'`,
+    [current.id, toInt(actorId)]
+  );
+  if (!result?.rowsAffected?.[0]) throw clientError("These terms were just changed — reload and try again.", 409);
+  const ctx = await appContext(appId);
+  await logActivity(
+    appId,
+    "TERMS_REOPENED",
+    `Agreed terms (version ${current.version}) reopened${note ? `: ${note}` : ""}`,
+    actorId
+  );
+
+  // The locator agreed to these, so they hear that they'll change.
+  if (ctx?.locator_user_id) {
+    await Notification.createNotification({
+      userId: ctx.locator_user_id,
+      subject: `Terms reopened: ${ctx.application_no}`,
+      body: `The terms and conditions you agreed to for ${ctx.application_no} were reopened and will be revised — you'll be asked to agree again.${
+        note ? ` Reason: ${note}` : ""
+      }`,
+      createdBy: toInt(actorId),
+      applicationId: appId,
+      eventType: "application_status",
+    }).catch((error) => console.error("Terms reopen notification error:", error));
+  }
+  return getForApplication(appId);
+}
+
+module.exports = { ensureSchema, STATUSES, getForApplication, saveDraft, send, respond, reopen };

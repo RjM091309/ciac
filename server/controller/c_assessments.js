@@ -414,6 +414,28 @@ exports.saveTerms = async (req, res) => {
   }
 };
 
+exports.reopenTerms = async (req, res) => {
+  try {
+    const id = appIdParam(req, res);
+    if (id === null) return undefined;
+    if (!(await ensureCanAct(req, res, id))) return undefined;
+    if (!(await ensureTermsEditable(res, id, req))) return undefined;
+    const data = await Terms.reopen(id, { reason: req.body?.reason, actorId: req.user?.id ?? null });
+    await AuditLog.record({
+      actorId: req.user?.id,
+      actorUsername: req.user?.username,
+      action: "APPLICATION_TERMS_REOPENED",
+      entityType: "application",
+      entityId: id,
+      details: { version: data?.version, reason: String(req.body?.reason || "").trim().slice(0, 500) || null },
+      req,
+    });
+    return res.json({ success: true, data });
+  } catch (error) {
+    return fail(res, error, "Reopen terms");
+  }
+};
+
 exports.sendTerms = async (req, res) => {
   try {
     const id = appIdParam(req, res);

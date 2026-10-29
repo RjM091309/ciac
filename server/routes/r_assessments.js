@@ -27,6 +27,7 @@ router.post("/:applicationId/for-approval", requireAssessmentAccess("edit"), con
 router.get("/:applicationId/terms", requireAssessmentAccess("view"), controller.getTerms);
 router.put("/:applicationId/terms", requireAssessmentAccess("edit"), controller.saveTerms);
 router.post("/:applicationId/terms/send", requireAssessmentAccess("edit"), controller.sendTerms);
+router.post("/:applicationId/terms/reopen", requireAssessmentAccess("edit"), controller.reopenTerms);
 // Contract (Level 2, after the terms are agreed): record it, print the package, upload the signed scan.
 router.get("/:applicationId/contract", requireAssessmentAccess("view"), controller.getContract);
 router.put("/:applicationId/contract", requireAssessmentAccess("edit"), controller.saveContract);
