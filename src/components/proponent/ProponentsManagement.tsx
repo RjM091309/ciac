@@ -299,7 +299,7 @@ type StockholderRow = {
   ownership: string;
 };
 
-type ContactPersonRow = {
+export type ContactPersonRow = {
   id?: number;
   name: string;
   designation: string;
@@ -314,7 +314,7 @@ function blankStockholderRow(): StockholderRow {
   return { name: '', nationality: '', subscribed: '', paid: '', ownership: '' };
 }
 
-function blankContactPersonRow(): ContactPersonRow {
+export function blankContactPersonRow(): ContactPersonRow {
   return { name: '', designation: '', contact_no: '', email: '' };
 }
 
@@ -322,7 +322,7 @@ const blankSignatoryRow = blankContactPersonRow;
 
 // Row tables (Stockholders, Contact Person, Signatory): like the property
 // schedule, every column of every listed row is required before saving.
-type RowRule<T> = {
+export type RowRule<T> = {
   key: keyof T & string;
   label: string;
   kind?: 'amount' | 'percent' | 'email' | 'option';
@@ -374,7 +374,7 @@ const STOCKHOLDER_RULES: RowRule<StockholderRow>[] = [
   { key: 'paid', label: 'Paid', kind: 'amount' },
   { key: 'ownership', label: 'Ownership %', kind: 'percent' },
 ];
-const CONTACT_RULES: RowRule<ContactPersonRow>[] = [
+export const CONTACT_RULES: RowRule<ContactPersonRow>[] = [
   { key: 'name', label: 'Name' },
   { key: 'designation', label: 'Designation' },
   { key: 'contact_no', label: 'Contact No.' },
@@ -389,7 +389,7 @@ function isBlankNewRow(row: { id?: number }, keys: string[]): boolean {
 }
 
 /** The keys of a row that are blank or not valid for their kind. */
-function invalidRowKeys<T>(row: T, rules: RowRule<T>[]): Set<string> {
+export function invalidRowKeys<T>(row: T, rules: RowRule<T>[]): Set<string> {
   const bad = new Set<string>();
   for (const rule of rules) {
     const value = String((row as any)[rule.key] ?? '').trim();
@@ -409,7 +409,7 @@ function invalidRowKeys<T>(row: T, rules: RowRule<T>[]): Set<string> {
 }
 
 /** First problem in a table as a message ("Contact Person row 2: fill in Name, Email Address."), or null. */
-function rowsError<T>(title: string, rows: T[], rules: RowRule<T>[]): string | null {
+export function rowsError<T>(title: string, rows: T[], rules: RowRule<T>[]): string | null {
   for (let i = 0; i < rows.length; i++) {
     const bad = invalidRowKeys(rows[i], rules);
     if (!bad.size) continue;
@@ -484,7 +484,7 @@ function mapStockholderRows(rows: any): StockholderRow[] {
 }
 
 // Contact persons and signatories share the same columns.
-function mapContactRows(rows: any): ContactPersonRow[] {
+export function mapContactRows(rows: any): ContactPersonRow[] {
   if (!Array.isArray(rows) || !rows.length) return [];
   return rows.map((r: any) => ({
     id: r.id,
@@ -523,7 +523,7 @@ const toStockholderPayload = (r: StockholderRow) => ({
   ownership: r.ownership.trim(),
 });
 
-const toContactPayload = (r: ContactPersonRow) => ({
+export const toContactPayload = (r: ContactPersonRow) => ({
   id: r.id,
   name: r.name.trim(),
   designation: r.designation.trim() || null,
@@ -601,6 +601,13 @@ function formatAmountInput(value: string): string {
   const decPart = firstDot === -1 ? '' : cleaned.slice(firstDot + 1).replace(/\./g, '');
   const withCommas = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
   return firstDot === -1 ? withCommas : `${withCommas}.${decPart}`;
+}
+
+/** Loaded free-text amounts: comma-format only a plain number ("1000000" ->
+ * "1,000,000"); anything else (e.g. older "USD 1M") is shown as saved. */
+function formatIfNumeric(value?: string | null): string {
+  const text = String(value ?? '').trim();
+  return /^[\d,]+(\.\d+)?$/.test(text) ? formatAmountInput(text) : text;
 }
 
 // yyyy-mm-dd, what <input type="date"> requires.
@@ -770,7 +777,7 @@ export function ProponentsManagement({
   // Mirrors the legacy BRIDGE system's Locator's Information tab strip —
   // only Profile has content so far, the rest are placeholders.
   const [activeProfileTab, setActiveProfileTab] = useState<
-    'Profile' | 'Stockholders' | 'Documents' | 'Investment'
+    'Profile' | 'Stockholders' | 'Documents'
   >('Profile');
   const [confirmDeactivateId, setConfirmDeactivateId] = useState<number | null>(null);
   const [confirmReactivateId, setConfirmReactivateId] = useState<number | null>(null);
@@ -1371,8 +1378,8 @@ export function ProponentsManagement({
           performance_security_months: data.performance_security_months || '',
           performance_security_amount: data.performance_security_amount || '',
           performance_security_currency: data.performance_security_currency || 'PHP',
-          investment_commitment: data.investment_commitment || '',
-          investment_actual: data.investment_actual || '',
+          investment_commitment: formatIfNumeric(data.investment_commitment),
+          investment_actual: formatIfNumeric(data.investment_actual),
           employee_commitment: data.employee_commitment || '',
           employee_actual: data.employee_actual || '',
           sec_company_email: data.sec_company_email || '',
@@ -1517,8 +1524,8 @@ export function ProponentsManagement({
                 )
             : section === 'investment'
               ? {
-                  investment_commitment: data.investment_commitment || '',
-                  investment_actual: data.investment_actual || '',
+                  investment_commitment: formatIfNumeric(data.investment_commitment),
+                  investment_actual: formatIfNumeric(data.investment_actual),
                   employee_commitment: data.employee_commitment || '',
                   employee_actual: data.employee_actual || '',
                 }
@@ -1548,7 +1555,7 @@ export function ProponentsManagement({
             : section === 'sec'
               ? 'SEC registration information saved'
             : section === 'investment'
-              ? 'Investment figures saved'
+              ? 'Performance Commitment saved'
               : 'Property schedule saved',
       );
       if (section === 'properties') setShowPropertyErrors(false);
@@ -2573,7 +2580,7 @@ export function ProponentsManagement({
             <div className="sticky -top-4 z-20 -mt-3 pt-4" style={{ backgroundColor: 'var(--surface)' }}>
               <div className="folders">
                 <div className="tabs overflow-x-auto">
-                  {(['Profile', 'Stockholders', 'Documents', 'Investment'] as const).map((tab) => (
+                  {(['Profile', 'Stockholders', 'Documents'] as const).map((tab) => (
                     <div
                       key={tab}
                       className={`tab ${activeProfileTab === tab ? 'active' : ''}`}
@@ -2776,86 +2783,6 @@ export function ProponentsManagement({
                         </div>
                       </div>
                     </div>
-                  </div>
-                ) : activeProfileTab === 'Investment' ? (
-                  <div className="flex flex-col gap-4">
-                    <div className="overflow-x-auto rounded-lg border" style={{ borderColor: 'var(--input-border)' }}>
-                      <table className="w-full text-xs border-collapse">
-                        <thead>
-                          <tr style={{ backgroundColor: 'var(--control-bg)' }}>
-                            <th
-                              className="px-3 py-2 text-left font-semibold uppercase tracking-wide text-[9px] border-b"
-                              style={{ borderColor: 'var(--input-border)', color: 'var(--text-muted)' }}
-                            />
-                            {['Commitment', 'Actual'].map((h) => (
-                              <th
-                                key={h}
-                                className="px-3 py-2 text-left font-semibold uppercase tracking-wide text-[9px] border-b"
-                                style={{ borderColor: 'var(--input-border)', color: 'var(--text-muted)' }}
-                              >
-                                {h}
-                              </th>
-                            ))}
-                          </tr>
-                        </thead>
-                        <tbody>
-                          <tr>
-                            <td className="px-3 py-2 border-b font-semibold" style={{ borderColor: 'var(--input-border)', color: 'var(--text)' }}>
-                              Investment
-                            </td>
-                            <td className="px-2 py-1.5 border-b" style={{ borderColor: 'var(--input-border)' }}>
-                              <input
-                                className="app-form-control app-form-control-sm w-full"
-                                inputMode="decimal"
-                                value={form.investment_commitment}
-                                disabled={loadingLocation}
-                                onChange={(e) => setForm((p) => ({ ...p, investment_commitment: e.target.value }))}
-                              />
-                            </td>
-                            <td className="px-2 py-1.5 border-b" style={{ borderColor: 'var(--input-border)' }}>
-                              <input
-                                className="app-form-control app-form-control-sm w-full"
-                                inputMode="decimal"
-                                value={form.investment_actual}
-                                disabled={loadingLocation}
-                                onChange={(e) => setForm((p) => ({ ...p, investment_actual: e.target.value }))}
-                              />
-                            </td>
-                          </tr>
-                          <tr>
-                            <td className="px-3 py-2 font-semibold" style={{ color: 'var(--text)' }}>No. Employee</td>
-                            <td className="px-2 py-1.5">
-                              <input
-                                className="app-form-control app-form-control-sm w-full"
-                                inputMode="decimal"
-                                value={form.employee_commitment}
-                                disabled={loadingLocation}
-                                onChange={(e) => setForm((p) => ({ ...p, employee_commitment: e.target.value }))}
-                              />
-                            </td>
-                            <td className="px-2 py-1.5">
-                              <input
-                                className="app-form-control app-form-control-sm w-full"
-                                inputMode="decimal"
-                                value={form.employee_actual}
-                                disabled={loadingLocation}
-                                onChange={(e) => setForm((p) => ({ ...p, employee_actual: e.target.value }))}
-                              />
-                            </td>
-                          </tr>
-                        </tbody>
-                      </table>
-                    </div>
-                    <SectionSaveBar
-                      allowed={editing ? canEdit : canAdd}
-                      label="Save Investment"
-                      isEditing={Boolean(editing)}
-                      hasContent={[form.investment_commitment, form.investment_actual, form.employee_commitment, form.employee_actual].some((v) => v.trim() !== '')}
-                      dirty={sectionDirty.investment}
-                      saving={savingSection === 'investment'}
-                      disabled={saving || loadingLocation}
-                      onSave={() => void saveSection('investment')}
-                    />
                   </div>
                 ) : activeProfileTab === 'Documents' ? (
                   <LocatorDocumentsTab
@@ -3472,6 +3399,64 @@ export function ProponentsManagement({
               </div>
             </div>
 
+            {/* Performance Commitment (was the Investment tab; dbo.proponent_investment):
+                what the locator committed to vs. what it actually has — investment
+                amount and number of employees. Own Save, like the other cards. */}
+            <div
+              className="flex flex-col gap-3 rounded-xl border p-3"
+              style={{ borderColor: 'var(--input-border)', backgroundColor: 'color-mix(in oklab, var(--control-bg) 55%, transparent)' }}
+            >
+              <div
+                className="-mx-3 -mt-3 flex items-center justify-between gap-2 rounded-t-xl border-b px-3 py-2"
+                style={{ borderColor: 'var(--input-border)', backgroundColor: 'var(--control-bg)' }}
+              >
+                <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--text)' }}>
+                  Performance Commitment
+                </span>
+                <SectionSaveBar
+                  allowed={editing ? canEdit : canAdd}
+                  label="Save Performance Commitment"
+                  isEditing={Boolean(editing)}
+                  hasContent={[form.investment_commitment, form.investment_actual, form.employee_commitment, form.employee_actual].some((v) => v.trim() !== '')}
+                  dirty={sectionDirty.investment}
+                  saving={savingSection === 'investment'}
+                  disabled={saving || loadingLocation}
+                  onSave={() => void saveSection('investment')}
+                />
+              </div>
+              <div className="grid grid-cols-[max-content_minmax(0,1fr)_minmax(0,1fr)] items-center gap-x-3 gap-y-2">
+                <span />
+                <span className="text-[9px] font-semibold uppercase tracking-widest text-secondary">Commitment</span>
+                <span className="text-[9px] font-semibold uppercase tracking-widest text-secondary">Actual</span>
+                {(
+                  [
+                    { label: 'Investment', commitment: 'investment_commitment', actual: 'investment_actual', amount: true },
+                    { label: 'No. of Employees', commitment: 'employee_commitment', actual: 'employee_actual', amount: false },
+                  ] as const
+                ).map((row) => (
+                  <React.Fragment key={row.label}>
+                    <span className="text-right text-[12px] font-semibold leading-tight" style={{ color: 'var(--text)' }}>
+                      {row.label}
+                    </span>
+                    {([row.commitment, row.actual] as const).map((key) => (
+                      <input
+                        key={key}
+                        className="app-form-control app-form-control-sm h-9 w-full tabular-nums"
+                        inputMode={row.amount ? 'decimal' : 'numeric'}
+                        placeholder={row.amount ? '0.00' : '0'}
+                        value={form[key]}
+                        disabled={loadingLocation}
+                        onChange={(e) => {
+                          const value = row.amount ? formatAmountInput(e.target.value) : e.target.value.replace(/[^\d]/g, '');
+                          setForm((p) => ({ ...p, [key]: value }));
+                        }}
+                      />
+                    ))}
+                  </React.Fragment>
+                ))}
+              </div>
+            </div>
+
                   </div>
                 )}
               </fieldset>
@@ -3745,7 +3730,7 @@ function SectionSaveBar({
 /** Inline editable table for a locator's child rows (stockholders, contact persons):
  * numbered rows, a text input per cell, "×" to drop a row, "+" to add one. Rows keep
  * their `id` so the server can update them in place instead of recreating them. */
-function RowsEditor<T extends { id?: number }>({
+export function RowsEditor<T extends { id?: number }>({
   rows,
   columns,
   disabled,

@@ -117,6 +117,21 @@ const SCENARIOS: Scenario[] = [
       },
       {
         lane: 'bdo2',
+        title: 'Encode proponent information',
+        auto: [
+          "Saves to the locator's own record — the same details show on Registered Locator once it's approved (nothing is re-typed).",
+          'Only the assigned evaluator can edit, while the review is open; the Manager sees it read-only.',
+          'Locked once the review is submitted.',
+        ],
+        status: 'IN_REVIEW',
+        where: 'Evaluation Queue · Proponent Information / Performance Commitment',
+        details: [
+          'Proponent Information: business name, principal and lease address, location, land use, proposed lease term, contact no., business activities, contact person and authorized signatory.',
+          'Performance Commitment: the investment and number of employees committed. The Actual figures are the Account Officer’s once it’s a Registered Locator.',
+        ],
+      },
+      {
+        lane: 'bdo2',
         title: 'Verify / reject documents',
         auto: ["Records the decision and remarks per requirement.", "Keeps Verify / Reject locked until the locator has uploaded a file.", "Tells the locator when a requirement is rejected, so they can re-upload."],
         status: 'IN_REVIEW',

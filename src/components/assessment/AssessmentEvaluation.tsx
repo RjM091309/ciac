@@ -38,6 +38,8 @@ import { requestNotificationsRefresh } from '../../lib/notificationRefresh';
 import { ApprovalDetail } from '../approval/ApprovalIssuance';
 import { DatePicker, parseYmd, toYmd } from '../ui/DatePicker';
 import { useLiveRefresh } from '../../lib/liveData';
+import { ProponentInfoTab } from './ProponentInfoTab';
+import { PerformanceCommitmentTab } from './PerformanceCommitmentTab';
 
 const MENU_KEY = 'assessment:queue';
 
@@ -1118,7 +1120,19 @@ function StatTile({
   );
 }
 
-const TABS = ['Overview', 'Compliance', 'Terms', 'Contract', 'Recommendation', 'Activity Log'] as const;
+// Proponent Information (B-09) and Performance Commitment (B-10) are the BDO's
+// encoding of the proponent — same records the Registered Locator shows once
+// approved.
+const TABS = [
+  'Overview',
+  'Proponent Information',
+  'Performance Commitment',
+  'Compliance',
+  'Terms',
+  'Contract',
+  'Recommendation',
+  'Activity Log',
+] as const;
 type Tab = (typeof TABS)[number];
 
 function AssessmentDetail({
@@ -1170,10 +1184,12 @@ function AssessmentDetail({
   }, [load]);
 
   // Land on the tab where the stage's work happens — Compliance while In
-  // Review, Recommendation once it's For Recommendation — both when the
-  // application is opened and the moment it moves into that stage. A deep
-  // link's explicit ?tab= still wins on open.
+  // Review, Recommendation once For Recommendation (else Overview) — on open
+  // and whenever the stage moves. A deep link's ?tab= wins on open. No tab is
+  // shown as selected until the first load says which one, so it doesn't
+  // flash Overview and then jump.
   const prevStageRef = useRef<string | null>(null);
+  const [tabReady, setTabReady] = useState(Boolean(initialTab));
   const stage = data?.assessment?.stage ?? null;
   useEffect(() => {
     if (!stage) return;
@@ -1184,6 +1200,7 @@ function AssessmentDetail({
       setTab(target);
     }
     prevStageRef.current = stage;
+    setTabReady(true);
   }, [stage, initialTab]);
 
   const run = useCallback(
@@ -1227,7 +1244,7 @@ function AssessmentDetail({
         onClick={onClose}
       />
       <motion.div
-        className="relative z-10 h-full w-full max-w-3xl border-l shadow-2xl flex flex-col"
+        className="relative z-10 h-full w-full max-w-[1280px] border-l shadow-2xl flex flex-col"
         style={{ backgroundColor: 'var(--surface)', borderColor: 'var(--border)' }}
         initial={{ x: '100%' }}
         animate={{ x: 0 }}
@@ -1262,7 +1279,7 @@ function AssessmentDetail({
               onClick={() => setTab(t)}
               className={cn(
                 'px-3 py-2 text-[12px] font-semibold border-b-2 -mb-px whitespace-nowrap transition-colors',
-                tab === t
+                tabReady && tab === t
                   ? 'border-[var(--text)] text-[var(--text)]'
                   : 'border-transparent text-secondary hover:text-[var(--text)]'
               )}
@@ -1273,12 +1290,26 @@ function AssessmentDetail({
         </div>
 
         <div className="flex-1 overflow-y-auto p-4">
-          {loading || !data ? (
+          {loading || !data || !tabReady ? (
             <div className="flex items-center justify-center py-16">
               <Loader2 className="animate-spin text-secondary" />
             </div>
           ) : tab === 'Overview' ? (
             <OverviewTab data={data} evaluators={evaluators} perms={perms} busy={busy} run={run} />
+          ) : tab === 'Proponent Information' ? (
+            <ProponentInfoTab
+              applicationId={data.assessment.application_id}
+              canEdit={perms.canEdit}
+              // A renamed proponent shows in the header and the queue right away.
+              onSaved={(businessName) => {
+                setData((prev) =>
+                  prev ? { ...prev, assessment: { ...prev.assessment, proponent_name: businessName } } : prev,
+                );
+                onMutatedRef.current();
+              }}
+            />
+          ) : tab === 'Performance Commitment' ? (
+            <PerformanceCommitmentTab applicationId={data.assessment.application_id} canEdit={perms.canEdit} />
           ) : tab === 'Compliance' ? (
             <ComplianceTab data={data} canEdit={perms.canEdit} busy={busy} run={run} />
           ) : tab === 'Terms' ? (

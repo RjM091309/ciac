@@ -24,6 +24,12 @@ router.post("/:applicationId/return-to-officer", requireAssessmentAccess("edit")
 router.post("/:applicationId/for-approval", requireAssessmentAccess("edit"), controller.forApproval);
 
 // Terms and conditions (Level 2 writes and sends them; the locator agrees in the portal).
+// Proponent Information tab (B-09): the BDO encodes the proponent's details.
+router.get("/:applicationId/profile", requireAssessmentAccess("view"), controller.getProfile);
+router.put("/:applicationId/profile", requireAssessmentAccess("edit"), controller.saveProfile);
+// Performance Commitment tab (B-10): the BDO encodes the commitment figures.
+router.get("/:applicationId/commitment", requireAssessmentAccess("view"), controller.getCommitment);
+router.put("/:applicationId/commitment", requireAssessmentAccess("edit"), controller.saveCommitment);
 router.get("/:applicationId/terms", requireAssessmentAccess("view"), controller.getTerms);
 router.put("/:applicationId/terms", requireAssessmentAccess("edit"), controller.saveTerms);
 router.post("/:applicationId/terms/send", requireAssessmentAccess("edit"), controller.sendTerms);

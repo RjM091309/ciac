@@ -1984,7 +1984,7 @@ function joinLeaseTerm(years: string, months: string) {
 }
 
 /** Proposed lease term as years plus months, e.g. 1 yr 2 mos (up to 99 years). */
-function LeaseTermInput({
+export function LeaseTermInput({
   value,
   unit,
   onChange,

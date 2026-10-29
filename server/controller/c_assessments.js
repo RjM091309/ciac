@@ -370,6 +370,194 @@ exports.forApproval = async (req, res) => {
   }
 };
 
+/* -------------- Proponent Information (Evaluation Queue tab) -------------- */
+// The BDO encodes the proponent's details while evaluating (B-09). Same
+// dbo.proponents row (and contact / signatory tables) the Registered Locator
+// shows once approved — nothing is copied. Same edit rule as the Terms tab:
+// the assigned Level 2 while the review is open; Level 1 views; locked once
+// the review is submitted (admin Reopen).
+
+const PROFILE_FIELDS = [
+  "business_name",
+  "address",
+  "lease_address",
+  "location",
+  "land_use_id",
+  "proposed_lease_term_years",
+  "proposed_lease_term_unit",
+  "contact_no",
+  "business_activities",
+];
+
+/** { editable, reason } for the profile tabs of one application. */
+async function profileEditState(req, applicationId) {
+  const isAdmin = String(req.user?.role || "").toLowerCase() === "admin";
+  if (!isAdmin && (await scopeFor(req)).manager) {
+    return { editable: false, reason: "Encoded by the assigned evaluator — view only for Level 1." };
+  }
+  const asm = await Assessment.getOrCreateAssessment(applicationId, null);
+  if (["FOR_RECOMMENDATION", "COMPLETED", "RETURNED"].includes(String(asm?.stage || ""))) {
+    return { editable: false, reason: "The review was already submitted — the proponent's details can't change now." };
+  }
+  return { editable: true, reason: null };
+}
+
+async function profilePayload(req, applicationId) {
+  const app = await Workflow.getApplicationById(applicationId);
+  if (!app?.proponent_id) return null;
+  const p = await Proponent.getProponentById(app.proponent_id);
+  if (!p) return null;
+  const data = { proponent_id: p.id };
+  for (const key of PROFILE_FIELDS) data[key] = p[key] ?? null;
+  return {
+    ...data,
+    login_email: p.login_email ?? null,
+    contract_type_name: p.contract_type_name ?? null,
+    business_type: p.business_type ?? null,
+    land_use_name: p.land_use_name ?? null,
+    contact_persons: p.contact_persons || [],
+    signatories: p.signatories || [],
+    ...(await profileEditState(req, applicationId)),
+  };
+}
+
+exports.getProfile = async (req, res) => {
+  try {
+    const id = appIdParam(req, res);
+    if (id === null) return undefined;
+    if (!(await ensureCanAct(req, res, id))) return undefined;
+    const data = await profilePayload(req, id);
+    if (!data) return res.status(404).json({ success: false, message: "Proponent not found" });
+    return res.json({ success: true, data });
+  } catch (error) {
+    return fail(res, error, "Get proponent information");
+  }
+};
+
+exports.saveProfile = async (req, res) => {
+  try {
+    const id = appIdParam(req, res);
+    if (id === null) return undefined;
+    if (!(await ensureCanAct(req, res, id))) return undefined;
+    const state = await profileEditState(req, id);
+    if (!state.editable) return res.status(409).json({ success: false, message: state.reason });
+
+    const app = await Workflow.getApplicationById(id);
+    if (!app?.proponent_id) return res.status(404).json({ success: false, message: "Proponent not found" });
+    const b = req.body || {};
+    const { leaseTermValue, leaseTermUnit, isValidLeaseTerm, LEASE_TERM_MESSAGE } = require("./c_users").leaseTerm;
+
+    if (b.business_name !== undefined && !String(b.business_name || "").trim()) {
+      return res.status(400).json({ success: false, message: "Business name is required." });
+    }
+    if (!isValidLeaseTerm(b.proposed_lease_term_years, b.proposed_lease_term_unit)) {
+      return res.status(400).json({ success: false, message: LEASE_TERM_MESSAGE });
+    }
+    if (b.land_use_id) {
+      const LandUse = require("../models/LandUse");
+      if (!(await LandUse.listLandUses()).some((r) => Number(r.id) === Number(b.land_use_id))) {
+        return res.status(400).json({ success: false, message: "Unknown land use" });
+      }
+    }
+    const text = (v) => (v === undefined ? undefined : String(v || "").trim() || null);
+    const patch = {
+      business_name: b.business_name !== undefined ? String(b.business_name).trim() : undefined,
+      address: text(b.address),
+      lease_address: text(b.lease_address),
+      location: text(b.location),
+      land_use_id: b.land_use_id !== undefined ? (b.land_use_id ? Number(b.land_use_id) : null) : undefined,
+      proposed_lease_term_years:
+        b.proposed_lease_term_years !== undefined ? leaseTermValue(b.proposed_lease_term_years) : undefined,
+      proposed_lease_term_unit: b.proposed_lease_term_unit !== undefined ? leaseTermUnit(b.proposed_lease_term_unit) : undefined,
+      contact_no: text(b.contact_no),
+      business_activities: text(b.business_activities),
+      contact_persons: Array.isArray(b.contact_persons) ? b.contact_persons : undefined,
+      signatories: Array.isArray(b.signatories) ? b.signatories : undefined,
+      updated_by: req.user?.id ?? null,
+    };
+    await Proponent.updateProponent(app.proponent_id, patch);
+    await AuditLog.record({
+      actorId: req.user?.id,
+      actorUsername: req.user?.username,
+      action: "PROPONENT_PROFILE_UPDATED",
+      entityType: "proponent",
+      entityId: app.proponent_id,
+      details: { application_no: app.application_no, section: "proponent_information", via: "evaluation" },
+      req,
+    });
+    return res.json({ success: true, data: await profilePayload(req, id) });
+  } catch (error) {
+    return fail(res, error, "Save proponent information");
+  }
+};
+
+/* ------------ Performance Commitment (Evaluation Queue tab, B-10) ---------- */
+// What the proponent commits to (investment, employees), encoded by the BDO
+// while evaluating. Same dbo.proponent_investment row the Registered Locator's
+// Performance Commitment card shows; the BDO sets only the Commitment column —
+// the Actual figures are the Account Officer's once it's a locator. Same edit
+// rule as Proponent Information.
+
+async function commitmentPayload(req, applicationId) {
+  const app = await Workflow.getApplicationById(applicationId);
+  if (!app?.proponent_id) return null;
+  const Investment = require("../models/Investment");
+  const figures = await Investment.getForProponent(app.proponent_id);
+  return {
+    investment_commitment: figures.investment_commitment ?? null,
+    employee_commitment: figures.employee_commitment ?? null,
+    // Shown read-only for reference; only the Registered Locator edits these.
+    investment_actual: figures.investment_actual ?? null,
+    employee_actual: figures.employee_actual ?? null,
+    ...(await profileEditState(req, applicationId)),
+  };
+}
+
+exports.getCommitment = async (req, res) => {
+  try {
+    const id = appIdParam(req, res);
+    if (id === null) return undefined;
+    if (!(await ensureCanAct(req, res, id))) return undefined;
+    const data = await commitmentPayload(req, id);
+    if (!data) return res.status(404).json({ success: false, message: "Proponent not found" });
+    return res.json({ success: true, data });
+  } catch (error) {
+    return fail(res, error, "Get performance commitment");
+  }
+};
+
+exports.saveCommitment = async (req, res) => {
+  try {
+    const id = appIdParam(req, res);
+    if (id === null) return undefined;
+    if (!(await ensureCanAct(req, res, id))) return undefined;
+    const state = await profileEditState(req, id);
+    if (!state.editable) return res.status(409).json({ success: false, message: state.reason });
+    const app = await Workflow.getApplicationById(id);
+    if (!app?.proponent_id) return res.status(404).json({ success: false, message: "Proponent not found" });
+    const b = req.body || {};
+    const text = (v) => (v === undefined ? undefined : String(v ?? "").trim() || null);
+    // Commitment only — the Actual columns are left as they are.
+    await Proponent.saveInvestment(
+      app.proponent_id,
+      { investment_commitment: text(b.investment_commitment), employee_commitment: text(b.employee_commitment) },
+      req.user?.id ?? null
+    );
+    await AuditLog.record({
+      actorId: req.user?.id,
+      actorUsername: req.user?.username,
+      action: "PROPONENT_INVESTMENT_UPDATED",
+      entityType: "proponent",
+      entityId: app.proponent_id,
+      details: { application_no: app.application_no, section: "performance_commitment", via: "evaluation" },
+      req,
+    });
+    return res.json({ success: true, data: await commitmentPayload(req, id) });
+  } catch (error) {
+    return fail(res, error, "Save performance commitment");
+  }
+};
+
 /* ------------------------- Terms and conditions -------------------------- */
 
 const Terms = require("../models/ApplicationTerms");

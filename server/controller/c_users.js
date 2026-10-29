@@ -122,6 +122,8 @@ function isValidLeaseTerm(v, unit) {
 }
 const LEASE_TERM_MESSAGE =
   "Proposed lease term must be more than 0 and up to 99 years 11 months.";
+// Also used by the Evaluation Queue's Proponent Information tab (c_assessments.js).
+exports.leaseTerm = { leaseTermValue, leaseTermUnit, isValidLeaseTerm, LEASE_TERM_MESSAGE };
 
 /** Land Use (File Maintenance) picked on the Locator Accounts form must exist. */
 async function isKnownLandUse(id) {
