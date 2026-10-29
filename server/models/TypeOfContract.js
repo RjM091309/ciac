@@ -45,6 +45,40 @@ async function seedDefaults() {
 }
 
 
+/** "Direct  Lease " -> "DIRECT LEASE": one space between words, none at the
+ * ends, uppercase (as the defaults are seeded). */
+function normalizeName(name) {
+  if (name === undefined || name === null) return name;
+  return String(name).replace(/\s+/g, " ").trim().toUpperCase();
+}
+
+/** Fixes names saved with extra spaces (e.g. "DIRECT  LEASE" typed in File
+ * Maintenance): collapses repeated spaces and trims the ends. Same row and id,
+ * so requirements/locators/applications pointing at it are unaffected. A row
+ * whose fixed name already belongs to another row is left as is (the name is
+ * unique). Runs once per backend start. */
+async function fixSpacedNames() {
+  try {
+    await updateData(`
+      DECLARE @changed INT = 1;
+      WHILE @changed > 0
+      BEGIN
+        UPDATE t
+        SET t.name = LTRIM(RTRIM(REPLACE(t.name, '  ', ' '))), t.updated_at = GETDATE()
+        FROM dbo.type_of_contract t
+        WHERE (CHARINDEX('  ', t.name) > 0 OR t.name LIKE ' %')
+          AND NOT EXISTS (
+            SELECT 1 FROM dbo.type_of_contract o
+            WHERE o.id <> t.id AND o.name = LTRIM(RTRIM(REPLACE(t.name, '  ', ' ')))
+          );
+        SET @changed = @@ROWCOUNT;
+      END
+    `);
+  } catch (error) {
+    console.error("Type of contract name cleanup failed:", error);
+  }
+}
+
 let ensurePromise = null;
 
 /** Creates the table and seeds the defaults. Memoised per process: every model call awaits
@@ -78,6 +112,7 @@ async function createSchema() {
     END
   `);
   await seedDefaults();
+  await fixSpacedNames();
 }
 
 function mapRow(row) {
@@ -115,7 +150,7 @@ async function createTypeOfContract({ name, created_by, is_active = 1 }) {
     OUTPUT INSERTED.id
     VALUES (@param0, @param1, NULL, GETDATE(), NULL, @param2)
     `,
-    [name, toInt(created_by), is_active ? 1 : 0]
+    [normalizeName(name), toInt(created_by), is_active ? 1 : 0]
   );
   return getTypeOfContractById(result?.recordset?.[0]?.id);
 }
@@ -128,7 +163,7 @@ async function updateTypeOfContract(id, { name, is_active, updated_by }) {
     sets.push(sqlFrag.replace("?", `@param${params.length}`));
     params.push(value);
   };
-  if (name !== undefined) pushSet("name = ?", name);
+  if (name !== undefined) pushSet("name = ?", normalizeName(name));
   if (is_active !== undefined) pushSet("is_active = ?", is_active ? 1 : 0);
   const updatedBy = toInt(updated_by);
   if (updatedBy !== null) pushSet("updated_by = ?", updatedBy);

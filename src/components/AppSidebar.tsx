@@ -409,7 +409,7 @@ export function AppSidebar({
 
   const systemSettingsItems: SidebarLeaf[] = [
     canView('settings:users') && { key: 'settings:users', label: 'User Management', active: view === 'settings:users', onClick: () => onViewChange('settings:users') },
-    canView('settings:locator-users') && { key: 'settings:locator-users', label: 'Locator Accounts', active: view === 'settings:locator-users', onClick: () => onViewChange('settings:locator-users') },
+    canView('settings:locator-users') && { key: 'settings:locator-users', label: 'Proponent Accounts', active: view === 'settings:locator-users', onClick: () => onViewChange('settings:locator-users') },
     canView('settings:control-panel') && { key: 'settings:control-panel', label: 'Control Panel', active: view === 'settings:control-panel', onClick: () => onViewChange('settings:control-panel') },
     canView('settings:audit-log') && { key: 'settings:audit-log', label: 'Audit Log', active: view === 'settings:audit-log', onClick: () => onViewChange('settings:audit-log') },
     showPortalSettings && { key: 'settings:portal', label: 'Portal Settings', active: view === 'settings:portal', onClick: () => onViewChange('settings:portal') },

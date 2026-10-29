@@ -246,7 +246,7 @@ export const LANDING_CONFIG: Record<AppView, LandingConfig> = {
     },
   },
   'settings:locator-users': {
-    title: 'Locator Accounts',
+    title: 'Proponent Accounts',
     description: 'Manage login accounts for registered locators, kept separate from staff accounts.',
     badge: 'System',
     icon: Users,

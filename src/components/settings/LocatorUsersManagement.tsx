@@ -144,7 +144,7 @@ export function LocatorUsersManagement({
   // Application's own create/continue flow is gone — clicking a draft's
   // Company/Locator cell (or its "Draft ->" button) opens this instead of
   // navigating to Assessment (which excludes drafts entirely). Shows the
-  // same field set as New Locator Account (for context — the account and
+  // same field set as New Proponent Account (for context — the account and
   // profile are already fixed at this point, read-only here); only
   // Application Type is actually editable, mirroring
   // ApplicationsWorkflow.tsx's openContinueDraft/submitApplication.
@@ -338,7 +338,7 @@ export function LocatorUsersManagement({
   const locatorRole = useMemo(() => allRoles.find((r) => isLocatorRoleName(r.name)) || null, [allRoles]);
 
   // A genuine locator account always holds exactly one role (Locator) — the
-  // New Locator Account form only ever assigns that single role_id. Matching
+  // New Proponent Account form only ever assigns that single role_id. Matching
   // "holds Locator among possibly several roles" instead would also sweep in
   // a multi-role staff account (e.g. admin also holding Proponent, for the
   // dashboard role-preview switcher) that isn't really a locator.
@@ -651,7 +651,7 @@ export function LocatorUsersManagement({
     setFieldErrors({});
     try {
       if (!editing) {
-        // Locator Accounts + New Application, merged into one step (the
+        // Proponent Accounts + New Application, merged into one step (the
         // business confirmed 1 account = 1 application) — this single call
         // creates the login account, its business profile, AND its first
         // application together, instead of two separate flows.
@@ -920,7 +920,7 @@ export function LocatorUsersManagement({
 
   // Same destination ApplicationsWorkflow.tsx's own goToApplication() uses —
   // a locator account's linked application is opened the same way whether
-  // you got there from the Applications queue or from Locator Accounts.
+  // you got there from the Applications queue or from Proponent Accounts.
   // DRAFT is the one exception: Assessment excludes drafts entirely, so
   // that click opens the Continue Draft panel instead.
   function goToApplication(u: UserRow, app: { id: number; application_no: string; application_type: string; status: string; contract_type_id: number | null }) {
@@ -988,7 +988,7 @@ export function LocatorUsersManagement({
     try {
       // Still a draft, so unlike the account/business fields shown read-only
       // everywhere else, these are genuinely fixable here — same PUT the
-      // Edit Locator Account form itself uses.
+      // Edit Proponent Account form itself uses.
       const userRes = await fetch(api(`/api/users/${continuingDraft.userId}`), {
         method: 'PUT',
         credentials: 'include',
@@ -1209,7 +1209,7 @@ export function LocatorUsersManagement({
     <>
       <SidePanel
         open={isCreateOpen}
-        title={editing ? 'Edit Locator Account' : startingIntake ? `New Application — ${startingIntake.business_name}` : 'New Locator Account'}
+        title={editing ? 'Edit Proponent Account' : startingIntake ? `New Application — ${startingIntake.business_name}` : 'New Proponent Account'}
         subtitle="Users table, locked to the Locator role"
         onClose={() => setIsCreateOpen(false)}
         onSave={() => save(false)}
@@ -1548,7 +1548,7 @@ export function LocatorUsersManagement({
       >
         <div className="flex items-center justify-between mb-3 gap-2">
           <h3 className="text-sm font-bold tracking-tight" style={{ color: 'var(--text)' }}>
-            Locator Account List
+            Proponent Account List
           </h3>
           {canAdd && newRecordAllowed ? (
             <button
@@ -1577,7 +1577,7 @@ export function LocatorUsersManagement({
             />
             <input
               type="text"
-              placeholder="Search locator accounts..."
+              placeholder="Search proponent accounts..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="h-9 rounded-full pl-9 pr-3 text-xs w-full focus:outline-none focus:ring-1 focus:ring-[var(--border)] text-[var(--text)] placeholder:text-[var(--text-muted)] transition-all"
@@ -1618,11 +1618,11 @@ export function LocatorUsersManagement({
           </div>
         ) : filteredUsers.length === 0 ? (
           <EmptyState
-            title="No locator accounts found"
+            title="No proponent accounts found"
             description={
               searchQuery
                 ? 'Try adjusting your search filters.'
-                : 'There are no locator accounts to show here yet. Create one to get started.'
+                : 'There are no proponent accounts to show here yet. Create one to get started.'
             }
             action={
               !searchQuery && canAdd && newRecordAllowed ? (
@@ -1632,7 +1632,7 @@ export function LocatorUsersManagement({
                   onClick={onNewRecord}
                   disabled={!locatorRole}
                 >
-                  Create Locator Account
+                  Create Proponent Account
                 </button>
               ) : undefined
             }
@@ -1816,7 +1816,7 @@ export function LocatorUsersManagement({
 
       <ConfirmModal
         open={confirmDeactivateId !== null}
-        title="Deactivate this locator account?"
+        title="Deactivate this proponent account?"
         description="This locator will no longer be able to access the portal unless reactivated."
         confirmText="Deactivate"
         danger
@@ -1831,7 +1831,7 @@ export function LocatorUsersManagement({
 
       <ConfirmModal
         open={confirmReactivateId !== null}
-        title="Reactivate this locator account?"
+        title="Reactivate this proponent account?"
         description="This locator will regain access to the portal."
         confirmText="Reactivate"
         loading={saving}
@@ -1845,7 +1845,7 @@ export function LocatorUsersManagement({
 
       <ConfirmModal
         open={confirmSuspendId !== null}
-        title="Suspend this locator account?"
+        title="Suspend this proponent account?"
         description="A temporary hold — easier to lift than a deactivation. The locator can't log in, and any active session ends immediately."
         confirmText="Suspend"
         danger

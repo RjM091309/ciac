@@ -260,6 +260,18 @@ type ContractTypeOption = {
   is_active: number;
 };
 
+/** New Locator panel heading, by the Type of Contract picked (matched on the
+ * File Maintenance name). No type picked, or one not listed here: "New Locator". */
+function newLocatorTitle(contractTypeName: string | null | undefined): string {
+  // Extra spaces are ignored ("DIRECT  LEASE" as typed in File Maintenance).
+  const name = String(contractTypeName || '').replace(/\s+/g, ' ').trim().toUpperCase();
+  if (name === 'DIRECT LEASE' || name === 'SHORT TERM LEASE') return 'New Lessee';
+  if (name === 'MOA' || name.includes('(MOA)') || name.startsWith('MEMORANDUM OF AGREEMENT')) return 'New Development Partner';
+  if (name === 'MOU' || name.includes('(MOU)') || name.startsWith('MEMORANDUM OF UNDERSTANDING')) return 'New Lessee (Supplemental)';
+  if (name.startsWith('SUBLEASE')) return 'Sub Lessee';
+  return 'New Locator';
+}
+
 // File Maintenance lookup (Land Use) — same shape as the contract types.
 type LookupOption = ContractTypeOption;
 
@@ -276,7 +288,7 @@ type LocatorsData = {
 // Industry = Application Types catalog, keyed by code (what applications store).
 type IndustryOption = { id: number; code: string; name: string; is_active: number };
 
-// "Stockholders Information" / "Contact Person" tabs — child tables (dbo.stockholder,
+// "SEC Registration Information" / "Contact Person" tabs — child tables (dbo.stockholder,
 // dbo.contact_person) synced by id on every save (rows removed here are deactivated).
 type StockholderRow = {
   id?: number;
@@ -565,16 +577,22 @@ export function ProponentsManagement({
   // Set after a save is blocked by an incomplete property row: outlines the
   // blank fields in red until they're filled in.
   const [showPropertyErrors, setShowPropertyErrors] = useState(false);
-  // Switching a row to Standard replaces its MGL with Area × Rate — asked
-  // in the app's own confirm dialog first.
-  const [standardSwitch, setStandardSwitch] = useState<{ index: number; current: string; computed: string } | null>(null);
+  // Changing a row's Rate type changes how its MGL/MO works, so it's
+  // confirmed first in the app's own dialog: to Standard replaces a typed MGL
+  // with Area × Rate; to Non-standard stops computing it (value kept, typed by hand).
+  const [rateSwitch, setRateSwitch] = useState<{
+    index: number;
+    to: PropertyRateType;
+    current: string;
+    computed: string;
+  } | null>(null);
   // Documents picked on the Documents tab while creating a New Locator —
   // uploaded once the POST returns the new locator's id.
   const [pendingDocs, setPendingDocs] = useState<PendingLocatorDocument[]>([]);
   // Mirrors the legacy BRIDGE system's Locator's Information tab strip —
   // only Profile has content so far, the rest are placeholders.
   const [activeProfileTab, setActiveProfileTab] = useState<
-    'Profile' | 'Stockholders Information' | 'Contact Person' | 'Documents' | 'Investment'
+    'Profile' | 'SEC Registration Information' | 'Contact Person' | 'Documents' | 'Investment'
   >('Profile');
   const [confirmDeactivateId, setConfirmDeactivateId] = useState<number | null>(null);
   const [confirmReactivateId, setConfirmReactivateId] = useState<number | null>(null);
@@ -1702,7 +1720,16 @@ export function ProponentsManagement({
 
       <SidePanel
         open={isCreateOpen}
-        title={editing ? 'Locator Information' : 'New Locator'}
+        title={
+          editing
+            ? 'Locator Information'
+            : // Same lookup the Type of Contract select uses to show its value.
+              newLocatorTitle(
+                contractTypeOptions
+                  .find((o) => o.value === String(form.contract_type_id ?? ''))
+                  ?.label.replace(/ \(inactive\)$/, ''),
+              )
+        }
         subtitle="Locators master table"
         onClose={() => setIsCreateOpen(false)}
         onSave={() => void save()}
@@ -2172,7 +2199,7 @@ export function ProponentsManagement({
                 Information form — only Profile has content built out so far. */}
             <div className="folders">
               <div className="tabs overflow-x-auto">
-                {(['Profile', 'Stockholders Information', 'Contact Person', 'Documents', 'Investment'] as const).map((tab) => (
+                {(['Profile', 'SEC Registration Information', 'Contact Person', 'Documents', 'Investment'] as const).map((tab) => (
                   <div
                     key={tab}
                     className={`tab ${activeProfileTab === tab ? 'active' : ''}`}
@@ -2185,7 +2212,7 @@ export function ProponentsManagement({
             </div>
             <div className="contents">
               <fieldset disabled={formLocked && activeProfileTab !== 'Documents'} className="content min-w-0">
-                {activeProfileTab === 'Stockholders Information' ? (
+                {activeProfileTab === 'SEC Registration Information' ? (
                   <div className="flex flex-col gap-3">
                     <RowsEditor<StockholderRow>
                       rows={form.stockholders}
@@ -2483,7 +2510,7 @@ export function ProponentsManagement({
 
             {/* Property schedule (dbo.proponent_properties) — an inline editable
                 table synced wholesale on Save, add/remove-row buttons on the right. */}
-            <div className="flex flex-col sm:flex-row gap-2 sm:items-start">
+            <div className="flex flex-col sm:flex-row gap-2 sm:items-stretch">
               {form.properties.length === 0 ? (
                 <div
                   className="flex-1 min-w-0 rounded-lg border border-dashed px-3 py-2.5 text-[11px] text-secondary"
@@ -2593,12 +2620,14 @@ export function ProponentsManagement({
                             }
                             onChange={(e) => {
                               const next = e.target.value as PropertyRateType;
-                              if (next === 'STANDARD') {
-                                const computed = computeStandardMgl(row);
-                                if (row.mgl_mo.trim() && row.mgl_mo !== computed) {
-                                  setStandardSwitch({ index: i, current: row.mgl_mo, computed });
-                                  return;
-                                }
+                              const computed = computeStandardMgl(row);
+                              const ask =
+                                next === 'STANDARD'
+                                  ? Boolean(row.mgl_mo.trim()) && row.mgl_mo !== computed
+                                  : row.rate_type === 'STANDARD';
+                              if (ask) {
+                                setRateSwitch({ index: i, to: next, current: row.mgl_mo, computed });
+                                return;
                               }
                               setForm((p) => ({
                                 ...p,
@@ -2740,7 +2769,7 @@ export function ProponentsManagement({
                 </table>
               </div>
               )}
-              <div className="flex flex-row sm:flex-col justify-end gap-1.5 shrink-0">
+              <div className="flex flex-row sm:flex-col justify-end sm:justify-between gap-1.5 shrink-0">
                 <div className="relative">
                   <button
                     type="button"
@@ -2788,7 +2817,9 @@ export function ProponentsManagement({
                     </>
                   ) : null}
                 </div>
-                {/* Also shown after removing the last row, so that removal can be saved. */}
+                {/* Saves the whole schedule (every row), so it sits at the bottom of the
+                    table rather than beside any one row. Also shown after removing the
+                    last row, so that removal can be saved. */}
                 {(form.properties.length > 0 || sectionDirty.properties) && (
                   <SectionSaveBar
                     allowed={editing ? canEdit : canAdd}
@@ -2934,26 +2965,30 @@ export function ProponentsManagement({
       </SidePanel>
 
       <ConfirmModal
-        open={standardSwitch !== null}
-        title="Switch to Standard?"
+        open={rateSwitch !== null}
+        title={rateSwitch?.to === 'NON_STANDARD' ? 'Switch to Non-standard?' : 'Switch to Standard?'}
         description={
-          standardSwitch
-            ? `MGL/MO ${standardSwitch.current} will be replaced by Area × Rate${
-                standardSwitch.computed ? ` (${standardSwitch.computed})` : ' — blank until both Area and Rate are filled in'
-              }.`
-            : ''
+          !rateSwitch
+            ? ''
+            : rateSwitch.to === 'NON_STANDARD'
+              ? `MGL/MO will no longer be computed from Area × Rate. You will enter the amount value manually.${
+                  rateSwitch.current ? ` The current value (${rateSwitch.current}) will be kept.` : ''
+                }`
+              : `MGL/MO ${rateSwitch.current} will be replaced by Area × Rate${
+                  rateSwitch.computed ? ` (${rateSwitch.computed})` : ' — blank until both Area and Rate are filled in'
+                }.`
         }
-        confirmText="Switch to Standard"
-        onCancel={() => setStandardSwitch(null)}
+        confirmText={rateSwitch?.to === 'NON_STANDARD' ? 'Switch to Non-standard' : 'Switch to Standard'}
+        onCancel={() => setRateSwitch(null)}
         onConfirm={() => {
-          if (standardSwitch) {
-            const { index } = standardSwitch;
+          if (rateSwitch) {
+            const { index, to } = rateSwitch;
             setForm((p) => ({
               ...p,
-              properties: p.properties.map((r, ri) => (ri === index ? updatePropertyRow(r, { rate_type: 'STANDARD' }) : r)),
+              properties: p.properties.map((r, ri) => (ri === index ? updatePropertyRow(r, { rate_type: to }) : r)),
             }));
           }
-          setStandardSwitch(null);
+          setRateSwitch(null);
         }}
       />
 

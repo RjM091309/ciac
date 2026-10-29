@@ -36,7 +36,7 @@ const OTHERS = '__others';
 const label = (n: string) => (n === NOT_SPECIFIED ? 'Not specified' : n);
 
 /** How many stockholders each locator has, and their nationalities — from
- * the Stockholders Information tab of each locator's profile. */
+ * the SEC Registration Information tab of each locator's profile. */
 export function StockholdersReport({ navigate }: { navigate?: (to: string, opts?: { replace?: boolean }) => void }) {
   const [data, setData] = useState<Data | null>(null);
   const [loading, setLoading] = useState(true);
@@ -484,7 +484,7 @@ function WithoutStockholdersDialog({
           <div>
             <h3 className="text-sm font-bold">No stockholder info ({rows.length})</h3>
             <p className="text-[11px] text-secondary mt-0.5">
-              Active locators with nothing on their Stockholders Information tab{onOpen ? ' · click one to open it in Registered Locator' : ''}.
+              Active locators with nothing on their SEC Registration Information tab{onOpen ? ' · click one to open it in Registered Locator' : ''}.
             </p>
           </div>
           <button type="button" onClick={onClose} className="p-1 rounded text-secondary" aria-label="Close">

@@ -781,7 +781,7 @@ input[type='week']:not(:disabled)::-webkit-calendar-picker-indicator {
    each tab reads as a physical folder tab, and the active one visually
    merges into the content pane below it. Tab width is intrinsic (padding-
    based) rather than the fixed px in the original design, so long labels
-   like "Stockholders Information" aren't clipped; the slanted edge is
+   like "SEC Registration Information" aren't clipped; the slanted edge is
    positioned with a `left: 100%` percentage instead of a fixed offset so it
    still lines up correctly at any tab width. */
 .folders {

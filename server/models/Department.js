@@ -11,7 +11,7 @@ const DEFAULT_DEPARTMENTS = [
   ["MD", "MARKETING DEPARTMENT"],
   ["MISD", "MANAGEMENT INFORMATION SYSTEM DEPARTMENT"],
   ["PD", "PROPERTY DEPARTMENT"],
-  ["NBVU", "NEW BUSINESS VENTURE UNIT"],
+  ["NBVU", "NEW BUSINESS VENTURES UNIT"],
   ["OP", "OFFICE OF THE PRESIDENT AND CEO"],
   ["RMD", "RECORDS MANAGEMENT DEPARTMENT"],
   ["AD", "ADMINISTRATIVE DEPARTMENT"],
@@ -54,6 +54,24 @@ async function seedDefaultDepartments() {
   }
 }
 
+// Corrected wordings for departments seeded under an older name. Only a row
+// still holding the exact old name is renamed (same row and id), so a name an
+// admin has since changed is left alone. Runs on every backend start.
+const DEPARTMENT_RENAMES = [["NBVU", "NEW BUSINESS VENTURE UNIT", "NEW BUSINESS VENTURES UNIT"]];
+
+async function applyDepartmentRenames() {
+  for (const [code, from, to] of DEPARTMENT_RENAMES) {
+    try {
+      await updateData(
+        `UPDATE dbo.department SET name = @param2, updated_at = GETDATE() WHERE code = @param0 AND name = @param1`,
+        [code, from, to]
+      );
+    } catch (error) {
+      console.error(`Department rename ${code} failed:`, error);
+    }
+  }
+}
+
 let ensurePromise = null;
 
 /** Creates the table and seeds the defaults. Memoised per process: every model call
@@ -88,6 +106,7 @@ async function createSchema() {
     END
   `);
   await seedDefaultDepartments();
+  await applyDepartmentRenames();
 }
 
 function mapRow(row) {

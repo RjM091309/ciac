@@ -784,7 +784,7 @@ exports.sendLogin = async (req, res) => {
     if (proponent.login_status !== "PENDING") {
       return res.status(409).json({
         success: false,
-        message: "This login was already sent. To send a new password, use Reset password on Locator Accounts.",
+        message: "This login was already sent. To send a new password, use Reset password on Proponent Accounts.",
       });
     }
     const result = await require("./c_applications").activateLocatorIfPending(id, req.user?.id ?? null);

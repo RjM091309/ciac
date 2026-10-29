@@ -83,7 +83,7 @@ const SCENARIOS: Scenario[] = [
         title: 'Create locator + application',
         auto: ["Generates the application number (NEW-year-…; older ones are APP-year-…).", "Seeds the requirements checklist for the industry type and type of contract.", "Refuses a second application for the same locator.", "On submit: activates the locator’s login and emails a temporary password; emails them that the application was filed."],
         status: 'SUBMITTED',
-        where: 'Locator Accounts',
+        where: 'Proponent Accounts',
         details: [
           'One step: login account, business profile and the application together.',
           'One application per locator — a second one is refused.',
@@ -208,7 +208,7 @@ const SCENARIOS: Scenario[] = [
       {
         lane: 'ao2',
         title: 'Registered Locator',
-        auto: ["Adds the locator to Registered Locator (one row), with the lease term from the contract; from now on it's shown by its LOC-… Ref No (also on Locator Accounts).", "Scopes it so an Account Officer sees only their own locators.", "Counts the permit down to expiry; within 6 months it shows on Renewal Tracking and in Needs Attention.", "At 6 months left, emails the locator to renew (and tells the Account Officer), then a follow-up every month until the renewal is filed — each one logged."],
+        auto: ["Adds the locator to Registered Locator (one row), with the lease term from the contract; from now on it's shown by its LOC-… Ref No (also on Proponent Accounts).", "Scopes it so an Account Officer sees only their own locators.", "Counts the permit down to expiry; within 6 months it shows on Renewal Tracking and in Needs Attention.", "At 6 months left, emails the locator to renew (and tells the Account Officer), then a follow-up every month until the renewal is filed — each one logged."],
         status: 'One row per locator',
         where: 'Registered Locator',
         details: [
