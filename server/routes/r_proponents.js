@@ -97,6 +97,8 @@ router.put("/:id/contacts", requireMenuAccess(MENU_KEY, "edit"), proponentsContr
 router.put("/:id/properties", requireMenuAccess(MENU_KEY, "edit"), proponentsController.requireOwnLocator, proponentsController.saveProperties);
 router.put("/:id/investment", requireMenuAccess(MENU_KEY, "edit"), proponentsController.requireOwnLocator, proponentsController.saveInvestment);
 router.put("/:id/sec-registration", requireMenuAccess(MENU_KEY, "edit"), proponentsController.requireOwnLocator, proponentsController.saveSecRegistration);
+// Sub-lease (A-07): link this locator as a sub-lessee of another, or unlink it.
+router.put("/:id/sublessor", requireMenuAccess(MENU_KEY, "edit"), proponentsController.requireOwnLocator, proponentsController.setSublessor);
 router.patch("/:id/deactivate", requireMenuAccess(MENU_KEY, "delete"), proponentsController.requireOwnLocator, proponentsController.deactivate);
 router.patch("/:id/reactivate", requireMenuAccess(MENU_KEY, "edit"), proponentsController.requireOwnLocator, proponentsController.reactivate);
 

@@ -230,6 +230,7 @@ const SCENARIOS: Scenario[] = [
         details: [
           'The locator now appears in Registered Locator; an Account Officer sees only their own locators.',
           'The Account Officer types the lease’s Ref. Code (never reused) and Date Signed under Lease Agreements; the proponent details the BDO encoded are already there.',
+          'Sub-Lease: each sub-lessee is a locator of its own — added (or linked) from the Sub-Lessees card of the locator it sub-leases from.',
           'The contract permit counts down to expiry — it shows on Renewal Tracking once expiring (6 months left).',
           'The locator gets a renewal reminder email then, and monthly after that, until the renewal is filed.',
           'The locator can still upload requirements that were to follow.',

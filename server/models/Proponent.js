@@ -333,6 +333,20 @@ async function createSchema() {
     IF COL_LENGTH('dbo.proponents', 'manual_end_term') IS NULL
       ALTER TABLE dbo.proponents ADD manual_end_term DATE NULL;
   `);
+  // Sub-lease (A-07): a sub-lessee is a locator of its own (own Locator
+  // Information), linked to the locator it sub-leases from. One level only —
+  // a sub-lessee has no sub-lessees of its own. NULL = not a sub-lessee.
+  await updateSchema(`
+    IF COL_LENGTH('dbo.proponents', 'sublessor_id') IS NULL
+      ALTER TABLE dbo.proponents ADD sublessor_id INT NULL;
+  `);
+  await updateSchema(`
+    IF NOT EXISTS (SELECT 1 FROM sys.foreign_keys WHERE name = 'FK_proponents_sublessor')
+      ALTER TABLE dbo.proponents ADD CONSTRAINT FK_proponents_sublessor
+        FOREIGN KEY (sublessor_id) REFERENCES dbo.proponents(id);
+    IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_proponents_sublessor_id' AND object_id = OBJECT_ID('dbo.proponents'))
+      CREATE INDEX IX_proponents_sublessor_id ON dbo.proponents(sublessor_id);
+  `);
   await ensureLookupLinks();
   await migrateLegacyPlaintextTin();
   await backfillMissingRefNos();
@@ -570,6 +584,92 @@ async function getProponentProperties(proponentId) {
  * brand-new locator filing their first-ever application has no approved
  * application yet, by definition) — defaulting to unfiltered and only
  * narrowing on explicit opt-in avoids locking new locators out of filing. */
+/** A locator's sub-lessees (A-07), with each one's lease end so the panel can
+ * flag a sub-lease running past the main lease. */
+async function listSublessees(proponentId) {
+  const rows = await selectData(
+    `
+    SELECT
+      s.id, s.ref_no, s.ref_code, s.business_name, s.is_active, s.account_officer_id,
+      COALESCE(ct.effective_start, s.manual_start_term) AS start_term,
+      COALESCE(ct.effective_end, s.manual_end_term) AS end_term
+    FROM dbo.proponents s
+    OUTER APPLY (
+      SELECT TOP (1) c.effective_start, c.effective_end
+      FROM dbo.contracts c
+      INNER JOIN dbo.applications a ON a.id = c.application_id
+      WHERE a.proponent_id = s.id AND a.status = 'APPROVED'
+      ORDER BY c.effective_end DESC, c.id DESC
+    ) ct
+    WHERE s.sublessor_id = @param0
+    ORDER BY s.is_active DESC, s.business_name
+    `,
+    [proponentId]
+  );
+  return rows.map((s) => ({
+    id: s.id,
+    ref_no: s.ref_no ?? null,
+    ref_code: s.ref_code ?? null,
+    business_name: s.business_name,
+    is_active: s.is_active,
+    account_officer_id: s.account_officer_id ?? null,
+    start_term: s.start_term ?? null,
+    end_term: s.end_term ?? null,
+  }));
+}
+
+function subleaseError(message) {
+  const error = new Error(message);
+  error.status = 400;
+  return error;
+}
+
+/** Checks that `sublessorId` can take `childId` (null for a locator not yet
+ * created) as a sub-lessee: it exists, isn't the locator itself, isn't a
+ * sub-lessee itself, and the child has no sub-lessees of its own (one level).
+ * Throws a 400 error; returns the sublessor row. */
+async function assertSublessor(sublessorId, childId = null) {
+  const parentId = toInt(sublessorId);
+  if (!parentId) throw subleaseError("Choose the locator this one sub-leases from.");
+  if (childId && parentId === toInt(childId)) throw subleaseError("A locator can't be its own sub-lessee.");
+  const [parent] = await selectData(
+    `SELECT id, business_name, sublessor_id, account_officer_id FROM dbo.proponents WHERE id = @param0`,
+    [parentId]
+  );
+  if (!parent) throw subleaseError("That locator was not found.");
+  if (parent.sublessor_id) throw subleaseError(`${parent.business_name} is itself a sub-lessee, so it can't have sub-lessees.`);
+  if (childId) {
+    const [own] = await selectData(`SELECT COUNT(*) AS n FROM dbo.proponents WHERE sublessor_id = @param0`, [toInt(childId)]);
+    if (Number(own?.n) > 0) throw subleaseError("This locator has sub-lessees of its own, so it can't be a sub-lessee.");
+  }
+  return parent;
+}
+
+/** Links a locator to the locator it sub-leases from, or unlinks it (null).
+ * Linking also ticks the sublessor's Sub-Lease box. Nothing is deleted. */
+async function setSublessor(id, sublessorId, actorId = null) {
+  await ensureSchema();
+  const childId = toInt(id);
+  const parentId = toInt(sublessorId);
+  if (parentId) await assertSublessor(parentId, childId);
+  await updateData(
+    `UPDATE dbo.proponents SET sublessor_id = @param1, updated_by = @param2, updated_at = GETDATE() WHERE id = @param0`,
+    [childId, parentId, toInt(actorId)]
+  );
+  if (parentId) {
+    await updateData(`UPDATE dbo.proponents SET is_sublease = 1 WHERE id = @param0 AND ISNULL(is_sublease, 0) = 0`, [parentId]);
+  }
+  return true;
+}
+
+async function countActiveSublessees(proponentId) {
+  const [row] = await selectData(
+    `SELECT COUNT(*) AS n FROM dbo.proponents WHERE sublessor_id = @param0 AND is_active = 1`,
+    [toInt(proponentId)]
+  );
+  return Number(row?.n) || 0;
+}
+
 async function listProponents({ approvedOnly = false } = {}) {
   await ensureSchema();
   const rows = await selectData(
@@ -590,6 +690,7 @@ async function listProponents({ approvedOnly = false } = {}) {
       p.updated_at,
       p.is_active,
       p.account_officer_id,
+      p.sublessor_id,
       u.email AS email,
       u.full_name AS contact_name,
       u.status AS account_status
@@ -618,6 +719,8 @@ async function listProponents({ approvedOnly = false } = {}) {
     is_active: p.is_active,
     // Set once an Account Officer is assigned = a Registered Locator.
     account_officer_id: p.account_officer_id ?? null,
+    // Set when this locator is a sub-lessee of another (A-07).
+    sublessor_id: p.sublessor_id ?? null,
     // Locator's own login email/name (not the business itself) — used by
     // the New Application picker to show who'll receive the activation
     // email, and account_status ("PENDING" = created but not yet activated,
@@ -679,6 +782,10 @@ async function getProponentById(id) {
       p.manual_start_term,
       p.manual_end_term,
       p.is_manual_registration,
+      p.sublessor_id,
+      sublessor.business_name AS sublessor_name,
+      sublessor.ref_no AS sublessor_ref_no,
+      sublessor.account_officer_id AS sublessor_account_officer_id,
       COALESCE(ct.contract_type_id, latest_app.contract_type_id, p.contract_type_id) AS contract_type_id,
       toctype.name AS contract_type_name,
       COALESCE(apptype.name, manual_apptype.name) AS business_type,
@@ -703,6 +810,7 @@ async function getProponentById(id) {
       ORDER BY r.id DESC
     ) open_ren
     LEFT JOIN dbo.users officer ON officer.id = p.account_officer_id
+    LEFT JOIN dbo.proponents sublessor ON sublessor.id = p.sublessor_id
     LEFT JOIN dbo.land_use lu ON lu.id = p.land_use_id
     OUTER APPLY (
       SELECT TOP (1) c.effective_start, c.effective_end, c.contract_type_id
@@ -730,13 +838,14 @@ async function getProponentById(id) {
   const p = rows?.[0] || null;
   if (!p) return null;
   const properties = await getProponentProperties(id);
-  const [stockholders, contact_persons, signatories, financialTerms, investment, secRegistration] = await Promise.all([
+  const [stockholders, contact_persons, signatories, financialTerms, investment, secRegistration, sublessees] = await Promise.all([
     Stockholder().listForProponent(id),
     ContactPerson().listForProponent(id),
     Signatory().listForProponent(id),
     FinancialTerms().getForProponent(id),
     Investment().getForProponent(id),
     SecRegistration().getForProponent(id),
+    listSublessees(id),
   ]);
   return {
     id: p.id,
@@ -797,6 +906,12 @@ async function getProponentById(id) {
     is_manual_registration: Boolean(p.is_manual_registration),
     renewal_application_no: p.renewal_application_no ?? null,
     renewal_status: p.renewal_status ?? null,
+    // Sub-lease: the locator this one sub-leases from, and its own sub-lessees.
+    sublessor_id: p.sublessor_id ?? null,
+    sublessor_name: p.sublessor_name ?? null,
+    sublessor_ref_no: p.sublessor_ref_no ?? null,
+    sublessor_account_officer_id: p.sublessor_account_officer_id ?? null,
+    sublessees,
     properties,
     stockholders,
     contact_persons,
@@ -958,6 +1073,7 @@ async function createProponent({
   contact_persons,
   signatories,
   sec_registration,
+  sublessor_id,
   created_by,
   is_active = 1,
   is_manual_registration = false,
@@ -968,7 +1084,10 @@ async function createProponent({
   const userId = toInt(user_id);
   const createdBy = toInt(created_by);
   const accountOfficerId = toInt(account_officer_id);
-  const isSublease = is_sublease === null || is_sublease === undefined ? null : is_sublease ? 1 : 0;
+  const sublessorId = toInt(sublessor_id);
+  // A sub-lessee doesn't sub-lease further, so its own Sub-Lease box stays off.
+  const isSublease = sublessorId ? 0 : is_sublease === null || is_sublease === undefined ? null : is_sublease ? 1 : 0;
+  if (sublessorId) await assertSublessor(sublessorId);
   await assertRefCodeAvailable(ref_code);
   await assertUniqueField("registration_no", registration_no);
 
@@ -1014,6 +1133,10 @@ async function createProponent({
     const nationalityText = normalizeNationality(nationality);
     if (nationalityText) {
       await tx.query(`UPDATE dbo.proponents SET nationality = @param1 WHERE id = @param0`, [insertedId, nationalityText]);
+    }
+    if (sublessorId) {
+      await tx.query(`UPDATE dbo.proponents SET sublessor_id = @param1 WHERE id = @param0`, [insertedId, sublessorId]);
+      await tx.query(`UPDATE dbo.proponents SET is_sublease = 1 WHERE id = @param0 AND ISNULL(is_sublease, 0) = 0`, [sublessorId]);
     }
     await ProponentLease().currentLeaseId(insertedId, tx); // its first lease (current)
     await replaceProponentProperties(tx, insertedId, properties, createdBy);
@@ -1461,6 +1584,9 @@ module.exports = {
   listLeases: (id) => ProponentLease().listForProponent(id),
   assertRefCodeAvailable,
   isFieldAvailable,
+  assertSublessor,
+  setSublessor,
+  countActiveSublessees,
   listProponents,
   listProponentsForLocatorList,
   setManualClassification,

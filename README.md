@@ -60,6 +60,10 @@ After approval the locator is edited by its Account Officer on Registered Locato
   Security (with Total Amount), Performance Commitment.
 - **Stockholders** — the stockholders and the SEC Registration Information card
   (SEC Reg. No. — unique per company — capital, purposes, SEC contact person, GIS).
+- **Sub-Lease** — a sub-lessee is a locator of its own, linked to the locator it
+  sub-leases from (`proponents.sublessor_id`). The main locator's Sub-Lessees card
+  lists them, adds a new one (Add Sub-Lessee) or links / unlinks an existing locator
+  (`PUT /api/proponents/:id/sublessor`).
 - Deletes are soft (`is_active = 0`); new tables and columns are created on backend
   start, so a `git pull` + restart is all another machine needs.
 

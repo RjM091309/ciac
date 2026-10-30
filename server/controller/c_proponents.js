@@ -941,6 +941,7 @@ exports.create = async (req, res) => {
       stockholders,
       contact_persons,
       signatories,
+      sublessor_id,
       is_active,
     } = req.body || {};
     if (!business_name) return res.status(400).json({ success: false, message: "business_name is required" });
@@ -950,6 +951,14 @@ exports.create = async (req, res) => {
     // A Level 2 Account Officer's new locator is always their own.
     const ownOnly = await accountOfficerScope(req);
     if (ownOnly !== null) accountOfficerId = ownOnly;
+    // A new sub-lessee (Add Sub-Lessee): a Level 2 only under their own locator.
+    const sublessorId = toNullableId(sublessor_id);
+    if (sublessorId !== null) {
+      const parent = await Proponent.assertSublessor(sublessorId);
+      if (ownOnly !== null && Number(parent.account_officer_id) !== ownOnly) {
+        return res.status(403).json({ success: false, message: "This locator is assigned to another Account Officer." });
+      }
+    }
     if (!accountOfficerId && (await checkMenuAllowed(String(req.user?.role || "").toLowerCase(), "approval:queue", "view"))) {
       accountOfficerId = Number(req.user?.id) || null;
     }
@@ -1013,6 +1022,7 @@ exports.create = async (req, res) => {
       contact_persons,
       signatories,
       sec_registration: SecRegistration.pickFields(req.body),
+      sublessor_id: sublessorId,
       created_by: req.user?.id ?? null,
       is_active,
       // POST / is only called from the Registered Locator page's New Locator
@@ -1041,6 +1051,7 @@ exports.create = async (req, res) => {
     return res.status(201).json({ success: true, data: row });
   } catch (error) {
     if (error?.status === 409) return res.status(409).json({ success: false, message: error.message, field: error.field });
+    if (error?.status === 400) return res.status(400).json({ success: false, message: error.message });
     console.error("Create proponent error:", error);
     return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
@@ -1160,6 +1171,49 @@ exports.saveSecRegistration = sectionHandler("sec_registration", "PROPONENT_SEC_
   save: (id, b, actor) => Proponent.saveSecRegistration(id, b, actor),
 });
 
+/** PUT /:id/sublessor { sublessor_id } — links an existing locator as a
+ * sub-lessee of another (A-07), or unlinks it (null). A Level 2 Account
+ * Officer only between their own locators. */
+exports.setSublessor = async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ success: false, message: "Invalid id" });
+    const before = await Proponent.getProponentById(id);
+    if (!before) return res.status(404).json({ success: false, message: "Proponent not found" });
+    const sublessorId = toNullableId(req.body?.sublessor_id);
+    if (sublessorId !== null && !Number.isFinite(sublessorId)) {
+      return res.status(400).json({ success: false, message: "Invalid sublessor" });
+    }
+    if (sublessorId !== null) {
+      const parent = await Proponent.assertSublessor(sublessorId, id);
+      const me = await accountOfficerScope(req);
+      if (me !== null && Number(parent.account_officer_id) !== me) {
+        return res.status(403).json({ success: false, message: "That locator is assigned to another Account Officer." });
+      }
+    }
+    await Proponent.setSublessor(id, sublessorId, req.user?.id ?? null);
+    const after = await Proponent.getProponentById(id);
+    await AuditLog.record({
+      actorId: req.user?.id,
+      actorUsername: req.user?.username,
+      action: sublessorId ? "PROPONENT_SUBLESSOR_LINKED" : "PROPONENT_SUBLESSOR_UNLINKED",
+      entityType: "proponent",
+      entityId: id,
+      details: {
+        business_name: before.business_name,
+        from: before.sublessor_name ?? null,
+        to: after?.sublessor_name ?? null,
+      },
+      req,
+    });
+    return res.json({ success: true, data: after });
+  } catch (error) {
+    if (error?.status === 400) return res.status(400).json({ success: false, message: error.message });
+    console.error("Set sublessor error:", error);
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
+  }
+};
+
 exports.update = async (req, res) => {
   try {
     const id = Number(req.params.id);
@@ -1239,6 +1293,10 @@ exports.update = async (req, res) => {
     if (lookupError) return res.status(400).json({ success: false, message: lookupError });
     const leaseTerm = readLeaseTerm(req.body);
     if (leaseTerm.error) return res.status(400).json({ success: false, message: leaseTerm.error });
+    // Sub-Lease stays ticked while the locator has active sub-lessees.
+    if (is_sublease !== undefined && !is_sublease && (await Proponent.countActiveSublessees(id)) > 0) {
+      return res.status(400).json({ success: false, message: "This locator still has sub-lessees — unlink them before unticking Sub-Lease." });
+    }
 
     const before = await Proponent.getProponentById(id);
     const row = await Proponent.updateProponent(id, {
@@ -1334,6 +1392,7 @@ exports.update = async (req, res) => {
     return res.json({ success: true, data: refreshed || row });
   } catch (error) {
     if (error?.status === 409) return res.status(409).json({ success: false, message: error.message, field: error.field });
+    if (error?.status === 400) return res.status(400).json({ success: false, message: error.message });
     console.error("Update proponent error:", error);
     return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }

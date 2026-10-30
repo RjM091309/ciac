@@ -377,11 +377,12 @@ async function getLeaseArea() {
   await require("./ProponentLease").ensureSchema(); // adds proponent_properties.lease_id
   // Only the current lease's schedule: a renewal's new lease starts with a copy
   // of the previous one, so counting every lease would double the area.
+  // A sub-lessee's area is part of its sublessor's, so it isn't added again.
   const rows = await selectData(`
     SELECT pp.proponent_id, pp.date_from, pp.date_to, pp.type_of_property, pp.area_sqm
     FROM dbo.proponent_properties pp
     INNER JOIN dbo.proponents p ON p.id = pp.proponent_id
-    WHERE pp.is_active = 1 AND p.is_active = 1
+    WHERE pp.is_active = 1 AND p.is_active = 1 AND p.sublessor_id IS NULL
       AND (pp.lease_id IS NULL
            OR pp.lease_id IN (SELECT l.id FROM dbo.proponent_leases l WHERE l.is_current = 1 AND l.is_active = 1))
       AND ${REGISTERED_SQL}

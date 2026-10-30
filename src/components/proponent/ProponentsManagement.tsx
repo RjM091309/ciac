@@ -51,6 +51,8 @@ type ProponentRow = {
   date_signed: string | null;
   grace_period: string | null;
   is_sublease: number | null;
+  /** Set when this locator is a sub-lessee of another (A-07). */
+  sublessor_id?: number | null;
   sub_pgro: string | null;
   sub_pgrr: string | null;
   land_use: string | null;
@@ -611,6 +613,32 @@ type LeaseRow = {
   properties?: any[];
 };
 
+/** Sub-lease (A-07): a sub-lessee is a locator of its own, linked to the
+ * locator it sub-leases from (GET /:id → sublessor_* / sublessees). */
+type SublesseeRow = {
+  id: number;
+  ref_no: string | null;
+  ref_code: string | null;
+  business_name: string;
+  is_active: number;
+  account_officer_id: number | null;
+  start_term: string | null;
+  end_term: string | null;
+};
+type SubleaseInfo = {
+  sublessor: { id: number; name: string; ref_no: string | null } | null;
+  sublessees: SublesseeRow[];
+};
+const NO_SUBLEASE: SubleaseInfo = { sublessor: null, sublessees: [] };
+function subleaseFrom(data: any): SubleaseInfo {
+  return {
+    sublessor: data?.sublessor_id
+      ? { id: Number(data.sublessor_id), name: data.sublessor_name || 'Locator', ref_no: data.sublessor_ref_no ?? null }
+      : null,
+    sublessees: Array.isArray(data?.sublessees) ? data.sublessees : [],
+  };
+}
+
 /** Lease status from the contract's End Term: Active through that day
  * (inclusive), Expired after. null = no contract/End Term yet. Shared by the
  * list's status filter and the panel header badge. */
@@ -845,7 +873,7 @@ export function ProponentsManagement({
   const cardRefs = useRef<Record<number, HTMLButtonElement | null>>({});
 
   const { data: locatorsData, isLoading, isRevalidating, refresh } = useSessionStorageCachedResource<LocatorsData>({
-    cacheKey: 'ciac.locators.v11',
+    cacheKey: 'ciac.locators.v12',
     ttlMs: 5 * 60 * 1000,
     fetcher: async () => {
       const [pRes, dRes, uRes, atRes, luRes, inRes] = await Promise.all([
@@ -1078,6 +1106,13 @@ export function ProponentsManagement({
   // one's property schedule is being viewed (null = the current lease).
   const [leases, setLeases] = useState<LeaseRow[]>([]);
   const [viewLeaseId, setViewLeaseId] = useState<number | null>(null);
+  // Sub-lease (A-07): who this locator sub-leases from, and its own sub-lessees.
+  // On a New Locator opened by "Add Sub-Lessee", `sublessor` is the parent.
+  const [sublease, setSublease] = useState<SubleaseInfo>(NO_SUBLEASE);
+  const [sublesseeLinkId, setSublesseeLinkId] = useState('');
+  const [sublesseeUnlink, setSublesseeUnlink] = useState<SublesseeRow | null>(null);
+  const [sublesseeLinkConfirm, setSublesseeLinkConfirm] = useState(false);
+  const [subleaseSaving, setSubleaseSaving] = useState(false);
   const loadLeases = useCallback(async (proponentId: number) => {
     try {
       const res = await fetch(api(`/api/proponents/${proponentId}/leases`), { credentials: 'include' });
@@ -1360,8 +1395,13 @@ export function ProponentsManagement({
   // Manual registration (walk-in/legacy locators) — the backend flags these
   // is_manual_registration so they show in this list without an approved
   // application behind them.
-  function openCreate() {
+  // With `sublessor` ("Add Sub-Lessee" on a locator): a new sub-lessee of it —
+  // Type of Contract preset to Sublease and the same Account Officer.
+  function openCreate(sublessor?: { id: number; name: string; ref_no: string | null; account_officer_id: string }) {
     setEditing(null);
+    const subleaseType = sublessor
+      ? contractTypes.find((t) => t.is_active === 1 && newLocatorTitle(t.name) === 'Sub Lessee')
+      : undefined;
     setForm({
       user_id: '',
       business_name: '',
@@ -1370,7 +1410,14 @@ export function ProponentsManagement({
       address: '',
       contact_no: '',
       ...BLANK_PROFILE_FORM,
+      ...(sublessor
+        ? {
+            account_officer_id: sublessor.account_officer_id,
+            contract_type_id: subleaseType ? String(subleaseType.id) : '',
+          }
+        : {}),
     });
+    setSublease(sublessor ? { sublessor: { id: sublessor.id, name: sublessor.name, ref_no: sublessor.ref_no }, sublessees: [] } : NO_SUBLEASE);
     setActiveProfileTab('Profile');
     setContactsOpen(null);
     setShowRowErrors({ stockholders: false, contacts: false });
@@ -1393,6 +1440,7 @@ export function ProponentsManagement({
     setShowRowErrors({ stockholders: false, contacts: false });
     setLeases([]);
     setViewLeaseId(null);
+    setSublease(NO_SUBLEASE);
     setLoaded(null);
     setEditing(p);
     setLoginInfo(null);
@@ -1470,6 +1518,7 @@ export function ProponentsManagement({
           signatories: mapContactRows(data.signatories),
         };
         setForm((prev) => ({ ...prev, ...profileFields }));
+        setSublease(subleaseFrom(data));
         setViewLeaseId(null);
         void loadLeases(p.id);
         setEditing((prev) =>
@@ -1770,6 +1819,8 @@ export function ProponentsManagement({
       // Type of Contract goes to the current contract when there is one,
       // otherwise to the locator's own fallback column (manual registration).
       payload.contract_type_id = form.contract_type_id ? Number(form.contract_type_id) : null;
+      // "Add Sub-Lessee": the new locator is linked to its sublessor.
+      if (!editing && sublease.sublessor) payload.sublessor_id = sublease.sublessor.id;
       if (!industryDerived) payload.industry_code = form.industry_code || null;
       // Encoded lease term — only while there's no approved contract (its
       // dates rule after that; the server ignores these then too).
@@ -1826,6 +1877,71 @@ export function ProponentsManagement({
       toast.error(message);
     } finally {
       setSaving(false);
+    }
+  }
+
+  // ---- Sub-lease (A-07) ----
+  // Opening another locator (a sub-lessee, or the sublessor) replaces this
+  // panel, so unsaved edits must be saved or undone first.
+  // The Sub-Lease box itself doesn't count: adding or linking a sub-lessee
+  // ticks it on the server anyway.
+  function blockedByUnsaved() {
+    if (!formChangedSinceLoad || !loaded) return false;
+    let savedSublease = form.is_sublease;
+    try {
+      savedSublease = Boolean(JSON.parse(loaded.rest).is_sublease);
+    } catch {
+      /* keep the form's value */
+    }
+    const parts = splitForm({ ...form, is_sublease: savedSublease });
+    const dirty = parts.rest !== loaded.rest || Object.values(sectionDirty).some(Boolean);
+    if (!dirty) return false;
+    toast.warning('Save or undo your changes to this locator first.');
+    return true;
+  }
+  function openLocatorById(id: number) {
+    const row = proponents.find((p) => p.id === id);
+    if (!row || blockedByUnsaved()) return;
+    openEdit(row);
+  }
+  function addSublessee() {
+    if (!editing || blockedByUnsaved()) return;
+    openCreate({
+      id: editing.id,
+      name: form.business_name.trim() || editing.business_name,
+      ref_no: editing.ref_no,
+      account_officer_id: form.account_officer_id,
+    });
+  }
+  /** Links `childId` under the open locator, or unlinks it (sublessorId null). */
+  async function setSublessorOf(childId: number, sublessorId: number | null) {
+    if (!editing || blockedByUnsaved()) return;
+    setSubleaseSaving(true);
+    try {
+      const res = await fetch(api(`/api/proponents/${childId}/sublessor`), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ sublessor_id: sublessorId }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.message || 'Could not update the sub-lease');
+      const data = (await fetch(api(`/api/proponents/${editing.id}`), { credentials: 'include' }).then((r) => r.json()))?.data;
+      if (data) {
+        setSublease(subleaseFrom(data));
+        // Linking ticks Sub-Lease on the server; keep the form (and its
+        // "unsaved" baseline) in step so the next Update doesn't untick it.
+        const nextForm = { ...form, is_sublease: Boolean(data.is_sublease) };
+        setForm(nextForm);
+        setLoaded(splitForm(nextForm));
+      }
+      setSublesseeLinkId('');
+      toast.success(sublessorId ? 'Sub-lessee linked' : 'Sub-lessee unlinked');
+      await refresh({ showLoading: false });
+    } catch (e: any) {
+      toast.error(e?.message || 'Could not update the sub-lease');
+    } finally {
+      setSubleaseSaving(false);
     }
   }
 
@@ -1984,7 +2100,7 @@ export function ProponentsManagement({
           <button
             className="shrink-0 h-9 rounded-lg px-3 text-xs sm:text-sm font-semibold inline-flex items-center gap-1.5 shadow-sm cursor-pointer whitespace-nowrap"
             style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
-            onClick={openCreate}
+            onClick={() => openCreate()}
           >
             <Plus size={15} />
             <span className="sm:hidden">New</span>
@@ -2137,6 +2253,8 @@ export function ProponentsManagement({
         title={
           editing
             ? 'Locator Information'
+            : sublease.sublessor
+            ? 'Sub Lessee'
             : // Same lookup the Type of Contract select uses to show its value.
               newLocatorTitle(
                 contractTypeOptions
@@ -2601,18 +2719,241 @@ export function ProponentsManagement({
               </div>
             </div>
 
-            {/* Row 4: Sub-Lease */}
-            <div className="flex items-center gap-4">
-              <label className="flex items-center gap-1.5 text-[9px] font-semibold text-secondary uppercase tracking-widest whitespace-nowrap">
-                <input
-                  type="checkbox"
-                  checked={form.is_sublease}
-                  disabled={loadingLocation}
-                  onChange={(e) => setForm((p) => ({ ...p, is_sublease: e.target.checked }))}
-                />
-                Sub-Lease
-              </label>
-            </div>
+            {/* Row 4: Sub-Lease (A-07). A sub-lessee is a locator of its own (own
+                Locator Information), linked to the locator it sub-leases from.
+                - A sub-lessee shows who it sub-leases from (no Sub-Lease box: one level only).
+                - Any other locator has the Sub-Lease box; ticked (or with sub-lessees)
+                  it lists them, adds a new one, or links an existing locator. */}
+            {(() => {
+              const parent = sublease.sublessor;
+              if (parent) {
+                const canOpen = Boolean(editing) && proponents.some((p) => p.id === parent.id);
+                return (
+                  <div
+                    className="flex flex-wrap items-center gap-2 rounded-xl border px-3 py-2 text-xs"
+                    style={{ borderColor: 'var(--input-border)', backgroundColor: 'var(--control-bg)' }}
+                  >
+                    <span className="text-[9px] font-semibold uppercase tracking-widest text-secondary">Sub-lessee of</span>
+                    {canOpen ? (
+                      <button
+                        type="button"
+                        className="font-semibold text-blue-600 underline-offset-2 hover:underline dark:text-blue-400"
+                        onClick={() => openLocatorById(parent.id)}
+                        title="Open this locator"
+                      >
+                        {parent.name}
+                      </button>
+                    ) : (
+                      <span className="font-semibold" style={{ color: 'var(--text)' }}>
+                        {parent.name}
+                      </span>
+                    )}
+                    {parent.ref_no ? <span className="text-secondary">{parent.ref_no}</span> : null}
+                    {/* Unlink from the sub-lessee's side too (saved locators only). */}
+                    {editing && canEdit ? (
+                      <button
+                        type="button"
+                        className="ml-auto text-[10px] font-semibold text-secondary hover:text-red-600"
+                        disabled={subleaseSaving}
+                        onClick={() =>
+                          setSublesseeUnlink({
+                            id: editing.id,
+                            ref_no: editing.ref_no,
+                            ref_code: null,
+                            business_name: form.business_name.trim() || editing.business_name,
+                            is_active: editing.is_active,
+                            account_officer_id: null,
+                            start_term: null,
+                            end_term: null,
+                          })
+                        }
+                      >
+                        Unlink
+                      </button>
+                    ) : null}
+                  </div>
+                );
+              }
+
+              const subs = sublease.sublessees;
+              const activeSubs = subs.filter((s) => Number(s.is_active) === 1).length;
+              const showCard = Boolean(editing) && (form.is_sublease || subs.length > 0);
+              const mainEnd = editing?.end_term ? String(editing.end_term).slice(0, 10) : '';
+              // Link existing: active locators that aren't sub-lessees and have none of their own.
+              const linkOptions = editing
+                ? proponents
+                    .filter(
+                      (p) =>
+                        p.id !== editing.id &&
+                        p.is_active === 1 &&
+                        !p.sublessor_id &&
+                        !proponents.some((o) => o.sublessor_id === p.id),
+                    )
+                    .map((p) => ({ value: String(p.id), label: p.business_name, detail: p.ref_no ?? '' }))
+                : [];
+              return (
+                <div className="flex flex-col gap-2">
+                  <label
+                    className="flex w-fit items-center gap-1.5 text-[9px] font-semibold text-secondary uppercase tracking-widest whitespace-nowrap"
+                    title={activeSubs ? 'Unlink its sub-lessees first to untick this' : undefined}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={form.is_sublease || activeSubs > 0}
+                      disabled={loadingLocation || activeSubs > 0}
+                      onChange={(e) => setForm((p) => ({ ...p, is_sublease: e.target.checked }))}
+                    />
+                    Sub-Lease
+                    {!editing && form.is_sublease ? (
+                      <span className="font-normal normal-case tracking-normal">— add its sub-lessees after saving this locator</span>
+                    ) : null}
+                  </label>
+                  {showCard ? (
+                    <div
+                      className="flex flex-col gap-2 rounded-xl border p-3"
+                      style={{ borderColor: 'var(--input-border)', backgroundColor: 'color-mix(in oklab, var(--control-bg) 55%, transparent)' }}
+                    >
+                      <div
+                        className="-mx-3 -mt-3 mb-1 flex flex-wrap items-center justify-between gap-2 rounded-t-xl border-b px-3 py-2"
+                        style={{ borderColor: 'var(--input-border)', backgroundColor: 'var(--control-bg)' }}
+                      >
+                        <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--text)' }}>
+                          Sub-Lessees
+                          <span className="ml-1.5 font-normal normal-case tracking-normal text-secondary">({subs.length})</span>
+                        </span>
+                        <span className="text-[10px] text-secondary">Each sub-lessee has its own Locator Information</span>
+                      </div>
+                      {subs.length ? (
+                        <div className="min-w-0 overflow-x-auto rounded-lg border" style={{ borderColor: 'var(--input-border)' }}>
+                          <table className="w-full min-w-[44rem] table-fixed text-xs border-collapse">
+                            <thead>
+                              <tr style={{ backgroundColor: 'var(--control-bg)' }}>
+                                {[
+                                  ['Sub-Lessee', '34%'],
+                                  ['Ref. Code', '15%'],
+                                  ['Start Term', '14%'],
+                                  ['End Term', '14%'],
+                                  ['Status', '13%'],
+                                  ['', '10%'],
+                                ].map(([h, w], i) => (
+                                  <th
+                                    key={h || i}
+                                    className="px-2 py-1.5 text-left font-semibold uppercase tracking-wide text-[9px] border-b"
+                                    style={{ borderColor: 'var(--input-border)', color: 'var(--text-muted)', width: w }}
+                                  >
+                                    {h}
+                                  </th>
+                                ))}
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {subs.map((s) => {
+                                const canOpen = proponents.some((p) => p.id === s.id);
+                                const end = s.end_term ? String(s.end_term).slice(0, 10) : '';
+                                const pastMain = Boolean(mainEnd && end && end > mainEnd);
+                                const active = Number(s.is_active) === 1;
+                                return (
+                                  <tr
+                                    key={s.id}
+                                    className={canOpen ? 'cursor-pointer hover:bg-[var(--selected-bg)]' : undefined}
+                                    onClick={canOpen ? () => openLocatorById(s.id) : undefined}
+                                    title={canOpen ? 'Open this sub-lessee' : 'Assigned to another Account Officer'}
+                                  >
+                                    <td className="px-2 py-2 border-b font-medium" style={{ borderColor: 'var(--input-border)', color: 'var(--text)' }}>
+                                      <div className="truncate">{s.business_name}</div>
+                                      <div className="text-[10px] font-normal text-secondary">{s.ref_no || '—'}</div>
+                                    </td>
+                                    <td className="px-2 py-2 border-b" style={{ borderColor: 'var(--input-border)' }}>{s.ref_code || '—'}</td>
+                                    <td className="px-2 py-2 border-b" style={{ borderColor: 'var(--input-border)' }}>{fmtDate(s.start_term)}</td>
+                                    <td className="px-2 py-2 border-b" style={{ borderColor: 'var(--input-border)' }}>
+                                      {fmtDate(s.end_term)}
+                                      {pastMain ? (
+                                        <div className="text-[10px] font-semibold" style={{ color: '#ea580c' }} title={`Main lease ends ${fmtDate(mainEnd)}`}>
+                                          Ends after the main lease
+                                        </div>
+                                      ) : null}
+                                    </td>
+                                    <td className="px-2 py-2 border-b" style={{ borderColor: 'var(--input-border)' }}>
+                                      <span
+                                        className="rounded-full px-2 py-0.5 text-[10px] font-semibold"
+                                        style={
+                                          active
+                                            ? { backgroundColor: 'color-mix(in oklab, #22c55e 18%, transparent)', color: '#15803d' }
+                                            : { backgroundColor: 'var(--control-bg)', color: 'var(--text-muted)' }
+                                        }
+                                      >
+                                        {active ? 'Active' : 'Inactive'}
+                                      </span>
+                                    </td>
+                                    <td className="px-2 py-2 border-b text-right" style={{ borderColor: 'var(--input-border)' }}>
+                                      {canEdit ? (
+                                        <button
+                                          type="button"
+                                          className="text-[10px] font-semibold text-secondary hover:text-red-600"
+                                          disabled={subleaseSaving}
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            setSublesseeUnlink(s);
+                                          }}
+                                        >
+                                          Unlink
+                                        </button>
+                                      ) : null}
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      ) : (
+                        <div className="text-xs text-secondary">No sub-lessees yet.</div>
+                      )}
+                      {canAdd || canEdit ? (
+                        <div className="flex flex-wrap items-center gap-2">
+                          {canAdd ? (
+                            <button
+                              type="button"
+                              className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[11px] font-semibold cursor-pointer disabled:cursor-not-allowed disabled:opacity-60 hover:bg-[var(--selected-bg)]"
+                              style={{ borderColor: 'var(--input-border)', color: 'var(--text)', backgroundColor: 'var(--surface)' }}
+                              disabled={subleaseSaving || loadingLocation}
+                              onClick={addSublessee}
+                            >
+                              <Plus size={13} /> Add Sub-Lessee
+                            </button>
+                          ) : null}
+                          {canEdit && linkOptions.length ? (
+                            <>
+                              <span className="text-[10px] text-secondary">or link an existing locator</span>
+                              <div style={{ width: 260 }}>
+                                <AppSelect
+                                  compact
+                                  isClearable
+                                  options={linkOptions}
+                                  value={sublesseeLinkId}
+                                  onChange={(value) => setSublesseeLinkId(value || '')}
+                                  placeholder="Select locator..."
+                                  isDisabled={subleaseSaving}
+                                />
+                              </div>
+                              <button
+                                type="button"
+                                className="rounded-md border px-2 py-1 text-[11px] font-semibold cursor-pointer disabled:cursor-not-allowed disabled:opacity-60 hover:bg-[var(--selected-bg)]"
+                              style={{ borderColor: 'var(--input-border)', color: 'var(--text)', backgroundColor: 'var(--surface)' }}
+                                disabled={!sublesseeLinkId || subleaseSaving}
+                                onClick={() => setSublesseeLinkConfirm(true)}
+                              >
+                                Link
+                              </button>
+                            </>
+                          ) : null}
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })()}
 
             {/* Contact Person + Authorized Person / Signatory — the locator's two people
                 lists (dbo.contact_person / dbo.signatory) in one card, same columns and
@@ -3767,6 +4108,37 @@ export function ProponentsManagement({
         onConfirm={() => {
           copyPrimaryPurpose();
           setConfirmCopyPurpose(false);
+        }}
+      />
+
+      <ConfirmModal
+        open={sublesseeLinkConfirm}
+        title="Link sub-lessee?"
+        description={`${
+          proponents.find((p) => String(p.id) === sublesseeLinkId)?.business_name ?? 'The selected locator'
+        } will become a sub-lessee of ${form.business_name.trim() || 'this locator'}. Nothing in either locator is changed or deleted.`}
+        confirmText="Link"
+        loading={subleaseSaving}
+        onCancel={() => setSublesseeLinkConfirm(false)}
+        onConfirm={async () => {
+          if (editing && sublesseeLinkId) await setSublessorOf(Number(sublesseeLinkId), editing.id);
+          setSublesseeLinkConfirm(false);
+        }}
+      />
+
+      <ConfirmModal
+        open={sublesseeUnlink !== null}
+        title="Unlink sub-lessee?"
+        description={`${sublesseeUnlink?.business_name ?? 'This locator'} will no longer be a sub-lessee of ${
+          (sublease.sublessor?.name ?? form.business_name.trim()) || 'this locator'
+        }. Its own Locator Information is kept.`}
+        confirmText="Unlink"
+        danger
+        loading={subleaseSaving}
+        onCancel={() => setSublesseeUnlink(null)}
+        onConfirm={async () => {
+          if (sublesseeUnlink) await setSublessorOf(sublesseeUnlink.id, null);
+          setSublesseeUnlink(null);
         }}
       />
 
