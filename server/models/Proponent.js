@@ -231,6 +231,12 @@ async function createSchema() {
     )
       ALTER TABLE dbo.proponents ADD business_activities NVARCHAR(MAX) NULL;
   `);
+  // The proponent / locator's own nationality (B-13), set by the BDO or the
+  // Account Officer; the stockholders keep theirs separately.
+  await updateSchema(`
+    IF COL_LENGTH('dbo.proponents', 'nationality') IS NULL
+      ALTER TABLE dbo.proponents ADD nationality NVARCHAR(100) NULL;
+  `);
   // The legacy "Profile" tab's property schedule table (No./Year/Date
   // From--To/Type of Property/Area/Rate/MGL, add-a-row via the +/- buttons)
   // — a real one-to-many child table, not columns on proponents, since a
@@ -659,6 +665,7 @@ async function getProponentById(id) {
       p.paid_up_capital,
       p.paid_up_capital_currency,
       p.business_activities,
+      p.nationality,
       p.proposed_lease_term_years,
       p.proposed_lease_term_unit,
       p.created_by,
@@ -767,6 +774,7 @@ async function getProponentById(id) {
     paid_up_capital: p.paid_up_capital ?? null,
     paid_up_capital_currency: p.paid_up_capital_currency ?? null,
     business_activities: p.business_activities ?? null,
+    nationality: p.nationality ?? null,
     proposed_lease_term_years: p.proposed_lease_term_years != null ? Number(p.proposed_lease_term_years) : null,
     proposed_lease_term_unit: leaseTermUnit(p.proposed_lease_term_unit),
     ...financialTerms,
@@ -893,6 +901,14 @@ function leaseTermUnit(value) {
   return String(value || "").trim().toUpperCase() === "MONTHS" ? "MONTHS" : "YEARS";
 }
 
+/** Typed in freely; stored trimmed, single-spaced and upper case like the
+ * stockholders' nationalities ("filipino " → "FILIPINO"), so reports group
+ * them. Blank → null. */
+function normalizeNationality(value) {
+  if (value === null || value === undefined) return null;
+  return String(value).replace(/\s+/g, " ").trim().toUpperCase().slice(0, 100) || null;
+}
+
 async function createProponent({
   user_id,
   business_name,
@@ -922,6 +938,7 @@ async function createProponent({
   paid_up_capital,
   paid_up_capital_currency,
   business_activities,
+  nationality,
   advance_lease_payment_months,
   advance_lease_payment_amount,
   advance_lease_payment_currency,
@@ -994,6 +1011,10 @@ async function createProponent({
       ]
     );
     const insertedId = result?.recordset?.[0]?.id;
+    const nationalityText = normalizeNationality(nationality);
+    if (nationalityText) {
+      await tx.query(`UPDATE dbo.proponents SET nationality = @param1 WHERE id = @param0`, [insertedId, nationalityText]);
+    }
     await ProponentLease().currentLeaseId(insertedId, tx); // its first lease (current)
     await replaceProponentProperties(tx, insertedId, properties, createdBy);
     await Stockholder().syncForProponent(tx, insertedId, stockholders, createdBy);
@@ -1112,6 +1133,7 @@ async function updateProponent(
     paid_up_capital,
     paid_up_capital_currency,
     business_activities,
+    nationality,
     advance_lease_payment_months,
     advance_lease_payment_amount,
     advance_lease_payment_currency,
@@ -1183,6 +1205,7 @@ async function updateProponent(
   if (paid_up_capital !== undefined) pushSet("paid_up_capital = ?", paid_up_capital);
   if (paid_up_capital_currency !== undefined) pushSet("paid_up_capital_currency = ?", paid_up_capital_currency);
   if (business_activities !== undefined) pushSet("business_activities = ?", business_activities);
+  if (nationality !== undefined) pushSet("nationality = ?", normalizeNationality(nationality));
   if (land_use_id !== undefined) pushSet("land_use_id = ?", toInt(land_use_id));
   if (is_active !== undefined) pushSet("is_active = ?", is_active ? 1 : 0);
 

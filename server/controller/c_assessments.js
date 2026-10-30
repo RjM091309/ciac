@@ -387,6 +387,7 @@ const PROFILE_FIELDS = [
   "proposed_lease_term_unit",
   "contact_no",
   "business_activities",
+  "nationality",
 ];
 
 /** { editable, reason } for the profile tabs of one application. */
@@ -471,6 +472,7 @@ exports.saveProfile = async (req, res) => {
       proposed_lease_term_unit: b.proposed_lease_term_unit !== undefined ? leaseTermUnit(b.proposed_lease_term_unit) : undefined,
       contact_no: text(b.contact_no),
       business_activities: text(b.business_activities),
+      nationality: text(b.nationality),
       contact_persons: Array.isArray(b.contact_persons) ? b.contact_persons : undefined,
       signatories: Array.isArray(b.signatories) ? b.signatories : undefined,
       updated_by: req.user?.id ?? null,

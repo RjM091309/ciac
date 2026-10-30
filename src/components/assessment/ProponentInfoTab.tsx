@@ -7,6 +7,7 @@ import { LeaseTermInput } from '../settings/LocatorUsersManagement';
 import { cn } from '../../lib/utils';
 import {
   CONTACT_RULES,
+  NationalityInput,
   RowsEditor,
   blankContactPersonRow,
   invalidRowKeys,
@@ -34,6 +35,7 @@ type Profile = {
   proposed_lease_term_unit: 'YEARS' | 'MONTHS';
   contact_no: string;
   business_activities: string;
+  nationality: string;
   contact_persons: ContactPersonRow[];
   signatories: ContactPersonRow[];
 };
@@ -58,6 +60,7 @@ const REQUIRED: { key: keyof Profile; label: string }[] = [
   { key: 'proposed_lease_term_years', label: 'Proposed Lease Term' },
   { key: 'contact_no', label: 'Contact No.' },
   { key: 'business_activities', label: 'Business Activities' },
+  { key: 'nationality', label: 'Nationality' },
 ];
 
 function missingRequired(f: Profile): Set<keyof Profile> {
@@ -75,6 +78,7 @@ function toForm(d: any): Loaded {
     proposed_lease_term_unit: d?.proposed_lease_term_unit === 'MONTHS' ? 'MONTHS' : 'YEARS',
     contact_no: d?.contact_no || '',
     business_activities: d?.business_activities || '',
+    nationality: d?.nationality || '',
     contact_persons: mapContactRows(d?.contact_persons),
     signatories: mapContactRows(d?.signatories),
     login_email: d?.login_email ?? null,
@@ -95,6 +99,7 @@ const editableOf = (f: Profile): Profile => ({
   proposed_lease_term_unit: f.proposed_lease_term_unit,
   contact_no: f.contact_no,
   business_activities: f.business_activities,
+  nationality: f.nationality,
   contact_persons: f.contact_persons,
   signatories: f.signatories,
 });
@@ -244,6 +249,7 @@ export function ProponentInfoTab({
           proposed_lease_term_unit: form.proposed_lease_term_unit,
           contact_no: form.contact_no.trim() || null,
           business_activities: form.business_activities.trim() || null,
+          nationality: form.nationality.trim() || null,
           contact_persons: form.contact_persons.map(toContactPayload),
           signatories: form.signatories.map(toContactPayload),
         }),
@@ -383,24 +389,35 @@ export function ProponentInfoTab({
               <input className={input} value={form.contact_no} onChange={(e) => set({ contact_no: e.target.value })} />
             </Cell>
 
-            <Cell label="Business Activities *" bad={bad('business_activities')} className="@xl:col-span-2">
+            {/* Stretches to the height of the Nationality + Email column beside it. */}
+            <Cell
+              label="Business Activities *"
+              bad={bad('business_activities')}
+              className="@xl:col-span-2 [&>div:last-child]:flex [&>div:last-child]:flex-1"
+            >
               <textarea
-                className={cn(input, 'h-auto min-h-[4.5rem]')}
+                className={cn(input, 'h-auto min-h-[4.5rem] flex-1')}
                 placeholder="What the proponent will do at CIAC"
                 value={form.business_activities}
                 onChange={(e) => set({ business_activities: e.target.value })}
               />
             </Cell>
-            <Cell label="Email (login)">
-              <input
-                className={input}
-                style={readOnlyStyle}
-                value={loaded.login_email || '—'}
-                readOnly
-                tabIndex={-1}
-                title="The locator's login email — changed on Proponent Accounts"
-              />
-            </Cell>
+            {/* Beside Business Activities, stacked so the row keeps its height. */}
+            <div className="flex min-w-0 flex-col gap-3">
+              <Cell label="Nationality *" bad={bad('nationality')}>
+                <NationalityInput value={form.nationality} onChange={(v) => set({ nationality: v })} className={input} />
+              </Cell>
+              <Cell label="Email (login)">
+                <input
+                  className={input}
+                  style={readOnlyStyle}
+                  value={loaded.login_email || '—'}
+                  readOnly
+                  tabIndex={-1}
+                  title="The locator's login email — changed on Proponent Accounts"
+                />
+              </Cell>
+            </div>
           </div>
         </Card>
 

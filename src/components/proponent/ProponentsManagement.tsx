@@ -63,6 +63,7 @@ type ProponentRow = {
   paid_up_capital: string | null;
   paid_up_capital_currency: string | null;
   business_activities: string | null;
+  nationality: string | null;
   advance_lease_payment_months: string | null;
   advance_lease_payment_amount: string | null;
   advance_lease_payment_currency: string | null;
@@ -367,6 +368,42 @@ export const NATIONALITIES = [
   'VIETNAMESE',
   'OTHER',
 ] as const;
+
+/** The proponent / locator's own nationality (B-13): free text, with the
+ * stockholders' list offered as suggestions. Shown and saved in upper case. */
+export function NationalityInput({
+  value,
+  onChange,
+  className,
+  disabled,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  className?: string;
+  disabled?: boolean;
+}) {
+  const listId = `nationality-options-${React.useId().replace(/:/g, '')}`;
+  return (
+    <>
+      <input
+        className={cn(className, 'uppercase placeholder:normal-case')}
+        value={value}
+        list={listId}
+        maxLength={100}
+        disabled={disabled}
+        placeholder="e.g. Filipino"
+        autoComplete="off"
+        onChange={(e) => onChange(e.target.value)}
+      />
+      <datalist id={listId}>
+        {NATIONALITIES.filter((n) => n !== 'OTHER').map((n) => (
+          <option key={n} value={n} />
+        ))}
+      </datalist>
+    </>
+  );
+}
+
 export const STOCKHOLDER_RULES: RowRule<StockholderRow>[] = [
   { key: 'name', label: 'Stockholder Name' },
   { key: 'nationality', label: 'Nationality', kind: 'option', options: NATIONALITIES },
@@ -692,6 +729,7 @@ const BLANK_PROFILE_FORM = {
   contract_type_id: '',
   industry_code: '',
   business_activities: '',
+  nationality: '',
   advance_lease_payment_months: '',
   advance_lease_payment_amount: '',
   advance_lease_payment_currency: 'PHP',
@@ -1401,6 +1439,7 @@ export function ProponentsManagement({
           contract_type_id: data.contract_type_id != null ? String(data.contract_type_id) : '',
           industry_code: data.industry_code || '',
           business_activities: data.business_activities || '',
+          nationality: data.nationality || '',
           advance_lease_payment_months: data.advance_lease_payment_months || '',
           advance_lease_payment_amount: data.advance_lease_payment_amount || '',
           advance_lease_payment_currency: data.advance_lease_payment_currency || 'PHP',
@@ -1707,6 +1746,7 @@ export function ProponentsManagement({
         paid_up_capital: form.paid_up_capital.trim() || null,
         paid_up_capital_currency: form.paid_up_capital_currency || null,
         business_activities: form.business_activities.trim() || null,
+        nationality: form.nationality.trim() || null,
         advance_lease_payment_months: form.advance_lease_payment_months.trim() || null,
         advance_lease_payment_amount: form.advance_lease_payment_amount.trim() || null,
         advance_lease_payment_currency: form.advance_lease_payment_currency || null,
@@ -2291,14 +2331,26 @@ export function ProponentsManagement({
                 Principal/Lease Address and TIN/SEC/Ref inside their own cells rather than
                 adding extra top-level columns, which would throw off the gap math. */}
             <div className="grid grid-cols-1 md:grid-cols-[1.8fr_1.6fr_0.7fr] gap-3">
-              <div>
-                <Field compact label="Locator's Name">
+              {/* Name and nationality share the first column, so Row 1's
+                  three columns still line up with Row 2's. */}
+              <div className="flex flex-col xl:flex-row gap-3 min-w-0">
+                <Field compact label="Locator's Name" className="flex-1 min-w-0">
                   <div className="app-form-control app-form-control-sm p-0 overflow-hidden flex items-stretch">
                     <input
                       className="flex-1 min-w-0 border-0 bg-transparent outline-none px-2 py-1"
                       style={{ color: 'var(--text)' }}
                       value={form.business_name}
                       onChange={(e) => setForm((p) => ({ ...p, business_name: e.target.value }))}
+                    />
+                  </div>
+                </Field>
+                <Field compact label="Nationality" className="xl:w-40 shrink-0">
+                  {/* Same box as Locator's Name, so the two are one height. */}
+                  <div className="app-form-control app-form-control-sm p-0 overflow-hidden flex items-stretch">
+                    <NationalityInput
+                      className="flex-1 min-w-0 border-0 bg-transparent outline-none px-2 py-1 text-[var(--text)]"
+                      value={form.nationality}
+                      onChange={(v) => setForm((p) => ({ ...p, nationality: v }))}
                     />
                   </div>
                 </Field>
