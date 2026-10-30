@@ -133,6 +133,8 @@ const ACTION_LABELS: Record<string, string> = {
   PROPONENT_CONTACTS_UPDATED: 'Contacts updated',
   PROPONENT_PROPERTIES_UPDATED: 'Properties updated',
   PROPONENT_INVESTMENT_UPDATED: 'Investment info updated',
+  PROPONENT_EXTENSION_ADDED: 'Extension added',
+  PROPONENT_EXTENSION_REMOVED: 'Extension removed',
   // Applications
   APPLICATION_DRAFT_SAVED: 'Draft saved',
   APPLICATION_SUBMITTED: 'Application submitted',
@@ -722,6 +724,14 @@ function describeActivity(row: AuditLogRow): string {
       return `Updated property schedule for "${String(d.business_name ?? '')}"`;
     case 'PROPONENT_INVESTMENT_UPDATED':
       return `Updated investment info for "${String(d.business_name ?? '')}"`;
+    case 'PROPONENT_EXTENSION_ADDED':
+    case 'PROPONENT_EXTENSION_REMOVED': {
+      const verb = row.action === 'PROPONENT_EXTENSION_ADDED' ? 'Added' : 'Removed';
+      const when = d.extension_date ? ` (${String(d.extension_date).slice(0, 10)})` : '';
+      const note = d.remarks ? ` — "${String(d.remarks)}"` : '';
+      const ref = d.ref_no ? ` (${String(d.ref_no)})` : '';
+      return `${verb} an extension date${when} for "${String(d.business_name ?? '')}"${ref}${note}`;
+    }
 
     // --- Applications ---
     case 'APPLICATION_DRAFT_SAVED':

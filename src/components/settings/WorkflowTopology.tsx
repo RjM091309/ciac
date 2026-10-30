@@ -231,6 +231,7 @@ const SCENARIOS: Scenario[] = [
           'The locator now appears in Registered Locator; an Account Officer sees only their own locators.',
           'The Account Officer types the lease’s Ref. Code (never reused) and Date Signed under Lease Agreements; the proponent details the BDO encoded are already there.',
           'Lease Agreements shows the current lease; past leases are folded under “View past leases”, and each opens read only (its terms and property schedule) in a panel over the locator.',
+          'Extension Date: each extension (date and remarks, under the current lease) is added as its own row and kept as history — the latest shows first, earlier ones under “View past extensions”; removing one is a soft delete, and adds/removals are in the Audit Log.',
           'Sub-Lease: each sub-lessee is a locator of its own — added (or linked) from the Sub-Lessees card of the locator it sub-leases from, and opened in its own panel over that locator.',
           'Stockholders tab: stockholders, SEC Registration Information (capital, purposes, SEC contact person) and GIS — the latest GIS filing date, with the locator’s GIS document from Compliance shown read only.',
           'The contract permit counts down to expiry — it shows on Renewal Tracking once expiring (6 months left).',

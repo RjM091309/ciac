@@ -599,6 +599,17 @@ function fmtDate(value?: string | null) {
 
 type LeaseStatus = 'active' | 'expired';
 
+/** One lease extension (GET /api/proponents/:id/extensions). id null = typed in
+ * before extensions were kept as history (only on the locator itself). */
+type ExtensionRow = {
+  id: number | null;
+  extension_date: string | null;
+  remarks: string | null;
+  lease_ref_code: string | null;
+  encoded_by: string | null;
+  created_at: string | null;
+};
+
 /** One lease agreement (GET /api/proponents/:id/leases, A-02/A-03/A-04). */
 type LeaseRow = {
   id: number;
@@ -1145,6 +1156,50 @@ export function ProponentsManagement({
   const [nestedLocator, setNestedLocator] = useState<Omit<EmbeddedLocator, 'onClose'> | null>(null);
   const [sublesseeLinkConfirm, setSublesseeLinkConfirm] = useState(false);
   const [subleaseSaving, setSubleaseSaving] = useState(false);
+  // Extensions card: every extension of the open locator (newest first), the
+  // new one being typed in, and which one is being removed.
+  const [extensions, setExtensions] = useState<ExtensionRow[]>([]);
+  const [extensionDraft, setExtensionDraft] = useState({ extension_date: '', remarks: '' });
+  const [extensionSaving, setExtensionSaving] = useState(false);
+  const [extensionRemove, setExtensionRemove] = useState<ExtensionRow | null>(null);
+  const [showPastExtensions, setShowPastExtensions] = useState(false);
+  const loadExtensions = useCallback(async (proponentId: number) => {
+    try {
+      const res = await fetch(api(`/api/proponents/${proponentId}/extensions`), { credentials: 'include' });
+      const json = await res.json().catch(() => ({}));
+      setExtensions(res.ok && Array.isArray(json?.data) ? json.data : []);
+    } catch {
+      setExtensions([]);
+    }
+  }, []);
+  /** Adds the typed-in extension (POST), or removes one (DELETE); the card is
+   * saved on its own, not by the panel's Update. */
+  async function changeExtension(remove?: ExtensionRow) {
+    if (!editing) return;
+    setExtensionSaving(true);
+    try {
+      const res = remove
+        ? await fetch(api(`/api/proponents/${editing.id}/extensions/${remove.id ?? 'legacy'}`), {
+            method: 'DELETE',
+            credentials: 'include',
+          })
+        : await fetch(api(`/api/proponents/${editing.id}/extensions`), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({ extension_date: extensionDraft.extension_date, remarks: extensionDraft.remarks.trim() }),
+          });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.message || 'Could not save the extension');
+      setExtensions(Array.isArray(json?.data) ? json.data : []);
+      if (!remove) setExtensionDraft({ extension_date: '', remarks: '' });
+      toast.success(remove ? 'Extension removed' : 'Extension added');
+    } catch (e: any) {
+      toast.error(e?.message || 'Could not save the extension');
+    } finally {
+      setExtensionSaving(false);
+    }
+  }
   const loadLeases = useCallback(async (proponentId: number) => {
     try {
       const res = await fetch(api(`/api/proponents/${proponentId}/leases`), { credentials: 'include' });
@@ -1456,6 +1511,8 @@ export function ProponentsManagement({
     setLeases([]);
     setViewLeaseId(null);
     setGisDocument(null);
+    setExtensions([]);
+    setExtensionDraft({ extension_date: '', remarks: '' });
     setLoaded(null);
     setPendingDocs([]);
     locationRequestIdRef.current = null;
@@ -1474,6 +1531,9 @@ export function ProponentsManagement({
     setLeases([]);
     setViewLeaseId(null);
     setShowPastLeases(false);
+    setExtensions([]);
+    setExtensionDraft({ extension_date: '', remarks: '' });
+    setShowPastExtensions(false);
     setSublease(NO_SUBLEASE);
     setLoaded(null);
     setEditing(p);
@@ -1557,6 +1617,7 @@ export function ProponentsManagement({
         setSublease(subleaseFrom(data));
         setViewLeaseId(null);
         void loadLeases(p.id);
+        void loadExtensions(p.id);
         setEditing((prev) =>
           prev && prev.id === p.id
             ? {
@@ -1822,8 +1883,7 @@ export function ProponentsManagement({
         sub_pgrr: form.sub_pgrr.trim() || null,
         // land_use (the old free text) is no longer edited here — it is kept as a legacy note.
         land_use_id: form.land_use_id ? Number(form.land_use_id) : null,
-        extension_date: form.extension_date || null,
-        extension_remarks: form.extension_remarks.trim() || null,
+        // Extension Date / Remarks: saved by the Extensions card, not here.
         authorized_capital: form.authorized_capital.trim() || null,
         authorized_capital_currency: form.authorized_capital_currency || null,
         subscribed_capital: form.subscribed_capital.trim() || null,
@@ -2541,9 +2601,9 @@ export function ProponentsManagement({
                 same column count) so their edges line up vertically — Row 2 nests
                 Principal/Lease Address and TIN/SEC/Ref inside their own cells rather than
                 adding extra top-level columns, which would throw off the gap math. */}
-            <div className="grid grid-cols-1 md:grid-cols-[1.8fr_1.6fr_0.7fr] gap-3">
+            <div className="grid grid-cols-1 md:grid-cols-[1.8fr_1.6fr] gap-3">
               {/* Name and nationality share the first column, so Row 1's
-                  three columns still line up with Row 2's. */}
+                  two columns still line up with Row 2's. */}
               <div className="flex flex-col xl:flex-row gap-3 min-w-0">
                 <Field compact label="Locator's Name" className="flex-1 min-w-0">
                   <div className="app-form-control app-form-control-sm p-0 overflow-hidden flex items-stretch">
@@ -2590,25 +2650,13 @@ export function ProponentsManagement({
                   )}
                 </Field>
               </div>
-              <div>
-                <Field compact label="Extension Date">
-                  <DatePicker
-                    mode="single"
-                    fullWidth
-                    boxed
-                    placeholder="Select date"
-                    value={dateInputToDate(form.extension_date)}
-                    onChange={(d) => setForm((p) => ({ ...p, extension_date: dateToDateInputValue(d) }))}
-                  />
-                </Field>
-              </div>
             </div>
 
-            {/* Row 2: same grid-cols-[1.8fr_1.6fr_0.7fr] track sizes as Row 1 (see note above),
+            {/* Row 2: same grid-cols-[1.8fr_1.6fr] track sizes as Row 1 (see note above),
                 so Row 1/Row 2 edges stay pixel-aligned. Principal Address, TIN and SEC Registration
                 are on the Stockholders tab's SEC Registration Information card; the Ref. Code is
                 on the Lease Agreements card (one per lease). */}
-            <div className="grid grid-cols-1 md:grid-cols-[1.8fr_1.6fr_0.7fr] gap-3 items-stretch">
+            <div className="grid grid-cols-1 md:grid-cols-[1.8fr_1.6fr] gap-3 items-stretch">
               <div className="flex flex-col sm:flex-row gap-3 items-stretch">
                 <div className="flex-1 flex">
                   <Field compact label="Lease Address" className="h-full flex-1">
@@ -2640,16 +2688,6 @@ export function ProponentsManagement({
                 </Field>
               </div>
 
-              <div className="flex">
-                <Field compact label="Extension Remarks" className="h-full flex-1">
-                  <textarea
-                    className="app-form-control app-form-control-sm flex-1 min-h-[4.5rem] md:min-h-0"
-                    value={form.extension_remarks}
-                    disabled={loadingLocation}
-                    onChange={(e) => setForm((p) => ({ ...p, extension_remarks: e.target.value }))}
-                  />
-                </Field>
-              </div>
             </div>
 
             {/* Lease Agreements (A-02/A-03/A-04): one row per lease — the current
@@ -2828,6 +2866,158 @@ export function ProponentsManagement({
                 </table>
               </div>
             </div>
+
+            {/* Extensions: every extension of the lease term, kept as history (newest
+                first) — same card as Lease Agreements. Added / removed on their own
+                (not by Update); the latest is the locator's Extension Date in reports. */}
+            {leaseView ? null : (
+            <div
+              className="flex flex-col gap-2 rounded-xl border p-3"
+              style={{ borderColor: 'var(--input-border)', backgroundColor: 'color-mix(in oklab, var(--control-bg) 55%, transparent)' }}
+            >
+              <div
+                className="-mx-3 -mt-3 mb-1 flex items-center justify-between gap-2 rounded-t-xl border-b px-3 py-2"
+                style={{ borderColor: 'var(--input-border)', backgroundColor: 'var(--control-bg)' }}
+              >
+                <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--text)' }}>
+                  Extension Date
+                  <span className="ml-1.5 font-normal normal-case tracking-normal text-secondary">({extensions.length})</span>
+                </span>
+                <div className="flex items-center gap-3">
+                  <span className="text-[10px] text-secondary">Each extension is kept as history</span>
+                  {extensions.length > 1 ? (
+                    <button
+                      type="button"
+                      onClick={() => setShowPastExtensions((v) => !v)}
+                      className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[11px] font-semibold cursor-pointer hover:bg-[var(--selected-bg)]"
+                      style={{ borderColor: 'var(--input-border)', color: 'var(--text)', backgroundColor: 'var(--surface)' }}
+                      aria-expanded={showPastExtensions}
+                    >
+                      {showPastExtensions ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                      {showPastExtensions ? 'Hide past extensions' : `View past extensions (${extensions.length - 1})`}
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+              {!editing ? (
+                <div className="text-xs text-secondary">Add extensions after saving this locator.</div>
+              ) : (
+                <div className="min-w-0 overflow-x-auto rounded-lg border" style={{ borderColor: 'var(--input-border)' }}>
+                  <table className="w-full min-w-[52rem] table-fixed text-xs border-collapse">
+                    <thead>
+                      <tr style={{ backgroundColor: 'var(--control-bg)' }}>
+                        {[
+                          ['Extension Date', '16%'],
+                          ['Remarks', '34%'],
+                          ['Lease Ref. Code', '13%'],
+                          ['Encoded By', '14%'],
+                          ['Date Encoded', '12%'],
+                          ['Status', '11%'],
+                        ].map(([h, w]) => (
+                          <th
+                            key={h}
+                            className="px-2 py-1.5 text-left font-semibold uppercase tracking-wide text-[9px] border-b"
+                            style={{ borderColor: 'var(--input-border)', color: 'var(--text-muted)', width: w }}
+                          >
+                            {h}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(showPastExtensions ? extensions : extensions.slice(0, 1)).map((x, i) => {
+                        const latest = i === 0;
+                        return (
+                          <tr key={x.id ?? 'legacy'} style={{ backgroundColor: latest ? 'var(--surface)' : undefined }}>
+                            <td className="px-2 py-2 border-b font-medium" style={{ borderColor: 'var(--input-border)', color: 'var(--text)' }}>
+                              {fmtDate(x.extension_date)}
+                            </td>
+                            <td className="px-2 py-2 border-b" style={{ borderColor: 'var(--input-border)', color: 'var(--text)' }}>
+                              <div className="whitespace-pre-wrap break-words">{x.remarks || '—'}</div>
+                            </td>
+                            <td className="px-2 py-2 border-b" style={{ borderColor: 'var(--input-border)' }}>{x.lease_ref_code || '—'}</td>
+                            <td className="px-2 py-2 border-b" style={{ borderColor: 'var(--input-border)' }}>
+                              {x.encoded_by || (x.id == null ? <span className="text-secondary">Before history</span> : '—')}
+                            </td>
+                            <td className="px-2 py-2 border-b" style={{ borderColor: 'var(--input-border)' }}>{fmtDate(x.created_at)}</td>
+                            <td className="px-2 py-2 border-b" style={{ borderColor: 'var(--input-border)' }}>
+                              <div className="flex items-center justify-between gap-2">
+                                <span
+                                  className="rounded-full px-2 py-0.5 text-[10px] font-semibold"
+                                  style={
+                                    latest
+                                      ? { backgroundColor: 'color-mix(in oklab, #22c55e 18%, transparent)', color: '#15803d' }
+                                      : { backgroundColor: 'var(--control-bg)', color: 'var(--text-muted)' }
+                                  }
+                                >
+                                  {latest ? '● Latest' : 'Previous'}
+                                </span>
+                                {canEdit ? (
+                                  <button
+                                    type="button"
+                                    className="inline-flex h-6 w-6 items-center justify-center rounded-md cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 hover:bg-[var(--selected-bg)]"
+                                    disabled={extensionSaving}
+                                    onClick={() => setExtensionRemove(x)}
+                                    title="Remove this extension"
+                                    aria-label="Remove this extension"
+                                  >
+                                    <Trash2 size={13} className="text-red-500" />
+                                  </button>
+                                ) : null}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                      {extensions.length === 0 ? (
+                        <tr>
+                          <td colSpan={6} className="px-2 py-2 border-b text-secondary" style={{ borderColor: 'var(--input-border)' }}>
+                            No extensions yet.
+                          </td>
+                        </tr>
+                      ) : null}
+                      {/* New extension: typed in, then Add (saved right away). */}
+                      {canEdit ? (
+                        <tr>
+                          <td className="px-1 py-1 align-top">
+                            <DatePicker
+                              mode="single"
+                              fullWidth
+                              boxed
+                              placeholder="Extension date"
+                              value={dateInputToDate(extensionDraft.extension_date)}
+                              onChange={(d) => setExtensionDraft((p) => ({ ...p, extension_date: dateToDateInputValue(d) }))}
+                            />
+                          </td>
+                          <td colSpan={4} className="px-1 py-1 align-top">
+                            <input
+                              className="app-form-control app-form-control-sm h-9 w-full"
+                              placeholder="Remarks"
+                              maxLength={300}
+                              value={extensionDraft.remarks}
+                              disabled={extensionSaving}
+                              onChange={(e) => setExtensionDraft((p) => ({ ...p, remarks: e.target.value }))}
+                            />
+                          </td>
+                          <td className="px-1 py-1 align-top">
+                            <button
+                              type="button"
+                              className="inline-flex h-9 w-full items-center justify-center gap-1 rounded-md border px-2 text-[11px] font-semibold cursor-pointer disabled:cursor-not-allowed disabled:opacity-60 hover:bg-[var(--selected-bg)]"
+                              style={{ borderColor: 'var(--input-border)', color: 'var(--text)', backgroundColor: 'var(--surface)' }}
+                              disabled={!extensionDraft.extension_date || extensionSaving || loadingLocation}
+                              onClick={() => void changeExtension()}
+                            >
+                              <Plus size={13} /> {extensionSaving ? 'Saving…' : 'Add'}
+                            </button>
+                          </td>
+                        </tr>
+                      ) : null}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+            )}
 
             {/* Row 4: Sub-Lease (A-07). A sub-lessee is a locator of its own (own
                 Locator Information), linked to the locator it sub-leases from.
@@ -4239,6 +4429,22 @@ export function ProponentsManagement({
           }}
         />
       ) : null}
+
+      <ConfirmModal
+        open={extensionRemove !== null}
+        title="Remove this extension?"
+        description={`The extension${
+          extensionRemove?.extension_date ? ` of ${fmtDate(extensionRemove.extension_date)}` : ''
+        } is removed from the history now. The latest one left becomes the locator's Extension Date.`}
+        confirmText="Remove"
+        danger
+        loading={extensionSaving}
+        onCancel={() => setExtensionRemove(null)}
+        onConfirm={async () => {
+          if (extensionRemove) await changeExtension(extensionRemove);
+          setExtensionRemove(null);
+        }}
+      />
 
       <ConfirmModal
         open={sublesseeUnlink !== null}

@@ -1142,6 +1142,82 @@ exports.saveInvestment = sectionHandler("investment", "PROPONENT_INVESTMENT_UPDA
     ),
 });
 
+/* ---------------- Extensions card (dbo.proponent_extensions) ---------------- */
+const ProponentExtension = require("../models/ProponentExtension");
+
+/** GET /api/proponents/:id/extensions — every extension, newest first. */
+exports.listExtensions = async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ success: false, message: "Invalid id" });
+    return res.json({ success: true, data: await ProponentExtension.listForProponent(id) });
+  } catch (error) {
+    console.error("List extensions error:", error);
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
+  }
+};
+
+async function recordExtensionAudit(req, id, action, details) {
+  const proponent = await Proponent.getProponentById(id).catch(() => null);
+  await AuditLog.record({
+    actorId: req.user?.id,
+    actorUsername: req.user?.username,
+    action,
+    entityType: "proponent",
+    entityId: id,
+    details: { business_name: proponent?.business_name, ref_no: proponent?.ref_no ?? null, ...details },
+    req,
+  });
+}
+
+/** POST /api/proponents/:id/extensions — { extension_date, remarks }. */
+exports.addExtension = async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ success: false, message: "Invalid id" });
+    const extensionDate = String(req.body?.extension_date || "").trim();
+    const remarks = String(req.body?.remarks || "").trim();
+    if (!extensionDate) return res.status(400).json({ success: false, message: "Extension Date is required" });
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(extensionDate) || Number.isNaN(new Date(extensionDate).getTime())) {
+      return res.status(400).json({ success: false, message: "Invalid Extension Date" });
+    }
+    if (remarks.length > 300) return res.status(400).json({ success: false, message: "Remarks must be 300 characters or fewer" });
+    if (!(await Proponent.getProponentById(id))) return res.status(404).json({ success: false, message: "Proponent not found" });
+
+    const data = await ProponentExtension.add(id, { extension_date: extensionDate, remarks: remarks || null }, req.user?.id ?? null);
+    await recordExtensionAudit(req, id, "PROPONENT_EXTENSION_ADDED", { extension_date: extensionDate, remarks: remarks || null });
+    return res.json({ success: true, data });
+  } catch (error) {
+    console.error("Add extension error:", error);
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
+  }
+};
+
+/** DELETE /api/proponents/:id/extensions/:extId — "legacy" = the one typed in before the table. */
+exports.removeExtension = async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ success: false, message: "Invalid id" });
+    const raw = String(req.params.extId || "");
+    const extId = raw === "legacy" ? null : Number(raw);
+    if (extId !== null && !Number.isFinite(extId)) return res.status(400).json({ success: false, message: "Invalid extension" });
+
+    // What's removed, for the audit trail (the row itself is only soft-deleted).
+    const removed = (await ProponentExtension.listForProponent(id)).find((x) => (x.id ?? null) === extId) || null;
+    if (!removed) return res.status(404).json({ success: false, message: "Extension not found" });
+    const data = await ProponentExtension.remove(id, extId, req.user?.id ?? null);
+    await recordExtensionAudit(req, id, "PROPONENT_EXTENSION_REMOVED", {
+      extension_id: extId,
+      extension_date: removed.extension_date,
+      remarks: removed.remarks,
+    });
+    return res.json({ success: true, data });
+  } catch (error) {
+    console.error("Remove extension error:", error);
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
+  }
+};
+
 /** GET /api/proponents/:id/leases — the Lease Agreements card. */
 exports.listLeases = async (req, res) => {
   try {
