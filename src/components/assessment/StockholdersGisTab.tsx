@@ -18,7 +18,7 @@ import {
 } from '../proponent/ProponentsManagement';
 
 /**
- * Evaluation Queue → "Stockholders + GIS" tab (B-11): the stockholders and the
+ * Evaluation Queue → "Stockholders / GIS" tab (B-11): the stockholders and the
  * SEC registration details (as on the General Information Sheet), encoded by
  * the BDO while evaluating. Same rows as the Registered Locator's Stockholders
  * tab (GET/PUT /api/assessments/:id/stockholders). No Ref. Code here — it's set
@@ -341,7 +341,7 @@ export function StockholdersGisTab({ applicationId, canEdit = true }: { applicat
             className="rounded-lg px-4 py-2 text-[12px] font-semibold cursor-pointer disabled:cursor-not-allowed disabled:opacity-60"
             style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
           >
-            {saving ? 'Saving…' : 'Save Stockholders + GIS'}
+            {saving ? 'Saving…' : 'Save Stockholders / GIS'}
           </button>
         </div>
       ) : null}

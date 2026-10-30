@@ -231,9 +231,23 @@ async function notifyReviewers({ proponentName, itemName, actorId }) {
   }
 }
 
+/** The locator's latest GIS upload (Compliance page), summarised for the
+ * read-only "GIS document" field on the Stockholders tabs; null if none. */
+async function latestGisSummary(proponentId) {
+  const [latest] = await listForProponent(proponentId, "GIS");
+  if (!latest) return null;
+  return {
+    original_file_name: latest.original_file_name || latest.file_name || null,
+    status: latest.status || null,
+    validity_to: latest.validity_to || null,
+    uploaded_at: latest.uploaded_at || null,
+  };
+}
+
 module.exports = {
   ensureSchema,
   listForProponent,
+  latestGisSummary,
   getById,
   createUpload,
   applyReview,

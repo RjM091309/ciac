@@ -560,7 +560,7 @@ exports.saveCommitment = async (req, res) => {
   }
 };
 
-/* ------------- Stockholders + GIS (Evaluation Queue tab, B-11) ------------ */
+/* ------------- Stockholders / GIS (Evaluation Queue tab, B-11) ------------ */
 // The stockholders and the SEC registration details (as on the GIS), encoded
 // by the BDO while evaluating. Same dbo.stockholder / dbo.proponents /
 // dbo.proponent_sec_registration rows as the Registered Locator's Stockholders
@@ -592,16 +592,7 @@ async function stockholdersPayload(req, applicationId) {
   // The latest GIS upload on the locator's Compliance page (read-only here).
   let gis_document = null;
   try {
-    const ComplianceDocument = require("../models/ComplianceDocument");
-    const [latest] = await ComplianceDocument.listForProponent(app.proponent_id, "GIS");
-    if (latest) {
-      gis_document = {
-        original_file_name: latest.original_file_name || latest.file_name || null,
-        status: latest.status || null,
-        validity_to: latest.validity_to || null,
-        uploaded_at: latest.uploaded_at || null,
-      };
-    }
+    gis_document = await require("../models/ComplianceDocument").latestGisSummary(app.proponent_id);
   } catch (error) {
     console.error("GIS document lookup error:", error);
   }

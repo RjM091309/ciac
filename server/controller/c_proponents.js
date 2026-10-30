@@ -524,7 +524,15 @@ exports.getById = async (req, res) => {
     const row = await Proponent.getProponentById(id);
     if (!row) return res.status(404).json({ success: false, message: "Proponent not found" });
 
-    return res.json({ success: true, data: row });
+    // The latest GIS upload on the locator's Compliance page (Stockholders tab, read only).
+    let gis_document = null;
+    try {
+      gis_document = await require("../models/ComplianceDocument").latestGisSummary(id);
+    } catch (error) {
+      console.error("GIS document lookup error:", error);
+    }
+
+    return res.json({ success: true, data: { ...row, gis_document } });
   } catch (error) {
     console.error("Get proponent error:", error);
     return res.status(500).json({ success: false, message: publicErrorMessage(error) });

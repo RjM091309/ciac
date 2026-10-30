@@ -371,38 +371,40 @@ export const NATIONALITIES = [
   'OTHER',
 ] as const;
 
-/** The proponent / locator's own nationality (B-13): free text, with the
- * stockholders' list offered as suggestions. Shown and saved in upper case. */
+/** The proponent / locator's own nationality (B-13): the same searchable
+ * dropdown as the stockholders' Nationality column. An older free-text value
+ * that isn't in the list is kept as an extra option so it still shows. */
 export function NationalityInput({
   value,
   onChange,
   className,
   disabled,
+  minHeight = 26,
 }: {
   value: string;
   onChange: (value: string) => void;
   className?: string;
   disabled?: boolean;
+  minHeight?: number;
 }) {
-  const listId = `nationality-options-${React.useId().replace(/:/g, '')}`;
+  const current = String(value || '').trim();
+  const matched = asOption([...NATIONALITIES], current);
+  const options: string[] = [...NATIONALITIES];
+  if (current && !matched) options.unshift(current.toUpperCase());
   return (
-    <>
-      <input
-        className={cn(className, 'uppercase placeholder:normal-case')}
-        value={value}
-        list={listId}
-        maxLength={100}
-        disabled={disabled}
-        placeholder="e.g. Filipino"
-        autoComplete="off"
-        onChange={(e) => onChange(e.target.value)}
+    <div className={cn('app-form-control app-form-control-sm p-0 overflow-hidden flex items-stretch', className)}>
+      <AppSelect
+        options={options.map((o) => ({ value: o, label: o }))}
+        value={matched || current.toUpperCase()}
+        onChange={onChange}
+        placeholder="Select nationality"
+        isClearable={false}
+        isDisabled={disabled}
+        compact
+        boxed
+        minHeight={minHeight}
       />
-      <datalist id={listId}>
-        {NATIONALITIES.filter((n) => n !== 'OTHER').map((n) => (
-          <option key={n} value={n} />
-        ))}
-      </datalist>
-    </>
+    </div>
   );
 }
 
@@ -790,12 +792,26 @@ const BLANK_PROFILE_FORM = {
   signatories: [] as SignatoryRow[],
 };
 
+/** A sub-lessee opened from its sublessor's panel: this component renders only
+ * its own panel, stacked over the sublessor's, which stays as it was. */
+type EmbeddedLocator = {
+  /** Open this saved locator. */
+  locatorId?: number;
+  /** With locatorId: show this earlier lease of it, read only (Lease Agreements history). */
+  leaseId?: number;
+  /** Or start a New Locator as a sub-lessee of this one ("Add Sub-Lessee"). */
+  sublessor?: { id: number; name: string; ref_no: string | null; account_officer_id: string };
+  onClose: () => void;
+};
+
 export function ProponentsManagement({
   locationSearch = '',
   navigate,
+  embedded,
 }: {
   locationSearch?: string;
   navigate?: (to: string, opts?: { replace?: boolean }) => void;
+  embedded?: EmbeddedLocator;
 } = {}) {
   // The Account Officer field shows who a locator is assigned to. An Account
   // Officer looking at their own assigned locators doesn't need (or should
@@ -807,15 +823,17 @@ export function ProponentsManagement({
   // Control Panel add/edit for Registered Locator (settings:proponents, the
   // same key the server checks): without them the buttons aren't shown.
   const crud = crudPermissions['settings:proponents'] || { can_add: false, can_edit: false, can_delete: false };
-  const canAdd = cpFullAccess || crud.can_add;
-  const canEdit = cpFullAccess || crud.can_edit;
+  // An earlier lease opened in a stacked panel is history: nothing in it saves.
+  const viewOnlyLease = embedded?.leaseId != null;
+  const canAdd = !viewOnlyLease && (cpFullAccess || crud.can_add);
+  const canEdit = !viewOnlyLease && (cpFullAccess || crud.can_edit);
   const isAccountOfficer =
     !cpFullAccess && Boolean(cpSidebar['approval:queue']) && !cpSidebar['assessment:queue'];
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<ProponentRow | null>(null);
   // No Add/Edit right for this panel (new vs. existing locator) = view only.
-  const formLocked = editing ? !canEdit : !canAdd;
+  const formLocked = embedded?.leaseId != null || (editing ? !canEdit : !canAdd);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   // "+" on the property schedule asks Standard vs Non-standard first.
   const [propertyTypePickerOpen, setPropertyTypePickerOpen] = useState(false);
@@ -1102,6 +1120,13 @@ export function ProponentsManagement({
   // The open locator's portal login (from GET /:id): PENDING = created but
   // not sent yet ("Send login now"), ACTIVE = the locator has it.
   const [loginInfo, setLoginInfo] = useState<{ status: string | null; email: string | null; username: string | null } | null>(null);
+  // The latest GIS upload on the locator's Compliance page (from GET /:id),
+  // shown read only beside Latest GIS Filing on the Stockholders tab (A-16).
+  const [gisDocument, setGisDocument] = useState<{
+    original_file_name: string | null;
+    status: string | null;
+    validity_to: string | null;
+  } | null>(null);
   // Lease Agreements card: every lease of the open locator, and which earlier
   // one's property schedule is being viewed (null = the current lease).
   const [leases, setLeases] = useState<LeaseRow[]>([]);
@@ -1111,6 +1136,10 @@ export function ProponentsManagement({
   const [sublease, setSublease] = useState<SubleaseInfo>(NO_SUBLEASE);
   const [sublesseeLinkId, setSublesseeLinkId] = useState('');
   const [sublesseeUnlink, setSublesseeUnlink] = useState<SublesseeRow | null>(null);
+  // A sub-lessee (opened from the Sub-Lessees card, or a new one from "Add
+  // Sub-Lessee") gets its own panel stacked over this one, so this locator's
+  // fields are never swapped out from under the user.
+  const [nestedLocator, setNestedLocator] = useState<Omit<EmbeddedLocator, 'onClose'> | null>(null);
   const [sublesseeLinkConfirm, setSublesseeLinkConfirm] = useState(false);
   const [subleaseSaving, setSubleaseSaving] = useState(false);
   const loadLeases = useCallback(async (proponentId: number) => {
@@ -1423,6 +1452,7 @@ export function ProponentsManagement({
     setShowRowErrors({ stockholders: false, contacts: false });
     setLeases([]);
     setViewLeaseId(null);
+    setGisDocument(null);
     setLoaded(null);
     setPendingDocs([]);
     locationRequestIdRef.current = null;
@@ -1444,6 +1474,7 @@ export function ProponentsManagement({
     setLoaded(null);
     setEditing(p);
     setLoginInfo(null);
+    setGisDocument(null);
     setForm({
       user_id: p.user_id != null ? String(p.user_id) : '',
       business_name: p.business_name || '',
@@ -1462,6 +1493,7 @@ export function ProponentsManagement({
         if (locationRequestIdRef.current !== p.id) return; // superseded by a newer openEdit() call
         const data = json?.data || {};
         setLoginInfo({ status: data.login_status ?? null, email: data.login_email ?? null, username: data.login_username ?? null });
+        setGisDocument(data.gis_document ?? null);
         const profileFields = {
           location: data.location || '',
           ref_code: data.ref_code || '',
@@ -1905,13 +1937,55 @@ export function ProponentsManagement({
     openEdit(row);
   }
   function addSublessee() {
-    if (!editing || blockedByUnsaved()) return;
-    openCreate({
-      id: editing.id,
-      name: form.business_name.trim() || editing.business_name,
-      ref_no: editing.ref_no,
-      account_officer_id: form.account_officer_id,
+    if (!editing) return;
+    setNestedLocator({
+      sublessor: {
+        id: editing.id,
+        name: form.business_name.trim() || editing.business_name,
+        ref_no: editing.ref_no,
+        account_officer_id: form.account_officer_id,
+      },
     });
+  }
+  // Stacked (embedded) instance: open its locator once the list has loaded,
+  // and hand control back to the sublessor's panel when this one closes.
+  const embeddedOpenedRef = useRef(false);
+  useEffect(() => {
+    if (!embedded || embeddedOpenedRef.current || !locatorsData) return;
+    embeddedOpenedRef.current = true;
+    if (embedded.sublessor) {
+      openCreate(embedded.sublessor);
+      return;
+    }
+    const row = proponents.find((p) => p.id === embedded.locatorId);
+    if (row) openEdit(row);
+    else embedded.onClose();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [embedded, locatorsData]);
+  useEffect(() => {
+    if (embedded?.leaseId != null && leases.some((l) => l.id === embedded.leaseId)) setViewLeaseId(embedded.leaseId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [leases]);
+  const embeddedShownRef = useRef(false);
+  useEffect(() => {
+    if (isCreateOpen) embeddedShownRef.current = true;
+    if (!embedded || !embeddedShownRef.current || isCreateOpen) return;
+    // Let the panel's slide-out finish before it's unmounted.
+    const t = window.setTimeout(() => embedded.onClose(), 300);
+    return () => window.clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isCreateOpen]);
+
+  /** After the stacked sub-lessee panel closes: its name, terms or link may
+   * have changed, so re-read this locator's sub-lessees. */
+  async function reloadSublease() {
+    if (!editing) return;
+    try {
+      const data = (await fetch(api(`/api/proponents/${editing.id}`), { credentials: 'include' }).then((r) => r.json()))?.data;
+      if (data) setSublease(subleaseFrom(data));
+    } catch {
+      /* keep what's shown */
+    }
   }
   /** Links `childId` under the open locator, or unlinks it (sublessorId null). */
   async function setSublessorOf(childId: number, sublessorId: number | null) {
@@ -2030,6 +2104,12 @@ export function ProponentsManagement({
   const secNoTaken = useTakenCheck('registration_no', form.registration_no, editing?.registration_no);
 
   const viewedLease = viewLeaseId !== null ? leases.find((l) => l.id === viewLeaseId) || null : null;
+  // An earlier lease's stacked panel: lease-view layout from the first render,
+  // even before its lease has loaded (no flash of the locator's own layout).
+  const leaseView = viewOnlyLease;
+  const leaseLabel = viewedLease
+    ? viewedLease.ref_code || viewedLease.application_no || viewedLease.contract_no || 'Encoded lease'
+    : null;
 
   // One-line text input on the SEC Registration Information card.
   const secTextField = (key: SecKey, label: string, placeholder?: string) => (
@@ -2048,7 +2128,8 @@ export function ProponentsManagement({
   );
 
   return (
-    <div className="space-y-4 sm:space-y-5">
+    <div className={embedded ? undefined : 'space-y-4 sm:space-y-5'}>
+      {embedded ? null : (
       <div className="glass-card p-3 sm:p-5 !border-transparent overflow-hidden" style={{ backgroundColor: 'var(--surface)' }}>
         {error && (
           <div
@@ -2247,12 +2328,19 @@ export function ProponentsManagement({
           </>
         )}
       </div>
+      )}
 
       <SidePanel
         open={isCreateOpen}
         title={
-          editing
-            ? 'Locator Information'
+          leaseView
+            ? leaseLabel
+              ? `Lease Agreement — ${leaseLabel}`
+              : 'Lease Agreement'
+            : editing
+            ? sublease.sublessor
+              ? 'Sub-Lessee Information'
+              : 'Locator Information'
             : sublease.sublessor
             ? 'Sub Lessee'
             : // Same lookup the Type of Contract select uses to show its value.
@@ -2262,12 +2350,12 @@ export function ProponentsManagement({
                   ?.label.replace(/ \(inactive\)$/, ''),
               )
         }
-        subtitle="Locators master table"
+        subtitle={leaseView ? 'Locators master table · earlier lease (read only)' : 'Locators master table'}
         onClose={() => setIsCreateOpen(false)}
         onSave={() => void save()}
         saving={saving}
         saveDisabled={!canSubmit}
-        hideSave={editing ? !canEdit : !canAdd}
+        hideSave={embedded?.leaseId != null || (editing ? !canEdit : !canAdd)}
         saveLabel={editing ? 'Update' : 'Save'}
         headerExtra={(() => {
           // An encoded locator with no portal login yet: offer to create one.
@@ -2357,7 +2445,8 @@ export function ProponentsManagement({
             </>
           ) : undefined
         }
-        widthClassName="md:max-w-[75vw]"
+        // Stacked sub-lessee panel: a little narrower so the sublessor's shows behind it.
+        widthClassName={embedded ? 'md:max-w-[70vw]' : 'md:max-w-[75vw]'}
       >
         {editing && pendingRequestFor.has(editing.id) ? (() => {
           const cr = pendingRequestFor.get(editing.id)!;
@@ -2464,13 +2553,10 @@ export function ProponentsManagement({
                 </Field>
                 <Field compact label="Nationality" className="xl:w-40 shrink-0">
                   {/* Same box as Locator's Name, so the two are one height. */}
-                  <div className="app-form-control app-form-control-sm p-0 overflow-hidden flex items-stretch">
-                    <NationalityInput
-                      className="flex-1 min-w-0 border-0 bg-transparent outline-none px-2 py-1 text-[var(--text)]"
-                      value={form.nationality}
-                      onChange={(v) => setForm((p) => ({ ...p, nationality: v }))}
-                    />
-                  </div>
+                  <NationalityInput
+                    value={form.nationality}
+                    onChange={(v) => setForm((p) => ({ ...p, nationality: v }))}
+                  />
                 </Field>
               </div>
               <div>
@@ -2515,8 +2601,9 @@ export function ProponentsManagement({
             </div>
 
             {/* Row 2: same grid-cols-[1.8fr_1.6fr_0.7fr] track sizes as Row 1 (see note above),
-                so Row 1/Row 2 edges stay pixel-aligned. Principal Address, TIN, SEC Registration
-                and Ref. Code are on the Stockholders tab's SEC Registration Information card. */}
+                so Row 1/Row 2 edges stay pixel-aligned. Principal Address, TIN and SEC Registration
+                are on the Stockholders tab's SEC Registration Information card; the Ref. Code is
+                on the Lease Agreements card (one per lease). */}
             <div className="grid grid-cols-1 md:grid-cols-[1.8fr_1.6fr_0.7fr] gap-3 items-stretch">
               <div className="flex flex-col sm:flex-row gap-3 items-stretch">
                 <div className="flex-1 flex">
@@ -2576,12 +2663,16 @@ export function ProponentsManagement({
                 style={{ borderColor: 'var(--input-border)', backgroundColor: 'var(--control-bg)' }}
               >
                 <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--text)' }}>
-                  Lease Agreements
-                  <span className="ml-1.5 font-normal normal-case tracking-normal text-secondary">
-                    ({Math.max(leases.length, 1)})
-                  </span>
+                  {leaseView ? 'Lease Agreement' : 'Lease Agreements'}
+                  {leaseView ? null : (
+                    <span className="ml-1.5 font-normal normal-case tracking-normal text-secondary">
+                      ({Math.max(leases.length, 1)})
+                    </span>
+                  )}
                 </span>
-                <span className="text-[10px] text-secondary">A renewal starts a new lease with its own Ref. Code</span>
+                <span className="text-[10px] text-secondary">
+                  {leaseView ? 'An earlier lease — read only' : 'A renewal starts a new lease with its own Ref. Code'}
+                </span>
               </div>
               <div className="min-w-0 overflow-x-auto rounded-lg border" style={{ borderColor: 'var(--input-border)' }}>
                 <table className="w-full min-w-[60rem] table-fixed text-xs border-collapse">
@@ -2608,8 +2699,9 @@ export function ProponentsManagement({
                     </tr>
                   </thead>
                   <tbody>
-                    {/* Current lease: the panel's own fields */}
-                    <tr style={{ backgroundColor: viewLeaseId === null ? 'var(--surface)' : undefined }}>
+                    {/* Current lease: the panel's own fields (not shown while viewing an earlier lease) */}
+                    {leaseView ? null : (
+                    <tr style={{ backgroundColor: 'var(--surface)' }}>
                       <td className="px-1 py-1 border-b align-top" style={{ borderColor: 'var(--input-border)' }}>
                         <input
                           className="app-form-control app-form-control-sm h-9 w-full"
@@ -2679,18 +2771,17 @@ export function ProponentsManagement({
                         </div>
                       </td>
                     </tr>
-                    {/* Earlier leases: history, read-only */}
-                    {leases
-                      .filter((l) => !l.is_current)
+                    )}
+                    {/* Earlier leases: history, read-only. A click opens the lease in
+                        its own panel stacked over this one (like a sub-lessee). */}
+                    {(leaseView ? (viewedLease ? [viewedLease] : []) : leases.filter((l) => !l.is_current))
                       .map((l) => {
-                        const selected = viewLeaseId === l.id;
                         return (
                           <tr
                             key={l.id}
-                            className="cursor-pointer hover:bg-[var(--selected-bg)]"
-                            style={{ backgroundColor: selected ? 'var(--selected-bg)' : undefined }}
-                            onClick={() => setViewLeaseId(selected ? null : l.id)}
-                            title="Show this lease's property schedule"
+                            className={leaseView || !editing ? undefined : 'cursor-pointer hover:bg-[var(--selected-bg)]'}
+                            onClick={leaseView || !editing ? undefined : () => setNestedLocator({ locatorId: editing.id, leaseId: l.id })}
+                            title={leaseView ? undefined : 'Open this lease'}
                           >
                             <td className="px-2 py-2 border-b font-medium" style={{ borderColor: 'var(--input-border)', color: 'var(--text)' }}>
                               {l.ref_code || <span className="text-secondary">—</span>}
@@ -2724,7 +2815,7 @@ export function ProponentsManagement({
                 - A sub-lessee shows who it sub-leases from (no Sub-Lease box: one level only).
                 - Any other locator has the Sub-Lease box; ticked (or with sub-lessees)
                   it lists them, adds a new one, or links an existing locator. */}
-            {(() => {
+            {leaseView ? null : (() => {
               const parent = sublease.sublessor;
               if (parent) {
                 const canOpen = Boolean(editing) && proponents.some((p) => p.id === parent.id);
@@ -2738,10 +2829,10 @@ export function ProponentsManagement({
                       <button
                         type="button"
                         className="font-semibold text-blue-600 underline-offset-2 hover:underline dark:text-blue-400"
-                        onClick={() => openLocatorById(parent.id)}
-                        title="Open this locator"
+                        onClick={() => (embedded ? setIsCreateOpen(false) : openLocatorById(parent.id))}
+                        title="Back to this locator's Locator Information"
                       >
-                        {parent.name}
+                        ← {parent.name}
                       </button>
                     ) : (
                       <span className="font-semibold" style={{ color: 'var(--text)' }}>
@@ -2856,7 +2947,7 @@ export function ProponentsManagement({
                                   <tr
                                     key={s.id}
                                     className={canOpen ? 'cursor-pointer hover:bg-[var(--selected-bg)]' : undefined}
-                                    onClick={canOpen ? () => openLocatorById(s.id) : undefined}
+                                    onClick={canOpen ? () => setNestedLocator({ locatorId: s.id }) : undefined}
                                     title={canOpen ? 'Open this sub-lessee' : 'Assigned to another Account Officer'}
                                   >
                                     <td className="px-2 py-2 border-b font-medium" style={{ borderColor: 'var(--input-border)', color: 'var(--text)' }}>
@@ -3113,14 +3204,9 @@ export function ProponentsManagement({
             </fieldset>
 
             {/* Folder-tab strip mirroring the legacy BRIDGE system's Locator's
-                Information form. Sticks to the very top of the panel while scrolling,
-                so switching tabs is one click from anywhere in a long tab. The panel's
-                scroll area has 1rem top padding (py-4): the wrapper sticks at -1rem
-                and fills that strip (and the tabs' rounded corners) with the panel
-                background, so nothing scrolls into view above or behind the tabs.
-                -mt-3 only cancels this column's gap-3 (no more, or the wrapper's
-                background would paint over the bottom of the card above it). */}
-            <div className="sticky -top-4 z-20 -mt-3 pt-4" style={{ backgroundColor: 'var(--surface)' }}>
+                Information form. Not sticky: it scrolls away with the panel, so the
+                tab's content never slides underneath it. */}
+            <div className="-mt-3 pt-4" style={{ backgroundColor: 'var(--surface)' }}>
               <div className="folders">
                 <div className="tabs overflow-x-auto">
                   {(['Profile', 'Stockholders', 'Documents'] as const).map((tab) => (
@@ -3245,26 +3331,14 @@ export function ProponentsManagement({
                         {secTextField('tin', 'TIN Number')}
                       </div>
 
-                      <div className="grid grid-cols-1 md:grid-cols-[2fr_1fr] gap-3">
-                        <Field compact label="Principal Office Address">
-                          <textarea
-                            className="app-form-control app-form-control-sm min-h-[4.5rem]"
-                            placeholder="No. / Street / Barangay / City / Town / Province / Zip code"
-                            value={form.address}
-                            onChange={(e) => setForm((p) => ({ ...p, address: e.target.value }))}
-                          />
-                        </Field>
-                        <Field compact label="Latest GIS Filing">
-                          <DatePicker
-                            mode="single"
-                            fullWidth
-                            boxed
-                            placeholder="Select date"
-                            value={dateInputToDate(form.sec_gis_date)}
-                            onChange={(d) => setForm((p) => ({ ...p, sec_gis_date: dateToDateInputValue(d) }))}
-                          />
-                        </Field>
-                      </div>
+                      <Field compact label="Principal Office Address">
+                        <textarea
+                          className="app-form-control app-form-control-sm min-h-[4.5rem]"
+                          placeholder="No. / Street / Barangay / City / Town / Province / Zip code"
+                          value={form.address}
+                          onChange={(e) => setForm((p) => ({ ...p, address: e.target.value }))}
+                        />
+                      </Field>
 
                       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                         {secTextField('sec_company_email', "Company's Email Address")}
@@ -3326,6 +3400,66 @@ export function ProponentsManagement({
                           {secTextField('sec_contact_telephone', 'Telephone No.')}
                           {secTextField('sec_contact_mobile', 'Mobile No.')}
                         </div>
+                      </div>
+                    </div>
+
+                    {/* GIS (General Information Sheet): the filing date is typed in (saved
+                        with the SEC Registration Information); the document is the
+                        locator's Compliance upload, read only. */}
+                    <div
+                      className="flex flex-col gap-3 rounded-xl border p-3"
+                      style={{ borderColor: 'var(--input-border)', backgroundColor: 'color-mix(in oklab, var(--control-bg) 55%, transparent)' }}
+                    >
+                      <div
+                        className="-mx-3 -mt-3 mb-1 flex items-center justify-between gap-2 rounded-t-xl border-b px-3 py-2"
+                        style={{ borderColor: 'var(--input-border)', backgroundColor: 'var(--control-bg)' }}
+                      >
+                        <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--text)' }}>
+                          GIS (General Information Sheet)
+                        </span>
+                        <SectionSaveBar
+                          allowed={editing ? canEdit : canAdd}
+                          label="Save GIS"
+                          isEditing={Boolean(editing)}
+                          hasContent={String(form.sec_gis_date ?? '').trim() !== ''}
+                          dirty={sectionDirty.sec}
+                          saving={savingSection === 'sec'}
+                          disabled={saving || loadingLocation}
+                          onSave={() => void saveSection('sec')}
+                        />
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <Field compact label="Latest GIS Filing">
+                          <DatePicker
+                            mode="single"
+                            fullWidth
+                            boxed
+                            placeholder="Select date"
+                            value={dateInputToDate(form.sec_gis_date)}
+                            onChange={(d) => setForm((p) => ({ ...p, sec_gis_date: dateToDateInputValue(d) }))}
+                          />
+                        </Field>
+                        <Field compact label="GIS Document (Compliance)">
+                          <div
+                            className="app-form-control app-form-control-sm flex h-9 items-center gap-2 text-[12px]"
+                            style={{ backgroundColor: 'var(--control-bg)', cursor: 'default' }}
+                            title="Uploaded by the locator on their Compliance page (or by the Compliance Officer)"
+                          >
+                            {gisDocument ? (
+                              <>
+                                <span className="truncate font-medium" style={{ color: 'var(--text)' }}>
+                                  {gisDocument.original_file_name || 'GIS'}
+                                </span>
+                                <span className="shrink-0 text-secondary">
+                                  · {String(gisDocument.status || '').replace(/_/g, ' ').toLowerCase() || 'uploaded'}
+                                  {gisDocument.validity_to ? ` · valid until ${fmtDate(gisDocument.validity_to)}` : ''}
+                                </span>
+                              </>
+                            ) : (
+                              <span className="text-secondary">{editing ? 'Not uploaded yet' : 'After the locator is saved'}</span>
+                            )}
+                          </div>
+                        </Field>
                       </div>
                     </div>
                   </div>
@@ -3510,13 +3644,11 @@ export function ProponentsManagement({
                 <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--text)' }}>
                   Property Schedule
                   <span className="ml-1.5 font-normal normal-case tracking-normal text-secondary">
-                    {viewedLease
-                      ? `— ${viewedLease.ref_code || viewedLease.application_no || 'earlier lease'} (earlier lease, read only)`
-                      : `(${form.properties.length})`}
+                    ({leaseView ? (viewedLease?.properties || []).length : form.properties.length})
                   </span>
                 </span>
-                {/* Editing is for the current lease only — hidden while an earlier one is shown. */}
-                <div className={cn('flex items-center gap-2', viewedLease && 'hidden')}>
+                {/* Editing is for the current lease only; an earlier lease's panel is read only. */}
+                <div className={cn('flex items-center gap-2', leaseView && 'hidden')}>
                   <div className="relative">
                     <button
                       type="button"
@@ -3579,61 +3711,12 @@ export function ProponentsManagement({
                   )}
                 </div>
               </div>
-              {viewedLease ? (
-                <div className="flex flex-col gap-2">
-                  {(viewedLease.properties || []).length === 0 ? (
-                    <div className="rounded-lg border border-dashed px-3 py-2.5 text-[11px] text-secondary" style={{ borderColor: 'var(--input-border)' }}>
-                      No property schedule on this lease.
-                    </div>
-                  ) : (
-                    <div className="min-w-0 overflow-x-auto rounded-lg border" style={{ borderColor: 'var(--input-border)' }}>
-                      <table className="w-full text-xs border-collapse">
-                        <thead>
-                          <tr style={{ backgroundColor: 'var(--control-bg)' }}>
-                            {['No.', 'Year', 'Date From', 'Date To', 'Rate', 'Type of Property', 'Area (SQM)', 'Rate/SQM/MO', 'MGL/MO'].map((h) => (
-                              <th
-                                key={h}
-                                className="px-2 py-1.5 text-left font-semibold uppercase tracking-wide text-[9px] border-b"
-                                style={{ borderColor: 'var(--input-border)', color: 'var(--text-muted)' }}
-                              >
-                                {h}
-                              </th>
-                            ))}
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {(viewedLease.properties || []).map((r: any, i: number) => (
-                            <tr key={r.id}>
-                              {[
-                                String(i + 1),
-                                r.year || '—',
-                                fmtDate(r.date_from),
-                                fmtDate(r.date_to),
-                                r.rate_type === 'STANDARD' ? 'Standard' : r.rate_type === 'NON_STANDARD' ? 'Non-standard' : '—',
-                                r.type_of_property || '—',
-                                r.area_sqm || '—',
-                                r.rate_sqm_mo ? `${r.rate_sqm_mo} ${r.rate_currency || ''}` : '—',
-                                r.mgl_mo ? `${r.mgl_mo} ${r.mgl_currency || ''}` : '—',
-                              ].map((v, ci) => (
-                                <td key={ci} className="px-2 py-1.5 border-b" style={{ borderColor: 'var(--input-border)', color: 'var(--text)' }}>
-                                  {v}
-                                </td>
-                              ))}
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => setViewLeaseId(null)}
-                    className="self-start rounded-md border px-2 py-1 text-[11px] font-semibold cursor-pointer hover:bg-[var(--selected-bg)]"
-                    style={{ borderColor: 'var(--input-border)', color: 'var(--text)', backgroundColor: 'var(--surface)' }}
-                  >
-                    Back to the current lease
-                  </button>
-                </div>
+              {leaseView ? (
+                viewedLease ? (
+                  <LeasePropertyTable properties={viewedLease.properties || []} />
+                ) : (
+                  <div className="text-[11px] text-secondary">Loading…</div>
+                )
               ) : form.properties.length === 0 ? (
                 <div
                   className="rounded-lg border border-dashed px-3 py-2.5 text-[11px] text-secondary"
@@ -4126,6 +4209,18 @@ export function ProponentsManagement({
         }}
       />
 
+      {nestedLocator ? (
+        <ProponentsManagement
+          embedded={{
+            ...nestedLocator,
+            onClose: () => {
+              setNestedLocator(null);
+              void reloadSublease();
+            },
+          }}
+        />
+      ) : null}
+
       <ConfirmModal
         open={sublesseeUnlink !== null}
         title="Unlink sub-lessee?"
@@ -4249,6 +4344,57 @@ export function ProponentsManagement({
         onCancel={() => setSendLoginOpen(false)}
         onConfirm={() => void sendLogin()}
       />
+    </div>
+  );
+}
+
+/** An earlier lease's property schedule (A-03), read only. */
+function LeasePropertyTable({ properties }: { properties: any[] }) {
+  if (properties.length === 0) {
+    return (
+      <div className="rounded-lg border border-dashed px-3 py-2.5 text-[11px] text-secondary" style={{ borderColor: 'var(--input-border)' }}>
+        No property schedule on this lease.
+      </div>
+    );
+  }
+  return (
+    <div className="min-w-0 overflow-x-auto rounded-lg border" style={{ borderColor: 'var(--input-border)' }}>
+      <table className="w-full text-xs border-collapse">
+        <thead>
+          <tr style={{ backgroundColor: 'var(--control-bg)' }}>
+            {['No.', 'Year', 'Date From', 'Date To', 'Rate', 'Type of Property', 'Area (SQM)', 'Rate/SQM/MO', 'MGL/MO'].map((h) => (
+              <th
+                key={h}
+                className="px-2 py-1.5 text-left font-semibold uppercase tracking-wide text-[9px] border-b"
+                style={{ borderColor: 'var(--input-border)', color: 'var(--text-muted)' }}
+              >
+                {h}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {properties.map((r: any, i: number) => (
+            <tr key={r.id ?? i}>
+              {[
+                String(i + 1),
+                r.year || '—',
+                fmtDate(r.date_from),
+                fmtDate(r.date_to),
+                r.rate_type === 'STANDARD' ? 'Standard' : r.rate_type === 'NON_STANDARD' ? 'Non-standard' : '—',
+                r.type_of_property || '—',
+                r.area_sqm || '—',
+                r.rate_sqm_mo ? `${r.rate_sqm_mo} ${r.rate_currency || ''}` : '—',
+                r.mgl_mo ? `${r.mgl_mo} ${r.mgl_currency || ''}` : '—',
+              ].map((v, ci) => (
+                <td key={ci} className="px-2 py-1.5 border-b" style={{ borderColor: 'var(--input-border)', color: 'var(--text)' }}>
+                  {v}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }

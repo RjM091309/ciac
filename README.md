@@ -31,7 +31,7 @@ and on **System Settings → Workflow Topology**. In short:
 1. **Assignment** — BDO Level 1 assigns a Level 2 (`PATCH /api/assessments/:id/assign`);
    stage `UNASSIGNED → ASSIGNED`, and the Level 2 opening it moves it to `IN_REVIEW`.
 2. **Encode the proponent** — drawer tabs **Proponent Information**,
-   **Performance Commitment** and **Stockholders + GIS**
+   **Performance Commitment** and **Stockholders / GIS**
    (`/api/assessments/:id/profile | /commitment | /stockholders`). They write the
    proponent's own records, so the same details show on Registered Locator once
    approved. Only the assigned Level 2 edits, while the review is open.
@@ -43,7 +43,7 @@ and on **System Settings → Workflow Topology**. In short:
    Level 1 returns it or clicks **For Approval** and approves in the Approval panel.
 
 Drawer tab order: `Overview | Proponent Information | Performance Commitment |
-Stockholders + GIS | Compliance | Terms | Contract | Recommendation | Activity Log`.
+Stockholders / GIS | Compliance | Terms | Contract | Recommendation | Activity Log`.
 
 ### Registered Locator — Locator Information
 

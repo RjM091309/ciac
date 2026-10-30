@@ -1122,13 +1122,13 @@ function StatTile({
 }
 
 // Proponent Information (B-09), Performance Commitment (B-10) and
-// Stockholders + GIS (B-11) are the BDO's encoding of the proponent — same
+// Stockholders / GIS (B-11) are the BDO's encoding of the proponent — same
 // records the Registered Locator shows once approved.
 const TABS = [
   'Overview',
   'Proponent Information',
   'Performance Commitment',
-  'Stockholders + GIS',
+  'Stockholders / GIS',
   'Compliance',
   'Terms',
   'Contract',
@@ -1312,7 +1312,7 @@ function AssessmentDetail({
             />
           ) : tab === 'Performance Commitment' ? (
             <PerformanceCommitmentTab applicationId={data.assessment.application_id} canEdit={perms.canEdit} />
-          ) : tab === 'Stockholders + GIS' ? (
+          ) : tab === 'Stockholders / GIS' ? (
             <StockholdersGisTab applicationId={data.assessment.application_id} canEdit={perms.canEdit} />
           ) : tab === 'Compliance' ? (
             <ComplianceTab data={data} canEdit={perms.canEdit} busy={busy} run={run} />

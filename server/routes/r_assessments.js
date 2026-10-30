@@ -30,7 +30,7 @@ router.put("/:applicationId/profile", requireAssessmentAccess("edit"), controlle
 // Performance Commitment tab (B-10): the BDO encodes the commitment figures.
 router.get("/:applicationId/commitment", requireAssessmentAccess("view"), controller.getCommitment);
 router.put("/:applicationId/commitment", requireAssessmentAccess("edit"), controller.saveCommitment);
-// Stockholders + GIS tab (B-11): stockholders and SEC registration details.
+// Stockholders / GIS tab (B-11): stockholders and SEC registration details.
 router.get("/:applicationId/stockholders", requireAssessmentAccess("view"), controller.getStockholders);
 router.put("/:applicationId/stockholders", requireAssessmentAccess("edit"), controller.saveStockholders);
 router.get("/:applicationId/terms", requireAssessmentAccess("view"), controller.getTerms);

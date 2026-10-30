@@ -405,7 +405,7 @@ export function ProponentInfoTab({
             {/* Beside Business Activities, stacked so the row keeps its height. */}
             <div className="flex min-w-0 flex-col gap-3">
               <Cell label="Nationality *" bad={bad('nationality')}>
-                <NationalityInput value={form.nationality} onChange={(v) => set({ nationality: v })} className={input} />
+                <NationalityInput value={form.nationality} onChange={(v) => set({ nationality: v })} className="h-9" minHeight={34} />
               </Cell>
               <Cell label="Email (login)">
                 <input
