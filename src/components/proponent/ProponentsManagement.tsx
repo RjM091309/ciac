@@ -238,9 +238,46 @@ type LocatorDynamicRow = {
   encoded_by: string | null;
   /** A renewal still being decided — the Ref No then shows as REN-… (same number). */
   renewal_application_no?: string | null;
+  /** The latest Extension Date (Extension Date card). */
+  extension_date?: string | null;
 };
 
 type DisplayRow = ProponentRow & LocatorDynamicRow;
+
+/** The latest Extension Date when it runs past the End Term ('' otherwise). */
+function extendedEnd(endTerm?: string | null, extensionDate?: string | null): string {
+  const end = String(endTerm || '').slice(0, 10);
+  const ext = String(extensionDate || '').slice(0, 10);
+  return end && ext && ext > end ? ext : '';
+}
+
+/** The list's Lease Term: up to the Extension Date when the lease is extended
+ * (same as the panel's Lease Agreements row). */
+function displayLeaseTerm(p: { start_term?: string | null; end_term?: string | null; lease_term?: string | null; extension_date?: string | null }) {
+  const to = extendedEnd(p.end_term, p.extension_date);
+  return (to && p.start_term ? formatLeaseTerm(String(p.start_term).slice(0, 10), to) : p.lease_term) || '—';
+}
+
+// Same amber as the "Renewal in process" badge.
+const EXTENDED_COLOR = '#d97706';
+const EXTENDED_BADGE_STYLE: React.CSSProperties = {
+  color: EXTENDED_COLOR,
+  backgroundColor: 'rgba(245,158,11,.12)',
+  borderColor: 'rgba(245,158,11,.35)',
+};
+
+/** "Extended" chip beside an End Term; hover shows the new end. */
+function ExtendedBadge({ to, endTerm }: { to: string; endTerm?: string | null }) {
+  return (
+    <span
+      className="inline-flex items-center rounded-full border px-1.5 py-0.5 text-[10px] font-semibold"
+      style={EXTENDED_BADGE_STYLE}
+      title={`Extended to ${fmtDate(to)}${endTerm ? ` — the term ended ${fmtDate(endTerm)}` : ''}`}
+    >
+      Extended
+    </span>
+  );
+}
 
 type UserOption = {
   id: number;
@@ -902,7 +939,7 @@ export function ProponentsManagement({
   const cardRefs = useRef<Record<number, HTMLButtonElement | null>>({});
 
   const { data: locatorsData, isLoading, isRevalidating, refresh } = useSessionStorageCachedResource<LocatorsData>({
-    cacheKey: 'ciac.locators.v12',
+    cacheKey: 'ciac.locators.v13',
     ttlMs: 5 * 60 * 1000,
     fetcher: async () => {
       const [pRes, dRes, uRes, atRes, luRes, inRes] = await Promise.all([
@@ -1038,6 +1075,7 @@ export function ProponentsManagement({
         lease_term: d?.lease_term ?? null,
         encoded_by: d?.encoded_by ?? null,
         renewal_application_no: d?.renewal_application_no ?? null,
+        extension_date: d?.extension_date ?? null,
       };
     });
   }, [proponents, locatorsData?.dynamic]);
@@ -1194,6 +1232,8 @@ export function ProponentsManagement({
       setExtensions(Array.isArray(json?.data) ? json.data : []);
       if (!remove) setExtensionDraft({ extension_date: '', remarks: '' });
       toast.success(remove ? 'Extension removed' : 'Extension added');
+      // The list's "Extended" badge reads the latest Extension Date.
+      void refresh({ showLoading: false }).catch(() => {});
     } catch (e: any) {
       toast.error(e?.message || 'Could not save the extension');
     } finally {
@@ -2168,6 +2208,12 @@ export function ProponentsManagement({
   const secNoTaken = useTakenCheck('registration_no', form.registration_no, editing?.registration_no);
 
   const viewedLease = viewLeaseId !== null ? leases.find((l) => l.id === viewLeaseId) || null : null;
+  // The current lease runs past its End Term when the latest Extension Date is
+  // later: Lease Agreements shows the new end and the extended term.
+  const currentStart = String((termEditable ? form.start_term : editing?.start_term) || '').slice(0, 10);
+  const currentEnd = String((termEditable ? form.end_term : editing?.end_term) || '').slice(0, 10);
+  const latestExtension = extensions[0]?.extension_date ? String(extensions[0].extension_date).slice(0, 10) : '';
+  const extendedTo = latestExtension && currentEnd && latestExtension > currentEnd ? latestExtension : '';
   // An earlier lease's stacked panel: lease-view layout from the first render,
   // even before its lease has loaded (no flash of the locator's own layout).
   const leaseView = viewOnlyLease;
@@ -2311,10 +2357,13 @@ export function ProponentsManagement({
                   <div className="min-w-0">
                     <div className="text-[9px] uppercase tracking-wider text-secondary">End</div>
                     <div className="truncate" style={{ color: 'var(--text)' }}>{fmtDate(p.end_term)}</div>
+                    {extendedEnd(p.end_term, p.extension_date) ? (
+                      <ExtendedBadge to={extendedEnd(p.end_term, p.extension_date)} endTerm={p.end_term} />
+                    ) : null}
                   </div>
                   <div className="min-w-0 text-right">
                     <div className="text-[9px] uppercase tracking-wider text-secondary">Lease term</div>
-                    <div className="truncate" style={{ color: 'var(--text)' }}>{p.lease_term || '—'}</div>
+                    <div className="truncate" style={{ color: 'var(--text)' }}>{displayLeaseTerm(p)}</div>
                   </div>
                 </div>
                 {p.encoded_by ? <div className="mt-2 text-[10px] text-secondary">Encoded by {p.encoded_by}</div> : null}
@@ -2368,8 +2417,15 @@ export function ProponentsManagement({
                       {p.business_type || '—'}
                     </td>
                     <td className="px-3 py-2 text-[11px] text-secondary whitespace-nowrap">{fmtDate(p.start_term)}</td>
-                    <td className="px-3 py-2 text-[11px] text-secondary whitespace-nowrap">{fmtDate(p.end_term)}</td>
-                    <td className="px-3 py-2 text-[11px] text-secondary whitespace-nowrap">{p.lease_term || '—'}</td>
+                    <td className="px-3 py-2 text-[11px] text-secondary whitespace-nowrap">
+                      <span className="inline-flex items-center gap-1.5">
+                        {fmtDate(p.end_term)}
+                        {extendedEnd(p.end_term, p.extension_date) ? (
+                          <ExtendedBadge to={extendedEnd(p.end_term, p.extension_date)} endTerm={p.end_term} />
+                        ) : null}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2 text-[11px] text-secondary whitespace-nowrap">{displayLeaseTerm(p)}</td>
                     <td className="px-3 py-2 text-[11px] text-secondary whitespace-nowrap">{p.encoded_by || '—'}</td>
                   </tr>
                 ))}
@@ -2807,6 +2863,15 @@ export function ProponentsManagement({
                               {fmtDate(editing?.[key])}
                             </div>
                           )}
+                          {key === 'end_term' && extendedTo ? (
+                            <div
+                              className="mt-1 flex flex-wrap items-center gap-1 px-1 text-[10px] font-semibold"
+                              style={{ color: EXTENDED_COLOR }}
+                            >
+                              → {fmtDate(extendedTo)}
+                              <ExtendedBadge to={extendedTo} endTerm={currentEnd} />
+                            </div>
+                          ) : null}
                         </td>
                       ))}
                       <td className="px-1 py-1 border-b align-top" style={{ borderColor: 'var(--input-border)' }}>
@@ -2814,7 +2879,11 @@ export function ProponentsManagement({
                           className="flex h-9 items-center rounded-md px-2 font-semibold tabular-nums"
                           style={{ backgroundColor: 'color-mix(in oklab, #22c55e 18%, transparent)', color: 'var(--text)' }}
                         >
-                          {(termEditable ? formatLeaseTerm(form.start_term, form.end_term) : editing?.lease_term) || '—'}
+                          {(extendedTo && currentStart
+                            ? formatLeaseTerm(currentStart, extendedTo)
+                            : termEditable
+                            ? formatLeaseTerm(form.start_term, form.end_term)
+                            : editing?.lease_term) || '—'}
                         </div>
                       </td>
                       <td className="px-2 py-1 border-b align-top" style={{ borderColor: 'var(--input-border)' }}>

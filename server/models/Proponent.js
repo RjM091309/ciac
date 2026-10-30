@@ -958,6 +958,7 @@ async function listProponentsForLocatorList({ accountOfficerId = null } = {}) {
       COALESCE(apptype.name, manual_apptype.name) AS business_type,
       COALESCE(ct.effective_start, p.manual_start_term) AS start_term,
       COALESCE(ct.effective_end, p.manual_end_term) AS end_term,
+      p.extension_date,
       open_ren.application_no AS renewal_application_no
     FROM dbo.proponents p
     LEFT JOIN dbo.users creator ON creator.id = p.created_by
@@ -1007,6 +1008,9 @@ async function listProponentsForLocatorList({ accountOfficerId = null } = {}) {
     start_term: p.start_term ?? null,
     end_term: p.end_term ?? null,
     lease_term: formatLeaseTerm(p.start_term, p.end_term),
+    // The latest Extension Date (mirrored from dbo.proponent_extensions): the
+    // list flags a lease that runs past its End Term.
+    extension_date: p.extension_date ?? null,
     renewal_application_no: p.renewal_application_no ?? null,
   }));
 }
