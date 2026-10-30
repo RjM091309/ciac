@@ -1131,6 +1131,9 @@ export function ProponentsManagement({
   // one's property schedule is being viewed (null = the current lease).
   const [leases, setLeases] = useState<LeaseRow[]>([]);
   const [viewLeaseId, setViewLeaseId] = useState<number | null>(null);
+  // Lease Agreements card: past leases are hidden until "View past leases".
+  const [showPastLeases, setShowPastLeases] = useState(false);
+  const pastLeaseCount = leases.filter((l) => !l.is_current).length;
   // Sub-lease (A-07): who this locator sub-leases from, and its own sub-lessees.
   // On a New Locator opened by "Add Sub-Lessee", `sublessor` is the parent.
   const [sublease, setSublease] = useState<SubleaseInfo>(NO_SUBLEASE);
@@ -1470,6 +1473,7 @@ export function ProponentsManagement({
     setShowRowErrors({ stockholders: false, contacts: false });
     setLeases([]);
     setViewLeaseId(null);
+    setShowPastLeases(false);
     setSublease(NO_SUBLEASE);
     setLoaded(null);
     setEditing(p);
@@ -2670,9 +2674,24 @@ export function ProponentsManagement({
                     </span>
                   )}
                 </span>
-                <span className="text-[10px] text-secondary">
-                  {leaseView ? 'An earlier lease — read only' : 'A renewal starts a new lease with its own Ref. Code'}
-                </span>
+                <div className="flex items-center gap-3">
+                  <span className="text-[10px] text-secondary">
+                    {leaseView ? 'An earlier lease — read only' : 'A renewal starts a new lease with its own Ref. Code'}
+                  </span>
+                  {/* Past leases are folded away by default; this shows / hides them. */}
+                  {!leaseView && pastLeaseCount > 0 ? (
+                    <button
+                      type="button"
+                      onClick={() => setShowPastLeases((v) => !v)}
+                      className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[11px] font-semibold cursor-pointer hover:bg-[var(--selected-bg)]"
+                      style={{ borderColor: 'var(--input-border)', color: 'var(--text)', backgroundColor: 'var(--surface)' }}
+                      aria-expanded={showPastLeases}
+                    >
+                      {showPastLeases ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                      {showPastLeases ? 'Hide past leases' : `View past leases (${pastLeaseCount})`}
+                    </button>
+                  ) : null}
+                </div>
               </div>
               <div className="min-w-0 overflow-x-auto rounded-lg border" style={{ borderColor: 'var(--input-border)' }}>
                 <table className="w-full min-w-[60rem] table-fixed text-xs border-collapse">
@@ -2774,7 +2793,7 @@ export function ProponentsManagement({
                     )}
                     {/* Earlier leases: history, read-only. A click opens the lease in
                         its own panel stacked over this one (like a sub-lessee). */}
-                    {(leaseView ? (viewedLease ? [viewedLease] : []) : leases.filter((l) => !l.is_current))
+                    {(leaseView ? (viewedLease ? [viewedLease] : []) : showPastLeases ? leases.filter((l) => !l.is_current) : [])
                       .map((l) => {
                         return (
                           <tr
@@ -3766,7 +3785,7 @@ export function ProponentsManagement({
                         </td>
                         <td className={`px-1 py-1 border-b${miss('year')}`} style={{ borderColor: 'var(--input-border)' }}>
                           <BoxSelect
-                            className="w-[136px] min-w-[136px]"
+                            className="w-full min-w-[110px]"
                             options={PROPERTY_YEARS}
                             value={asOption(PROPERTY_YEARS, row.year)}
                             placeholder="Select year"
@@ -3816,7 +3835,7 @@ export function ProponentsManagement({
                         <td className={`px-1 py-1 border-b whitespace-nowrap${miss('rate_type')}`} style={{ borderColor: 'var(--input-border)' }}>
                           {/* Switchable: Non-standard → Standard recomputes MGL, so it asks first. */}
                           <BoxSelect
-                            className="w-[156px] min-w-[156px]"
+                            className="w-full min-w-[150px]"
                             options={[
                               { value: 'STANDARD', label: 'Standard' },
                               { value: 'NON_STANDARD', label: 'Non-standard' },
@@ -3852,7 +3871,7 @@ export function ProponentsManagement({
                         </td>
                         <td className={`px-1 py-1 border-b${miss('type_of_property')}`} style={{ borderColor: 'var(--input-border)' }}>
                           <BoxSelect
-                            className="w-[150px] min-w-[150px]"
+                            className="w-full min-w-[140px]"
                             options={PROPERTY_TYPES}
                             value={asOption(PROPERTY_TYPES, row.type_of_property)}
                             placeholder="Select type"
@@ -3867,7 +3886,7 @@ export function ProponentsManagement({
                         </td>
                         <td className={`px-1 py-1 border-b${miss('area_sqm')}`} style={{ borderColor: 'var(--input-border)' }}>
                           <input
-                            className="app-form-control app-form-control-sm w-20"
+                            className="app-form-control app-form-control-sm w-full min-w-[5.5rem] tabular-nums"
                             value={row.area_sqm}
                             disabled={loadingLocation}
                             onChange={(e) =>
@@ -3880,7 +3899,7 @@ export function ProponentsManagement({
                         </td>
                         <td className={`px-1 py-1 border-b${miss('rate_sqm_mo')}`} style={{ borderColor: 'var(--input-border)' }}>
                           <input
-                            className="app-form-control app-form-control-sm w-24"
+                            className="app-form-control app-form-control-sm w-full min-w-[6.5rem] tabular-nums"
                             value={row.rate_sqm_mo}
                             disabled={loadingLocation}
                             onChange={(e) =>
@@ -3895,7 +3914,7 @@ export function ProponentsManagement({
                         </td>
                         <td className={`px-1 py-1 border-b${miss('rate_currency')}`} style={{ borderColor: 'var(--input-border)' }}>
                           <BoxSelect
-                            className="w-[86px] min-w-[86px]"
+                            className="w-full min-w-[100px]"
                             options={CURRENCY_OPTIONS}
                             value={row.rate_currency}
                             disabled={loadingLocation}
@@ -3909,7 +3928,7 @@ export function ProponentsManagement({
                         </td>
                         <td className={`px-1 py-1 border-b${miss('mgl_mo')}`} style={{ borderColor: 'var(--input-border)' }}>
                           <input
-                            className="app-form-control app-form-control-sm w-24"
+                            className="app-form-control app-form-control-sm w-full min-w-[8.5rem] tabular-nums"
                             value={row.mgl_mo}
                             disabled={loadingLocation || row.rate_type === 'STANDARD'}
                             readOnly={row.rate_type === 'STANDARD'}
@@ -3926,7 +3945,7 @@ export function ProponentsManagement({
                         </td>
                         <td className={`px-1 py-1 border-b${miss('mgl_currency')}`} style={{ borderColor: 'var(--input-border)' }}>
                           <BoxSelect
-                            className="w-[86px] min-w-[86px]"
+                            className="w-full min-w-[100px]"
                             options={CURRENCY_OPTIONS}
                             value={row.mgl_currency}
                             disabled={loadingLocation || row.rate_type === 'STANDARD'}
