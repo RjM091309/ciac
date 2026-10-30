@@ -25,6 +25,11 @@ import { EmptyState } from '../ui/EmptyState';
 import { Skeleton, TableSkeleton } from '../ui/Skeleton';
 import { csvEscape, downloadBlob, usePagination } from './reportUtils';
 import { StockholdersReport } from './StockholdersReport';
+import { ReportSummary } from './ReportSummary';
+import { QuarterlyInvestmentsReport } from './QuarterlyInvestmentsReport';
+import { LocatorStatusReport } from './LocatorStatusReport';
+import { GisFilingReport } from './GisFilingReport';
+import { currentPeriod, Period } from './reportParts';
 
 const STATUS_LABELS: Record<string, string> = {
   SUBMITTED: 'Submitted',
@@ -300,17 +305,24 @@ function useIsPhone() {
 }
 
 
-type ReportKey = 'applications' | 'stockholders';
+type ReportKey = 'applications' | 'summary' | 'investments' | 'locator-status' | 'stockholders' | 'gis';
 const REPORTS: { key: ReportKey; label: string }[] = [
   { key: 'applications', label: 'Applications' },
+  { key: 'summary', label: 'Summary' },
+  { key: 'investments', label: 'Quarterly Investments' },
+  { key: 'locator-status', label: 'Locator Status' },
   { key: 'stockholders', label: 'Stockholders & Nationality' },
+  { key: 'gis', label: 'GIS Filing' },
 ];
 
-/** The Reports page: one tab per report (?report=… in the address bar). */
+/** The Reports page: one tab per report (?report=… in the address bar). The
+ * period reports share one year/quarter, kept while switching tabs. */
 export function ReportsAnalytics({ navigate }: { navigate?: (to: string, opts?: { replace?: boolean }) => void }) {
-  const [report, setReport] = useState<ReportKey>(() =>
-    new URLSearchParams(window.location.search).get('report') === 'stockholders' ? 'stockholders' : 'applications'
-  );
+  const [report, setReport] = useState<ReportKey>(() => {
+    const key = new URLSearchParams(window.location.search).get('report');
+    return REPORTS.some((r) => r.key === key) ? (key as ReportKey) : 'applications';
+  });
+  const [period, setPeriod] = useState<Period>(currentPeriod);
   const pick = (key: ReportKey) => {
     setReport(key);
     const params = new URLSearchParams(window.location.search);
@@ -336,7 +348,19 @@ export function ReportsAnalytics({ navigate }: { navigate?: (to: string, opts?: 
           </button>
         ))}
       </div>
-      {report === 'stockholders' ? <StockholdersReport navigate={navigate} /> : <ApplicationsReport navigate={navigate} />}
+      {report === 'stockholders' ? (
+        <StockholdersReport navigate={navigate} />
+      ) : report === 'summary' ? (
+        <ReportSummary period={period} onPeriodChange={setPeriod} navigate={navigate} />
+      ) : report === 'investments' ? (
+        <QuarterlyInvestmentsReport period={period} onPeriodChange={setPeriod} navigate={navigate} />
+      ) : report === 'locator-status' ? (
+        <LocatorStatusReport period={period} onPeriodChange={setPeriod} navigate={navigate} />
+      ) : report === 'gis' ? (
+        <GisFilingReport navigate={navigate} />
+      ) : (
+        <ApplicationsReport navigate={navigate} />
+      )}
     </div>
   );
 }

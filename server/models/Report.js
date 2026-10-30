@@ -298,39 +298,73 @@ async function listStockholders() {
   };
 }
 
-/** Investment figures are free text on the Investment tab ("1,500,000.00",
- * "₱ 1500000") — keep the digits and decimal point; anything that isn't a
- * positive number doesn't rank. */
+// The first number in a free-text figure ("1,500,000.00", "₱ 1500000",
+// "1,200 (phase 1)") — not every digit in it, which would read
+// "1,000,000.00 (phase 1)" as 1000000.001.
+const NUMBER_TEXT = /(\d[\d,]*(?:\.\d+)?)(?:\s*(k|thousand|m|mn|mil|million|b|bn|billion)\b)?/i;
+
+/** Investment, area and employee figures are free text — the first number
+ * in it; anything that isn't a positive number doesn't count. */
 function parseAmount(v) {
-  const n = Number(String(v ?? "").replace(/[^0-9.]/g, ""));
+  const match = String(v ?? "").match(NUMBER_TEXT);
+  const n = match ? Number(match[1].replace(/,/g, "")) : NaN;
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
-/** Top N registered locators by committed investment (G-11). Registered =
- * the Registered Locator list's rule (manually registered, or has an approved
- * application). Not tied to the applications filters: it's the current
- * standing of every locator. */
-async function getTopInvestments(limit = 3) {
+const SCALE = { k: 1e3, thousand: 1e3, m: 1e6, mn: 1e6, mil: 1e6, million: 1e6, b: 1e9, bn: 1e9, billion: 1e9 };
+
+/** A money figure: like parseAmount, plus a word scale ("1.5M", "2 billion"). */
+function parseMoney(v) {
+  const match = String(v ?? "").match(NUMBER_TEXT);
+  const n = match ? Number(match[1].replace(/,/g, "")) * (SCALE[String(match[2] || "").toLowerCase()] || 1) : NaN;
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+/** The Registered Locator list's rule (manually registered, or has an
+ * approved application), on a query with dbo.proponents as `p`. */
+const REGISTERED_SQL = `(p.is_manual_registration = 1
+  OR EXISTS (SELECT 1 FROM dbo.applications a2 WHERE a2.proponent_id = p.id AND a2.status = 'APPROVED'))`;
+
+// The amount has no currency field: one written in dollars ("USD 2,500,000",
+// "$1.2M") can't be ranked against pesos, so only PHP amounts rank.
+const USD_TEXT = /\bUSD\b|US\s*\$|\$|DOLLAR/i;
+
+/** Top N registered locators by a committed Performance Commitment figure.
+ * Not tied to the applications filters: it's the current standing of every
+ * locator. */
+async function topByCommitment(metricType, limit) {
   await require("./Investment").ensureSchema();
-  const rows = await selectData(`
-    SELECT p.id AS proponent_id, p.ref_no, p.business_name, i.commitment, i.actual
-    FROM dbo.proponent_investment i
-    INNER JOIN dbo.proponents p ON p.id = i.proponent_id
-    WHERE i.metric_type = 'INVESTMENT' AND i.is_active = 1 AND p.is_active = 1
-      AND (p.is_manual_registration = 1
-           OR EXISTS (SELECT 1 FROM dbo.applications a WHERE a.proponent_id = p.id AND a.status = 'APPROVED'))
-  `);
+  const rows = await selectData(
+    `SELECT p.id AS proponent_id, p.ref_no, p.business_name, i.commitment, i.actual
+     FROM dbo.proponent_investment i
+     INNER JOIN dbo.proponents p ON p.id = i.proponent_id
+     WHERE i.metric_type = @param0 AND i.is_active = 1 AND p.is_active = 1 AND ${REGISTERED_SQL}`,
+    [metricType]
+  );
+  const money = metricType === "INVESTMENT";
+  const parse = money ? parseMoney : parseAmount;
   return rows
+    .filter((r) => !money || !USD_TEXT.test(String(r.commitment || "")))
     .map((r) => ({
       proponent_id: r.proponent_id,
       ref_no: r.ref_no || null,
       business_name: r.business_name,
-      commitment: parseAmount(r.commitment),
-      actual: parseAmount(r.actual),
+      commitment: parse(r.commitment),
+      actual: parse(r.actual),
     }))
     .filter((r) => r.commitment !== null)
     .sort((a, b) => b.commitment - a.commitment || a.business_name.localeCompare(b.business_name))
     .slice(0, limit);
+}
+
+/** Top N by committed investment, in pesos (G-11). */
+function getTopInvestments(limit = 3) {
+  return topByCommitment("INVESTMENT", limit);
+}
+
+/** Top N by committed number of employees (G-13). */
+function getTopEmployees(limit = 3) {
+  return topByCommitment("EMPLOYEE_COUNT", limit);
 }
 
 /** Total leased area in sqm across registered locators (G-12), split by
@@ -350,8 +384,7 @@ async function getLeaseArea() {
     WHERE pp.is_active = 1 AND p.is_active = 1
       AND (pp.lease_id IS NULL
            OR pp.lease_id IN (SELECT l.id FROM dbo.proponent_leases l WHERE l.is_current = 1 AND l.is_active = 1))
-      AND (p.is_manual_registration = 1
-           OR EXISTS (SELECT 1 FROM dbo.applications a WHERE a.proponent_id = p.id AND a.status = 'APPROVED'))
+      AND ${REGISTERED_SQL}
   `);
   // Compared as YYYY-MM-DD: DATE columns arrive as UTC midnight, so mixing
   // them with a local-time "today" would drop a period on its first day.
@@ -389,8 +422,13 @@ async function getLeaseArea() {
 }
 
 module.exports = {
+  REGISTERED_SQL,
+  USD_TEXT,
+  parseAmount,
+  parseMoney,
   getOverview,
   getTopInvestments,
+  getTopEmployees,
   getLeaseArea,
   listApplications,
   listStockholders,

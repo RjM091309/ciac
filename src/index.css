@@ -70,6 +70,14 @@
     --insight-warning: #fbbf24;
     --insight-danger: #f87171;
     --insight-info: #a78bfa;
+
+    /* Status text on the page (Reports): dark enough for small text on white */
+    --tone-green: #047857;
+    --tone-amber: #b45309;
+    --tone-red: #dc2626;
+    --tone-blue: #2563eb;
+    --tone-violet: #7c3aed;
+    --tone-gray: #4b5563;
   }
 
   .dark {
@@ -136,6 +144,12 @@
     --insight-warning: #fbbf24;
     --insight-danger: #f87171;
     --insight-info: #a78bfa;
+    --tone-green: #34d399;
+    --tone-amber: #fbbf24;
+    --tone-red: #f87171;
+    --tone-blue: #60a5fa;
+    --tone-violet: #a78bfa;
+    --tone-gray: #a1a1aa;
     --border-table: #272727;
     --table-bg: #262626;
     --table-hover-bg: #3c3d41;

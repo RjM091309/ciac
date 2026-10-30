@@ -1,4 +1,5 @@
 const Report = require("../models/Report");
+const LocatorReport = require("../models/LocatorReport");
 const AuditLog = require("../models/AuditLog");
 const { publicErrorMessage } = require("../lib/httpError");
 
@@ -33,9 +34,9 @@ exports.overview = async (req, res) => {
   }
 };
 
-const EXPORT_FORMATS = ["csv", "pdf"];
-const EXPORT_FILTER_KEYS = ["dateFrom", "dateTo", "applicationType", "status", "isRenewal", "search", "nationality"];
-const EXPORT_REPORTS = ["applications", "stockholders"];
+const EXPORT_FORMATS = ["csv", "pdf", "xlsx"];
+const EXPORT_FILTER_KEYS = ["dateFrom", "dateTo", "applicationType", "status", "isRenewal", "search", "nationality", "year", "quarter"];
+const EXPORT_REPORTS = ["applications", "stockholders", "investments", "locator-status", "gis", "summary"];
 
 /** The Reports page builds its CSV/PDF in the browser from data it already
  * fetched, so the server never sees the file itself — the page reports each
@@ -83,5 +84,38 @@ exports.applications = async (req, res) => {
     return res.json({ success: true, data });
   } catch (error) {
     return fail(res, error, "Reports applications list");
+  }
+};
+
+/** The period reports take ?year=2026&quarter=1 (no quarter = the whole
+ * year); a bad period is a 400 with the reason. */
+function periodReport(fn, label) {
+  return async (req, res) => {
+    let query;
+    try {
+      query = { year: queryText(req, "year"), quarter: queryText(req, "quarter") };
+      LocatorReport.readPeriod(query);
+    } catch (error) {
+      return res.status(400).json({ success: false, message: error.message });
+    }
+    try {
+      const data = await fn(query);
+      return res.json({ success: true, data });
+    } catch (error) {
+      return fail(res, error, label);
+    }
+  };
+}
+
+exports.investments = periodReport(LocatorReport.getQuarterlyInvestments, "Reports quarterly investments");
+exports.locatorStatus = periodReport(LocatorReport.getLocatorStatus, "Reports locator status");
+exports.summary = periodReport(LocatorReport.getSummary, "Reports summary");
+
+exports.gis = async (req, res) => {
+  try {
+    const data = await LocatorReport.getGisFiling();
+    return res.json({ success: true, data });
+  } catch (error) {
+    return fail(res, error, "Reports GIS filing");
   }
 };
