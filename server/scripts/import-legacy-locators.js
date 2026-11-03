@@ -46,6 +46,10 @@
  *   node scripts/import-legacy-locators.js --only=2024000001  one locator (with or without --apply)
  *   node scripts/import-legacy-locators.js --apply --no-officers
  *                                                             no Account Officer on any locator (assign later)
+ *   node scripts/import-legacy-locators.js --resync [--apply] [--only=…] [--no-officers]
+ *                                                             re-applies the legacy data to the locators
+ *                                                             this import created and nobody has worked on
+ *                                                             since (only differing values are written)
  *   node scripts/import-legacy-locators.js --remove [--apply] undoes this import (only locators it
  *                                                             created that have no application and no
  *                                                             portal login yet), files included
@@ -63,12 +67,13 @@ const FinancialTerms = require("../models/FinancialTerms");
 const Investment = require("../models/Investment");
 const ProponentDocument = require("../models/ProponentDocument");
 const Permit = require("../models/Permit");
-const { encryptValue } = require("../lib/crypto");
+const { encryptValue, decryptValue } = require("../lib/crypto");
 const { locatorDir } = require("../lib/locatorFolders");
 const { relativeStoragePath, resolveStoredPath } = require("../lib/fileStorage");
 
 const APPLY = process.argv.includes("--apply");
 const REMOVE = process.argv.includes("--remove");
+const RESYNC = process.argv.includes("--resync");
 const SKIP_DOCS = process.argv.includes("--skip-documents");
 // Leave every locator without an Account Officer (assigned later on Registered Locator).
 const NO_OFFICERS = process.argv.includes("--no-officers");
@@ -94,6 +99,25 @@ const personKey = (v) =>
     .split(" ")
     .filter((t) => t.length > 1)
     .join(" ");
+/** Every way BRIDGE may have written a staff member's name. Staff full_name is
+ * the "AO - Jane_IP" label, so the name parts carry the match: "JANE PINEDA"
+ * (first + last), "TRISHA CAMELLO" (a middle name + last — Robinne Trisha G.
+ * Camello), "TJ GALVEZ" (initials + last — Tyronne Jeff D. Galvez), and the
+ * username without spaces ("TJGALVEZ"). */
+function officerKeys(u) {
+  const keys = new Set([personKey(u.full_name), upperKey(u.username).replace(/[^A-Z0-9]/g, "")]);
+  const last = personKey(u.last_name);
+  const given = personKey(`${u.first_name || ""} ${u.middle_name || ""}`).split(" ").filter(Boolean);
+  if (last && given.length) {
+    for (const name of given) keys.add(`${name} ${last}`);
+    for (let n = 2; n <= given.length; n += 1) keys.add(`${given.slice(0, n).map((t) => t[0]).join("")} ${last}`);
+  }
+  return [...keys].filter(Boolean);
+}
+const findOfficer = (name, lk) => {
+  const key = personKey(name);
+  return lk.officers.get(key) ?? lk.officers.get(key.replace(/ /g, "")) ?? null;
+};
 const currency = (v) => {
   const s = upperKey(v).replace(/[^A-Z$₱]/g, "");
   if (!s) return null;
@@ -187,18 +211,20 @@ async function loadLookups() {
     (r) => upperKey(r.name),
     (r) => r.id
   );
-  // Account Officers: anyone whose role works the Approved Queue.
+  // Account Officers: anyone whose role works the Approved Queue. Each is
+  // reachable by every way BRIDGE wrote their name (see officerKeys).
+  const officerRows = await selectData(`
+    SELECT DISTINCT u.id, u.username, u.full_name, u.first_name, u.middle_name, u.last_name
+    FROM dbo.users u
+    INNER JOIN dbo.user_roles ur ON ur.user_id = u.id
+    INNER JOIN dbo.roles r ON r.id = ur.role_id AND r.is_active = 1
+    INNER JOIN dbo.role_sidebar_menu_permissions p
+      ON p.role_id = r.id AND p.menu_key = 'approval:queue' AND p.is_enabled = 1
+    WHERE u.is_active = 1 AND LOWER(LTRIM(RTRIM(r.name))) NOT IN ('admin', 'proponent')
+  `);
   const officers = byKey(
-    await selectData(`
-      SELECT DISTINCT u.id, u.full_name
-      FROM dbo.users u
-      INNER JOIN dbo.user_roles ur ON ur.user_id = u.id
-      INNER JOIN dbo.roles r ON r.id = ur.role_id AND r.is_active = 1
-      INNER JOIN dbo.role_sidebar_menu_permissions p
-        ON p.role_id = r.id AND p.menu_key = 'approval:queue' AND p.is_enabled = 1
-      WHERE u.is_active = 1 AND LOWER(LTRIM(RTRIM(r.name))) NOT IN ('admin', 'proponent')
-    `),
-    (r) => personKey(r.full_name),
+    officerRows.flatMap((u) => officerKeys(u).map((key) => ({ key, id: u.id }))),
+    (r) => r.key,
     (r) => r.id
   );
   const usersByName = byKey(await selectData(`SELECT id, username FROM dbo.users`), (r) => upperKey(r.username), (r) => r.id);
@@ -287,7 +313,7 @@ function resolveIndustry(industryText, tocText, lk) {
 
 function mapLocator(row, lk) {
   const officerName = txt(row.AccountOfficer);
-  const officerId = officerName && !NO_OFFICERS ? lk.officers.get(personKey(officerName)) ?? null : null;
+  const officerId = officerName && !NO_OFFICERS ? findOfficer(officerName, lk) : null;
   const industryText = txt(row.Industry);
   const tocText = txt(row.TypeContract);
   const landUseText = txt(row.LandUse, 500);
@@ -315,114 +341,101 @@ function mapLocator(row, lk) {
   };
 }
 
+// The dbo.proponents columns a legacy locator fills (ref_no aside) — one
+// source for the import and --resync. TIN is plain here (encrypted on write).
+function profileValues(row, m) {
+  return {
+    business_name: m.businessName,
+    tin: txt(row.TINNo),
+    address: txt(row.Address, 1000),
+    lease_address: txt(row.ActualAddress, 1000),
+    ref_code: txt(row.RefCode, 100),
+    location: txt(row.Location, 500),
+    business_activities: m.activities,
+    industry_code: m.industryCode,
+    contract_type_id: m.contractTypeId,
+    land_use: m.landUseText,
+    land_use_id: m.landUseId,
+    account_officer_id: m.officerId,
+    sec_registration_date: ymd(row.SecReg),
+    date_signed: ymd(row.SignedDT),
+    grace_period: txt(row.GracePeriod, 100),
+    is_sublease: sublease(row.SubLeased),
+    sub_pgro: txt(row.SubPGRO, 50),
+    sub_pgrr: txt(row.SubPGRR, 50),
+    extension_remarks: txt(row.Extension, 1000),
+    authorized_capital: txt(row.CapitalStock, 100),
+    authorized_capital_currency: currency(row.ACSCurrency),
+    subscribed_capital: txt(row.SubscribedCapital, 100),
+    subscribed_capital_currency: currency(row.SCCurrency),
+    paid_up_capital: txt(row.PaidUpCapital, 100),
+    paid_up_capital_currency: currency(row.PCCurrency),
+    manual_start_term: m.start,
+    manual_end_term: m.end,
+    created_by: m.createdBy,
+  };
+}
+const dbValue = (col, v) => (col === "tin" && v ? encryptValue(v) : v);
+
+const stockholderRows = (rows) =>
+  rows.map((s) => ({
+    name: txt(s.StockName, 255),
+    nationality: txt(s.Nationality, 100),
+    subscribed: money(s.Subcribed),
+    paid: money(s.Paid),
+    ownership: money(s.Ownership),
+  }));
+const personRows = (rows, nameKey) =>
+  rows.map((r) => ({
+    name: txt(r[nameKey], 255),
+    designation: txt(r.Designation, 255),
+    contact_no: txt(r.CPNumber, 100),
+    email: txt(r.EmailAddress, 255),
+  }));
+const financialFields = (row) => ({
+  advance_lease_payment_months: txt(row.ALPPerMonth, 100),
+  advance_lease_payment_amount: txt(row.ALPAmount1, 100),
+  advance_lease_payment_currency: currency(row.ALPCurrency),
+  security_deposit_months: txt(row.SDPerMonth, 100),
+  security_deposit_amount: txt(row.SDAmount1, 100),
+  security_deposit_currency: currency(row.SDCurrency),
+  performance_security_months: txt(row.PSPerMonth, 100),
+  performance_security_amount: txt(row.PSAmount1, 100),
+  performance_security_currency: currency(row.PSCurrency),
+});
+const investmentFields = (row) => ({
+  investment_commitment: txt(row.InvestmentCommit, 100),
+  investment_actual: txt(row.InvestmentActual, 100),
+  employee_commitment: txt(row.EmployeeCommit, 100),
+  employee_actual: txt(row.EmployeeActual, 100),
+});
+
 // ---------- import ----------
 
 async function createLocator(row, m, children, actorId) {
   return runInTransaction(async (tx) => {
+    const values = profileValues(row, m);
+    const cols = Object.keys(values);
     const inserted = await tx.query(
       `
       INSERT INTO dbo.proponents
-        (user_id, business_name, tin, address, lease_address, ref_no, ref_code, location, business_activities,
-         industry_code, contract_type_id, land_use, land_use_id, account_officer_id,
-         sec_registration_date, date_signed, grace_period, is_sublease, sub_pgro, sub_pgrr, extension_remarks,
-         authorized_capital, authorized_capital_currency, subscribed_capital, subscribed_capital_currency,
-         paid_up_capital, paid_up_capital_currency,
-         is_manual_registration, manual_start_term, manual_end_term,
-         is_active, created_by, created_at, updated_at, legacy_imported_at)
+        (user_id, ref_no, ${cols.join(", ")},
+         is_manual_registration, is_active, created_at, updated_at, legacy_imported_at)
       OUTPUT INSERTED.id
       VALUES
-        (NULL, @param0, @param1, @param2, @param3, @param4, @param5, @param6, @param7,
-         @param8, @param9, @param10, @param11, @param12,
-         @param13, @param14, @param15, @param16, @param17, @param18, @param19,
-         @param20, @param21, @param22, @param23,
-         @param24, @param25,
-         1, @param26, @param27,
-         1, @param28, @param29, @param30, SYSUTCDATETIME())
+        (NULL, @param0, ${cols.map((_, i) => `@param${i + 1}`).join(", ")},
+         1, 1, @param${cols.length + 1}, @param${cols.length + 2}, SYSUTCDATETIME())
       `,
-      [
-        m.businessName,
-        row.TINNo && txt(row.TINNo) ? encryptValue(txt(row.TINNo)) : null,
-        txt(row.Address, 1000),
-        txt(row.ActualAddress, 1000),
-        m.refNo,
-        txt(row.RefCode, 100),
-        txt(row.Location, 500),
-        m.activities,
-        m.industryCode,
-        m.contractTypeId,
-        m.landUseText,
-        m.landUseId,
-        m.officerId,
-        ymd(row.SecReg),
-        ymd(row.SignedDT),
-        txt(row.GracePeriod, 100),
-        sublease(row.SubLeased),
-        txt(row.SubPGRO, 50),
-        txt(row.SubPGRR, 50),
-        txt(row.Extension, 1000),
-        txt(row.CapitalStock, 100),
-        currency(row.ACSCurrency),
-        txt(row.SubscribedCapital, 100),
-        currency(row.SCCurrency),
-        txt(row.PaidUpCapital, 100),
-        currency(row.PCCurrency),
-        m.start,
-        m.end,
-        m.createdBy,
-        row.EncodedDT || new Date(),
-        row.EditedDT || null,
-      ]
+      [m.refNo, ...cols.map((c) => dbValue(c, values[c])), row.EncodedDT || new Date(), row.EditedDT || null]
     );
     const id = inserted?.recordset?.[0]?.id;
     if (!id) throw new Error("insert returned no id");
 
-    await Stockholder.syncForProponent(
-      tx,
-      id,
-      children.stockholders.map((s) => ({
-        name: txt(s.StockName, 255),
-        nationality: txt(s.Nationality, 100),
-        subscribed: money(s.Subcribed),
-        paid: money(s.Paid),
-        ownership: money(s.Ownership),
-      })),
-      actorId
-    );
-    const person = (name, r) => ({
-      name: txt(name, 255),
-      designation: txt(r.Designation, 255),
-      contact_no: txt(r.CPNumber, 100),
-      email: txt(r.EmailAddress, 255),
-    });
-    await ContactPerson.syncForProponent(tx, id, children.contacts.map((c) => person(c.ContactPerson, c)), actorId);
-    await Signatory.syncForProponent(tx, id, children.signatories.map((s) => person(s.Signatory, s)), actorId);
-    await FinancialTerms.upsertForProponent(
-      tx,
-      id,
-      {
-        advance_lease_payment_months: txt(row.ALPPerMonth, 100),
-        advance_lease_payment_amount: txt(row.ALPAmount1, 100),
-        advance_lease_payment_currency: currency(row.ALPCurrency),
-        security_deposit_months: txt(row.SDPerMonth, 100),
-        security_deposit_amount: txt(row.SDAmount1, 100),
-        security_deposit_currency: currency(row.SDCurrency),
-        performance_security_months: txt(row.PSPerMonth, 100),
-        performance_security_amount: txt(row.PSAmount1, 100),
-        performance_security_currency: currency(row.PSCurrency),
-      },
-      actorId
-    );
-    await Investment.upsertForProponent(
-      tx,
-      id,
-      {
-        investment_commitment: txt(row.InvestmentCommit, 100),
-        investment_actual: txt(row.InvestmentActual, 100),
-        employee_commitment: txt(row.EmployeeCommit, 100),
-        employee_actual: txt(row.EmployeeActual, 100),
-      },
-      actorId
-    );
+    await Stockholder.syncForProponent(tx, id, stockholderRows(children.stockholders), actorId);
+    await ContactPerson.syncForProponent(tx, id, personRows(children.contacts, "ContactPerson"), actorId);
+    await Signatory.syncForProponent(tx, id, personRows(children.signatories, "Signatory"), actorId);
+    await FinancialTerms.upsertForProponent(tx, id, financialFields(row), actorId);
+    await Investment.upsertForProponent(tx, id, investmentFields(row), actorId);
     if (txt(row.BuildingDetails)) {
       await tx.query(
         `INSERT INTO dbo.proponent_properties (proponent_id, sort_order, type_of_property, date_from, date_to, rate_currency, mgl_currency, created_at)
@@ -615,6 +628,183 @@ async function runImport() {
   console.log("No portal logins were created — add one per locator on Registered Locator (Portal login) once its email is known.");
 }
 
+// ---------- resync ----------
+
+/** Comparable form of a stored or mapped value ("" / null alike, dates as
+ * YYYY-MM-DD, bits as 0/1, numbers as numbers). */
+function norm(v) {
+  if (v === undefined || v === null) return null;
+  if (v instanceof Date) return v.toISOString().slice(0, 10);
+  if (typeof v === "boolean") return v ? 1 : 0;
+  if (typeof v === "number") return v;
+  const s = String(v).trim();
+  if (!s) return null;
+  return /^-?\d+(\.\d+)?$/.test(s) && s.length < 16 ? Number(s) : s;
+}
+const same = (a, b) => norm(a) === norm(b);
+const show = (v) => (norm(v) === null ? "∅" : JSON.stringify(norm(v)).slice(0, 60));
+const listKey = (rows, fields) => JSON.stringify(rows.map((r) => fields.map((f) => norm(r[f]))));
+
+/**
+ * Brings the locators this import created back in line with the legacy
+ * database and the app's current field rules (e.g. Account Officers matched by
+ * name parts). Only locators nobody has worked on since the import are
+ * touched — no staff edit, no portal login, no application; the rest are
+ * listed and left alone. Only values that differ are written. Documents are
+ * not part of this (a plain re-run of the import adds missing ones).
+ */
+async function runResync() {
+  if (!(await hasImportMarker())) {
+    console.log("Nothing to resync: this import has never run on this database.");
+    return;
+  }
+  const ProponentLease = require("../models/ProponentLease");
+  if (APPLY) await ProponentLease.ensureSchema();
+  const lk = await loadLookups();
+  const legacy = await loadLegacy();
+  const cols = Object.keys(profileValues({}, { start: null, end: null }));
+  const current = new Map(
+    (
+      await selectData(`
+        SELECT p.id, p.ref_no, p.user_id, p.updated_by, ${cols.map((c) => `p.${c}`).join(", ")},
+               (SELECT COUNT(1) FROM dbo.applications a WHERE a.proponent_id = p.id) AS applications
+        FROM dbo.proponents p WHERE p.legacy_imported_at IS NOT NULL`)
+    ).map((r) => [String(r.ref_no), r])
+  );
+
+  console.log(`${APPLY ? "RESYNCING" : "DRY RUN — nothing is written (add --apply)"} from ${LEGACY_DB}${ONLY ? `, Ref No ${ONLY}` : ""}\n`);
+  const stats = { changed: 0, same: 0, touched: 0, notImported: 0, failed: 0 };
+  const fieldCounts = new Map();
+  const unmatchedOfficers = new Map();
+  const bump = (map, k) => map.set(k, (map.get(k) || 0) + 1);
+
+  for (const row of legacy.locators) {
+    const m = mapLocator(row, lk);
+    const cur = current.get(m.refNo);
+    if (!cur) {
+      stats.notImported += 1;
+      continue;
+    }
+    if (cur.updated_by || cur.user_id || Number(cur.applications) > 0) {
+      stats.touched += 1;
+      console.log(`- ${m.refNo} ${m.businessName}: worked on since the import — left alone`);
+      continue;
+    }
+    if (m.officerName && !m.officerId && !NO_OFFICERS) bump(unmatchedOfficers, m.officerName);
+
+    const want = profileValues(row, m);
+    if (NO_OFFICERS) delete want.account_officer_id;
+    const changes = [];
+    for (const [col, v] of Object.entries(want)) {
+      const have = col === "tin" ? decryptValue(cur.tin) : cur[col];
+      if (!same(have, v)) changes.push({ col, from: have, to: v });
+    }
+
+    const kids = {
+      stockholders: stockholderRows(legacy.stockholders.get(m.refNo) || []),
+      contacts: personRows(legacy.contacts.get(m.refNo) || [], "ContactPerson"),
+      signatories: personRows(legacy.signatories.get(m.refNo) || [], "Signatory"),
+    };
+    const SH = ["name", "nationality", "subscribed", "paid", "ownership"];
+    const PP = ["name", "designation", "contact_no", "email"];
+    const childSync = [];
+    if (listKey(await Stockholder.listForProponent(cur.id), SH) !== listKey(kids.stockholders.filter((r) => r.name), SH))
+      childSync.push("stockholders");
+    if (listKey(await ContactPerson.listForProponent(cur.id), PP) !== listKey(kids.contacts.filter((r) => r.name), PP))
+      childSync.push("contacts");
+    if (listKey(await Signatory.listForProponent(cur.id), PP) !== listKey(kids.signatories.filter((r) => r.name), PP))
+      childSync.push("signatories");
+    const fin = financialFields(row);
+    const finHave = await FinancialTerms.getForProponent(cur.id);
+    if (Object.keys(fin).some((k) => !same(finHave[k], fin[k]))) childSync.push("financial terms");
+    const inv = investmentFields(row);
+    const invHave = await Investment.getForProponent(cur.id);
+    if (Object.keys(inv).some((k) => !same(invHave[k], inv[k]))) childSync.push("investment");
+
+    const building = txt(row.BuildingDetails, 255);
+    const props = await selectData(
+      `SELECT id, type_of_property, date_from, date_to FROM dbo.proponent_properties
+       WHERE proponent_id = @param0 AND is_active = 1 ORDER BY sort_order, id`,
+      [cur.id]
+    );
+    const prop = props[0];
+    const propChange =
+      building && (!prop || !same(prop.type_of_property, building) || !same(prop.date_from, m.start) || !same(prop.date_to, m.end));
+    if (propChange) childSync.push("building details");
+
+    const permit = (await Permit.listByProponent(cur.id)).find((x) => x.permit_type === "CONTRACT" && !x.application_id);
+    const permitChange = m.end && (!permit || !same(permit.issue_date, m.start) || !same(permit.expiry_date, m.end));
+    if (permitChange) childSync.push(permit ? "lease permit dates" : "lease permit (new)");
+
+    if (!changes.length && !childSync.length) {
+      stats.same += 1;
+      continue;
+    }
+    stats.changed += 1;
+    changes.forEach((c) => bump(fieldCounts, c.col));
+    childSync.forEach((c) => bump(fieldCounts, c));
+    console.log(`~ ${m.refNo} ${m.businessName}`);
+    for (const c of changes) {
+      const secret = c.col === "tin";
+      console.log(`    ${c.col}: ${secret ? "(changed)" : `${show(c.from)} → ${show(c.to)}`}`);
+    }
+    if (childSync.length) console.log(`    re-synced: ${childSync.join(", ")}`);
+    if (!APPLY) continue;
+
+    try {
+      await runInTransaction(async (tx) => {
+        if (changes.length) {
+          await tx.query(
+            `UPDATE dbo.proponents SET ${changes.map((c, i) => `${c.col} = @param${i + 1}`).join(", ")}, updated_at = SYSUTCDATETIME()
+             WHERE id = @param0 AND legacy_imported_at IS NOT NULL`,
+            [cur.id, ...changes.map((c) => dbValue(c.col, c.to))]
+          );
+        }
+        // Rows without ids: the active list is replaced by the legacy one.
+        if (childSync.includes("stockholders")) await Stockholder.syncForProponent(tx, cur.id, kids.stockholders, m.createdBy);
+        if (childSync.includes("contacts")) await ContactPerson.syncForProponent(tx, cur.id, kids.contacts, m.createdBy);
+        if (childSync.includes("signatories")) await Signatory.syncForProponent(tx, cur.id, kids.signatories, m.createdBy);
+        if (childSync.includes("financial terms")) await FinancialTerms.upsertForProponent(tx, cur.id, fin, m.createdBy);
+        if (childSync.includes("investment")) await Investment.upsertForProponent(tx, cur.id, inv, m.createdBy);
+        // The current lease row mirrors Ref. Code, Date Signed, Start/End and Type of Contract.
+        await ProponentLease.syncCurrentFromProponent(tx, cur.id, null);
+        if (propChange) {
+          const leaseId = await ProponentLease.currentLeaseId(cur.id, tx);
+          if (prop) {
+            await tx.query(
+              `UPDATE dbo.proponent_properties SET type_of_property = @param1, date_from = @param2, date_to = @param3, updated_at = GETDATE()
+               WHERE id = @param0`,
+              [prop.id, building, m.start, m.end]
+            );
+          } else {
+            await tx.query(
+              `INSERT INTO dbo.proponent_properties (proponent_id, lease_id, sort_order, type_of_property, date_from, date_to, rate_currency, mgl_currency, created_at)
+               VALUES (@param0, @param1, 1, @param2, @param3, @param4, 'PHP', 'PHP', SYSUTCDATETIME())`,
+              [cur.id, leaseId, building, m.start, m.end]
+            );
+          }
+        }
+      });
+      if (permitChange) {
+        if (permit) await Permit.update(permit.id, { issue_date: m.start, expiry_date: m.end });
+        else await createLeasePermit(cur.id, m, m.createdBy);
+      }
+    } catch (error) {
+      stats.failed += 1;
+      console.error(`! ${m.refNo} ${m.businessName}: FAILED — ${error.message}`);
+    }
+  }
+
+  const list = (map) => [...map.entries()].map(([k, n]) => `${k} (${n})`).join(", ") || "none";
+  console.log("\n================ Summary ================");
+  console.log(
+    `${APPLY ? "Updated" : "Would update"} ${stats.changed - stats.failed} locator(s); ${stats.same} already in line; ` +
+      `${stats.touched} worked on since the import (left alone); ${stats.notImported} not from this import; failed ${stats.failed}.`
+  );
+  console.log(`Changes by field: ${list(fieldCounts)}`);
+  if (!NO_OFFICERS) console.log(`Account Officer names with no matching Account Officer user (left unassigned): ${list(unmatchedOfficers)}`);
+}
+
 // ---------- undo ----------
 
 async function runRemove() {
@@ -682,7 +872,7 @@ async function runRemove() {
   console.log(`\n${APPLY ? "Removed" : "Would remove"} ${removed}; kept ${kept}.`);
 }
 
-(REMOVE ? runRemove() : runImport())
+(REMOVE ? runRemove() : RESYNC ? runResync() : runImport())
   .then(async () => {
     if (blobPool) await blobPool.close();
     process.exit(0);
