@@ -117,6 +117,11 @@ const FIELDS = [
   { section: "email", name: "mail_from_address", label: "From address", type: "email", importFrom: (e) => parseFrom(e.SMTP_FROM).address, importVars: ["SMTP_FROM"], default: "" },
   { section: "email", name: "mail_from_name", label: "From name", type: "text", max: 100, importFrom: (e) => parseFrom(e.SMTP_FROM).name, importVars: ["SMTP_FROM"], default: "" },
   { section: "email", name: "mail_reply_to", label: "Reply-to address", type: "email", default: "" },
+  // Evaluation / renewal emails to the locator (requirements, terms, contract,
+  // status): sent through the same SMTP account but shown as "<officer> via
+  // <portal>", with replies going to the assigned BDO / Account Officer.
+  { section: "email", name: "officer_sender", label: "Show the assigned officer as the sender", type: "bool", default: true },
+  { section: "email", name: "officer_cc", label: "Copy the assigned officer (CC)", type: "bool", default: false },
 
   // --- Integrations ---
   {
@@ -524,6 +529,8 @@ function assetFile(slot) {
 const orgShortName = () => get("branding.org_short_name") || "CIAC";
 
 const getters = {
+  mailOfficerSender: () => Boolean(get("email.officer_sender")),
+  mailOfficerCc: () => Boolean(get("email.officer_cc")),
   portalName: () => get("branding.portal_name"),
   orgShortName,
   orgName: () => get("branding.org_name"),

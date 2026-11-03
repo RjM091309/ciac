@@ -47,8 +47,23 @@ function withSignature({ text, html }) {
  * dev/test without real SMTP credentials. Returns whether the mail actually
  * went out, so a caller can tell the admin if delivery didn't happen.
  */
-async function sendMail({ to, cc, subject, text, html }) {
+/**
+ * `sender` ({ name, email }, see lib/mailSender.js): an evaluation / renewal
+ * email from the assigned officer — still sent through the system's SMTP
+ * account (a From of the officer's own address would be spoofing), but shown
+ * as "<name> via <portal>" with replies going to the officer, and the officer
+ * copied when Portal Settings says so. Without it (or with the setting off):
+ * the system sender.
+ */
+async function sendMail({ to, cc, subject, text, html, sender = null }) {
   const config = siteSettings.mailConfig();
+  const officer =
+    sender && sender.email && siteSettings.getters.mailOfficerSender() && config.from
+      ? { name: `${sender.name || sender.email} via ${config.from.name}`, email: sender.email }
+      : null;
+  const from = officer ? { name: officer.name, address: config.from.address } : config.from;
+  const replyTo = officer ? officer.email : config.replyTo;
+  const ccList = [cc, officer && siteSettings.getters.mailOfficerCc() ? officer.email : null].filter(Boolean).join(", ") || undefined;
   if (!config.configured) {
     console.warn(
       `[mailer] SMTP not configured — email not sent. To: ${to}, Subject: ${subject}\n${text || html || ""}`
@@ -63,10 +78,10 @@ async function sendMail({ to, cc, subject, text, html }) {
   }
   try {
     await currentTransporter(config).sendMail({
-      from: config.from,
-      replyTo: config.replyTo,
+      from,
+      replyTo,
       to,
-      ...(cc ? { cc } : {}),
+      ...(ccList ? { cc: ccList } : {}),
       subject,
       ...withSignature({ text, html }),
     });

@@ -120,6 +120,9 @@ const FIELD_HELP: Record<string, string> = {
   mail_from_address: 'Leave empty to send from the SMTP username (shown in grey).',
   mail_from_name: 'Leave empty to use the portal name (shown in grey).',
   mail_reply_to: 'Where replies go. Leave empty to use the from address (shown in grey).',
+  officer_sender:
+    'Evaluation and renewal emails to the locator (requirements, terms, contract, status) show "<officer> via <portal>" and replies go to the assigned BDO / Account Officer. Still sent from the address above. Account, password and reminder emails always come from the portal.',
+  officer_cc: 'Also send the assigned officer a copy of those emails.',
   google_maps_api_key:
     'Used for address suggestions. Stored encrypted. Restrict this key to your domain (HTTP referrer) in Google Cloud Console. A new key applies the next time each page is opened.',
   login_max_attempts: 'Wrong passwords or authenticator codes in a row before the account is locked.',
@@ -1304,6 +1307,10 @@ export function PortalSettings() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-4">
             {['mail_from_address', 'mail_from_name', 'mail_reply_to'].map((f) => renderField(f))}
           </div>
+        </section>
+        <section>
+          <GroupHeader title="Evaluation & renewal emails" hint="Sent on behalf of the assigned officer" />
+          <div className="grid grid-cols-1 gap-y-4">{['officer_sender', 'officer_cc'].map((f) => renderField(f))}</div>
         </section>
         <div className="flex flex-col sm:flex-row sm:items-center gap-2 rounded-xl border p-3" style={{ borderColor: 'var(--border-subtle)' }}>
           <div className="min-w-0 flex-1 text-[11px] text-secondary">

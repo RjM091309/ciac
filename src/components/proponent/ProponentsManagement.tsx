@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronDown, ChevronRight, Copy, Minus, Plus, Save, Search, Send, Trash2 } from 'lucide-react';
+import { ChevronDown, ChevronRight, Copy, Lock, Minus, Plus, Save, Search, Send, Trash2 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { toast } from 'sonner';
 import { SidePanel } from '../ui/SidePanel';
@@ -310,6 +310,14 @@ function newLocatorTitle(contractTypeName: string | null | undefined): string {
   if (name === 'MOU' || name.includes('(MOU)') || name.startsWith('MEMORANDUM OF UNDERSTANDING')) return 'New Lessee (Supplemental)';
   if (name.startsWith('SUBLEASE')) return 'Sub Lessee';
   return 'New Locator';
+}
+
+/** An existing locator's panel heading: the same by Type of Contract, without
+ * "New" (Lessee, Development Partner, Lessee (Supplemental), Sub Lessee). */
+function locatorTitle(contractTypeName: string | null | undefined, isSublessee: boolean): string {
+  const title = newLocatorTitle(contractTypeName);
+  if (title === 'New Locator') return isSublessee ? 'Sub-Lessee Information' : 'Locator Information';
+  return title.replace(/^New /, '');
 }
 
 // File Maintenance lookup (Land Use) — same shape as the contract types.
@@ -2338,7 +2346,9 @@ export function ProponentsManagement({
                     {p.business_name}
                     {pendingRequestFor.has(p.id) ? <ChangeRequestBadge /> : null}
                   </div>
-                  <span className="shrink-0 text-[10px] font-semibold text-secondary tabular-nums">{displayRef(p)}</span>
+                  <span className="shrink-0 text-[10px] font-semibold tabular-nums" title={displayRef(p)}>
+                    <RefCodeCell code={p.ref_code} />
+                  </span>
                 </div>
                 {p.address ? <div className="mt-0.5 text-[11px] text-secondary break-words line-clamp-2">{p.address}</div> : null}
                 {p.business_type ? (
@@ -2375,7 +2385,7 @@ export function ProponentsManagement({
             <table className="min-w-full text-left text-xs">
               <thead>
                 <tr style={{ borderBottom: '1px solid var(--border-subtle)' }}>
-                  {['Ref No', 'Tenant', 'Address', 'Industry', 'Start Term', 'End Term', 'Lease Term', 'Encoded By'].map((col) => (
+                  {['Ref Code', 'Tenant', 'Address', 'Industry', 'Start Term', 'End Term', 'Lease Term', 'Encoded By'].map((col) => (
                     <th
                       key={col}
                       className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary whitespace-nowrap"
@@ -2403,8 +2413,8 @@ export function ProponentsManagement({
                     className="cursor-pointer hover:bg-[var(--control-bg)]/40"
                     onClick={() => openEdit(p)}
                   >
-                    <td className="px-3 py-2 text-[11px] whitespace-nowrap" style={{ color: 'var(--text)' }}>
-                      {displayRef(p)}
+                    <td className="px-3 py-2 text-[11px] whitespace-nowrap" style={{ color: 'var(--text)' }} title={displayRef(p)}>
+                      <RefCodeCell code={p.ref_code} />
                     </td>
                     <td className="px-3 py-2 text-[11px]" style={{ color: 'var(--text)' }}>
                       {p.business_name}
@@ -2452,15 +2462,23 @@ export function ProponentsManagement({
 
       <SidePanel
         open={isCreateOpen}
-        title={
+        // Upper case, like the File Maintenance names it follows.
+        title={(
           leaseView
             ? leaseLabel
               ? `Lease Agreement — ${leaseLabel}`
               : 'Lease Agreement'
             : editing
-            ? sublease.sublessor
-              ? 'Sub-Lessee Information'
-              : 'Locator Information'
+            ? // Follows the Type of Contract, like a New Locator's heading.
+              locatorTitle(
+                contractTypeOptions
+                  .find((o) => o.value === String(form.contract_type_id ?? ''))
+                  ?.label.replace(/ \(inactive\)$/, '') ??
+                  // Still loading the details: the list row's type, so the
+                  // heading doesn't flash "Locator Information" first.
+                  editing.contract_type_name,
+                Boolean(sublease.sublessor || editing.sublessor_id),
+              )
             : sublease.sublessor
             ? 'Sub Lessee'
             : // Same lookup the Type of Contract select uses to show its value.
@@ -2469,7 +2487,7 @@ export function ProponentsManagement({
                   .find((o) => o.value === String(form.contract_type_id ?? ''))
                   ?.label.replace(/ \(inactive\)$/, ''),
               )
-        }
+        ).toUpperCase()}
         subtitle={leaseView ? 'Locators master table · earlier lease (read only)' : 'Locators master table'}
         onClose={() => setIsCreateOpen(false)}
         onSave={() => void save()}
@@ -2653,49 +2671,116 @@ export function ProponentsManagement({
                 the Save button hidden. Documents stays outside so files can
                 still be opened. */}
             <fieldset disabled={formLocked} style={{ display: 'contents' }}>
-            {/* Row 1 and Row 2 share this exact column template (same track sizes, same gap,
-                same column count) so their edges line up vertically — Row 2 nests
-                Principal/Lease Address and TIN/SEC/Ref inside their own cells rather than
-                adding extra top-level columns, which would throw off the gap math. */}
-            <div className="grid grid-cols-1 md:grid-cols-[1.8fr_1.6fr] gap-3">
-              {/* Name and nationality share the first column, so Row 1's
-                  two columns still line up with Row 2's. */}
-              <div className="flex flex-col xl:flex-row gap-3 min-w-0">
-                <Field compact label="Locator's Name" className="flex-1 min-w-0">
-                  <div className="app-form-control app-form-control-sm p-0 overflow-hidden flex items-stretch">
-                    <input
-                      className="flex-1 min-w-0 border-0 bg-transparent outline-none px-2 py-1"
-                      style={{ color: 'var(--text)' }}
-                      value={form.business_name}
-                      onChange={(e) => setForm((p) => ({ ...p, business_name: e.target.value }))}
-                    />
-                  </div>
-                </Field>
-                <Field compact label="Nationality" className="xl:w-40 shrink-0">
-                  {/* Same box as Locator's Name, so the two are one height. */}
-                  <NationalityInput
-                    value={form.nationality}
-                    onChange={(v) => setForm((p) => ({ ...p, nationality: v }))}
-                  />
-                </Field>
+            {/* The locator's own details, in a card like the ones below (same
+                header strip); the fields keep their places. */}
+            <div
+              className="flex flex-col gap-3 rounded-xl border p-3"
+              style={{ borderColor: 'var(--input-border)', backgroundColor: 'color-mix(in oklab, var(--control-bg) 55%, transparent)' }}
+            >
+              <div
+                className="-mx-3 -mt-3 mb-1 flex items-center justify-between gap-2 rounded-t-xl border-b px-3 py-2"
+                style={{ borderColor: 'var(--input-border)', backgroundColor: 'var(--control-bg)' }}
+              >
+                <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--text)' }}>
+                  Locator Details
+                </span>
+                {editing?.ref_no ? (
+                  <span className="text-[10px] text-secondary tabular-nums" title="System Ref No">
+                    {editing.ref_no}
+                  </span>
+                ) : null}
               </div>
-              <div>
-                <Field compact label={officerLevel === 1 ? 'Account Officer' : 'Account Officer'}>
-                  {officerLocked ? (
-                    <input
-                      className="app-form-control app-form-control-sm"
-                      readOnly
-                      tabIndex={-1}
-                      value={officerName(form.account_officer_id || (myUserId != null ? String(myUserId) : ''))}
-                      title="Your locators are assigned to you — the Manager can reassign them"
+              {/* Row 1 and Row 2 share this exact column template (same track sizes, same gap,
+                  same column count) so their edges line up vertically — Row 2 nests
+                  Principal/Lease Address and TIN/SEC/Ref inside their own cells rather than
+                  adding extra top-level columns, which would throw off the gap math. */}
+              <div className="grid grid-cols-1 md:grid-cols-[1.8fr_1.6fr] gap-3">
+                {/* Name and nationality share the first column, so Row 1's
+                    two columns still line up with Row 2's. */}
+                <div className="flex flex-col xl:flex-row gap-3 min-w-0">
+                  <Field compact label="Locator's Name" className="flex-1 min-w-0">
+                    <div className="app-form-control app-form-control-sm p-0 overflow-hidden flex items-stretch">
+                      <input
+                        className="flex-1 min-w-0 border-0 bg-transparent outline-none px-2 py-1"
+                        style={{ color: 'var(--text)' }}
+                        value={form.business_name}
+                        onChange={(e) => setForm((p) => ({ ...p, business_name: e.target.value }))}
+                      />
+                    </div>
+                  </Field>
+                  <Field compact label="Nationality" className="xl:w-40 shrink-0">
+                    {/* Same box as Locator's Name, so the two are one height. */}
+                    <NationalityInput
+                      value={form.nationality}
+                      onChange={(v) => setForm((p) => ({ ...p, nationality: v }))}
                     />
-                  ) : (
+                  </Field>
+                </div>
+                <div>
+                  <Field compact label={officerLevel === 1 ? 'Account Officer' : 'Account Officer'}>
+                    {officerLocked ? (
+                      // Same box as Locator's Name (one height), read-only with a lock.
+                      <div
+                        className="app-form-control app-form-control-sm p-0 overflow-hidden flex items-stretch"
+                        style={{ backgroundColor: 'var(--control-bg)' }}
+                        title="Your locators are assigned to you — the Manager can reassign them"
+                      >
+                        <input
+                          className="flex-1 min-w-0 border-0 bg-transparent outline-none px-2 py-1 cursor-default"
+                          style={{ color: 'var(--text-muted)' }}
+                          readOnly
+                          tabIndex={-1}
+                          value={officerName(form.account_officer_id || (myUserId != null ? String(myUserId) : ''))}
+                        />
+                        <span className="flex items-center pr-2.5 text-secondary">
+                          <Lock size={12} />
+                        </span>
+                      </div>
+                    ) : (
+                      <div className="app-form-control app-form-control-sm p-0 overflow-hidden flex items-stretch">
+                        <AppSelect
+                          options={userOptions}
+                          value={form.account_officer_id}
+                          onChange={(value) => setForm((p) => ({ ...p, account_officer_id: value || '' }))}
+                          placeholder={userOptions.length ? 'Select...' : 'No account officers'}
+                          isClearable
+                          isDisabled={loadingLocation}
+                          compact
+                          boxed
+                          minHeight={26}
+                        />
+                      </div>
+                    )}
+                  </Field>
+                </div>
+              </div>
+
+              {/* Row 2: same grid-cols-[1.8fr_1.6fr] track sizes as Row 1 (see note above),
+                  so Row 1/Row 2 edges stay pixel-aligned. Principal Address, TIN and SEC Registration
+                  are on the Stockholders tab's SEC Registration Information card; the Ref. Code is
+                  on the Lease Agreements card (one per lease). */}
+              <div className="grid grid-cols-1 md:grid-cols-[1.8fr_1.6fr] gap-3 items-stretch">
+                <div className="flex flex-col sm:flex-row gap-3 items-stretch">
+                  <div className="flex-1 flex">
+                    <Field compact label="Lease Address" className="h-full flex-1">
+                      <textarea
+                        className="app-form-control app-form-control-sm flex-1 min-h-[4.5rem] md:min-h-0"
+                        value={form.lease_address}
+                        disabled={loadingLocation}
+                        onChange={(e) => setForm((p) => ({ ...p, lease_address: e.target.value }))}
+                      />
+                    </Field>
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-2">
+                  <Field compact label="Type of Contract">
                     <div className="app-form-control app-form-control-sm p-0 overflow-hidden flex items-stretch">
                       <AppSelect
-                        options={userOptions}
-                        value={form.account_officer_id}
-                        onChange={(value) => setForm((p) => ({ ...p, account_officer_id: value || '' }))}
-                        placeholder={userOptions.length ? 'Select...' : 'No account officers'}
+                        options={contractTypeOptions}
+                        value={form.contract_type_id}
+                        onChange={(value) => setForm((p) => ({ ...p, contract_type_id: value || '' }))}
+                        placeholder="Select..."
                         isClearable
                         isDisabled={loadingLocation}
                         compact
@@ -2703,47 +2788,10 @@ export function ProponentsManagement({
                         minHeight={26}
                       />
                     </div>
-                  )}
-                </Field>
-              </div>
-            </div>
-
-            {/* Row 2: same grid-cols-[1.8fr_1.6fr] track sizes as Row 1 (see note above),
-                so Row 1/Row 2 edges stay pixel-aligned. Principal Address, TIN and SEC Registration
-                are on the Stockholders tab's SEC Registration Information card; the Ref. Code is
-                on the Lease Agreements card (one per lease). */}
-            <div className="grid grid-cols-1 md:grid-cols-[1.8fr_1.6fr] gap-3 items-stretch">
-              <div className="flex flex-col sm:flex-row gap-3 items-stretch">
-                <div className="flex-1 flex">
-                  <Field compact label="Lease Address" className="h-full flex-1">
-                    <textarea
-                      className="app-form-control app-form-control-sm flex-1 min-h-[4.5rem] md:min-h-0"
-                      value={form.lease_address}
-                      disabled={loadingLocation}
-                      onChange={(e) => setForm((p) => ({ ...p, lease_address: e.target.value }))}
-                    />
                   </Field>
                 </div>
-              </div>
 
-              <div className="flex flex-col gap-2">
-                <Field compact label="Type of Contract">
-                  <div className="app-form-control app-form-control-sm p-0 overflow-hidden flex items-stretch">
-                    <AppSelect
-                      options={contractTypeOptions}
-                      value={form.contract_type_id}
-                      onChange={(value) => setForm((p) => ({ ...p, contract_type_id: value || '' }))}
-                      placeholder="Select..."
-                      isClearable
-                      isDisabled={loadingLocation}
-                      compact
-                      boxed
-                      minHeight={26}
-                    />
-                  </div>
-                </Field>
               </div>
-
             </div>
 
             {/* Lease Agreements (A-02/A-03/A-04): one row per lease — the current
@@ -4713,6 +4761,23 @@ function StatCard({ label, value }: { label: string; value: string }) {
  * button (matches the +/- row buttons) so it can sit in the same vertical
  * stack instead of its own full-width row. Disabled until something in that
  * section changed; the label is only used as the tooltip/title now. */
+/** The list's identifier column: the Ref. Code the Account Officer types in
+ * (unique, never reused — Proponent.assertUniqueField); "Not set" until then.
+ * The system Ref No (LOC-…) is in the cell's tooltip. */
+function RefCodeCell({ code }: { code: string | null | undefined }) {
+  const text = String(code || '').trim();
+  if (text) return <span className="font-semibold">{text}</span>;
+  return (
+    <span
+      className="inline-flex items-center rounded-full border px-1.5 py-0.5 text-[10px] font-semibold"
+      style={{ color: '#d97706', borderColor: 'rgba(245,158,11,.35)', backgroundColor: 'rgba(245,158,11,.1)' }}
+      title="No Ref. Code yet — the Account Officer types it in on the locator's panel"
+    >
+      Not set
+    </span>
+  );
+}
+
 /** The locator's own Ref No; while a renewal is in process its prefix reads
  * REN instead of LOC (same number), so it's clear at a glance it's renewing. */
 function displayRef(p: { ref_no: string | null; renewal_application_no?: string | null }) {

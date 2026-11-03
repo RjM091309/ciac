@@ -385,6 +385,8 @@ const FIELD_LABELS: Record<string, string> = {
   mail_from_address: 'from address',
   mail_from_name: 'from name',
   mail_reply_to: 'reply-to address',
+  officer_sender: 'show the assigned officer as the sender',
+  officer_cc: 'copy the assigned officer',
   google_maps_api_key: 'Google Maps API key',
   login_max_attempts: 'failed sign-in attempts before lockout',
   login_lockout_minutes: 'lockout duration (minutes)',

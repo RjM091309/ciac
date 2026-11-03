@@ -336,6 +336,18 @@ async function createSchema() {
   // Sub-lease (A-07): a sub-lessee is a locator of its own (own Locator
   // Information), linked to the locator it sub-leases from. One level only —
   // a sub-lessee has no sub-lessees of its own. NULL = not a sub-lessee.
+  // Ref. Code: the Account Officer's own identifier for the locator — unique
+  // (assertUniqueField checks first; this index also stops two saves at the
+  // same moment). Skipped, with a log line, if the data already has duplicates.
+  try {
+    await updateSchema(`
+      IF COL_LENGTH('dbo.proponents', 'ref_code') IS NOT NULL
+        AND NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'UX_proponents_ref_code' AND object_id = OBJECT_ID('dbo.proponents'))
+        CREATE UNIQUE INDEX UX_proponents_ref_code ON dbo.proponents(ref_code) WHERE ref_code IS NOT NULL AND ref_code <> '';
+    `);
+  } catch (error) {
+    console.error("Ref. Code unique index not created — duplicate Ref. Codes exist; fix them on Registered Locator:", error.message);
+  }
   await updateSchema(`
     IF COL_LENGTH('dbo.proponents', 'sublessor_id') IS NULL
       ALTER TABLE dbo.proponents ADD sublessor_id INT NULL;
@@ -711,9 +723,26 @@ async function listProponents({ approvedOnly = false } = {}) {
       p.sublessor_id,
       u.email AS email,
       u.full_name AS contact_name,
-      u.status AS account_status
+      u.status AS account_status,
+      toctype.name AS contract_type_name
     FROM dbo.proponents p
     LEFT JOIN dbo.users u ON u.id = p.user_id
+    -- Type of Contract, same order as getProponentById: the approved contract's,
+    -- else the latest (approved first) application's, else the encoded one.
+    OUTER APPLY (
+      SELECT TOP (1) c.contract_type_id
+      FROM dbo.contracts c
+      INNER JOIN dbo.applications a ON a.id = c.application_id
+      WHERE a.proponent_id = p.id AND a.status = 'APPROVED'
+      ORDER BY c.effective_end DESC, c.id DESC
+    ) ct
+    OUTER APPLY (
+      SELECT TOP (1) a2.contract_type_id
+      FROM dbo.applications a2
+      WHERE a2.proponent_id = p.id
+      ORDER BY CASE WHEN a2.status = 'APPROVED' THEN 0 ELSE 1 END, a2.created_at DESC, a2.id DESC
+    ) latest_app
+    LEFT JOIN dbo.type_of_contract toctype ON toctype.id = COALESCE(ct.contract_type_id, latest_app.contract_type_id, p.contract_type_id)
     ${approvedOnly ? "WHERE p.is_manual_registration = 1 OR EXISTS (SELECT 1 FROM dbo.applications a WHERE a.proponent_id = p.id AND a.status = 'APPROVED')" : ""}
     ORDER BY p.id DESC
     `
@@ -747,6 +776,8 @@ async function listProponents({ approvedOnly = false } = {}) {
     email: p.email ?? null,
     contact_name: p.contact_name ?? null,
     account_status: p.account_status ?? null,
+    // The panel heading (Lessee / Development Partner / …) before its details load.
+    contract_type_name: p.contract_type_name ?? null,
   }));
 }
 

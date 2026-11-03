@@ -1,5 +1,6 @@
 const { selectData, insertData, updateData, updateSchema, runInTransaction } = require("../config/database");
 const Notification = require("./Notification");
+const { officerSenderFor } = require("../lib/mailSender");
 const ApplicationType = require("./ApplicationType");
 const Requirement = require("./Requirement");
 const Permit = require("./Permit");
@@ -192,6 +193,7 @@ async function createStatusChangeNotifications({ application, toStatus, remarks,
         const trimmedRemarks = String(remarks || "").trim();
         const loginUrl = `${String(process.env.FRONTEND_URL || "").replace(/\/+$/, "")}/`;
         await sendMail({
+          sender: await officerSenderFor(application?.id), // from the assigned officer (lib/mailSender.js)
           to: locator.email,
           subject: `Business status update: ${applicationNo || "your application"} — ${statusLabel}`,
           text:
@@ -244,6 +246,7 @@ async function createApplicationCreatedNotifications({
     if (locator?.email) {
       const loginUrl = `${String(process.env.FRONTEND_URL || "").replace(/\/+$/, "")}/`;
       await sendMail({
+        sender: Number(isRenewal) ? await officerSenderFor(applicationId) : null, // a renewal: its Account Officer; a new filing: the system
         to: locator.email,
         subject: `${entryLabel} filed: ${appNo}`,
         text:
@@ -319,6 +322,7 @@ async function createRequirementStatusNotifications({
         const actionLabel = isRejected ? "rejected" : "verified";
         const callToAction = isRejected ? "review and resubmit" : "review your application";
         await sendMail({
+          sender: await officerSenderFor(application?.id),
           to: locator.email,
           subject: `Requirement ${actionLabel} for ${applicationNo || "your application"}`,
           text:
@@ -1750,6 +1754,7 @@ async function addRequirementComment({ applicationRequirementId, authorId, autho
     if (locator?.email) {
       const loginUrl = `${String(process.env.FRONTEND_URL || "").replace(/\/+$/, "")}/`;
       await sendMail({
+        sender: await officerSenderFor(requirement.application_id),
         to: locator.email,
         subject: `New reply on ${requirementLabel || "a requirement"} for ${applicationNo || "your application"}`,
         text:
@@ -1865,6 +1870,7 @@ async function addCustomRequirementToApplication({ applicationId, name, descript
       const applicationNo = String(application.application_no || "").trim();
       const loginUrl = `${String(process.env.FRONTEND_URL || "").replace(/\/+$/, "")}/`;
       await sendMail({
+        sender: await officerSenderFor(applicationId),
         to: locator.email,
         subject: `New requirement requested for ${applicationNo || "your application"}`,
         text:

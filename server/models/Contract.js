@@ -242,6 +242,7 @@ async function sendContractEmail(applicationId, normalizedContractNo) {
     if (locator?.email) {
       const loginUrl = `${String(process.env.FRONTEND_URL || "").replace(/\/+$/, "")}/`;
       await sendMail({
+        sender: await require("../lib/mailSender").officerSenderFor(applicationId),
         to: locator.email,
         subject: `Contract signed: ${locator.application_no || "your application"}`,
         text:

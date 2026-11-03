@@ -181,7 +181,9 @@ async function send(applicationId, actorId) {
   }).catch((error) => console.error("Terms notification error:", error));
   if (ctx.locator_email) {
     const loginUrl = `${String(process.env.FRONTEND_URL || "").replace(/\/+$/, "")}/me/applications?applicationId=${appId}`;
+    const sender = await require("../lib/mailSender").officerSenderFor(appId);
     sendMail({
+      sender,
       to: ctx.locator_email,
       subject: `Terms and conditions for ${ctx.application_no} — please review`,
       text:
