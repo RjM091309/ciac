@@ -205,6 +205,7 @@ exports.getById = async (req, res) => {
         proposed_lease_term_years: proponent?.proposed_lease_term_years ?? null,
         proposed_lease_term_unit: proponent?.proposed_lease_term_unit ?? "YEARS",
         contact_no: proponent?.contact_no ?? null,
+        nationality: proponent?.nationality ?? null,
       },
     });
   } catch (error) {
@@ -436,6 +437,8 @@ exports.createLocatorWithApplication = async (req, res) => {
       save_as_draft,
       contract_type_id,
       intake_id,
+      sublessor_id,
+      nationality,
     } = req.body || {};
     // A new proponent starts from BDO Level 1's intake (letter + the Level 2
     // assigned); the Level 2 files it from there, under its business name.
@@ -528,11 +531,16 @@ exports.createLocatorWithApplication = async (req, res) => {
           proposed_lease_term_years: leaseTermValue(proposed_lease_term_years),
           proposed_lease_term_unit: leaseTermUnit(proposed_lease_term_unit),
         contact_no: String(contact_no).trim(),
+        // A sub-lessee: the locator it sub-leases from (checked by Proponent.assertSublessor).
+        sublessor_id: sublessor_id ? Number(sublessor_id) : null,
+        nationality,
         created_by: req.user?.id ?? null,
       });
       createdProponentId = proponent?.id;
     } catch (error) {
       console.error("Create locator with application: proponent step failed:", error);
+      // A rule the caller can fix (e.g. the sub-lessor is itself a sub-lessee).
+      if (error?.status === 400 || error?.status === 409) throw error;
       throw Object.assign(new Error("Failed to create the locator's business profile."), { status: 500 });
     }
 
@@ -647,6 +655,7 @@ exports.update = async (req, res) => {
       proposed_lease_term_years,
       proposed_lease_term_unit,
       contact_no,
+      nationality,
     } = req.body || {};
     if (land_use_id && !(await isKnownLandUse(land_use_id))) {
       return res.status(400).json({ success: false, message: "Unknown land use" });
@@ -687,7 +696,7 @@ exports.update = async (req, res) => {
     // the admin-direct edit path (gated by the same settings:locator-users
     // permission as the rest of this route), separate from the proponent's
     // own self-service change-request flow in c_proponents.js.
-    if (business_name !== undefined || address !== undefined || lease_address !== undefined || location !== undefined || land_use_id !== undefined || proposed_lease_term_years !== undefined || proposed_lease_term_unit !== undefined || contact_no !== undefined) {
+    if (business_name !== undefined || address !== undefined || lease_address !== undefined || location !== undefined || land_use_id !== undefined || proposed_lease_term_years !== undefined || proposed_lease_term_unit !== undefined || contact_no !== undefined || nationality !== undefined) {
       try {
         const existing = await Proponent.getProponentByUserId(id);
         if (existing) {
@@ -700,6 +709,7 @@ exports.update = async (req, res) => {
             proposed_lease_term_years: proposed_lease_term_years !== undefined ? leaseTermValue(proposed_lease_term_years) : undefined,
             proposed_lease_term_unit: proposed_lease_term_unit !== undefined ? leaseTermUnit(proposed_lease_term_unit) : undefined,
             contact_no: contact_no !== undefined ? (contact_no ? String(contact_no).trim() : null) : undefined,
+            nationality,
             updated_by: req.user?.id ?? null,
           });
         } else if (String(business_name || "").trim()) {

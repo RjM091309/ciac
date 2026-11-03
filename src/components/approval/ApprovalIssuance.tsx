@@ -328,7 +328,7 @@ export function ApprovalDetail({
           </div>
         </div>
 
-        <div className="px-4 pt-2 border-b flex gap-1 overflow-x-auto" style={{ borderColor: 'var(--border-subtle)' }}>
+        <div className="px-4 pt-2 border-b flex gap-1 tab-strip-scroll" style={{ borderColor: 'var(--border-subtle)' }}>
           {TABS.map((t) => (
             <button
               key={t}

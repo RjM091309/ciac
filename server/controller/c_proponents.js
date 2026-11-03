@@ -201,6 +201,16 @@ exports.listTypeOfContractOptions = async (req, res) => {
 
 // Lookup for the Land Use dropdown on the New/Edit Locator form (File Maintenance > Land
 // Use). Inactive rows are included, flagged, so a locator that still uses one can display it.
+/** GET /api/proponents/sublessor-options — for a new sub-lessee on Proponent Accounts. */
+exports.listSublessorOptions = async (req, res) => {
+  try {
+    return res.json({ success: true, data: await Proponent.listSublessorOptions() });
+  } catch (error) {
+    console.error("List sublessor options error:", error);
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
+  }
+};
+
 exports.listLandUseOptions = async (req, res) => {
   try {
     const rows = await LandUse.listLandUses();
@@ -253,13 +263,16 @@ async function readClassification(body) {
 // `req.proponent` is populated by requireProponentSelf.
 exports.getMine = async (req, res) => {
   try {
-    const [pendingRequest, requestHistory] = await Promise.all([
+    const [pendingRequest, requestHistory, sublease] = await Promise.all([
       ChangeRequest.getPendingForProponent(req.proponent.id),
       ChangeRequest.listForProponent(req.proponent.id, 10),
+      // Sub-lease (A-07): the locator it sub-leases from, or its sub-lessees.
+      Proponent.getSubleaseLinks(req.proponent.id),
     ]);
     return res.json({
       success: true,
       data: req.proponent,
+      sublease,
       pendingChangeRequest: pendingRequest,
       changeRequestHistory: requestHistory,
       editableFields: ChangeRequest.EDITABLE_FIELDS,

@@ -924,3 +924,14 @@ fieldset:disabled .app-select__indicators {
 .recharts-wrapper *:focus {
   outline: none;
 }
+
+/* Tab strips that scroll sideways on narrow screens: no scrollbar (the
+   active tab's -mb-px border would otherwise add a vertical one). */
+.tab-strip-scroll {
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+.tab-strip-scroll::-webkit-scrollbar {
+  display: none;
+}

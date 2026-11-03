@@ -1714,7 +1714,7 @@ function InspectionDetail({
           </div>
         </div>
 
-        <div className="px-4 pt-2 border-b flex gap-1 overflow-x-auto" style={{ borderColor: 'var(--border)' }}>
+        <div className="px-4 pt-2 border-b flex gap-1 tab-strip-scroll" style={{ borderColor: 'var(--border)' }}>
           {DETAIL_TABS.map((t) => (
             <button
               key={t}

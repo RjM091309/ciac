@@ -28,9 +28,16 @@ type ChangeRequest = {
   reviewed_at: string | null;
 };
 
+type SubleaseLinks = {
+  sublessor: { business_name: string; ref_no: string | null } | null;
+  sublessees: { business_name: string; ref_no: string | null; start_term: string | null; end_term: string | null }[];
+};
+
 type MeResponse = {
   success: boolean;
   data: ProponentProfileData;
+  /** Sub-lease (A-07): who this locator sub-leases from, or its sub-lessees. */
+  sublease?: SubleaseLinks;
   pendingChangeRequest: ChangeRequest | null;
   changeRequestHistory: ChangeRequest[];
   editableFields: string[];
@@ -68,6 +75,61 @@ function Field({ label, value }: { label: string; value: string | null }) {
       <span className="text-sm font-medium" style={{ color: 'var(--text)' }}>
         {value && value.trim() ? value : '—'}
       </span>
+    </div>
+  );
+}
+
+/** Sub-lease: a sub-lessee sees the locator it's under; a main locator its
+ * sub-lessees (each is a separate account). Nothing when neither. */
+function SubleaseCard({ links }: { links?: SubleaseLinks }) {
+  if (!links || (!links.sublessor && !links.sublessees.length)) return null;
+  return (
+    <div className="glass-card p-4 sm:p-5 !border-transparent" style={{ backgroundColor: 'var(--surface)' }}>
+      <h4 className="text-sm font-bold mb-1" style={{ color: 'var(--text)' }}>
+        Sub-Lease
+      </h4>
+      {links.sublessor ? (
+        <>
+          <p className="text-[11px] text-secondary mb-3">Your business sub-leases from this locator.</p>
+          <div className="grid grid-cols-2 gap-4 sm:gap-5">
+            <Field label="Sub-lessee of" value={links.sublessor.business_name} />
+            <Field label="Ref No." value={links.sublessor.ref_no} />
+          </div>
+        </>
+      ) : (
+        <>
+          <p className="text-[11px] text-secondary mb-3">
+            Businesses that sub-lease from you. Each has its own account with {getSiteSettings().branding.org_short_name}.
+          </p>
+          <div className="overflow-x-auto rounded-lg border" style={{ borderColor: 'var(--border-subtle)' }}>
+            <table className="w-full text-xs">
+              <thead>
+                <tr>
+                  {['Sub-lessee', 'Ref No.', 'Start', 'End'].map((h) => (
+                    <th
+                      key={h}
+                      className="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-widest text-secondary border-b"
+                      style={{ borderColor: 'var(--border-subtle)' }}
+                    >
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {links.sublessees.map((s, i) => (
+                  <tr key={`${s.ref_no || s.business_name}-${i}`} className="border-b last:border-b-0" style={{ borderColor: 'var(--border-subtle)' }}>
+                    <td className="px-3 py-2 font-medium" style={{ color: 'var(--text)' }}>{s.business_name}</td>
+                    <td className="px-3 py-2 text-secondary">{s.ref_no || '—'}</td>
+                    <td className="px-3 py-2 text-secondary whitespace-nowrap">{formatDate(s.start_term)}</td>
+                    <td className="px-3 py-2 text-secondary whitespace-nowrap">{formatDate(s.end_term)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -292,6 +354,7 @@ export function ProponentProfile() {
               </div>
             </div>
           </div>
+          <SubleaseCard links={state.res.sublease} />
         </>
       )}
 

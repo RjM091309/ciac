@@ -72,6 +72,12 @@ router.get("/industries", requireMenuAccess(MENU_KEY, "view"), proponentsControl
 // Also used by Locator Accounts' New Locator Account form.
 router.get("/ref-code-available", requireMenuAccess(MENU_KEY, "view"), proponentsController.refCodeAvailable);
 router.get("/land-uses", requireAnyMenuAccess([MENU_KEY, "settings:locator-users"], "view"), proponentsController.listLandUseOptions);
+// Proponent Accounts / New Proponent: the locator a new sub-lessee sub-leases from.
+router.get(
+  "/sublessor-options",
+  requireAnyMenuAccess([MENU_KEY, "settings:locator-users", "applications:proponent-intake"], "view"),
+  proponentsController.listSublessorOptions
+);
 // Before "/:id" so it isn't read as an id.
 router.get("/duplicates", requireMenuAccess(MENU_KEY, "view"), proponentsController.findDuplicates);
 router.get("/:id", requireMenuAccess(MENU_KEY, "view"), proponentsController.requireOwnLocator, proponentsController.getById);

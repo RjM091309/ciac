@@ -10,6 +10,7 @@ import { EmptyState } from '../ui/EmptyState';
 import { AddressAutocomplete } from '../ui/AddressAutocomplete';
 import { AppSelect } from '../ui/AppSelect';
 import { IntakeLetterLink, UsernameSuggestion, suggestUsername, type Intake } from '../applications/intakeShared';
+import { NATIONALITIES } from '../proponent/ProponentsManagement';
 import { RowActionsMenu, type RowActionItem } from '../ui/RowActionsMenu';
 import { useSessionStorageCachedResource } from '../../hooks/useSessionStorageCachedResource';
 import { useControlPanelAccess } from '../../context/ControlPanelAccessContext';
@@ -365,6 +366,8 @@ export function LocatorUsersManagement({
     contact_no: '',
     application_type: 'DIRECT_LEASE',
     contract_type_id: '',
+    sublessor_id: '',
+    nationality: '',
   });
   const [originalForm, setOriginalForm] = useState<typeof form | null>(null);
   const landUseOptions = useMemo(
@@ -506,6 +509,33 @@ export function LocatorUsersManagement({
     return Array.from({ length: end - adjustedStart + 1 }, (_, i) => adjustedStart + i);
   }, [page, totalPages]);
 
+  // A sub-lessee (Industry Type "Sublease" or a Sublease Type of Contract —
+  // the Registered Locator's rule) needs the locator it sub-leases from.
+  const subleaseChosen =
+    !editing &&
+    (form.application_type === 'SUBLEASE' ||
+      String(contractTypeOptions.find((t) => t.value === form.contract_type_id)?.label || '')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .toUpperCase()
+        .startsWith('SUBLEASE'));
+  const [sublessorOptions, setSublessorOptions] = useState<{ value: string; label: string; detail: string }[] | null>(null);
+  useEffect(() => {
+    if (!subleaseChosen || sublessorOptions) return;
+    fetch(api('/api/proponents/sublessor-options'), { credentials: 'include' })
+      .then((res) => res.json())
+      .then((json) =>
+        setSublessorOptions(
+          (Array.isArray(json?.data) ? json.data : []).map((p: any) => ({
+            value: String(p.id),
+            label: String(p.business_name || ''),
+            detail: String(p.ref_code || p.ref_no || ''),
+          }))
+        )
+      )
+      .catch(() => setSublessorOptions([]));
+  }, [subleaseChosen, sublessorOptions]);
+
   const canSubmit = useMemo(() => {
     const username = form.username.trim();
     const email = form.email.trim();
@@ -538,7 +568,9 @@ export function LocatorUsersManagement({
           form.contact_no.trim() &&
           form.address.trim() &&
           form.application_type.trim() &&
-          form.contract_type_id
+          form.contract_type_id &&
+          form.nationality.trim() &&
+          (!subleaseChosen || form.sublessor_id)
       );
     }
 
@@ -554,9 +586,10 @@ export function LocatorUsersManagement({
       form.land_use_id !== originalForm.land_use_id ||
       form.proposed_lease_term_years !== originalForm.proposed_lease_term_years ||
       form.proposed_lease_term_unit !== originalForm.proposed_lease_term_unit ||
-      form.contact_no.trim() !== originalForm.contact_no.trim()
+      form.contact_no.trim() !== originalForm.contact_no.trim() ||
+      form.nationality.trim() !== originalForm.nationality.trim()
     );
-  }, [editing, form, locatorRole, originalForm, fieldErrors, checkingField]);
+  }, [editing, form, locatorRole, originalForm, fieldErrors, checkingField, subleaseChosen]);
 
   useEffect(() => {
     setPage(1);
@@ -585,6 +618,8 @@ export function LocatorUsersManagement({
       contact_no: '',
       application_type: 'DIRECT_LEASE',
       contract_type_id: '',
+      sublessor_id: '',
+      nationality: '',
       });
     setIsCreateOpen(true);
   }
@@ -611,6 +646,8 @@ export function LocatorUsersManagement({
       // one consistent shape between create and edit.
       application_type: 'DIRECT_LEASE',
       contract_type_id: '',
+      sublessor_id: '',
+      nationality: '',
       };
     setForm(baseline);
     setOriginalForm(baseline);
@@ -630,6 +667,7 @@ export function LocatorUsersManagement({
           proposed_lease_term_years: json.data.proposed_lease_term_years != null ? String(json.data.proposed_lease_term_years) : '',
           proposed_lease_term_unit: json.data.proposed_lease_term_unit === 'MONTHS' ? 'MONTHS' : 'YEARS',
           contact_no: json.data.contact_no || '',
+          nationality: json.data.nationality || '',
         };
         setForm(withProfile);
         setOriginalForm(withProfile);
@@ -670,6 +708,8 @@ export function LocatorUsersManagement({
           contact_no: form.contact_no.trim(),
           application_type: form.application_type,
           contract_type_id: form.contract_type_id ? Number(form.contract_type_id) : null,
+          sublessor_id: subleaseChosen && form.sublessor_id ? Number(form.sublessor_id) : undefined,
+          nationality: form.nationality.trim(),
           save_as_draft: asDraft,
           intake_id: startingIntake?.id,
         };
@@ -723,6 +763,7 @@ export function LocatorUsersManagement({
       payload.proposed_lease_term_years = form.proposed_lease_term_years.trim() || null;
       payload.proposed_lease_term_unit = form.proposed_lease_term_unit;
       payload.contact_no = form.contact_no.trim() || undefined;
+      payload.nationality = form.nationality.trim() || null;
       // No password field on this form: the backend generates one and emails
       // it when none is supplied, same as an admin-triggered reset.
 
@@ -1329,6 +1370,25 @@ export function LocatorUsersManagement({
               isClearable
             />
           </Field>
+          {subleaseChosen ? (
+            <div className="sm:col-span-2">
+              <Field label="Sub-lessee of (locator) *">
+                <AppSelect
+                  options={sublessorOptions ?? []}
+                  value={form.sublessor_id}
+                  onChange={(value) => setForm((p) => ({ ...p, sublessor_id: value || '' }))}
+                  placeholder={
+                    sublessorOptions === null
+                      ? 'Loading locators…'
+                      : sublessorOptions.length
+                        ? 'Select the locator it sub-leases from'
+                        : 'No registered locators to sub-lease from'
+                  }
+                  isClearable
+                />
+              </Field>
+            </div>
+          ) : null}
         </div>
 
 
@@ -1339,6 +1399,7 @@ export function LocatorUsersManagement({
             </p>
           ) : null}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="sm:col-span-2 grid grid-cols-1 sm:grid-cols-3 gap-3 items-start">
             <div className="sm:col-span-2">
               <Field label={editing ? 'Business name' : 'Business name *'}>
                 <input
@@ -1355,6 +1416,25 @@ export function LocatorUsersManagement({
                   <IntakeLetterLink intake={startingIntake} label={`View the letter (${startingIntake.letter_name || 'PDF'})`} />
                 </div>
               ) : null}
+            </div>
+            {/* The proponent's own nationality (B-13), as on Registered Locator. */}
+            <Field label={editing ? 'Nationality' : 'Nationality *'}>
+              {/* Plain AppSelect, like the form's other dropdowns; same list as
+                  Registered Locator (an older value not in it still shows). */}
+              <AppSelect
+                options={(() => {
+                  const current = form.nationality.trim().toUpperCase();
+                  const list: string[] = [...NATIONALITIES];
+                  if (current && !list.includes(current)) list.unshift(current);
+                  return list.map((n) => ({ value: n, label: n }));
+                })()}
+                value={form.nationality.trim().toUpperCase()}
+                onChange={(v) => setForm((p) => ({ ...p, nationality: v || '' }))}
+                placeholder="Select nationality"
+                isDisabled={loadingProfile}
+                isClearable={false}
+              />
+            </Field>
             </div>
             <div className="sm:col-span-2">
               <Field label={editing ? 'Principal Address' : 'Principal Address *'}>
@@ -1988,10 +2068,13 @@ export function LeaseTermInput({
   value,
   unit,
   onChange,
+  stacked = false,
 }: {
   value: string;
   unit: string;
   onChange: (value: string, unit: string) => void;
+  /** Years above Months (e.g. beside a tall textarea) instead of side by side. */
+  stacked?: boolean;
 }) {
   const [parts, setParts] = useState(() => splitLeaseTerm(value, unit));
 
@@ -2013,7 +2096,7 @@ export function LeaseTermInput({
   }
 
   return (
-    <div className="grid grid-cols-2 gap-2">
+    <div className={stacked ? 'grid grid-cols-1 gap-2' : 'grid grid-cols-2 gap-2'}>
       <div className="relative">
         <input
           type="number"
@@ -2027,7 +2110,7 @@ export function LeaseTermInput({
           placeholder="0"
           aria-label="Years"
         />
-        <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-secondary">years</span>
+        <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-secondary">Years</span>
       </div>
       <div className="relative">
         <input
@@ -2045,7 +2128,7 @@ export function LeaseTermInput({
           placeholder="0"
           aria-label="Months"
         />
-        <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-secondary">months</span>
+        <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-secondary">Months</span>
       </div>
     </div>
   );

@@ -618,6 +618,24 @@ async function listSublessees(proponentId) {
   }));
 }
 
+/** For the locator's own portal (My Business Profile): who it sub-leases from
+ * and its own sub-lessees — names, Ref Nos and lease dates only. */
+async function getSubleaseLinks(proponentId) {
+  await ensureSchema();
+  const id = toInt(proponentId);
+  const [parent] = await selectData(
+    `SELECT s.business_name, s.ref_no FROM dbo.proponents p JOIN dbo.proponents s ON s.id = p.sublessor_id WHERE p.id = @param0`,
+    [id]
+  );
+  const subs = await listSublessees(id);
+  return {
+    sublessor: parent ? { business_name: parent.business_name, ref_no: parent.ref_no ?? null } : null,
+    sublessees: subs
+      .filter((s) => Number(s.is_active) === 1)
+      .map((s) => ({ business_name: s.business_name, ref_no: s.ref_no, start_term: s.start_term, end_term: s.end_term })),
+  };
+}
+
 function subleaseError(message) {
   const error = new Error(message);
   error.status = 400;
@@ -941,6 +959,20 @@ async function getProponentById(id) {
 /** Registered Locator: only locators that have an Account Officer (assigned
  * from /approval, or set when registered by hand). `accountOfficerId`
  * narrows it to one Level 2 Account Officer's own locators. */
+/** Locators a new sub-lessee can sub-lease from (Proponent Accounts form):
+ * active Registered Locators (with an Account Officer) that aren't sub-lessees
+ * themselves — same rule as assertSublessor. */
+async function listSublessorOptions() {
+  await ensureSchema();
+  const rows = await selectData(
+    `SELECT p.id, p.business_name, p.ref_no, p.ref_code
+     FROM dbo.proponents p
+     WHERE p.is_active = 1 AND p.sublessor_id IS NULL AND p.account_officer_id IS NOT NULL
+     ORDER BY p.business_name`
+  );
+  return rows.map((r) => ({ id: r.id, business_name: r.business_name, ref_no: r.ref_no ?? null, ref_code: r.ref_code ?? null }));
+}
+
 async function listProponentsForLocatorList({ accountOfficerId = null } = {}) {
   await ensureSchema();
   const rows = await selectData(
@@ -1578,6 +1610,8 @@ async function listProponentIdsForAccountOfficer(userId) {
 }
 
 module.exports = {
+  listSublessorOptions,
+  getSubleaseLinks,
   listProponentIdsForAccountOfficer,
   ensureSchema,
   saveStockholders,

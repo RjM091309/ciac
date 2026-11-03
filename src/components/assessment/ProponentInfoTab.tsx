@@ -352,8 +352,10 @@ export function ProponentInfoTab({
             </Cell>
             <Cell label="Proposed Lease Term *" bad={bad('proposed_lease_term_years')}>
               {/* Same years + months input as the Proponent Accounts form (stored as
-                  years, or as total months when there are months). */}
+                  years, or as total months when there are months), stacked to
+                  match the address boxes beside it. */}
               <LeaseTermInput
+                stacked
                 value={form.proposed_lease_term_years}
                 unit={form.proposed_lease_term_unit}
                 onChange={(value, unit) =>
@@ -362,62 +364,54 @@ export function ProponentInfoTab({
               />
             </Cell>
 
-            <Cell label="Location (Preferred Lot Area) *" bad={bad('location')}>
-              <input
-                className={input}
-                placeholder="e.g. G Puyat, Bertaphil V"
-                value={form.location}
-                onChange={(e) => set({ location: e.target.value })}
-              />
-            </Cell>
-            <Cell label="Land Use *" bad={bad('land_use_id')}>
-              <div className="app-form-control app-form-control-sm h-9 p-0 overflow-hidden flex items-stretch">
-                <AppSelect
-                  options={landUseOptions}
-                  value={form.land_use_id}
-                  onChange={(v) => set({ land_use_id: v })}
-                  placeholder="Select land use"
-                  isClearable
-                  isDisabled={!editable}
-                  compact
-                  boxed
-                  minHeight={26}
+            {/* One row: Location, Land Use, Contact No. and Nationality. */}
+            <div className="col-span-full grid grid-cols-1 gap-3 @xl:grid-cols-2 @4xl:grid-cols-4">
+              <Cell label="Location (Preferred Lot Area) *" bad={bad('location')}>
+                <input
+                  className={input}
+                  placeholder="e.g. G Puyat, Bertaphil V"
+                  value={form.location}
+                  onChange={(e) => set({ location: e.target.value })}
                 />
-              </div>
-            </Cell>
-            <Cell label="Contact No. *" bad={bad('contact_no')}>
-              <input className={input} value={form.contact_no} onChange={(e) => set({ contact_no: e.target.value })} />
-            </Cell>
+              </Cell>
+              <Cell label="Land Use *" bad={bad('land_use_id')}>
+                <div className="app-form-control app-form-control-sm h-9 p-0 overflow-hidden flex items-stretch">
+                  <AppSelect
+                    options={landUseOptions}
+                    value={form.land_use_id}
+                    onChange={(v) => set({ land_use_id: v })}
+                    placeholder="Select land use"
+                    isClearable
+                    isDisabled={!editable}
+                    compact
+                    boxed
+                    minHeight={26}
+                  />
+                </div>
+              </Cell>
+              <Cell label="Contact No. *" bad={bad('contact_no')}>
+                <input className={input} value={form.contact_no} onChange={(e) => set({ contact_no: e.target.value })} />
+              </Cell>
+              <Cell label="Nationality *" bad={bad('nationality')}>
+                {/* Same box and inner height as Land Use. */}
+                <NationalityInput
+                  value={form.nationality}
+                  onChange={(v) => set({ nationality: v })}
+                  className="h-9"
+                  minHeight={26}
+                  disabled={!editable}
+                />
+              </Cell>
+            </div>
 
-            {/* Stretches to the height of the Nationality + Email column beside it. */}
-            <Cell
-              label="Business Activities *"
-              bad={bad('business_activities')}
-              className="@xl:col-span-2 [&>div:last-child]:flex [&>div:last-child]:flex-1"
-            >
+            <Cell label="Business Activities *" bad={bad('business_activities')} className="col-span-full">
               <textarea
-                className={cn(input, 'h-auto min-h-[4.5rem] flex-1')}
+                className={cn(input, 'h-auto min-h-[4.5rem]')}
                 placeholder="What the proponent will do at CIAC"
                 value={form.business_activities}
                 onChange={(e) => set({ business_activities: e.target.value })}
               />
             </Cell>
-            {/* Beside Business Activities, stacked so the row keeps its height. */}
-            <div className="flex min-w-0 flex-col gap-3">
-              <Cell label="Nationality *" bad={bad('nationality')}>
-                <NationalityInput value={form.nationality} onChange={(v) => set({ nationality: v })} className="h-9" minHeight={34} />
-              </Cell>
-              <Cell label="Email (login)">
-                <input
-                  className={input}
-                  style={readOnlyStyle}
-                  value={loaded.login_email || '—'}
-                  readOnly
-                  tabIndex={-1}
-                  title="The locator's login email — changed on Proponent Accounts"
-                />
-              </Cell>
-            </div>
           </div>
         </Card>
 
