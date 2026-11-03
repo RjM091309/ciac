@@ -56,7 +56,10 @@ function ensureSchema() {
             REFERENCES dbo.applications(id) ON DELETE CASCADE
         );
         CREATE UNIQUE INDEX UX_application_terms_application ON dbo.application_terms(application_id);
-      END
+      END;
+      -- An optional PDF the evaluator attaches to the terms (sent with them).
+      IF COL_LENGTH('dbo.application_terms', 'attachment_path') IS NULL
+        ALTER TABLE dbo.application_terms ADD attachment_path NVARCHAR(500) NULL, attachment_name NVARCHAR(255) NULL;
     `).catch((error) => {
       schemaReady = null;
       throw error;
@@ -77,7 +80,11 @@ async function getForApplication(applicationId) {
     `,
     [toInt(applicationId)]
   );
-  return rows?.[0] || null;
+  const row = rows?.[0];
+  if (!row) return null;
+  // The stored path stays server-side; callers see whether there's a file.
+  const { attachment_path, ...rest } = row;
+  return { ...rest, has_attachment: Boolean(attachment_path) };
 }
 
 async function hasContract(applicationId) {
@@ -112,7 +119,10 @@ async function saveDraft(applicationId, body, actorId) {
   await ensureSchema();
   const appId = toInt(applicationId);
   const text = String(body || "").trim();
-  if (!text) throw clientError("Write the terms and conditions first.");
+  if (!text) {
+    const att = await selectData(`SELECT attachment_path FROM dbo.application_terms WHERE application_id = @param0`, [appId]);
+    if (!att?.[0]?.attachment_path) throw clientError("Write the terms and conditions first.");
+  }
   if (text.length > 20000) throw clientError("The terms are too long (20,000 characters at most).");
   if (await hasContract(appId)) throw clientError("The contract is already recorded — the terms can't change anymore.", 409);
   const current = await getForApplication(appId);
@@ -138,6 +148,9 @@ async function send(applicationId, actorId) {
   const appId = toInt(applicationId);
   const current = await getForApplication(appId);
   if (!current) throw clientError("Write the terms and conditions first.");
+  if (!String(current.body || "").trim() && !current.has_attachment) {
+    throw clientError("Write the terms and conditions, or attach them as a PDF, first.");
+  }
   const ctx = await appContext(appId);
   const who = partyWord(ctx?.is_renewal);
   if (current.status === "SENT") throw clientError(`These terms were already sent — waiting for the ${who}.`, 409);
@@ -159,7 +172,9 @@ async function send(applicationId, actorId) {
   await Notification.createNotification({
     userId: ctx.locator_user_id,
     subject: `Terms and conditions for ${ctx.application_no}`,
-    body: `Please review the terms and conditions for your ${what} ${ctx.application_no} and agree, or ask for changes.`,
+    body: `Please review the terms and conditions for your ${what} ${ctx.application_no}${
+      current.has_attachment ? " (with an attached document)" : ""
+    } and agree, or ask for changes.`,
     createdBy: toInt(actorId),
     applicationId: appId,
     eventType: "application_status",
@@ -171,11 +186,13 @@ async function send(applicationId, actorId) {
       subject: `Terms and conditions for ${ctx.application_no} — please review`,
       text:
         `Hello ${ctx.locator_name || ""},\n\n` +
-        `The terms and conditions for your ${what} ${ctx.application_no} (${ctx.business_name}) are ready. ` +
+        `The terms and conditions for your ${what} ${ctx.application_no} (${ctx.business_name}) are ready` +
+        `${current.has_attachment ? `, with an attached document (${current.attachment_name || "PDF"})` : ""}. ` +
         `Please review them in the ${site.locatorPortalLabel()} and agree, or ask for changes.\n\nOpen: ${loginUrl}\n`,
       html:
         `<p>Hello ${escapeHtml(ctx.locator_name || "")},</p>` +
-        `<p>The terms and conditions for your ${what} <b>${escapeHtml(ctx.application_no)}</b> (${escapeHtml(ctx.business_name)}) are ready. ` +
+        `<p>The terms and conditions for your ${what} <b>${escapeHtml(ctx.application_no)}</b> (${escapeHtml(ctx.business_name)}) are ready` +
+        `${current.has_attachment ? `, with an attached document (${escapeHtml(current.attachment_name || "PDF")})` : ""}. ` +
         `Please review them in the ${escapeHtml(site.locatorPortalLabel())} and agree, or ask for changes.</p>` +
         `<p><a href="${escapeHtml(loginUrl)}" style="display:inline-block;padding:10px 18px;background:#111827;color:#fff;text-decoration:none;border-radius:6px;">Review the terms</a></p>`,
     }).catch((error) => console.error("Terms email error:", error));
@@ -275,4 +292,64 @@ async function reopen(applicationId, { reason, actorId }) {
   return getForApplication(appId);
 }
 
-module.exports = { ensureSchema, STATUSES, getForApplication, saveDraft, send, respond, reopen };
+/** The evaluator attaches (or replaces) the terms' PDF. Like editing the
+ * text: back to DRAFT (send again); not once agreed (Reopen first) or once
+ * the contract is recorded. Creates the terms row when there's none yet. */
+async function setAttachment(applicationId, { storagePath, fileName, actorId }) {
+  await ensureSchema();
+  const appId = toInt(applicationId);
+  if (await hasContract(appId)) throw clientError("The contract is already recorded — the terms can't change anymore.", 409);
+  const before = await selectData(`SELECT id, status, attachment_path FROM dbo.application_terms WHERE application_id = @param0`, [appId]);
+  const current = before?.[0];
+  if (current?.status === "AGREED") throw clientError("These terms were agreed — Reopen them first to change the attachment.", 409);
+  const name = String(fileName || "Terms.pdf").slice(0, 255);
+  if (current) {
+    await updateData(
+      `UPDATE dbo.application_terms
+       SET attachment_path = @param1, attachment_name = @param2, status = 'DRAFT', updated_by = @param3, updated_at = SYSUTCDATETIME()
+       WHERE id = @param0`,
+      [current.id, storagePath, name, toInt(actorId)]
+    );
+  } else {
+    await updateData(
+      `INSERT INTO dbo.application_terms (application_id, body, status, attachment_path, attachment_name, created_by)
+       VALUES (@param0, N'', 'DRAFT', @param1, @param2, @param3)`,
+      [appId, storagePath, name, toInt(actorId)]
+    );
+  }
+  await logActivity(appId, "TERMS_ATTACHMENT_UPLOADED", `Terms attachment uploaded: ${name}`, actorId);
+  return { terms: await getForApplication(appId), replacedPath: current?.attachment_path || null };
+}
+
+/** Removes the terms' PDF (same rules as setAttachment). Returns the old path. */
+async function removeAttachment(applicationId, actorId) {
+  await ensureSchema();
+  const appId = toInt(applicationId);
+  if (await hasContract(appId)) throw clientError("The contract is already recorded — the terms can't change anymore.", 409);
+  const rows = await selectData(`SELECT id, status, attachment_path, attachment_name FROM dbo.application_terms WHERE application_id = @param0`, [appId]);
+  const current = rows?.[0];
+  if (!current?.attachment_path) throw clientError("There's no attachment to remove.", 404);
+  if (current.status === "AGREED") throw clientError("These terms were agreed — Reopen them first to change the attachment.", 409);
+  await updateData(
+    `UPDATE dbo.application_terms
+     SET attachment_path = NULL, attachment_name = NULL, status = 'DRAFT', updated_by = @param1, updated_at = SYSUTCDATETIME()
+     WHERE id = @param0`,
+    [current.id, toInt(actorId)]
+  );
+  await logActivity(appId, "TERMS_ATTACHMENT_REMOVED", `Terms attachment removed: ${current.attachment_name || "PDF"}`, actorId);
+  return { terms: await getForApplication(appId), removedPath: current.attachment_path };
+}
+
+/** { storagePath, name, status } of the attachment, or null. */
+async function attachmentFile(applicationId) {
+  await ensureSchema();
+  const rows = await selectData(
+    `SELECT attachment_path, attachment_name, status FROM dbo.application_terms WHERE application_id = @param0`,
+    [toInt(applicationId)]
+  );
+  const row = rows?.[0];
+  if (!row?.attachment_path) return null;
+  return { storagePath: row.attachment_path, name: row.attachment_name || "Terms.pdf", status: row.status };
+}
+
+module.exports = { ensureSchema, STATUSES, getForApplication, saveDraft, send, respond, reopen, setAttachment, removeAttachment, attachmentFile };

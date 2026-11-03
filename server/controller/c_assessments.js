@@ -698,6 +698,96 @@ exports.saveTerms = async (req, res) => {
   }
 };
 
+/* Terms attachment: a PDF the evaluator sends with the terms. */
+exports.uploadTermsAttachment = async (req, res) => {
+  const fs = require("fs");
+  const drop = () => req.file?.path && fs.rm(req.file.path, { force: true }, () => {});
+  try {
+    const id = appIdParam(req, res);
+    if (id === null) return drop();
+    if (!(await ensureCanAct(req, res, id))) return drop();
+    if (!(await ensureTermsEditable(res, id, req))) return drop();
+    if (!req.file) return res.status(400).json({ success: false, message: "Choose a PDF to upload." });
+    const { placeApplicationUpload } = require("../lib/locatorFolders");
+    const { relativeStoragePath, resolveStoredPath } = require("../lib/fileStorage");
+    const placed = await placeApplicationUpload(req.file.path, id);
+    const { terms, replacedPath } = await Terms.setAttachment(id, {
+      storagePath: relativeStoragePath(placed),
+      fileName: req.file.originalname,
+      actorId: req.user?.id ?? null,
+    });
+    const old = resolveStoredPath(replacedPath);
+    if (old && old !== placed) fs.rm(old, { force: true }, () => {});
+    await AuditLog.record({
+      actorId: req.user?.id,
+      actorUsername: req.user?.username,
+      action: "APPLICATION_TERMS_ATTACHMENT_UPLOADED",
+      entityType: "application",
+      entityId: id,
+      details: { file: req.file.originalname },
+      req,
+    });
+    return res.json({ success: true, data: terms });
+  } catch (error) {
+    drop();
+    return fail(res, error, "Upload terms attachment");
+  }
+};
+
+exports.removeTermsAttachment = async (req, res) => {
+  try {
+    const id = appIdParam(req, res);
+    if (id === null) return undefined;
+    if (!(await ensureCanAct(req, res, id))) return undefined;
+    if (!(await ensureTermsEditable(res, id, req))) return undefined;
+    const { terms, removedPath } = await Terms.removeAttachment(id, req.user?.id ?? null);
+    const abs = require("../lib/fileStorage").resolveStoredPath(removedPath);
+    if (abs) require("fs").rm(abs, { force: true }, () => {});
+    await AuditLog.record({
+      actorId: req.user?.id,
+      actorUsername: req.user?.username,
+      action: "APPLICATION_TERMS_ATTACHMENT_REMOVED",
+      entityType: "application",
+      entityId: id,
+      details: {},
+      req,
+    });
+    return res.json({ success: true, data: terms });
+  } catch (error) {
+    return fail(res, error, "Remove terms attachment");
+  }
+};
+
+/** Sends the terms' PDF inline (staff; the portal has its own route). */
+async function sendTermsAttachment(req, res, applicationId, { sentOnly = false } = {}) {
+  const file = await Terms.attachmentFile(applicationId);
+  if (!file || (sentOnly && file.status === "DRAFT")) return res.status(404).json({ success: false, message: "No attachment" });
+  const { resolveStoredPath, contentDisposition } = require("../lib/fileStorage");
+  const abs = resolveStoredPath(file.storagePath);
+  if (!abs || !require("fs").existsSync(abs)) return res.status(404).json({ success: false, message: "The file is missing" });
+  AuditLog.recordFileAccess(req, {
+    kind: "DOCUMENT",
+    entityType: "application",
+    entityId: applicationId,
+    details: { file: file.name, what: "terms attachment" },
+  }).catch(() => {});
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader("Content-Disposition", contentDisposition(req.query?.view === "1" ? "inline" : "attachment", file.name));
+  return require("fs").createReadStream(abs).pipe(res);
+}
+exports.sendTermsAttachment = sendTermsAttachment;
+
+exports.getTermsAttachment = async (req, res) => {
+  try {
+    const id = appIdParam(req, res);
+    if (id === null) return undefined;
+    if (!(await ensureCanAct(req, res, id))) return undefined;
+    return await sendTermsAttachment(req, res, id);
+  } catch (error) {
+    return fail(res, error, "Get terms attachment");
+  }
+};
+
 exports.reopenTerms = async (req, res) => {
   try {
     const id = appIdParam(req, res);

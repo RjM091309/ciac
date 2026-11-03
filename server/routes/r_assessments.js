@@ -2,6 +2,7 @@ const express = require("express");
 const router = express.Router();
 const controller = require("../controller/c_assessments");
 const { requireAssessmentAccess, requireRole } = require("../middleware/m_auth");
+const { handleUpload } = require("../lib/fileStorage");
 
 // BDO (assessment:queue, new applications) or Account Officer
 // (applications:renewals, renewals) — see requireAssessmentAccess.
@@ -37,6 +38,10 @@ router.get("/:applicationId/terms", requireAssessmentAccess("view"), controller.
 router.put("/:applicationId/terms", requireAssessmentAccess("edit"), controller.saveTerms);
 router.post("/:applicationId/terms/send", requireAssessmentAccess("edit"), controller.sendTerms);
 router.post("/:applicationId/terms/reopen", requireAssessmentAccess("edit"), controller.reopenTerms);
+// The terms' PDF attachment (sent to the locator with the terms).
+router.get("/:applicationId/terms/attachment", requireAssessmentAccess("view"), controller.getTermsAttachment);
+router.post("/:applicationId/terms/attachment", requireAssessmentAccess("edit"), handleUpload, controller.uploadTermsAttachment);
+router.delete("/:applicationId/terms/attachment", requireAssessmentAccess("edit"), controller.removeTermsAttachment);
 // Contract (Level 2, after the terms are agreed): record it, print the package, upload the signed scan.
 router.get("/:applicationId/contract", requireAssessmentAccess("view"), controller.getContract);
 router.put("/:applicationId/contract", requireAssessmentAccess("edit"), controller.saveContract);

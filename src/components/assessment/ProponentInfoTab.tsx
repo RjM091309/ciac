@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Plus } from 'lucide-react';
+import { Briefcase, Building2, CheckCircle2, CircleAlert, MapPin, PenLine, Phone, Plus, Users } from 'lucide-react';
+import { Card, Chip, LockedValue, Section } from './tabParts';
 import { toast } from 'sonner';
 import { AppSelect } from '../ui/AppSelect';
 import { ConfirmModal } from '../ui/ConfirmModal';
@@ -127,25 +128,71 @@ function Cell({
   );
 }
 
-// Read-only fields (from the application / the login) look muted.
-const readOnlyStyle: React.CSSProperties = { color: 'var(--text-muted)', backgroundColor: 'var(--control-bg)', cursor: 'default' };
 
-function Card({ title, actions, children }: { title: string; actions?: React.ReactNode; children: React.ReactNode }) {
+/** Top of the tab: who the proponent is, and how much of the profile is in. */
+function SummaryHeader({ form, loaded }: { form: Profile; loaded: Loaded }) {
+  const filled = REQUIRED.filter((r) => String(form[r.key] ?? '').trim()).length;
+  const checks = [
+    ...REQUIRED.map((r) => Boolean(String(form[r.key] ?? '').trim())),
+    form.contact_persons.length > 0,
+    form.signatories.length > 0,
+  ];
+  const done = checks.filter(Boolean).length;
+  const pct = Math.round((done / checks.length) * 100);
+  const complete = done === checks.length;
+  const name = form.business_name.trim() || 'Unnamed proponent';
+  const initials =
+    name
+      .replace(/[^A-Za-z0-9 ]/g, ' ')
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((w) => w[0]!.toUpperCase())
+      .join('') || 'P';
+  const color = complete ? '#10b981' : '#f59e0b';
   return (
     <div
-      className="flex flex-col gap-3 rounded-xl border p-3"
-      style={{ borderColor: 'var(--input-border)', backgroundColor: 'color-mix(in oklab, var(--control-bg) 55%, transparent)' }}
+      className="flex flex-col gap-3 rounded-xl border p-4 shadow-sm @2xl:flex-row @2xl:items-center"
+      style={{
+        borderColor: 'var(--input-border)',
+        background: 'linear-gradient(135deg, color-mix(in oklab, var(--nav-active-bg) 8%, var(--surface)), var(--surface))',
+      }}
     >
-      <div
-        className="-mx-3 -mt-3 flex items-center justify-between gap-2 rounded-t-xl border-b px-3 py-2"
-        style={{ borderColor: 'var(--input-border)', backgroundColor: 'var(--control-bg)' }}
-      >
-        <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--text)' }}>
-          {title}
-        </span>
-        {actions}
+      <div className="flex min-w-0 flex-1 items-center gap-3">
+        <div
+          className="grid h-12 w-12 shrink-0 place-items-center rounded-full text-[15px] font-bold"
+          style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
+          aria-hidden
+        >
+          {initials}
+        </div>
+        <div className="min-w-0">
+          <div className="truncate text-[16px] font-bold leading-tight" style={{ color: 'var(--text)' }}>
+            {name}
+          </div>
+          <div className="mt-1.5 flex flex-wrap gap-1.5">
+            {loaded.contract_type_name ? <Chip tone="accent">{loaded.contract_type_name}</Chip> : null}
+            {loaded.business_type ? <Chip>{loaded.business_type}</Chip> : null}
+            {form.nationality.trim() ? <Chip>{form.nationality.trim().toUpperCase()}</Chip> : null}
+          </div>
+        </div>
       </div>
-      {children}
+      <div className="w-full @2xl:w-64">
+        <div className="flex items-center justify-between text-[11px]">
+          <span className="flex items-center gap-1.5 font-semibold" style={{ color }}>
+            {complete ? <CheckCircle2 size={13} /> : <CircleAlert size={13} />}
+            {complete ? 'Profile complete' : 'Profile incomplete'}
+          </span>
+          <span className="text-secondary">{pct}%</span>
+        </div>
+        <div className="mt-1.5 h-1.5 overflow-hidden rounded-full" style={{ backgroundColor: 'var(--input-border)' }}>
+          <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, backgroundColor: color }} />
+        </div>
+        <div className="mt-1 text-[10px] text-secondary">
+          {filled}/{REQUIRED.length} required fields · {form.contact_persons.length ? '✓' : '✗'} contact ·{' '}
+          {form.signatories.length ? '✓' : '✗'} signatory
+        </div>
+      </div>
     </div>
   );
 }
@@ -274,6 +321,7 @@ export function ProponentInfoTab({
   const groups = [
     {
       title: 'Contact Person',
+      icon: Phone,
       nameLabel: 'Contact Person',
       addLabel: 'Add contact',
       rows: form.contact_persons,
@@ -282,6 +330,7 @@ export function ProponentInfoTab({
     },
     {
       title: 'Authorized Person / Signatory',
+      icon: PenLine,
       nameLabel: 'Signatory',
       addLabel: 'Add signatory',
       rows: form.signatories,
@@ -302,9 +351,12 @@ export function ProponentInfoTab({
         </div>
       ) : null}
 
+      <SummaryHeader form={form} loaded={loaded} />
+
       <fieldset disabled={!editable || saving} className="flex min-w-0 flex-col gap-4">
         <Card
           title="Proponent Information"
+          icon={Building2}
           actions={
             editable && dirty ? (
               <button
@@ -321,51 +373,58 @@ export function ProponentInfoTab({
         >
           {/* Same arrangement as the Registered Locator's Locator Information:
               name / contract / industry on top, the two addresses with the lease
-              term, then location / land use / contact, and Business Activities.
-              * = needed before the profile is complete. */}
-          <div className="grid grid-cols-1 gap-3 @xl:grid-cols-2 @4xl:grid-cols-[1.6fr_1.6fr_1.1fr]">
-            <Cell label="Business Name *" bad={bad('business_name')}>
-              <input className={input} value={form.business_name} onChange={(e) => set({ business_name: e.target.value })} />
-            </Cell>
-            <Cell label="Type of Contract">
-              <input className={input} style={readOnlyStyle} value={loaded.contract_type_name || '—'} readOnly tabIndex={-1} title="From the application" />
-            </Cell>
-            <Cell label="Industry">
-              <input className={input} style={readOnlyStyle} value={loaded.business_type || '—'} readOnly tabIndex={-1} title="From the application" />
-            </Cell>
+              term, then location / land use / contact / nationality, and Business
+              Activities. * = needed before the profile is complete. */}
+          <Section title="Business" icon={Briefcase}>
+            <div className="grid grid-cols-1 gap-3 @xl:grid-cols-2 @4xl:grid-cols-[1.6fr_1.6fr_1.1fr]">
+              <Cell label="Business Name *" bad={bad('business_name')}>
+                <input className={input} value={form.business_name} onChange={(e) => set({ business_name: e.target.value })} />
+              </Cell>
+              <Cell label="Type of Contract">
+                <LockedValue value={loaded.contract_type_name} />
+              </Cell>
+              <Cell label="Industry">
+                <LockedValue value={loaded.business_type} />
+              </Cell>
+            </div>
+          </Section>
 
-            <Cell label="Principal Address *" bad={bad('address')}>
-              <textarea
-                className={cn(input, 'h-auto min-h-[4.5rem]')}
-                placeholder="Company's address"
-                value={form.address}
-                onChange={(e) => set({ address: e.target.value })}
-              />
-            </Cell>
-            <Cell label="Lease Address *" bad={bad('lease_address')}>
-              <textarea
-                className={cn(input, 'h-auto min-h-[4.5rem]')}
-                placeholder="CIAC lot"
-                value={form.lease_address}
-                onChange={(e) => set({ lease_address: e.target.value })}
-              />
-            </Cell>
-            <Cell label="Proposed Lease Term *" bad={bad('proposed_lease_term_years')}>
-              {/* Same years + months input as the Proponent Accounts form (stored as
-                  years, or as total months when there are months), stacked to
-                  match the address boxes beside it. */}
-              <LeaseTermInput
-                stacked
-                value={form.proposed_lease_term_years}
-                unit={form.proposed_lease_term_unit}
-                onChange={(value, unit) =>
-                  set({ proposed_lease_term_years: value, proposed_lease_term_unit: unit === 'MONTHS' ? 'MONTHS' : 'YEARS' })
-                }
-              />
-            </Cell>
+          <Section title="Address & Lease" icon={MapPin}>
+            <div className="grid grid-cols-1 gap-3 @xl:grid-cols-2 @4xl:grid-cols-[1.6fr_1.6fr_1.1fr]">
+              <Cell label="Principal Address *" bad={bad('address')}>
+                <textarea
+                  className={cn(input, 'h-auto min-h-[4.5rem]')}
+                  placeholder="Company's address"
+                  value={form.address}
+                  onChange={(e) => set({ address: e.target.value })}
+                />
+              </Cell>
+              <Cell label="Lease Address *" bad={bad('lease_address')}>
+                <textarea
+                  className={cn(input, 'h-auto min-h-[4.5rem]')}
+                  placeholder="CIAC lot"
+                  value={form.lease_address}
+                  onChange={(e) => set({ lease_address: e.target.value })}
+                />
+              </Cell>
+              <Cell label="Proposed Lease Term *" bad={bad('proposed_lease_term_years')}>
+                {/* Same years + months input as the Proponent Accounts form (stored as
+                    years, or as total months when there are months), stacked to
+                    match the address boxes beside it. */}
+                <LeaseTermInput
+                  stacked
+                  value={form.proposed_lease_term_years}
+                  unit={form.proposed_lease_term_unit}
+                  onChange={(value, unit) =>
+                    set({ proposed_lease_term_years: value, proposed_lease_term_unit: unit === 'MONTHS' ? 'MONTHS' : 'YEARS' })
+                  }
+                />
+              </Cell>
+            </div>
+          </Section>
 
-            {/* One row: Location, Land Use, Contact No. and Nationality. */}
-            <div className="col-span-full grid grid-cols-1 gap-3 @xl:grid-cols-2 @4xl:grid-cols-4">
+          <Section title="Location & Contact" icon={Phone}>
+            <div className="grid grid-cols-1 gap-3 @xl:grid-cols-2 @4xl:grid-cols-4">
               <Cell label="Location (Preferred Lot Area) *" bad={bad('location')}>
                 <input
                   className={input}
@@ -403,19 +462,21 @@ export function ProponentInfoTab({
                 />
               </Cell>
             </div>
+          </Section>
 
-            <Cell label="Business Activities *" bad={bad('business_activities')} className="col-span-full">
+          <Section title="Business Activities" icon={Briefcase}>
+            <Cell label="What the proponent will do at CIAC *" bad={bad('business_activities')}>
               <textarea
                 className={cn(input, 'h-auto min-h-[4.5rem]')}
-                placeholder="What the proponent will do at CIAC"
+                placeholder="e.g. Manufacturing of aircraft parts and equipment"
                 value={form.business_activities}
                 onChange={(e) => set({ business_activities: e.target.value })}
               />
             </Cell>
-          </div>
+          </Section>
         </Card>
 
-        <Card title="Contact Person & Authorized Signatory">
+        <Card title="Contact Person & Authorized Signatory" icon={Users}>
           {groups.map((group, gi) => (
             <div
               key={group.title}
@@ -423,9 +484,19 @@ export function ProponentInfoTab({
               style={{ borderColor: 'var(--input-border)' }}
             >
               <div className="flex items-center justify-between gap-2">
-                <span className="text-[12px] font-semibold" style={{ color: 'var(--text)' }}>
+                <span className="flex items-center gap-2 text-[12px] font-semibold" style={{ color: 'var(--text)' }}>
+                  <group.icon size={13} className="text-secondary" />
                   {group.title}
-                  <span className="ml-1.5 text-[11px] font-normal text-secondary">({group.rows.length})</span>
+                  <span
+                    className="inline-flex min-w-[1.25rem] justify-center rounded-full px-1.5 py-0.5 text-[10px] font-bold"
+                    style={
+                      group.rows.length
+                        ? { backgroundColor: 'rgba(16,185,129,.14)', color: '#10b981' }
+                        : { backgroundColor: 'rgba(245,158,11,.14)', color: '#d97706' }
+                    }
+                  >
+                    {group.rows.length}
+                  </span>
                 </span>
                 {editable ? (
                   <button

@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Plus } from 'lucide-react';
+import { Banknote, FileText, Globe2, Landmark, Mail, Percent, Plus, Target, UserRound, Users } from 'lucide-react';
+import { Card as TabCard, ReasonBanner, SaveButton, Section } from './tabParts';
 import { toast } from 'sonner';
 import { ConfirmModal } from '../ui/ConfirmModal';
 import { DatePicker, parseYmd, toYmd } from '../ui/DatePicker';
@@ -88,22 +89,36 @@ function Cell({ label, children, className }: { label: string; children: React.R
   );
 }
 
-function Card({ title, actions, children }: { title: string; actions?: React.ReactNode; children: React.ReactNode }) {
+/** One summary figure above the cards. */
+function StatTile({
+  icon: Icon,
+  label,
+  value,
+  hint,
+  tone,
+}: {
+  icon: React.ComponentType<{ size?: number }>;
+  label: string;
+  value: string;
+  hint?: string;
+  tone?: 'good' | 'warn';
+}) {
+  const color = tone === 'good' ? '#10b981' : tone === 'warn' ? '#d97706' : 'var(--text)';
   return (
-    <div
-      className="flex flex-col gap-3 rounded-xl border p-3"
-      style={{ borderColor: 'var(--input-border)', backgroundColor: 'color-mix(in oklab, var(--control-bg) 55%, transparent)' }}
-    >
-      <div
-        className="-mx-3 -mt-3 flex items-center justify-between gap-2 rounded-t-xl border-b px-3 py-2"
-        style={{ borderColor: 'var(--input-border)', backgroundColor: 'var(--control-bg)' }}
+    <div className="flex items-center gap-3 rounded-xl border p-3 shadow-sm" style={{ borderColor: 'var(--input-border)', backgroundColor: 'var(--surface)' }}>
+      <span
+        className="grid h-9 w-9 shrink-0 place-items-center rounded-lg"
+        style={{ backgroundColor: 'color-mix(in oklab, var(--nav-active-bg) 12%, transparent)', color: 'var(--nav-active-bg)' }}
       >
-        <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--text)' }}>
-          {title}
-        </span>
-        {actions}
+        <Icon size={16} />
+      </span>
+      <div className="min-w-0">
+        <div className="text-[9px] font-semibold uppercase tracking-widest text-secondary">{label}</div>
+        <div className="truncate text-[15px] font-bold leading-tight tabular-nums" style={{ color }}>
+          {value}
+        </div>
+        {hint ? <div className="truncate text-[10px] text-secondary">{hint}</div> : null}
       </div>
-      {children}
     </div>
   );
 }
@@ -201,22 +216,46 @@ export function StockholdersGisTab({ applicationId, canEdit = true }: { applicat
     />
   );
   const gis = loaded.gis;
+  const ownershipTotal =
+    Math.round(form.stockholders.reduce((sum, r) => sum + (Number(String((r as any).ownership ?? '').replace(/,/g, '')) || 0), 0) * 100) / 100;
+  const nationalities = Array.from(
+    new Set(form.stockholders.map((r) => String((r as any).nationality || '').trim().toUpperCase()).filter(Boolean))
+  );
 
   return (
     // @container: the fields respond to the drawer's width, not the screen's.
     <div className="@container flex flex-col gap-4">
-      {!editable && loaded.reason ? (
-        <div
-          className="rounded-lg border px-3 py-2 text-[12px] text-secondary"
-          style={{ borderColor: 'var(--input-border)', backgroundColor: 'var(--control-bg)' }}
-        >
-          {loaded.reason}
-        </div>
-      ) : null}
+      {!editable ? <ReasonBanner reason={loaded.reason} /> : null}
+
+      {/* At a glance: how many, whether the shares add up, the mix, the GIS. */}
+      <div className="grid grid-cols-2 gap-3 @3xl:grid-cols-4">
+        <StatTile icon={Users} label="Stockholders" value={String(form.stockholders.length)} />
+        <StatTile
+          icon={Percent}
+          label="Total ownership"
+          value={`${ownershipTotal.toLocaleString('en-US', { maximumFractionDigits: 2 })}%`}
+          hint={ownershipTotal === 100 ? 'Adds up to 100%' : form.stockholders.length ? 'Should add up to 100%' : undefined}
+          tone={form.stockholders.length ? (ownershipTotal === 100 ? 'good' : 'warn') : undefined}
+        />
+        <StatTile
+          icon={Globe2}
+          label="Nationalities"
+          value={String(nationalities.length)}
+          hint={nationalities.slice(0, 3).join(', ') || undefined}
+        />
+        <StatTile
+          icon={FileText}
+          label="Latest GIS filing"
+          value={form.sec_gis_date ? fmtDate(form.sec_gis_date) : '—'}
+          hint={gis ? String(gis.status || 'uploaded').replace(/_/g, ' ').toLowerCase() : 'No GIS uploaded'}
+          tone={gis ? undefined : 'warn'}
+        />
+      </div>
 
       <fieldset disabled={!editable || saving} className="flex min-w-0 flex-col gap-4">
-        <Card
+        <TabCard
           title={`Stockholders (${form.stockholders.length})`}
+          icon={Users}
           actions={
             editable ? (
               <button
@@ -251,85 +290,99 @@ export function StockholdersGisTab({ applicationId, canEdit = true }: { applicat
             onChange={(next) => set({ stockholders: next })}
             blankRow={blankStockholderRow}
           />
-        </Card>
+        </TabCard>
 
-        <Card title="SEC Registration Information">
-          <div className="grid grid-cols-1 gap-3 @xl:grid-cols-3">
-            {text('registration_no', 'SEC Registration No.', 'e.g. CS201811260')}
-            {date('sec_registration_date', 'SEC Registration Date')}
-            {text('tin', 'TIN Number')}
-          </div>
-          <Cell label="Principal Office Address">
-            <textarea
-              className={cn(input, 'h-auto min-h-[4rem]')}
-              placeholder="No. / Street / Barangay / City / Town / Province / Zip code"
-              value={form.address}
-              onChange={(e) => set({ address: e.target.value })}
-            />
-          </Cell>
-          <div className="grid grid-cols-1 gap-3 @xl:grid-cols-3">
-            {text('sec_company_email', "Company's Email Address")}
-            {text('sec_company_telephone', "Company's Telephone No.")}
-            {text('sec_company_mobile', "Company's Mobile No.")}
-          </div>
-          <div className="grid grid-cols-1 gap-3 @xl:grid-cols-3">
-            {capital('authorized_capital', 'Authorized Capital Stock')}
-            {capital('subscribed_capital', 'Subscribed Capital')}
-            {capital('paid_up_capital', 'Paid-up Capital')}
-          </div>
-          <div className="grid grid-cols-1 gap-3 @xl:grid-cols-2">
-            <Cell label="Primary Purpose">
+        <TabCard title="SEC Registration Information" icon={Landmark}>
+          <div className="flex justify-end -mt-2">{editable && dirty ? <SaveButton saving={saving} onClick={() => void save()} /> : null}</div>
+          <Section title="Registration" icon={Landmark}>
+            <div className="grid grid-cols-1 gap-3 @xl:grid-cols-3">
+              {text('registration_no', 'SEC Registration No.', 'e.g. CS201811260')}
+              {date('sec_registration_date', 'SEC Registration Date')}
+              {text('tin', 'TIN Number')}
+            </div>
+            <Cell label="Principal Office Address">
               <textarea
                 className={cn(input, 'h-auto min-h-[4rem]')}
-                value={form.sec_primary_purpose}
-                onChange={(e) => set({ sec_primary_purpose: e.target.value })}
+                placeholder="No. / Street / Barangay / City / Town / Province / Zip code"
+                value={form.address}
+                onChange={(e) => set({ address: e.target.value })}
               />
             </Cell>
-            <Cell label="Secondary Purpose">
-              <textarea
-                className={cn(input, 'h-auto min-h-[4rem]')}
-                value={form.sec_secondary_purpose}
-                onChange={(e) => set({ sec_secondary_purpose: e.target.value })}
-              />
-            </Cell>
-          </div>
-          <div className="flex flex-col gap-2 rounded-lg border p-3" style={{ borderColor: 'var(--input-border)' }}>
-            <div className="text-[10px] font-bold uppercase tracking-widest text-secondary">SEC Contact Person</div>
+          </Section>
+          <Section title="Company Contact" icon={Mail}>
+            <div className="grid grid-cols-1 gap-3 @xl:grid-cols-3">
+              {text('sec_company_email', "Company's Email Address")}
+              {text('sec_company_telephone', "Company's Telephone No.")}
+              {text('sec_company_mobile', "Company's Mobile No.")}
+            </div>
+          </Section>
+          <Section title="Capital" icon={Banknote}>
+            <div className="grid grid-cols-1 gap-3 @xl:grid-cols-3">
+              {capital('authorized_capital', 'Authorized Capital Stock')}
+              {capital('subscribed_capital', 'Subscribed Capital')}
+              {capital('paid_up_capital', 'Paid-up Capital')}
+            </div>
+          </Section>
+          <Section title="Purpose" icon={Target}>
+            <div className="grid grid-cols-1 gap-3 @xl:grid-cols-2">
+              <Cell label="Primary Purpose">
+                <textarea
+                  className={cn(input, 'h-auto min-h-[4rem]')}
+                  value={form.sec_primary_purpose}
+                  onChange={(e) => set({ sec_primary_purpose: e.target.value })}
+                />
+              </Cell>
+              <Cell label="Secondary Purpose">
+                <textarea
+                  className={cn(input, 'h-auto min-h-[4rem]')}
+                  value={form.sec_secondary_purpose}
+                  onChange={(e) => set({ sec_secondary_purpose: e.target.value })}
+                />
+              </Cell>
+            </div>
+          </Section>
+          <Section title="SEC Contact Person" icon={UserRound}>
             <div className="grid grid-cols-1 gap-3 @xl:grid-cols-2 @4xl:grid-cols-4">
               {text('sec_contact_name', 'Name of Contact Person')}
               {text('sec_contact_email', 'Email Address')}
               {text('sec_contact_telephone', 'Telephone No.')}
               {text('sec_contact_mobile', 'Mobile No.')}
             </div>
-          </div>
-        </Card>
+          </Section>
+        </TabCard>
 
-        <Card title="GIS (General Information Sheet)">
+        <TabCard title="GIS (General Information Sheet)" icon={FileText}>
           <div className="grid grid-cols-1 gap-3 @xl:grid-cols-2">
             {date('sec_gis_date', 'Latest GIS Filing')}
             <Cell label="GIS document (Compliance)">
               <div
-                className="app-form-control app-form-control-sm flex h-9 items-center gap-2 text-[12px]"
-                style={{ backgroundColor: 'var(--control-bg)', cursor: 'default' }}
+                className="flex min-h-9 items-center gap-2.5 rounded-lg border px-3 py-1.5 text-[12px]"
+                style={{ borderColor: 'var(--input-border)', backgroundColor: 'var(--control-bg)', borderStyle: gis ? 'solid' : 'dashed' }}
                 title="Uploaded by the locator on their Compliance page (or by the Compliance Officer)"
               >
                 {gis ? (
                   <>
-                    <span className="truncate font-medium" style={{ color: 'var(--text)' }}>
-                      {gis.original_file_name || 'GIS'}
-                    </span>
-                    <span className="shrink-0 text-secondary">
-                      · {String(gis.status || '').replace(/_/g, ' ').toLowerCase() || 'uploaded'}
-                      {gis.validity_to ? ` · valid until ${fmtDate(gis.validity_to)}` : ''}
+                    <img src="/images/pdf.png" alt="" className="h-6 w-6 shrink-0" />
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate font-semibold" style={{ color: 'var(--text)' }}>
+                        {gis.original_file_name || 'GIS'}
+                      </div>
+                      {gis.validity_to ? <div className="text-[10px] text-secondary">Valid until {fmtDate(gis.validity_to)}</div> : null}
+                    </div>
+                    <span
+                      className="shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold capitalize"
+                      style={{ backgroundColor: 'color-mix(in oklab, var(--nav-active-bg) 10%, transparent)', color: 'var(--text)' }}
+                    >
+                      {String(gis.status || 'uploaded').replace(/_/g, ' ').toLowerCase()}
                     </span>
                   </>
                 ) : (
-                  <span className="text-secondary">Not uploaded yet</span>
+                  <span className="text-secondary">Not uploaded yet — the locator uploads it on their Compliance page</span>
                 )}
               </div>
             </Cell>
           </div>
-        </Card>
+        </TabCard>
       </fieldset>
 
       {editable && dirty ? (

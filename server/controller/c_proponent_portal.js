@@ -147,6 +147,16 @@ exports.getMyApplicationTerms = async (req, res) => {
   }
 };
 
+/** The terms' PDF, once the terms were sent (a draft's stays staff-only). */
+exports.getMyApplicationTermsAttachment = async (req, res) => {
+  try {
+    return await require("./c_assessments").sendTermsAttachment(req, res, req.application.id, { sentOnly: true });
+  } catch (error) {
+    console.error("Get my terms attachment error:", error);
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
+  }
+};
+
 exports.respondToMyApplicationTerms = async (req, res) => {
   try {
     const action = String(req.body?.action || "").toUpperCase();

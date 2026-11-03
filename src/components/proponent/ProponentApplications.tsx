@@ -316,6 +316,9 @@ type TabId = (typeof TABS)[number]['id'];
 
 type LocatorTerms = {
   body: string;
+  /** A PDF the evaluator sent with the terms. */
+  has_attachment?: boolean;
+  attachment_name?: string | null;
   status: 'SENT' | 'CHANGES_REQUESTED' | 'AGREED';
   version: number;
   sent_at: string | null;
@@ -413,9 +416,29 @@ function TermsPanel({ applicationId }: { applicationId: number }) {
             {terms.sent_at ? ` · sent ${fmtDate(terms.sent_at)}` : ''}
           </span>
         </div>
-        <div className="text-[13px] leading-relaxed whitespace-pre-wrap" style={{ color: 'var(--text)' }}>
-          {terms.body}
-        </div>
+        {terms.body?.trim() ? (
+          <div className="text-[13px] leading-relaxed whitespace-pre-wrap" style={{ color: 'var(--text)' }}>
+            {terms.body}
+          </div>
+        ) : null}
+        {terms.has_attachment ? (
+          // The PDF the evaluator attached to these terms.
+          <a
+            href={`/api/proponents/me/applications/${applicationId}/terms/attachment?view=1`}
+            target="_blank"
+            rel="noreferrer"
+            className={`${terms.body?.trim() ? 'mt-4 ' : ''}flex items-center gap-3 rounded-xl border px-3 py-2.5 hover:bg-[var(--selected-bg)]`}
+            style={{ borderColor: 'var(--border-subtle)' }}
+          >
+            <img src="/images/pdf.png" alt="" className="h-8 w-8 shrink-0" />
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-[12px] font-semibold" style={{ color: 'var(--text)' }}>
+                {terms.attachment_name || 'Terms.pdf'}
+              </div>
+              <div className="text-[10px] text-secondary">Attached to these terms · click to open</div>
+            </div>
+          </a>
+        ) : null}
         {terms.status === 'CHANGES_REQUESTED' && terms.locator_remarks ? (
           <div className="mt-4 rounded-lg px-3 py-2 text-[12px]" style={{ backgroundColor: 'rgba(245,158,11,.1)' }}>
             <span className="font-semibold">Your request:</span> {terms.locator_remarks}

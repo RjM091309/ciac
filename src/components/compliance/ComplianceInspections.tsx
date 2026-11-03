@@ -1407,7 +1407,7 @@ function LocatorInspectionsDrawer({
           ))}
         </div>
 
-        <div className="flex-1 overflow-y-auto p-4">
+        <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
           {tab === 'ACTIVITY' ? (
             <LocatorActivity proponentId={proponentId} reloadKey={activityKey} />
           ) : tab === 'INSPECTIONS' ? (
@@ -1731,7 +1731,7 @@ function InspectionDetail({
           ))}
         </div>
 
-        <div className="flex-1 overflow-y-auto p-4">
+        <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
           {loading || !data ? (
             <div className="flex items-center justify-center py-16">
               <Loader2 className="animate-spin text-secondary" />

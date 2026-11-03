@@ -1,5 +1,7 @@
 import React, { useEffect, useState } from 'react';
+import { Banknote, Lock, TrendingUp, Users } from 'lucide-react';
 import { toast } from 'sonner';
+import { Card, ReasonBanner, SaveButton } from './tabParts';
 
 /**
  * Evaluation Queue → "Performance Commitment" tab (B-10): the BDO encodes what
@@ -95,6 +97,8 @@ export function PerformanceCommitmentTab({ applicationId, canEdit = true }: { ap
   const rows = [
     {
       label: 'Investment',
+      icon: Banknote,
+      hint: 'Total amount the proponent commits to invest',
       key: 'investment_commitment' as const,
       actual: 'investment_actual' as const,
       placeholder: '0.00',
@@ -103,6 +107,8 @@ export function PerformanceCommitmentTab({ applicationId, canEdit = true }: { ap
     },
     {
       label: 'No. of Employees',
+      icon: Users,
+      hint: 'People the proponent commits to employ',
       key: 'employee_commitment' as const,
       actual: 'employee_actual' as const,
       placeholder: '0',
@@ -114,82 +120,69 @@ export function PerformanceCommitmentTab({ applicationId, canEdit = true }: { ap
   return (
     // @container: the layout responds to the drawer's width, not the screen's.
     <div className="@container flex flex-col gap-4">
-      {!editable && loaded.reason ? (
-        <div
-          className="rounded-lg border px-3 py-2 text-[12px] text-secondary"
-          style={{ borderColor: 'var(--input-border)', backgroundColor: 'var(--control-bg)' }}
-        >
-          {loaded.reason}
-        </div>
-      ) : null}
+      {!editable ? <ReasonBanner reason={loaded.reason} /> : null}
 
-      <div
-        className="flex flex-col gap-3 rounded-xl border p-3"
-        style={{ borderColor: 'var(--input-border)', backgroundColor: 'color-mix(in oklab, var(--control-bg) 55%, transparent)' }}
+      <Card
+        title="Performance Commitment"
+        icon={TrendingUp}
+        actions={editable && dirty ? <SaveButton saving={saving} onClick={() => void save()} /> : null}
       >
-        <div
-          className="-mx-3 -mt-3 flex items-center justify-between gap-2 rounded-t-xl border-b px-3 py-2"
-          style={{ borderColor: 'var(--input-border)', backgroundColor: 'var(--control-bg)' }}
-        >
-          <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--text)' }}>
-            Performance Commitment
-          </span>
-          {editable && dirty ? (
-            <button
-              type="button"
-              onClick={() => void save()}
-              disabled={saving}
-              className="rounded-md px-3 py-1 text-[11px] font-semibold cursor-pointer disabled:cursor-not-allowed disabled:opacity-60"
-              style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
-            >
-              {saving ? 'Saving…' : 'Save'}
-            </button>
-          ) : null}
-        </div>
-
-        {/* Same layout as the Registered Locator's Performance Commitment card.
-            Actual is read-only here — the Account Officer records it later. */}
-        <fieldset
-          disabled={!editable || saving}
-          className="grid grid-cols-2 items-center gap-x-3 gap-y-2 @lg:grid-cols-[max-content_minmax(0,1fr)_minmax(0,1fr)]"
-        >
-          <span className="hidden @lg:block" />
-          <span className="text-[9px] font-semibold uppercase tracking-widest text-secondary">Commitment</span>
-          <span className="text-[9px] font-semibold uppercase tracking-widest text-secondary">Actual</span>
+        {/* One tile per figure: the Commitment the BDO encodes, and the Actual
+            the Account Officer records later (read-only here). */}
+        <fieldset disabled={!editable || saving} className="grid grid-cols-1 gap-3 @2xl:grid-cols-2">
           {rows.map((row) => (
-            <React.Fragment key={row.key}>
-              <span
-                className="col-span-2 text-[12px] font-semibold leading-tight @lg:col-span-1 @lg:text-right"
-                style={{ color: 'var(--text)' }}
+            <div
+              key={row.key}
+              className="flex flex-col gap-3 rounded-xl border p-4"
+              style={{ borderColor: 'var(--input-border)', backgroundColor: 'color-mix(in oklab, var(--control-bg) 40%, transparent)' }}
+            >
+              <div className="flex items-center gap-2.5">
+                <span
+                  className="grid h-9 w-9 place-items-center rounded-lg"
+                  style={{ backgroundColor: 'color-mix(in oklab, var(--nav-active-bg) 12%, transparent)', color: 'var(--nav-active-bg)' }}
+                >
+                  <row.icon size={17} />
+                </span>
+                <div className="min-w-0">
+                  <div className="text-[13px] font-bold" style={{ color: 'var(--text)' }}>
+                    {row.label}
+                  </div>
+                  <div className="text-[10px] text-secondary">{row.hint}</div>
+                </div>
+              </div>
+              <label className="flex flex-col gap-1">
+                <span className="text-[9px] font-semibold uppercase tracking-widest text-secondary">Commitment</span>
+                <input
+                  className="app-form-control w-full h-11 text-[16px] font-semibold tabular-nums"
+                  inputMode={row.inputMode}
+                  placeholder={row.placeholder}
+                  value={form[row.key]}
+                  onChange={(e) => {
+                    const value = row.clean(e.target.value);
+                    setForm((p) => (p ? { ...p, [row.key]: value } : p));
+                  }}
+                />
+              </label>
+              <div
+                className="flex items-center justify-between gap-2 rounded-lg border border-dashed px-3 py-2 text-[11px]"
+                style={{ borderColor: 'var(--input-border)' }}
+                title="Recorded by the Account Officer once it's a Registered Locator"
               >
-                {row.label}
-              </span>
-              <input
-                className="app-form-control app-form-control-sm h-9 w-full tabular-nums"
-                inputMode={row.inputMode}
-                placeholder={row.placeholder}
-                value={form[row.key]}
-                onChange={(e) => {
-                  const value = row.clean(e.target.value);
-                  setForm((p) => (p ? { ...p, [row.key]: value } : p));
-                }}
-              />
-              <input
-                className="app-form-control app-form-control-sm h-9 w-full tabular-nums"
-                style={{ color: 'var(--text-muted)', backgroundColor: 'var(--control-bg)', cursor: 'default' }}
-                value={loaded[row.actual] || ''}
-                placeholder="Recorded by the Account Officer"
-                readOnly
-                tabIndex={-1}
-              />
-            </React.Fragment>
+                <span className="flex items-center gap-1.5 text-secondary">
+                  <Lock size={11} /> Actual
+                </span>
+                <span className="font-semibold tabular-nums" style={{ color: loaded[row.actual] ? 'var(--text)' : 'var(--text-muted)' }}>
+                  {loaded[row.actual] || 'Not recorded yet'}
+                </span>
+              </div>
+            </div>
           ))}
         </fieldset>
         <span className="text-[10px] text-secondary">
           What the proponent commits to. The Actual figures are recorded by the Account Officer once it's a Registered
           Locator.
         </span>
-      </div>
+      </Card>
     </div>
   );
 }

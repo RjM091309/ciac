@@ -1043,7 +1043,7 @@ function CompletedQueueModal({
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-4">
+        <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
           {filtered.length === 0 ? (
             <EmptyState
               icon={<CheckCircle2 size={40} className="opacity-40" />}
@@ -1291,7 +1291,7 @@ function AssessmentDetail({
           ))}
         </div>
 
-        <div className="flex-1 overflow-y-auto p-4">
+        <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
           {loading || !data || !tabReady ? (
             <div className="flex items-center justify-center py-16">
               <Loader2 className="animate-spin text-secondary" />
@@ -1914,6 +1914,9 @@ function RequirementThreadModal({
 
 type TermsRow = {
   body: string;
+  /** A PDF sent with the terms (GET …/terms/attachment). */
+  has_attachment?: boolean;
+  attachment_name?: string | null;
   status: 'DRAFT' | 'SENT' | 'CHANGES_REQUESTED' | 'AGREED';
   version: number;
   sent_at: string | null;
@@ -1952,6 +1955,8 @@ function TermsTab({ data, canEdit, busy, run }: { data: DetailPayload; canEdit: 
   const [confirmSend, setConfirmSend] = useState(false);
   const [confirmReopen, setConfirmReopen] = useState(false);
   const [reopenReason, setReopenReason] = useState('');
+  const [uploading, setUploading] = useState(false);
+  const [confirmRemoveFile, setConfirmRemoveFile] = useState(false);
 
   const load = useCallback(async () => {
     const json = await apiFetch(`/api/assessments/${appId}/terms`);
@@ -1968,6 +1973,26 @@ function TermsTab({ data, canEdit, busy, run }: { data: DetailPayload; canEdit: 
   const status = terms ? termsStatus({ p, P })[terms.status] : null;
   const dirty = draft.trim() !== (terms?.body || '').trim();
   const canWrite = editable && !locked;
+  const hasFile = Boolean(terms?.has_attachment);
+  // Changing the file is like editing the text (back to a draft); agreed terms need Reopen first.
+  const canChangeFile = canWrite && terms?.status !== 'AGREED';
+
+  async function uploadFile(file: File) {
+    setUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      const res = await fetch(`/api/assessments/${appId}/terms/attachment`, { method: 'POST', credentials: 'include', body: fd });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || json?.success === false) throw new Error(json?.message || 'Upload failed');
+      await load();
+      toast.success(terms && terms.status !== 'DRAFT' ? `Attachment saved — send the terms again for the ${p} to agree` : 'Attachment uploaded');
+    } catch (e: any) {
+      toast.error(e?.message || 'Upload failed');
+    } finally {
+      setUploading(false);
+    }
+  }
 
   return (
     <div className="flex flex-col gap-3">
@@ -2011,6 +2036,51 @@ function TermsTab({ data, canEdit, busy, run }: { data: DetailPayload; canEdit: 
         />
       </Field>
 
+      {/* Optional PDF sent with the terms — the proponent opens it on the portal's Terms tab. */}
+      <Field label="Attachment (PDF)">
+        {hasFile ? (
+          <div className="flex flex-wrap items-center gap-3 rounded-xl border px-3 py-2.5" style={{ borderColor: 'var(--border)' }}>
+            <img src="/images/pdf.png" alt="" className="h-8 w-8 shrink-0" />
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-[12px] font-semibold" style={{ color: 'var(--text)' }}>
+                {terms?.attachment_name || 'Terms.pdf'}
+              </div>
+              <div className="text-[10px] text-secondary">
+                {terms?.status === 'DRAFT' ? `Will be sent to the ${p} with the terms` : `Sent to the ${p} with the terms — on their portal`}
+              </div>
+            </div>
+            <a
+              href={`/api/assessments/${appId}/terms/attachment?view=1`}
+              target="_blank"
+              rel="noreferrer"
+              className="rounded-lg border px-2.5 py-1 text-[11px] font-semibold"
+              style={{ borderColor: 'var(--border)', color: 'var(--text)' }}
+            >
+              View
+            </a>
+            {canChangeFile ? (
+              <button
+                type="button"
+                className="rounded-lg border px-2.5 py-1 text-[11px] font-semibold disabled:opacity-50"
+                style={{ borderColor: '#ef444466', color: '#ef4444' }}
+                disabled={busy || uploading}
+                onClick={() => setConfirmRemoveFile(true)}
+              >
+                Remove
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+        {canChangeFile ? (
+          <div className={hasFile ? 'mt-2' : undefined}>
+            <PdfDropzone file={null} onFile={(f) => f && void uploadFile(f)} disabled={busy || uploading} what={hasFile ? 'a new PDF to replace it' : 'the terms PDF'} />
+            {uploading ? <div className="mt-1 text-[11px] text-secondary">Uploading…</div> : null}
+          </div>
+        ) : !hasFile ? (
+          <div className="text-[11px] text-secondary">No attachment.</div>
+        ) : null}
+      </Field>
+
       {canWrite ? (
         <div className="flex flex-wrap gap-2 justify-end">
           {/* B-16: a change of mind after the agreement — back to a draft to revise and send again. */}
@@ -2043,7 +2113,7 @@ function TermsTab({ data, canEdit, busy, run }: { data: DetailPayload; canEdit: 
           <button
             className="rounded-lg px-3 py-1.5 text-[12px] font-semibold disabled:opacity-50"
             style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
-            disabled={busy || !draft.trim() || terms?.status === 'SENT' || (terms?.status === 'AGREED' && !dirty)}
+            disabled={busy || uploading || (!draft.trim() && !hasFile) || terms?.status === 'SENT' || (terms?.status === 'AGREED' && !dirty)}
             onClick={() => setConfirmSend(true)}
           >
             <Send size={13} className="inline mr-1" /> Send to {p}
@@ -2067,6 +2137,23 @@ function TermsTab({ data, canEdit, busy, run }: { data: DetailPayload; canEdit: 
             setConfirmSend(false);
             await load();
           }, `Terms sent to the ${p}`)
+        }
+      />
+
+      <ConfirmModal
+        open={confirmRemoveFile}
+        title="Remove the attachment?"
+        description={`The terms go back to a draft — send them again so the ${p} sees the change.`}
+        confirmText="Remove"
+        danger
+        loading={busy}
+        onCancel={() => setConfirmRemoveFile(false)}
+        onConfirm={() =>
+          void run(async () => {
+            await apiFetch(`/api/assessments/${appId}/terms/attachment`, { method: 'DELETE' });
+            setConfirmRemoveFile(false);
+            await load();
+          }, 'Attachment removed')
         }
       />
 

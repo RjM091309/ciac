@@ -22,6 +22,7 @@ router.get("/me/applications/:id/requirements", requireProponentSelf, requireOwn
 // Terms and conditions sent by the evaluator: read, then agree / ask for changes.
 router.get("/me/applications/:id/terms", requireProponentSelf, requireOwnApplication, portalController.getMyApplicationTerms);
 router.post("/me/applications/:id/terms/respond", requireProponentSelf, requireOwnApplication, portalController.respondToMyApplicationTerms);
+router.get("/me/applications/:id/terms/attachment", requireProponentSelf, requireOwnApplication, portalController.getMyApplicationTermsAttachment);
 router.get("/me/applications/:id/documents", requireProponentSelf, requireOwnApplication, portalController.getMyApplicationDocuments);
 router.post(
   "/me/applications/:id/documents",

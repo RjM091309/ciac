@@ -183,6 +183,14 @@ async function buildContractBundle(applicationId) {
     const agreed = terms.status === "AGREED" && terms.responded_at ? `Agreed by the ${partyWord(app.is_renewal)} on ${new Date(terms.responded_at).toISOString().slice(0, 10)} (version ${terms.version})` : `Status: ${terms.status}`;
     textPages(pdf, fonts, "Terms and Conditions", terms.body, `${app.business_name} - ${app.application_no}. ${agreed}`);
   }
+  // …and the PDF the evaluator attached to the terms, right after them.
+  try {
+    const att = await require("../models/ApplicationTerms").attachmentFile(appId);
+    const abs = att ? resolveStoredPath(att.storagePath) : null;
+    if (abs && fs.existsSync(abs)) await appendPdf(pdf, fs.readFileSync(abs));
+  } catch (error) {
+    console.error("Contract package: terms attachment skipped:", error.message || error);
+  }
 
   // 3. Attachments: index, then the files.
   const included = [];
