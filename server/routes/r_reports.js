@@ -13,5 +13,11 @@ router.get("/locator-status", requireMenuAccess(MENU_KEY, "view"), controller.lo
 router.get("/gis", requireMenuAccess(MENU_KEY, "view"), controller.gis);
 router.get("/summary", requireMenuAccess(MENU_KEY, "view"), controller.summary);
 router.post("/export-log", requireMenuAccess(MENU_KEY, "view"), controller.logExport);
+// Custom Report: dataset / columns / filters chosen by the user; templates are per user.
+router.get("/custom/catalog", requireMenuAccess(MENU_KEY, "view"), controller.customCatalog);
+router.post("/custom/run", requireMenuAccess(MENU_KEY, "view"), controller.customRun);
+router.get("/custom/templates", requireMenuAccess(MENU_KEY, "view"), controller.customTemplates);
+router.post("/custom/templates", requireMenuAccess(MENU_KEY, "view"), controller.saveCustomTemplate);
+router.delete("/custom/templates/:id", requireMenuAccess(MENU_KEY, "view"), controller.deleteCustomTemplate);
 
 module.exports = router;

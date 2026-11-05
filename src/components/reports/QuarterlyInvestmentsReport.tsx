@@ -227,6 +227,9 @@ export function QuarterlyInvestmentsReport({
   }
 
   const head = ['Firm Name', 'Date of Registration', 'Date of Approval', 'Nationality', '% Ownership', 'Activity', 'Project Cost (₱M)', 'Paid-up Capital (₱M)', 'Labor'];
+  // Money / count columns: header right-aligned like their values. % Ownership
+  // stays left with Nationality — the two describe one stockholder.
+  const NUMERIC_HEAD = new Set(['Project Cost (₱M)', 'Paid-up Capital (₱M)', 'Labor']);
 
   return (
     <div className="space-y-4 sm:space-y-5">
@@ -268,7 +271,13 @@ export function QuarterlyInvestmentsReport({
               <thead>
                 <tr style={{ borderBottom: '1px solid var(--border-subtle)' }}>
                   {head.map((h) => (
-                    <th key={h} className="px-2.5 py-2.5 text-[10px] uppercase tracking-wider text-secondary align-bottom">
+                    <th
+                      key={h}
+                      className={cn(
+                        'px-2.5 py-2.5 text-[10px] uppercase tracking-wider text-secondary align-bottom',
+                        NUMERIC_HEAD.has(h) && 'text-right'
+                      )}
+                    >
                       {h}
                     </th>
                   ))}
@@ -310,7 +319,8 @@ export function QuarterlyInvestmentsReport({
 function FirmRows({ r, onOpen }: { r: Row; onOpen?: () => void }) {
   const span = Math.max(1, r.stockholders.length);
   const cellStyle: React.CSSProperties = r.foreign_currency ? { backgroundColor: 'color-mix(in oklab, var(--tone-amber) 12%, transparent)' } : {};
-  const merged = 'px-2.5 py-2 align-top';
+  // Every cell of a firm's first row: same size, top-aligned, same padding.
+  const merged = 'px-2.5 py-2 align-top text-[11px]';
   const Name: any = onOpen ? 'button' : 'span';
   const first = r.stockholders[0];
   return (
@@ -338,7 +348,7 @@ function FirmRows({ r, onOpen }: { r: Row; onOpen?: () => void }) {
           {r.date_approval ? fmtDate(r.date_approval) : <span className="text-secondary">—</span>}
         </td>
         <StockholderCells s={first} style={cellStyle} />
-        <td rowSpan={span} className={cn(merged, 'text-[11px] min-w-[240px] max-w-[360px]')} style={cellStyle}>
+        <td rowSpan={span} className={cn(merged, 'min-w-[240px] max-w-[360px]')} style={cellStyle}>
           {r.activity || <span className="text-secondary">—</span>}
         </td>
         <td rowSpan={span} className={cn(merged, 'text-right tabular-nums whitespace-nowrap')} style={cellStyle}>
@@ -363,10 +373,10 @@ function FirmRows({ r, onOpen }: { r: Row; onOpen?: () => void }) {
 function StockholderCells({ s, style }: { s?: { nationality: string | null; ownership: number }; style: React.CSSProperties }) {
   return (
     <>
-      <td className="px-2.5 py-1.5 whitespace-nowrap" style={{ ...style, borderTop: '1px dashed var(--border-subtle)' }}>
+      <td className="px-2.5 py-2 align-top text-[11px] whitespace-nowrap" style={{ ...style, borderTop: '1px dashed var(--border-subtle)' }}>
         {s ? s.nationality ? titleCase(s.nationality) : 'Not specified' : <span className="text-secondary">No stockholders</span>}
       </td>
-      <td className="px-2.5 py-1.5 text-right tabular-nums" style={{ ...style, borderTop: '1px dashed var(--border-subtle)' }}>
+      <td className="px-2.5 py-2 align-top text-[11px] tabular-nums" style={{ ...style, borderTop: '1px dashed var(--border-subtle)' }}>
         {s ? pct(s.ownership) : ''}
       </td>
     </>

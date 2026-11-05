@@ -28,6 +28,7 @@ import { StockholdersReport } from './StockholdersReport';
 import { ReportSummary } from './ReportSummary';
 import { QuarterlyInvestmentsReport } from './QuarterlyInvestmentsReport';
 import { LocatorStatusReport } from './LocatorStatusReport';
+import { CustomReport } from './CustomReport';
 import { GisFilingReport } from './GisFilingReport';
 import { currentPeriod, Period } from './reportParts';
 
@@ -305,7 +306,7 @@ function useIsPhone() {
 }
 
 
-type ReportKey = 'applications' | 'summary' | 'investments' | 'locator-status' | 'stockholders' | 'gis';
+type ReportKey = 'applications' | 'summary' | 'investments' | 'locator-status' | 'stockholders' | 'gis' | 'custom';
 const REPORTS: { key: ReportKey; label: string }[] = [
   { key: 'applications', label: 'Applications' },
   { key: 'summary', label: 'Summary' },
@@ -313,6 +314,7 @@ const REPORTS: { key: ReportKey; label: string }[] = [
   { key: 'locator-status', label: 'Locator Status' },
   { key: 'stockholders', label: 'Stockholders & Nationality' },
   { key: 'gis', label: 'GIS Filing' },
+  { key: 'custom', label: 'Custom Report' },
 ];
 
 /** The Reports page: one tab per report (?report=… in the address bar). The
@@ -358,6 +360,8 @@ export function ReportsAnalytics({ navigate }: { navigate?: (to: string, opts?: 
         <LocatorStatusReport period={period} onPeriodChange={setPeriod} navigate={navigate} />
       ) : report === 'gis' ? (
         <GisFilingReport navigate={navigate} />
+      ) : report === 'custom' ? (
+        <CustomReport />
       ) : (
         <ApplicationsReport navigate={navigate} />
       )}

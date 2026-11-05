@@ -35,8 +35,8 @@ exports.overview = async (req, res) => {
 };
 
 const EXPORT_FORMATS = ["csv", "pdf", "xlsx"];
-const EXPORT_FILTER_KEYS = ["dateFrom", "dateTo", "applicationType", "status", "isRenewal", "search", "nationality", "year", "quarter"];
-const EXPORT_REPORTS = ["applications", "stockholders", "investments", "locator-status", "gis", "summary"];
+const EXPORT_FILTER_KEYS = ["dateFrom", "dateTo", "applicationType", "status", "isRenewal", "search", "nationality", "year", "quarter", "dataset", "columns", "template"];
+const EXPORT_REPORTS = ["applications", "stockholders", "investments", "locator-status", "gis", "summary", "custom"];
 
 /** The Reports page builds its CSV/PDF in the browser from data it already
  * fetched, so the server never sees the file itself — the page reports each
@@ -117,5 +117,66 @@ exports.gis = async (req, res) => {
     return res.json({ success: true, data });
   } catch (error) {
     return fail(res, error, "Reports GIS filing");
+  }
+};
+
+/* ------------------------------ Custom Report ------------------------------ */
+// The user picks the dataset, columns and filters (models/CustomReport.js);
+// the file itself is built in the browser and logged through /export-log.
+const CustomReport = require("../models/CustomReport");
+const { aoLevel2Id } = require("../lib/departments");
+
+exports.customCatalog = async (req, res) => {
+  try {
+    return res.json({ success: true, data: await CustomReport.catalog(), maxRows: CustomReport.MAX_ROWS });
+  } catch (error) {
+    return fail(res, error, "Custom report catalog");
+  }
+};
+
+exports.customRun = async (req, res) => {
+  try {
+    const b = req.body || {};
+    const data = await CustomReport.run({
+      dataset: String(b.dataset || ""),
+      columns: b.columns,
+      filters: b.filters,
+      sort: b.sort,
+      // A Level 2 Account Officer: only their own locators.
+      ownOfficerId: await aoLevel2Id(req.user),
+      limit: b.limit,
+    });
+    return res.json({ success: true, data });
+  } catch (error) {
+    if (error.status === 400) return res.status(400).json({ success: false, message: error.message });
+    return fail(res, error, "Custom report");
+  }
+};
+
+exports.customTemplates = async (req, res) => {
+  try {
+    return res.json({ success: true, data: await CustomReport.listTemplates(req.user.id) });
+  } catch (error) {
+    return fail(res, error, "Custom report templates");
+  }
+};
+
+exports.saveCustomTemplate = async (req, res) => {
+  try {
+    const id = await CustomReport.saveTemplate(req.user.id, req.body || {});
+    return res.json({ success: true, data: { id, templates: await CustomReport.listTemplates(req.user.id) } });
+  } catch (error) {
+    if (error.status === 400) return res.status(400).json({ success: false, message: error.message });
+    return fail(res, error, "Save custom report template");
+  }
+};
+
+exports.deleteCustomTemplate = async (req, res) => {
+  try {
+    const ok = await CustomReport.deleteTemplate(req.user.id, req.params.id);
+    if (!ok) return res.status(404).json({ success: false, message: "Template not found" });
+    return res.json({ success: true, data: await CustomReport.listTemplates(req.user.id) });
+  } catch (error) {
+    return fail(res, error, "Delete custom report template");
   }
 };
