@@ -1,6 +1,6 @@
 const nodemailer = require("nodemailer");
 const siteSettings = require("./siteSettings");
-const { escapeHtml } = require("./html");
+const { renderEmail } = require("./emailLayout");
 
 // The SMTP connection comes from Portal Settings (Email tab) only — SMTP_* in
 // server/.env was imported once and is no longer read (lib/siteSettings.js).
@@ -24,8 +24,9 @@ function isConfigured() {
 
 /** Signature added to every email: the portal's name plus the support
  * contact from Portal Settings, so each message says who it's from and where
- * to get help without every call site repeating it. */
-function withSignature({ text, html }) {
+ * to get help without every call site repeating it. The HTML goes into the
+ * branded layout (lib/emailLayout.js), whose footer carries the same. */
+function withSignature({ text, html }, { subject = "", sender = null } = {}) {
   const portal = siteSettings.getters.portalLabel();
   const email = siteSettings.getters.supportEmail();
   const phone = siteSettings.getters.supportPhone();
@@ -33,8 +34,13 @@ function withSignature({ text, html }) {
   return {
     text: text ? `${text}\n—\n${portal}${help ? `\nNeed help? ${help}` : ""}\n` : text,
     html: html
-      ? `${html}<p style="margin-top:24px;color:#6b7280;font-size:12px;">— ${escapeHtml(portal)}` +
-        `${help ? `<br/>Need help? ${escapeHtml(help)}` : ""}</p>`
+      ? renderEmail({
+          html,
+          subject,
+          // Inbox preview line: the start of the plain text.
+          preheader: String(text || "").replace(/\s+/g, " ").trim().slice(0, 140),
+          sender,
+        })
       : html,
   };
 }
@@ -83,7 +89,7 @@ async function sendMail({ to, cc, subject, text, html, sender = null }) {
       to,
       ...(ccList ? { cc: ccList } : {}),
       subject,
-      ...withSignature({ text, html }),
+      ...withSignature({ text, html }, { subject, sender: officer ? sender : null }),
     });
     return { sent: true };
   } catch (error) {
@@ -120,7 +126,7 @@ async function sendTestMail(overrides, { to, subject, text, html }) {
   if (!config.configured) return { sent: false, message: "Enter the SMTP server and username first." };
   const transporter = nodemailer.createTransport(config.transport);
   try {
-    await transporter.sendMail({ from: config.from, replyTo: config.replyTo, to, subject, ...withSignature({ text, html }) });
+    await transporter.sendMail({ from: config.from, replyTo: config.replyTo, to, subject, ...withSignature({ text, html }, { subject }) });
     return { sent: true };
   } catch (error) {
     console.error("[mailer] Test email failed:", error.code || "", error.message || error);
