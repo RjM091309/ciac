@@ -11,7 +11,10 @@ import {
   Filter,
   Loader2,
   Plus,
+  Printer,
   Save,
+  Share2,
+  Sigma,
   Search,
   SlidersHorizontal,
   Trash2,
@@ -21,9 +24,10 @@ import { toast } from 'sonner';
 import { AppSelect } from '../ui/AppSelect';
 import { DatePicker, parseYmd, toYmd } from '../ui/DatePicker';
 import { EmptyState } from '../ui/EmptyState';
+import { DataTableControls } from '../ui/DataTableControls';
 import { cn } from '../../lib/utils';
 import { csvEscape, downloadBlob } from './reportUtils';
-import { downloadWorkbook, xlDate, type XlsxColumn } from './reportExports';
+import { downloadPdf, downloadWorkbook, xlDate, type PdfSection, type XlsxColumn, type XlsxGroup, type XlsxSheet } from './reportExports';
 import { fmtDate } from './reportParts';
 
 // Reports & Analytics → Custom Report: the user picks what to report on
@@ -36,7 +40,17 @@ type ColumnDef = { key: string; label: string; type: 'text' | 'date' | 'number' 
 type FilterDef = { key: string; label: string; type: 'select' | 'date'; options?: { value: string; label: string }[] };
 type Dataset = { key: string; label: string; description: string; columns: ColumnDef[]; defaults: string[]; filters: FilterDef[] };
 type Result = { columns: ColumnDef[]; rows: (string | number | null)[][]; total: number; truncated: boolean };
-type Template = { id: number; name: string; dataset: string; config: { columns?: string[]; filters?: Record<string, string>; sort?: Sort | null } };
+type Template = {
+  id: number;
+  name: string;
+  dataset: string;
+  config: { columns?: string[]; filters?: Record<string, string>; sort?: Sort | null };
+  /** Other Reports users can open it. */
+  shared: boolean;
+  /** The user's own (only the owner can change or delete it). */
+  mine: boolean;
+  owner: string | null;
+};
 type Sort = { key: string; dir: 'asc' | 'desc' } | null;
 
 async function api<T = any>(path: string, init?: RequestInit): Promise<T> {
@@ -50,7 +64,10 @@ async function api<T = any>(path: string, init?: RequestInit): Promise<T> {
   return json;
 }
 
-const PREVIEW_ROWS = 200;
+
+/** Number columns that make sense to add up (not percentages). */
+const summable = (c: ColumnDef) => c.type === 'number' && !/%/.test(c.label) && !/days left/i.test(c.label);
+const fmtNum = (n: number) => n.toLocaleString('en-US', { maximumFractionDigits: 2 });
 
 function cellText(v: string | number | null, type: ColumnDef['type']) {
   if (v == null || v === '') return '—';
@@ -70,10 +87,17 @@ export function CustomReport() {
   const [result, setResult] = useState<Result | null>(null);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [exporting, setExporting] = useState<'xlsx' | 'csv' | null>(null);
+  const [exporting, setExporting] = useState<'xlsx' | 'csv' | 'pdf' | null>(null);
   const [templates, setTemplates] = useState<Template[]>([]);
   const [templateId, setTemplateId] = useState('');
   const [saveName, setSaveName] = useState<string | null>(null);
+  const [saveShared, setSaveShared] = useState(false);
+  // Summary: rows counted by one column ('' = off).
+  const [groupBy, setGroupBy] = useState('');
+  // Results table: a quick search over the rows, and pages.
+  const [rowSearch, setRowSearch] = useState('');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
 
   const dataset = useMemo(() => datasets?.find((d) => d.key === datasetKey) || null, [datasets, datasetKey]);
   const colDef = useCallback((key: string) => dataset?.columns.find((c) => c.key === key), [dataset]);
@@ -102,6 +126,7 @@ export function CustomReport() {
     setColumns(d.defaults);
     setFilters({});
     setSort(null);
+    setGroupBy('');
     setTemplateId('');
   }
 
@@ -157,13 +182,13 @@ export function CustomReport() {
     setSort(t.config.sort || null);
   }
 
-  async function saveTemplate() {
-    const name = (saveName || '').trim();
+  // Saving under an existing name of the user's replaces that template.
+  async function saveTemplate(name = (saveName || '').trim(), shared = saveShared) {
     if (!name || !dataset) return;
     try {
       const json = await api('/api/reports/custom/templates', {
         method: 'POST',
-        body: JSON.stringify({ name, dataset: dataset.key, columns, filters, sort }),
+        body: JSON.stringify({ name, dataset: dataset.key, columns, filters, sort, shared }),
       });
       setTemplates(json.data.templates);
       setTemplateId(String(json.data.id));
@@ -186,8 +211,21 @@ export function CustomReport() {
     }
   }
 
-  function logExport(format: 'xlsx' | 'csv', rowCount: number) {
-    const template = templates.find((t) => String(t.id) === templateId)?.name;
+  const currentTemplate = templates.find((t) => String(t.id) === templateId) || null;
+  const reportTitle = currentTemplate?.name || dataset?.label || 'Custom Report';
+
+  /** The filters (and search) in force, in words — for the export subtitles. */
+  function appliedText() {
+    const applied = (dataset?.filters || [])
+      .filter((f) => filters[f.key])
+      .map((f) => `${f.label}: ${f.options?.find((o) => o.value === filters[f.key])?.label || (f.type === 'date' ? fmtDate(filters[f.key]) : filters[f.key])}`);
+    if (rowSearch.trim()) applied.push(`Search: "${rowSearch.trim()}"`);
+    const asOf = `As of ${new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}`;
+    return applied.length ? `${asOf} · ${applied.join(' · ')}` : asOf;
+  }
+
+  function logExport(format: 'xlsx' | 'csv' | 'pdf', rowCount: number) {
+    const template = currentTemplate?.name;
     fetch('/api/reports/export-log', {
       method: 'POST',
       credentials: 'include',
@@ -201,10 +239,7 @@ export function CustomReport() {
     }).catch(() => {});
   }
 
-  const fileBase = () => {
-    const t = templates.find((x) => String(x.id) === templateId)?.name;
-    return `${(t || dataset?.label || 'Custom Report').replace(/[^A-Za-z0-9]+/g, '-')}-${new Date().toISOString().slice(0, 10)}`;
-  };
+  const fileBase = () => `${reportTitle.replace(/[^A-Za-z0-9]+/g, '-')}-${new Date().toISOString().slice(0, 10)}`;
 
   async function exportExcel() {
     if (!result || !dataset) return;
@@ -216,23 +251,28 @@ export function CustomReport() {
         align: c.type === 'number' ? 'right' : 'left',
         numFmt: c.type === 'date' ? 'mmm d, yyyy' : c.type === 'number' ? '#,##0.##' : undefined,
       }));
-      const groups = result.rows.map((r) => ({
+      const groups: XlsxGroup[] = searchedRows.map((r) => ({
         lines: [r.map((v, i) => (result.columns[i].type === 'date' ? xlDate(v as string | null) : v))],
       }));
-      const title = (templates.find((x) => String(x.id) === templateId)?.name || dataset.label).toUpperCase();
-      const applied = dataset.filters
-        .filter((f) => filters[f.key])
-        .map((f) => `${f.label}: ${f.options?.find((o) => o.value === filters[f.key])?.label || filters[f.key]}`);
-      await downloadWorkbook(`${fileBase()}.xlsx`, title, [
-        {
-          name: dataset.label,
-          subtitle: applied.length ? applied.join(' · ') : `As of ${new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}`,
-          columns: cols,
-          groups,
-          empty: 'No rows match these filters.',
-        },
-      ]);
-      logExport('xlsx', result.rows.length);
+      if (totals) groups.push({ lines: [result.columns.map((c, i) => (summable(c) ? totals[i] : i === 0 ? 'TOTAL' : null))], highlight: true });
+      const sheets: XlsxSheet[] = [
+        { name: dataset.label, subtitle: appliedText(), columns: cols, groups, empty: 'No rows match these filters.' },
+      ];
+      if (summary) {
+        sheets.push({
+          name: 'Summary',
+          subtitle: `By ${summary.label} · ${appliedText()}`,
+          columns: [
+            { header: summary.label, width: 36 },
+            { header: 'Count', width: 10, align: 'right' },
+            { header: '% of rows', width: 12, align: 'right', numFmt: '0.0%' },
+            ...summary.sumCols.map((c) => ({ header: c.label, width: 16, align: 'right' as const, numFmt: '#,##0.##' })),
+          ],
+          groups: summary.groups.map((g) => ({ lines: [[g.label, g.count, g.count / summary.total, ...g.sums]] })),
+        });
+      }
+      await downloadWorkbook(`${fileBase()}.xlsx`, reportTitle.toUpperCase(), sheets);
+      logExport('xlsx', searchedRows.length);
     } catch (e: any) {
       toast.error(e?.message || 'Export failed');
     } finally {
@@ -245,12 +285,92 @@ export function CustomReport() {
     setExporting('csv');
     const lines = [
       result.columns.map((c) => csvEscape(c.label)).join(','),
-      ...result.rows.map((r) => r.map((v) => csvEscape(v == null ? '' : v)).join(',')),
+      ...searchedRows.map((r) => r.map((v) => csvEscape(v == null ? '' : v)).join(',')),
     ];
     downloadBlob(`${fileBase()}.csv`, `﻿${lines.join('\r\n')}`, 'text/csv;charset=utf-8');
-    logExport('csv', result.rows.length);
+    logExport('csv', searchedRows.length);
     setExporting(null);
   }
+
+  async function exportPdf() {
+    if (!result || !dataset) return;
+    setExporting('pdf');
+    try {
+      const body = searchedRows.map((r) => r.map((v, i) => (v == null || v === '' ? '' : cellText(v, result.columns[i].type))));
+      if (totals) body.push(result.columns.map((c, i) => (summable(c) ? fmtNum(totals[i]) : i === 0 ? 'TOTAL' : '')));
+      const sections: PdfSection[] = [];
+      if (summary) {
+        sections.push({
+          heading: `Summary by ${summary.label}`,
+          columns: [summary.label, 'Count', '% of rows', ...summary.sumCols.map((c) => c.label)],
+          body: summary.groups.map((g) => [g.label, String(g.count), `${((g.count / summary.total) * 100).toFixed(1)}%`, ...g.sums.map(fmtNum)]),
+          aligns: ['left', 'right', 'right', ...summary.sumCols.map(() => 'right' as const)],
+        });
+      }
+      sections.push({
+        heading: `${dataset.label} (${searchedRows.length.toLocaleString('en-US')})`,
+        newPage: Boolean(summary),
+        columns: result.columns.map((c) => c.label),
+        body,
+        aligns: result.columns.map((c) => (c.type === 'number' ? 'right' : 'left')),
+        empty: 'No rows match these filters.',
+      });
+      await downloadPdf(`${fileBase()}.pdf`, reportTitle.toUpperCase(), appliedText(), sections);
+      logExport('pdf', searchedRows.length);
+    } catch (e: any) {
+      toast.error(e?.message || 'Export failed');
+    } finally {
+      setExporting(null);
+    }
+  }
+
+  // Rows after the quick search (matches the text shown in any cell).
+  const searchedRows = useMemo(() => {
+    if (!result) return [];
+    const needle = rowSearch.trim().toLowerCase();
+    if (!needle) return result.rows;
+    return result.rows.filter((r) => r.some((v, i) => cellText(v, result.columns[i].type).toLowerCase().includes(needle)));
+  }, [result, rowSearch]);
+  useEffect(() => setPage(1), [result, rowSearch, pageSize]);
+
+  // Totals row: sums of the number columns that add up (null = none shown).
+  const totals = useMemo(() => {
+    if (!result || !searchedRows.length || !result.columns.some(summable)) return null;
+    return result.columns.map((c, i) => (summable(c) ? searchedRows.reduce((n, r) => n + (typeof r[i] === 'number' ? (r[i] as number) : 0), 0) : 0));
+  }, [result, searchedRows]);
+
+  // Summary: the rows counted by one of the shown columns, largest first.
+  const summary = useMemo(() => {
+    if (!result || !groupBy) return null;
+    const gi = result.columns.findIndex((c) => c.key === groupBy);
+    if (gi < 0) return null;
+    const sumIdx = result.columns.map((c, i) => (summable(c) ? i : -1)).filter((i) => i >= 0);
+    const map = new Map<string, { label: string; count: number; sums: number[] }>();
+    for (const r of searchedRows) {
+      const label = r[gi] == null || r[gi] === '' ? '(blank)' : cellText(r[gi], result.columns[gi].type);
+      const g = map.get(label) || { label, count: 0, sums: sumIdx.map(() => 0) };
+      g.count += 1;
+      sumIdx.forEach((ci, k) => {
+        if (typeof r[ci] === 'number') g.sums[k] += r[ci] as number;
+      });
+      map.set(label, g);
+    }
+    return {
+      label: result.columns[gi].label,
+      total: searchedRows.length,
+      sumCols: sumIdx.map((i) => result.columns[i]),
+      groups: [...map.values()].sort((a, b) => b.count - a.count || a.label.localeCompare(b.label)),
+    };
+  }, [result, searchedRows, groupBy]);
+  const totalPages = Math.max(1, Math.ceil(searchedRows.length / pageSize));
+  const safePage = Math.min(page, totalPages);
+  const pageStart = (safePage - 1) * pageSize;
+  const visiblePageNumbers = useMemo(() => {
+    const start = Math.max(1, safePage - 1);
+    const end = Math.min(totalPages, start + 2);
+    const adjustedStart = Math.max(1, end - 2);
+    return Array.from({ length: end - adjustedStart + 1 }, (_, i) => adjustedStart + i);
+  }, [safePage, totalPages]);
 
   if (error && !datasets) {
     return <EmptyState title="Couldn't load the Custom Report" description={error} />;
@@ -265,9 +385,8 @@ export function CustomReport() {
 
   const q = columnSearch.trim().toLowerCase();
   const available = dataset.columns.filter((c) => !columns.includes(c.key) && (!q || c.label.toLowerCase().includes(q)));
-  const shownRows = result ? result.rows.slice(0, PREVIEW_ROWS) : [];
+  const shownRows = searchedRows.slice(pageStart, pageStart + pageSize);
   const activeFilters = Object.values(filters).filter(Boolean).length;
-  const templateName = templates.find((t) => String(t.id) === templateId)?.name;
   const panel = 'rounded-2xl border flex flex-col';
   const panelStyle = {
     borderColor: 'var(--border-subtle)',
@@ -306,36 +425,66 @@ export function CustomReport() {
             <Save size={15} />
           </span>
           <div className="hidden shrink-0 sm:block">
-            <div className="text-[12.5px] font-semibold" style={{ color: 'var(--text)' }}>My templates</div>
-            <div className="text-[10.5px] text-secondary">{templates.length ? `${templates.length} saved` : 'Save a setup to reuse it'}</div>
+            <div className="text-[12.5px] font-semibold" style={{ color: 'var(--text)' }}>Templates</div>
+            <div className="text-[10.5px] text-secondary">
+              {templates.length
+                ? `${templates.filter((t) => t.mine).length} mine · ${templates.filter((t) => !t.mine).length} shared with me`
+                : 'Save a setup to reuse it'}
+            </div>
           </div>
           <div className="min-w-0 flex-1 sm:max-w-xs">
             <AppSelect
-              options={templates.map((t) => ({ value: String(t.id), label: t.name, detail: datasets.find((d) => d.key === t.dataset)?.label || '' }))}
+              options={templates.map((t) => {
+                const what = datasets.find((d) => d.key === t.dataset)?.label || '';
+                return {
+                  value: String(t.id),
+                  label: t.name,
+                  detail: t.mine ? `${what}${t.shared ? ' · Shared' : ''}` : `${what} · by ${t.owner || 'another user'}`,
+                };
+              })}
               value={templateId}
               onChange={(v) => (v ? applyTemplate(v) : setTemplateId(''))}
               placeholder={templates.length ? 'Open a saved template…' : 'No saved templates yet'}
               isClearable
             />
           </div>
-          {templateId ? (
+          {currentTemplate?.mine ? (
             <button type="button" className={btn} style={{ borderColor: '#ef444466', color: '#ef4444' }} onClick={() => void deleteTemplate()} title="Delete this template">
               <Trash2 size={13} />
             </button>
+          ) : currentTemplate ? (
+            <span className="hidden text-[11px] text-secondary md:inline">Shared by {currentTemplate.owner || 'another user'} — save a copy to change it</span>
           ) : null}
         </div>
         {saveName === null ? (
-          <button
-            type="button"
-            className={btn}
-            style={{ borderColor: 'var(--border)', color: 'var(--text)' }}
-            disabled={!columns.length}
-            onClick={() => setSaveName(templateName || '')}
-          >
-            <Save size={13} /> Save as template
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            {currentTemplate?.mine ? (
+              <button
+                type="button"
+                className={btn}
+                style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)', borderColor: 'transparent' }}
+                disabled={!columns.length}
+                onClick={() => void saveTemplate(currentTemplate.name, currentTemplate.shared)}
+                title={`Save the current setup into "${currentTemplate.name}"`}
+              >
+                <Save size={13} /> Save changes
+              </button>
+            ) : null}
+            <button
+              type="button"
+              className={btn}
+              style={{ borderColor: 'var(--border)', color: 'var(--text)' }}
+              disabled={!columns.length}
+              onClick={() => {
+                setSaveName(currentTemplate?.mine ? '' : currentTemplate ? `${currentTemplate.name} (copy)` : '');
+                setSaveShared(false);
+              }}
+            >
+              <Save size={13} /> {currentTemplate ? 'Save as new' : 'Save as template'}
+            </button>
+          </div>
         ) : (
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <input
               autoFocus
               className="app-input h-9 w-56"
@@ -348,6 +497,14 @@ export function CustomReport() {
                 if (e.key === 'Escape') setSaveName(null);
               }}
             />
+            <label
+              className="inline-flex cursor-pointer items-center gap-1.5 text-[11.5px] font-medium"
+              style={{ color: 'var(--text)' }}
+              title="Every Reports user can open it; only you can change it"
+            >
+              <input type="checkbox" checked={saveShared} onChange={(e) => setSaveShared(e.target.checked)} />
+              <Share2 size={12} className="text-secondary" /> Share
+            </label>
             <button
               type="button"
               className={btn}
@@ -502,7 +659,7 @@ export function CustomReport() {
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-[15px] font-bold" style={{ color: 'var(--text)' }}>
-                  {templateName || dataset.label}
+                  {reportTitle}
                 </span>
                 {result ? (
                   <span
@@ -517,14 +674,14 @@ export function CustomReport() {
               <div className="mt-0.5 text-[11px] text-secondary">
                 {result
                   ? `${columns.length} column${columns.length === 1 ? '' : 's'}${result.truncated ? ` · only the first ${maxRows.toLocaleString('en-US')} — narrow the filters` : ''}${
-                      result.total > PREVIEW_ROWS ? ` · preview shows ${PREVIEW_ROWS}, the export has all` : ''
+                      rowSearch.trim() ? ` · ${searchedRows.length.toLocaleString('en-US')} match the search — the export has these` : ''
                     }`
                   : columns.length
                     ? 'Loading…'
                     : 'Choose at least one column'}
               </div>
             </div>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               <button
                 type="button"
                 className={btn}
@@ -542,6 +699,16 @@ export function CustomReport() {
                 onClick={exportCsv}
               >
                 <FileText size={14} /> CSV
+              </button>
+              <button
+                type="button"
+                className={btn}
+                style={{ borderColor: 'var(--border)', color: 'var(--text)' }}
+                disabled={!result || running || Boolean(exporting)}
+                onClick={() => void exportPdf()}
+                title="PDF (landscape A4) — open it to print"
+              >
+                {exporting === 'pdf' ? <Loader2 size={14} className="animate-spin" /> : <Printer size={14} />} PDF
               </button>
             </div>
           </div>
@@ -634,6 +801,105 @@ export function CustomReport() {
             ) : null}
 
             {result && result.columns.length ? (
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <div className="relative w-full sm:max-w-xs">
+                <Search size={13} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-secondary" />
+                <input
+                  className="app-input h-9 w-full pl-8 pr-8 text-[12px]"
+                  placeholder="Search these rows…"
+                  value={rowSearch}
+                  onChange={(e) => setRowSearch(e.target.value)}
+                />
+                {rowSearch ? (
+                  <button
+                    type="button"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-secondary hover:text-[var(--text)]"
+                    onClick={() => setRowSearch('')}
+                    title="Clear search"
+                  >
+                    <X size={13} />
+                  </button>
+                ) : null}
+              </div>
+                <div className="flex items-center gap-2">
+                  <span className="flex shrink-0 items-center gap-1 text-[11px] font-semibold text-secondary">
+                    <Sigma size={12} /> Summary by
+                  </span>
+                  <div className="w-52">
+                    <AppSelect
+                      options={result.columns.filter((c) => c.type === 'text').map((c) => ({ value: c.key, label: c.label }))}
+                      value={groupBy}
+                      onChange={(v) => setGroupBy(v || '')}
+                      placeholder="Off"
+                      isClearable
+                    />
+                  </div>
+                </div>
+              </div>
+            ) : null}
+
+            {/* Summary: rows counted by the chosen column (plus sums of the number columns). */}
+            {summary ? (
+              <div className="overflow-hidden rounded-xl border" style={{ borderColor: 'var(--border-subtle)' }}>
+                <div className="flex items-center justify-between gap-2 border-b px-3 py-2" style={headTint}>
+                  <span className="text-[12px] font-semibold" style={{ color: 'var(--text)' }}>
+                    Summary by {summary.label}
+                    <span className="ml-1.5 font-normal text-secondary">
+                      {summary.groups.length} group{summary.groups.length === 1 ? '' : 's'} · {summary.total.toLocaleString('en-US')} rows
+                    </span>
+                  </span>
+                  <button type="button" className={linkBtn} onClick={() => setGroupBy('')}>
+                    Hide
+                  </button>
+                </div>
+                <div className="max-h-72 overflow-auto custom-scrollbar">
+                  <table className="w-full text-left text-[12px] border-collapse">
+                    <thead className="sticky top-0" style={{ backgroundColor: 'var(--surface)' }}>
+                      <tr className="text-[10px] uppercase tracking-wider text-secondary">
+                        <th className="border-b px-3 py-2 font-semibold" style={{ borderColor: 'var(--border-subtle)' }}>{summary.label}</th>
+                        <th className="border-b px-3 py-2 text-right font-semibold" style={{ borderColor: 'var(--border-subtle)' }}>Count</th>
+                        <th className="w-1/3 border-b px-3 py-2 font-semibold" style={{ borderColor: 'var(--border-subtle)' }}>Share</th>
+                        {summary.sumCols.map((c) => (
+                          <th key={c.key} className="border-b px-3 py-2 text-right font-semibold" style={{ borderColor: 'var(--border-subtle)' }}>
+                            {c.label}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {summary.groups.map((g) => {
+                        const pct = summary.total ? (g.count / summary.total) * 100 : 0;
+                        return (
+                          <tr key={g.label} className="border-t hover:bg-[var(--selected-bg)]" style={{ borderColor: 'var(--border-subtle)' }}>
+                            <td className="px-3 py-1.5" style={{ color: g.label === '(blank)' ? 'var(--text-muted)' : 'var(--text)' }}>
+                              {/status|new \/ renewal/i.test(summary.label) && g.label !== '(blank)' ? <StatusPill value={g.label} /> : g.label}
+                            </td>
+                            <td className="px-3 py-1.5 text-right font-semibold tabular-nums" style={{ color: 'var(--text)' }}>
+                              {g.count.toLocaleString('en-US')}
+                            </td>
+                            <td className="px-3 py-1.5">
+                              <div className="flex items-center gap-2">
+                                <div className="h-1.5 flex-1 overflow-hidden rounded-full" style={{ backgroundColor: 'var(--control-bg)' }}>
+                                  <div className="h-full rounded-full" style={{ width: `${pct}%`, backgroundColor: 'var(--nav-active-bg)' }} />
+                                </div>
+                                <span className="w-11 text-right text-[10.5px] tabular-nums text-secondary">{pct.toFixed(1)}%</span>
+                              </div>
+                            </td>
+                            {g.sums.map((n, k) => (
+                              <td key={k} className="px-3 py-1.5 text-right tabular-nums" style={{ color: 'var(--text)' }}>
+                                {fmtNum(n)}
+                              </td>
+                            ))}
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ) : null}
+
+            {result && result.columns.length ? (
               <div
                 className={cn('min-w-0 overflow-auto rounded-xl border max-h-[70vh] custom-scrollbar transition-opacity', running && 'opacity-60')}
                 style={{ borderColor: 'var(--border-subtle)' }}
@@ -682,7 +948,7 @@ export function CustomReport() {
                           backgroundColor: i % 2 ? 'color-mix(in oklab, var(--control-bg) 30%, transparent)' : undefined,
                         }}
                       >
-                        <td className="px-3 py-2 text-right align-top text-[10.5px] tabular-nums text-secondary">{i + 1}</td>
+                        <td className="px-3 py-2 text-right align-top text-[10.5px] tabular-nums text-secondary">{pageStart + i + 1}</td>
                         {r.map((v, j) => {
                           const c = result.columns[j];
                           const empty = v == null || v === '';
@@ -717,13 +983,43 @@ export function CustomReport() {
                     {!shownRows.length ? (
                       <tr>
                         <td colSpan={result.columns.length + 1} className="px-3 py-10 text-center text-[12px] text-secondary">
-                          No rows match these filters.
+                          {rowSearch.trim() ? 'No rows match the search.' : 'No rows match these filters.'}
                         </td>
                       </tr>
                     ) : null}
                   </tbody>
+                  {totals ? (
+                    <tfoot className="sticky bottom-0" style={{ backgroundColor: 'color-mix(in oklab, var(--control-bg) 80%, var(--surface))' }}>
+                      <tr className="border-t-2" style={{ borderColor: 'var(--border)' }}>
+                        <td className="whitespace-nowrap px-3 py-2 text-right text-[10.5px] font-bold text-secondary">Total</td>
+                        {result.columns.map((c, i) => (
+                          <td
+                            key={c.key}
+                            className={cn('px-3 py-2 text-[11.5px] font-bold', c.type === 'number' && 'text-right tabular-nums whitespace-nowrap')}
+                            style={{ color: 'var(--text)' }}
+                          >
+                            {summable(c) ? fmtNum(totals[i]) : ''}
+                          </td>
+                        ))}
+                      </tr>
+                    </tfoot>
+                  ) : null}
                 </table>
               </div>
+            ) : null}
+            {result && result.columns.length && searchedRows.length > 0 ? (
+              <DataTableControls
+                page={safePage}
+                totalPages={totalPages}
+                totalItems={searchedRows.length}
+                showingFrom={pageStart + 1}
+                showingTo={Math.min(searchedRows.length, pageStart + pageSize)}
+                visiblePageNumbers={visiblePageNumbers}
+                pageSize={pageSize}
+                pageSizeOptions={[25, 50, 100, 200]}
+                onPageSizeChange={(v) => setPageSize(v)}
+                onPageChange={(p) => setPage(p)}
+              />
             ) : !columns.length ? (
               <EmptyState title="No columns" description="Pick the columns you want on the left." />
             ) : null}

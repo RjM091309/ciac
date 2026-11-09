@@ -8,6 +8,8 @@ const { selectData, updateData, updateSchema, insertData } = require("../config/
 const { decryptValue } = require("../lib/crypto");
 
 const MAX_ROWS = 10000;
+// Filter key: rows where this column (a key from the dataset) is empty.
+const MISSING_FILTER = "missing";
 
 /** A staff user's real name for a report ("Chester Tayag"), not the
  * "AO - Chester_T" label full_name holds (lib/staffName.js). */
@@ -103,9 +105,9 @@ const DATASETS = {
       sublessor: { label: "Sub-lessee of", sql: "sublessor.business_name" },
       lease_end: { label: "Lease Ends (with extension)", sql: "le.eff_end", type: "date" },
       days_left: { label: "Days Left", sql: "DATEDIFF(day, CAST(GETDATE() AS DATE), le.eff_end)", type: "number" },
-      lease_status: { label: "Lease Status", sql: LEASE_STATUS_SQL },
+      lease_status: { label: "Lease Status", sql: LEASE_STATUS_SQL, noMissing: true },
       renewal_application_no: { label: "Renewal Application No.", sql: "open_ren.application_no" },
-      status: { label: "Record Status", sql: "CASE WHEN p.is_active = 1 THEN 'Active' ELSE 'Inactive' END" },
+      status: { label: "Record Status", sql: "CASE WHEN p.is_active = 1 THEN 'Active' ELSE 'Inactive' END", noMissing: true },
       created_at: { label: "Encoded On", sql: "p.created_at", type: "date" },
     },
     defaults: ["ref_code", "business_name", "nationality", "type_of_contract", "account_officer", "start_term", "end_term", "lease_status"],
@@ -146,7 +148,7 @@ const DATASETS = {
     order: "a.id DESC",
     columns: {
       application_no: { label: "Application No.", sql: "a.application_no" },
-      track: { label: "New / Renewal", sql: "CASE WHEN a.is_renewal = 1 THEN 'Renewal' ELSE 'New' END" },
+      track: { label: "New / Renewal", sql: "CASE WHEN a.is_renewal = 1 THEN 'Renewal' ELSE 'New' END", noMissing: true },
       business_name: { label: "Proponent / Locator", sql: "p.business_name" },
       ref_code: { label: "Ref. Code", sql: "p.ref_code" },
       nationality: { label: "Nationality", sql: "p.nationality" },
@@ -274,7 +276,18 @@ async function catalog() {
     description: d.description,
     columns: Object.entries(d.columns).map(([k, c]) => ({ key: k, label: c.label, type: c.type || "text" })),
     defaults: d.defaults,
-    filters: Object.entries(d.filters).map(([k, f]) => ({ key: k, label: f.label, type: f.type, options: f.options ? options[f.options] || [] : undefined })),
+    filters: [
+      ...Object.entries(d.filters).map(([k, f]) => ({ key: k, label: f.label, type: f.type, options: f.options ? options[f.options] || [] : undefined })),
+      // Rows where the chosen column is empty — for finding records to complete.
+      {
+        key: MISSING_FILTER,
+        label: "Missing data in",
+        type: "select",
+        options: Object.entries(d.columns)
+          .filter(([, c]) => c.type !== "number" && !c.noMissing)
+          .map(([k, c]) => ({ value: k, label: c.label })),
+      },
+    ],
   }));
 }
 
@@ -300,8 +313,14 @@ async function run({ dataset, columns, filters = {}, sort = null, ownOfficerId =
   };
   const where = [...d.where];
   for (const [key, raw] of Object.entries(filters || {})) {
-    const f = d.filters[key];
     const value = String(raw ?? "").trim();
+    if (key === MISSING_FILTER) {
+      const c = value && d.columns[value];
+      if (!c || c.type === "number" || c.noMissing) continue;
+      where.push(`NULLIF(LTRIM(RTRIM(CONVERT(NVARCHAR(4000), ${c.sql}))), '') IS NULL`);
+      continue;
+    }
+    const f = d.filters[key];
     if (!f || !value) continue;
     if (f.type === "date" && !/^\d{4}-\d{2}-\d{2}$/.test(value)) throw badRequest(`${f.label}: not a date.`);
     where.push(f.sql.replace("@v", param(f.type === "date" ? value : value.slice(0, 200))));
@@ -356,6 +375,9 @@ function ensureSchema() {
         updated_at DATETIME2(3) NULL,
         CONSTRAINT FK_report_templates_user FOREIGN KEY (user_id) REFERENCES dbo.users(id) ON DELETE CASCADE
       );
+      -- Shared: every Reports user can open it (only its owner can change it).
+      IF COL_LENGTH('dbo.report_templates', 'is_shared') IS NULL
+      ALTER TABLE dbo.report_templates ADD is_shared BIT NOT NULL CONSTRAINT DF_report_templates_is_shared DEFAULT (0);
     `).catch((error) => {
       schemaReady = null;
       throw error;
@@ -375,15 +397,31 @@ function parseConfig(text) {
 
 async function listTemplates(userId) {
   await ensureSchema();
+  // The user's own templates, then the ones others have shared.
   const rows = await selectData(
-    `SELECT id, name, dataset, config, created_at, updated_at FROM dbo.report_templates WHERE user_id = @param0 ORDER BY name`,
+    `SELECT t.id, t.name, t.dataset, t.config, t.is_shared, t.created_at, t.updated_at,
+        CASE WHEN t.user_id = @param0 THEN 1 ELSE 0 END AS mine, ${personName("u")} AS owner
+     FROM dbo.report_templates t
+     LEFT JOIN dbo.users u ON u.id = t.user_id
+     WHERE t.user_id = @param0 OR t.is_shared = 1
+     ORDER BY CASE WHEN t.user_id = @param0 THEN 0 ELSE 1 END, t.name`,
     [Number(userId)]
   );
-  return rows.map((r) => ({ id: r.id, name: r.name, dataset: r.dataset, config: parseConfig(r.config), updated_at: r.updated_at || r.created_at }));
+  return rows.map((r) => ({
+    id: r.id,
+    name: r.name,
+    dataset: r.dataset,
+    config: parseConfig(r.config),
+    shared: Boolean(r.is_shared),
+    mine: Number(r.mine) === 1,
+    owner: r.owner || null,
+    updated_at: r.updated_at || r.created_at,
+  }));
 }
 
-/** Saves (or, same name, replaces) one of the user's templates. */
-async function saveTemplate(userId, { name, dataset, columns, filters, sort }) {
+/** Saves (or, same name, replaces) one of the user's templates. `shared`:
+ * other Reports users can open it too. */
+async function saveTemplate(userId, { name, dataset, columns, filters, sort, shared }) {
   await ensureSchema();
   const title = String(name || "").trim().slice(0, 120);
   if (!title) throw badRequest("Name the template.");
@@ -391,20 +429,22 @@ async function saveTemplate(userId, { name, dataset, columns, filters, sort }) {
   if (!d) throw badRequest("Choose what to report on.");
   const config = JSON.stringify({
     columns: (Array.isArray(columns) ? columns : []).filter((k) => d.columns[k]),
-    filters: Object.fromEntries(Object.entries(filters || {}).filter(([k, v]) => d.filters[k] && String(v ?? "").trim())),
+    filters: Object.fromEntries(
+      Object.entries(filters || {}).filter(([k, v]) => (d.filters[k] || k === MISSING_FILTER) && String(v ?? "").trim())
+    ),
     sort: sort?.key && d.columns[sort.key] ? { key: sort.key, dir: sort.dir === "desc" ? "desc" : "asc" } : null,
   });
   const existing = await selectData(`SELECT id FROM dbo.report_templates WHERE user_id = @param0 AND name = @param1`, [Number(userId), title]);
   if (existing[0]) {
     await updateData(
-      `UPDATE dbo.report_templates SET dataset = @param1, config = @param2, updated_at = SYSUTCDATETIME() WHERE id = @param0`,
-      [existing[0].id, dataset, config]
+      `UPDATE dbo.report_templates SET dataset = @param1, config = @param2, is_shared = @param3, updated_at = SYSUTCDATETIME() WHERE id = @param0`,
+      [existing[0].id, dataset, config, shared ? 1 : 0]
     );
     return existing[0].id;
   }
   const result = await insertData(
-    `INSERT INTO dbo.report_templates (user_id, name, dataset, config) OUTPUT inserted.id VALUES (@param0, @param1, @param2, @param3)`,
-    [Number(userId), title, dataset, config]
+    `INSERT INTO dbo.report_templates (user_id, name, dataset, config, is_shared) OUTPUT inserted.id VALUES (@param0, @param1, @param2, @param3, @param4)`,
+    [Number(userId), title, dataset, config, shared ? 1 : 0]
   );
   return result?.recordset?.[0]?.id ?? null;
 }
