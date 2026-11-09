@@ -37,6 +37,37 @@ const CONTRACT_TYPE_APPLY = `
   LEFT JOIN dbo.proponents sublessor ON sublessor.id = p.sublessor_id
 `;
 
+// Registered Locators: where the locator's lease stands. The lease ends on the
+// End Term, or on the latest Extension Date when that is later; a renewal that
+// has been filed but not yet decided outranks the rest (same as the panel's
+// "Renewal in process" badge).
+const LEASE_APPLY = `
+  CROSS APPLY (
+    SELECT CASE
+      WHEN p.extension_date IS NOT NULL
+        AND (COALESCE(ct.effective_end, p.manual_end_term) IS NULL
+          OR CAST(p.extension_date AS DATE) > CAST(COALESCE(ct.effective_end, p.manual_end_term) AS DATE))
+      THEN CAST(p.extension_date AS DATE)
+      ELSE CAST(COALESCE(ct.effective_end, p.manual_end_term) AS DATE)
+    END AS eff_end
+  ) le
+  OUTER APPLY (
+    SELECT TOP (1) r.application_no
+    FROM dbo.applications r
+    WHERE r.proponent_id = p.id AND r.is_renewal = 1
+      AND r.status NOT IN ('DRAFT', 'APPROVED', 'REJECTED', 'DISAPPROVED')
+    ORDER BY r.id DESC
+  ) open_ren
+`;
+const EXPIRING_DAYS = 90;
+const LEASE_STATUS_SQL = `CASE
+    WHEN open_ren.application_no IS NOT NULL THEN 'Renewal in process'
+    WHEN le.eff_end IS NULL THEN 'No lease term'
+    WHEN le.eff_end < CAST(GETDATE() AS DATE) THEN 'Expired'
+    WHEN le.eff_end <= DATEADD(day, ${EXPIRING_DAYS}, CAST(GETDATE() AS DATE)) THEN 'Expiring soon'
+    ELSE 'Active'
+  END`;
+
 /** Locator columns shared by the datasets built on dbo.proponents p. */
 const LOCATOR_COLUMNS = {
   ref_code: { label: "Ref. Code", sql: "p.ref_code" },
@@ -52,7 +83,7 @@ const DATASETS = {
   locators: {
     label: "Registered Locators",
     description: "One row per registered locator.",
-    from: `FROM dbo.proponents p ${CONTRACT_TYPE_APPLY}`,
+    from: `FROM dbo.proponents p ${CONTRACT_TYPE_APPLY} ${LEASE_APPLY}`,
     where: ["p.account_officer_id IS NOT NULL"],
     order: "p.business_name",
     columns: {
@@ -70,17 +101,34 @@ const DATASETS = {
       end_term: { label: "End Term", sql: "COALESCE(ct.effective_end, p.manual_end_term)", type: "date" },
       extension_date: { label: "Extension Date", sql: "p.extension_date", type: "date" },
       sublessor: { label: "Sub-lessee of", sql: "sublessor.business_name" },
-      status: { label: "Status", sql: "CASE WHEN p.is_active = 1 THEN 'Active' ELSE 'Inactive' END" },
+      lease_end: { label: "Lease Ends (with extension)", sql: "le.eff_end", type: "date" },
+      days_left: { label: "Days Left", sql: "DATEDIFF(day, CAST(GETDATE() AS DATE), le.eff_end)", type: "number" },
+      lease_status: { label: "Lease Status", sql: LEASE_STATUS_SQL },
+      renewal_application_no: { label: "Renewal Application No.", sql: "open_ren.application_no" },
+      status: { label: "Record Status", sql: "CASE WHEN p.is_active = 1 THEN 'Active' ELSE 'Inactive' END" },
       created_at: { label: "Encoded On", sql: "p.created_at", type: "date" },
     },
-    defaults: ["ref_code", "business_name", "nationality", "type_of_contract", "account_officer", "start_term", "end_term", "status"],
+    defaults: ["ref_code", "business_name", "nationality", "type_of_contract", "account_officer", "start_term", "end_term", "lease_status"],
     filters: {
       contract_type_id: { label: "Type of Contract", type: "select", options: "contractTypes", sql: "toc.id = @v" },
       account_officer_id: { label: "Account Officer", type: "select", options: "accountOfficers", sql: "p.account_officer_id = @v" },
       nationality: { label: "Nationality", type: "select", options: "nationalities", sql: "UPPER(LTRIM(RTRIM(p.nationality))) = @v" },
-      status: { label: "Status", type: "select", options: "activeStatus", sql: "p.is_active = @v" },
+      lease_status: { label: "Lease Status", type: "select", options: "leaseStatuses", sql: `${LEASE_STATUS_SQL} = @v` },
+      expires_within: {
+        label: "Expires within",
+        type: "select",
+        options: "expiresWithin",
+        sql: "le.eff_end >= CAST(GETDATE() AS DATE) AND le.eff_end <= DATEADD(day, TRY_CAST(@v AS INT), CAST(GETDATE() AS DATE))",
+      },
+      status: { label: "Record Status", type: "select", options: "activeStatus", sql: "p.is_active = @v" },
       end_from: { label: "End Term from", type: "date", sql: "CAST(COALESCE(ct.effective_end, p.manual_end_term) AS DATE) >= @v" },
       end_to: { label: "End Term to", type: "date", sql: "CAST(COALESCE(ct.effective_end, p.manual_end_term) AS DATE) <= @v" },
+      start_from: { label: "Start Term from", type: "date", sql: "CAST(COALESCE(ct.effective_start, p.manual_start_term) AS DATE) >= @v" },
+      start_to: { label: "Start Term to", type: "date", sql: "CAST(COALESCE(ct.effective_start, p.manual_start_term) AS DATE) <= @v" },
+      signed_from: { label: "Date Signed from", type: "date", sql: "CAST(p.date_signed AS DATE) >= @v" },
+      signed_to: { label: "Date Signed to", type: "date", sql: "CAST(p.date_signed AS DATE) <= @v" },
+      created_from: { label: "Encoded On from", type: "date", sql: "CAST(p.created_at AS DATE) >= @v" },
+      created_to: { label: "Encoded On to", type: "date", sql: "CAST(p.created_at AS DATE) <= @v" },
     },
   },
 
@@ -197,6 +245,11 @@ async function optionLists() {
       { value: "1", label: "Active" },
       { value: "0", label: "Inactive" },
     ],
+    leaseStatuses: ["Active", "Expiring soon", "Expired", "Renewal in process", "No lease term"].map((v) => ({
+      value: v,
+      label: v === "Expiring soon" ? `Expiring soon (${EXPIRING_DAYS} days)` : v,
+    })),
+    expiresWithin: [30, 60, 90, 180, 365].map((n) => ({ value: String(n), label: n === 365 ? "1 year" : `${n} days` })),
     tracks: [
       { value: "0", label: "New" },
       { value: "1", label: "Renewal" },

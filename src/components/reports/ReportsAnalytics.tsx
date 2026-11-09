@@ -335,7 +335,7 @@ export function ReportsAnalytics({ navigate }: { navigate?: (to: string, opts?: 
   };
   return (
     <div className="space-y-4 sm:space-y-5">
-      <div className="flex items-center gap-1 border-b overflow-x-auto" style={{ borderColor: 'var(--border-subtle)' }}>
+      <div className="flex items-center gap-1 border-b tab-strip-scroll" style={{ borderColor: 'var(--border-subtle)' }}>
         {REPORTS.map((r) => (
           <button
             key={r.key}

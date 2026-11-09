@@ -1,5 +1,25 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronDown, ChevronRight, Copy, Lock, Minus, Plus, Save, Search, Send, Trash2 } from 'lucide-react';
+import {
+  Building2,
+  CalendarClock,
+  CalendarPlus,
+  ChevronDown,
+  ChevronRight,
+  Copy,
+  FileSignature,
+  Landmark,
+  LayoutGrid,
+  Lock,
+  Minus,
+  Plus,
+  Save,
+  Search,
+  Send,
+  Target,
+  Trash2,
+  UserRound,
+  Users,
+} from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { toast } from 'sonner';
 import { SidePanel } from '../ui/SidePanel';
@@ -335,6 +355,48 @@ type LocatorsData = {
 
 // Industry = Application Types catalog, keyed by code (what applications store).
 type IndustryOption = { id: number; code: string; name: string; is_active: number };
+
+// Drawer cards: white body and header with a soft shadow — instead of
+// grey-on-grey.
+const CARD_STYLE: React.CSSProperties = {
+  borderColor: 'var(--input-border)',
+  backgroundColor: 'var(--surface)',
+  boxShadow: '0 1px 2px rgb(0 0 0 / 0.04), 0 1px 3px rgb(0 0 0 / 0.06)',
+};
+const CARD_HEAD_STYLE: React.CSSProperties = {
+  borderColor: 'var(--input-border)',
+  // A faint tint so each card's header reads as a strip above its body.
+  backgroundColor: 'color-mix(in oklab, var(--control-bg) 55%, var(--surface))',
+};
+// Table header rows inside the drawer cards.
+const THEAD_ROW_STYLE: React.CSSProperties = {
+  backgroundColor: 'color-mix(in oklab, var(--control-bg) 70%, var(--surface))',
+};
+
+/** Drawer card heading: an icon chip, the title, and an optional count pill. */
+function CardTitle({ icon: Icon, children, count }: { icon: React.ElementType; children: React.ReactNode; count?: number }) {
+  return (
+    <span className="inline-flex min-w-0 items-center gap-2">
+      <span
+        className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md"
+        style={{ backgroundColor: 'color-mix(in oklab, var(--nav-active-bg) 12%, transparent)', color: 'var(--nav-active-bg)' }}
+      >
+        <Icon size={13} strokeWidth={2.2} />
+      </span>
+      <span className="truncate text-[12.5px] font-semibold" style={{ color: 'var(--text)' }}>
+        {children}
+      </span>
+      {count !== undefined ? (
+        <span
+          className="rounded-full px-1.5 py-px text-[10px] font-semibold tabular-nums text-secondary"
+          style={{ backgroundColor: 'var(--control-bg)' }}
+        >
+          {count}
+        </span>
+      ) : null}
+    </span>
+  );
+}
 
 // "Stockholders" tab / Contact Person section — child tables (dbo.stockholder,
 // dbo.contact_person) synced by id on every save (rows removed here are deactivated).
@@ -2222,6 +2284,13 @@ export function ProponentsManagement({
   const currentEnd = String((termEditable ? form.end_term : editing?.end_term) || '').slice(0, 10);
   const latestExtension = extensions[0]?.extension_date ? String(extensions[0].extension_date).slice(0, 10) : '';
   const extendedTo = latestExtension && currentEnd && latestExtension > currentEnd ? latestExtension : '';
+  // Lease Term of the current lease (to the Extension Date when extended).
+  const currentLeaseTerm =
+    (extendedTo && currentStart
+      ? formatLeaseTerm(currentStart, extendedTo)
+      : termEditable
+      ? formatLeaseTerm(form.start_term, form.end_term)
+      : editing?.lease_term) || '';
   // An earlier lease's stacked panel: lease-view layout from the first render,
   // even before its lease has loaded (no flash of the locator's own layout).
   const leaseView = viewOnlyLease;
@@ -2655,6 +2724,117 @@ export function ProponentsManagement({
             </div>
           );
         })() : null}
+        {/* Summary hero: who the locator is and where its current lease stands, at a glance. */}
+        {editing && !leaseView ? (() => {
+          const name = form.business_name.trim() || editing.business_name || '—';
+          const initials =
+            name
+              .split(/\s+/)
+              .filter(Boolean)
+              .slice(0, 2)
+              .map((w) => w[0])
+              .join('')
+              .toUpperCase() || '?';
+          const contractLabel =
+            contractTypeOptions
+              .find((o) => o.value === String(form.contract_type_id ?? ''))
+              ?.label.replace(/ \(inactive\)$/, '') || '';
+          const officer = officerName(form.account_officer_id || '');
+          const tiles: { icon: React.ElementType; label: string; value: React.ReactNode; hint?: React.ReactNode }[] = [
+            { icon: CalendarClock, label: 'Lease Term', value: currentLeaseTerm || '—' },
+            {
+              icon: FileSignature,
+              label: 'Start → End',
+              value: currentStart || currentEnd ? `${fmtDate(currentStart)} → ${fmtDate(currentEnd)}` : '—',
+              hint: extendedTo ? (
+                <span style={{ color: EXTENDED_COLOR }}>Extended to {fmtDate(extendedTo)}</span>
+              ) : undefined,
+            },
+            { icon: UserRound, label: 'Account Officer', value: officer || '—' },
+            {
+              icon: Users,
+              label: 'Sub-Lessees · Extensions',
+              value: `${sublease.sublessees.length} · ${extensions.length}`,
+            },
+          ];
+          return (
+            <div
+              className="mb-4 overflow-hidden rounded-2xl border"
+              style={{
+                borderColor: 'var(--input-border)',
+                background:
+                  'linear-gradient(135deg, color-mix(in oklab, var(--nav-active-bg) 10%, var(--surface)) 0%, var(--surface) 70%)',
+              }}
+            >
+              <div className="flex items-center gap-3 px-4 pt-4 pb-3">
+                <div
+                  className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-sm font-bold"
+                  style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
+                >
+                  {initials}
+                </div>
+                <div className="min-w-0">
+                  <div className="truncate text-base font-bold" style={{ color: 'var(--text)' }}>
+                    {name}
+                  </div>
+                  <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-secondary">
+                    {editing.ref_no ? <span className="tabular-nums font-medium">{editing.ref_no}</span> : null}
+                    {form.ref_code ? (
+                      <>
+                        <span aria-hidden>·</span>
+                        <span>Ref. Code {form.ref_code}</span>
+                      </>
+                    ) : null}
+                    {contractLabel ? (
+                      <>
+                        <span aria-hidden>·</span>
+                        <span>{contractLabel}</span>
+                      </>
+                    ) : null}
+                    {form.nationality ? (
+                      <>
+                        <span aria-hidden>·</span>
+                        <span>{form.nationality}</span>
+                      </>
+                    ) : null}
+                    {sublease.sublessor ? (
+                      <>
+                        <span aria-hidden>·</span>
+                        <span>Sub-lessee of {sublease.sublessor.name}</span>
+                      </>
+                    ) : null}
+                  </div>
+                </div>
+              </div>
+              <div
+                className="grid grid-cols-2 lg:grid-cols-4 border-t"
+                style={{ borderColor: 'var(--input-border)' }}
+              >
+                {tiles.map((t, i) => (
+                  <div
+                    key={t.label}
+                    className={cn(
+                      'flex min-w-0 items-start gap-2.5 px-4 py-3',
+                      i % 2 === 1 && 'border-l',
+                      i >= 2 && 'border-t lg:border-t-0',
+                      i === 2 && 'lg:border-l',
+                    )}
+                    style={{ borderColor: 'var(--input-border)' }}
+                  >
+                    <t.icon size={15} className="mt-0.5 shrink-0 text-secondary" />
+                    <div className="min-w-0">
+                      <div className="text-[10px] font-semibold uppercase tracking-wider text-secondary">{t.label}</div>
+                      <div className="truncate text-[13px] font-semibold tabular-nums" style={{ color: 'var(--text)' }}>
+                        {t.value}
+                      </div>
+                      {t.hint ? <div className="text-[10px] font-semibold">{t.hint}</div> : null}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })() : null}
         {(() => {
           // Same field layout for New and Edit — same grouping/positions as
           // the legacy BRIDGE system's Locator's Information form, one flex
@@ -2674,16 +2854,14 @@ export function ProponentsManagement({
             {/* The locator's own details, in a card like the ones below (same
                 header strip); the fields keep their places. */}
             <div
-              className="flex flex-col gap-3 rounded-xl border p-3"
-              style={{ borderColor: 'var(--input-border)', backgroundColor: 'color-mix(in oklab, var(--control-bg) 55%, transparent)' }}
+              className="flex flex-col gap-3 rounded-2xl border p-3"
+              style={CARD_STYLE}
             >
               <div
-                className="-mx-3 -mt-3 mb-1 flex items-center justify-between gap-2 rounded-t-xl border-b px-3 py-2"
-                style={{ borderColor: 'var(--input-border)', backgroundColor: 'var(--control-bg)' }}
+                className="-mx-3 -mt-3 mb-1 flex items-center justify-between gap-2 rounded-t-2xl border-b px-3 py-2.5"
+                style={CARD_HEAD_STYLE}
               >
-                <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--text)' }}>
-                  Locator Details
-                </span>
+                <CardTitle icon={Building2}>Locator Details</CardTitle>
                 {editing?.ref_no ? (
                   <span className="text-[10px] text-secondary tabular-nums" title="System Ref No">
                     {editing.ref_no}
@@ -2801,21 +2979,16 @@ export function ProponentsManagement({
                 (the company's, fixed). Every renewal is a new lease with a new
                 Ref. Code; Ref. Codes are never reused. */}
             <div
-              className="flex flex-col gap-2 rounded-xl border p-3"
-              style={{ borderColor: 'var(--input-border)', backgroundColor: 'color-mix(in oklab, var(--control-bg) 55%, transparent)' }}
+              className="flex flex-col gap-2 rounded-2xl border p-3"
+              style={CARD_STYLE}
             >
               <div
-                className="-mx-3 -mt-3 mb-1 flex items-center justify-between gap-2 rounded-t-xl border-b px-3 py-2"
-                style={{ borderColor: 'var(--input-border)', backgroundColor: 'var(--control-bg)' }}
+                className="-mx-3 -mt-3 mb-1 flex items-center justify-between gap-2 rounded-t-2xl border-b px-3 py-2.5"
+                style={CARD_HEAD_STYLE}
               >
-                <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--text)' }}>
+                <CardTitle icon={FileSignature} count={leaseView ? undefined : Math.max(leases.length, 1)}>
                   {leaseView ? 'Lease Agreement' : 'Lease Agreements'}
-                  {leaseView ? null : (
-                    <span className="ml-1.5 font-normal normal-case tracking-normal text-secondary">
-                      ({Math.max(leases.length, 1)})
-                    </span>
-                  )}
-                </span>
+                </CardTitle>
                 <div className="flex items-center gap-3">
                   <span className="text-[10px] text-secondary">
                     {leaseView ? 'An earlier lease — read only' : 'A renewal starts a new lease with its own Ref. Code'}
@@ -2838,7 +3011,7 @@ export function ProponentsManagement({
               <div className="min-w-0 overflow-x-auto rounded-lg border" style={{ borderColor: 'var(--input-border)' }}>
                 <table className="w-full min-w-[60rem] table-fixed text-xs border-collapse">
                   <thead>
-                    <tr style={{ backgroundColor: 'var(--control-bg)' }}>
+                    <tr style={THEAD_ROW_STYLE}>
                       {[
                         ['Ref. Code', '15%'],
                         ['SEC Reg. No.', '12%'],
@@ -2927,11 +3100,7 @@ export function ProponentsManagement({
                           className="flex h-9 items-center rounded-md px-2 font-semibold tabular-nums"
                           style={{ backgroundColor: 'color-mix(in oklab, #22c55e 18%, transparent)', color: 'var(--text)' }}
                         >
-                          {(extendedTo && currentStart
-                            ? formatLeaseTerm(currentStart, extendedTo)
-                            : termEditable
-                            ? formatLeaseTerm(form.start_term, form.end_term)
-                            : editing?.lease_term) || '—'}
+                          {currentLeaseTerm || '—'}
                         </div>
                       </td>
                       <td className="px-2 py-1 border-b align-top" style={{ borderColor: 'var(--input-border)' }}>
@@ -2989,17 +3158,14 @@ export function ProponentsManagement({
                 (not by Update); the latest is the locator's Extension Date in reports. */}
             {leaseView ? null : (
             <div
-              className="flex flex-col gap-2 rounded-xl border p-3"
-              style={{ borderColor: 'var(--input-border)', backgroundColor: 'color-mix(in oklab, var(--control-bg) 55%, transparent)' }}
+              className="flex flex-col gap-2 rounded-2xl border p-3"
+              style={CARD_STYLE}
             >
               <div
-                className="-mx-3 -mt-3 mb-1 flex items-center justify-between gap-2 rounded-t-xl border-b px-3 py-2"
-                style={{ borderColor: 'var(--input-border)', backgroundColor: 'var(--control-bg)' }}
+                className="-mx-3 -mt-3 mb-1 flex items-center justify-between gap-2 rounded-t-2xl border-b px-3 py-2.5"
+                style={CARD_HEAD_STYLE}
               >
-                <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--text)' }}>
-                  Extension Date
-                  <span className="ml-1.5 font-normal normal-case tracking-normal text-secondary">({extensions.length})</span>
-                </span>
+                <CardTitle icon={CalendarPlus} count={extensions.length}>Extension Date</CardTitle>
                 <div className="flex items-center gap-3">
                   <span className="text-[10px] text-secondary">Each extension is kept as history</span>
                   {extensions.length > 1 ? (
@@ -3022,7 +3188,7 @@ export function ProponentsManagement({
                 <div className="min-w-0 overflow-x-auto rounded-lg border" style={{ borderColor: 'var(--input-border)' }}>
                   <table className="w-full min-w-[52rem] table-fixed text-xs border-collapse">
                     <thead>
-                      <tr style={{ backgroundColor: 'var(--control-bg)' }}>
+                      <tr style={THEAD_ROW_STYLE}>
                         {[
                           ['Extension Date', '16%'],
                           ['Remarks', '34%'],
@@ -3211,7 +3377,15 @@ export function ProponentsManagement({
               return (
                 <div className="flex flex-col gap-2">
                   <label
-                    className="flex w-fit items-center gap-1.5 text-[9px] font-semibold text-secondary uppercase tracking-widest whitespace-nowrap"
+                    className="flex w-fit cursor-pointer items-center gap-2 rounded-full border px-3 py-1.5 text-[11px] font-semibold whitespace-nowrap"
+                    style={{
+                      borderColor: form.is_sublease || activeSubs > 0 ? 'var(--nav-active-bg)' : 'var(--input-border)',
+                      backgroundColor:
+                        form.is_sublease || activeSubs > 0
+                          ? 'color-mix(in oklab, var(--nav-active-bg) 8%, var(--surface))'
+                          : 'var(--surface)',
+                      color: 'var(--text)',
+                    }}
                     title={activeSubs ? 'Unlink its sub-lessees first to untick this' : undefined}
                   >
                     <input
@@ -3227,24 +3401,21 @@ export function ProponentsManagement({
                   </label>
                   {showCard ? (
                     <div
-                      className="flex flex-col gap-2 rounded-xl border p-3"
-                      style={{ borderColor: 'var(--input-border)', backgroundColor: 'color-mix(in oklab, var(--control-bg) 55%, transparent)' }}
+                      className="flex flex-col gap-2 rounded-2xl border p-3"
+                      style={CARD_STYLE}
                     >
                       <div
-                        className="-mx-3 -mt-3 mb-1 flex flex-wrap items-center justify-between gap-2 rounded-t-xl border-b px-3 py-2"
-                        style={{ borderColor: 'var(--input-border)', backgroundColor: 'var(--control-bg)' }}
+                        className="-mx-3 -mt-3 mb-1 flex flex-wrap items-center justify-between gap-2 rounded-t-2xl border-b px-3 py-2.5"
+                        style={CARD_HEAD_STYLE}
                       >
-                        <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--text)' }}>
-                          Sub-Lessees
-                          <span className="ml-1.5 font-normal normal-case tracking-normal text-secondary">({subs.length})</span>
-                        </span>
+                        <CardTitle icon={Users} count={subs.length}>Sub-Lessees</CardTitle>
                         <span className="text-[10px] text-secondary">Each sub-lessee has its own Locator Information</span>
                       </div>
                       {subs.length ? (
                         <div className="min-w-0 overflow-x-auto rounded-lg border" style={{ borderColor: 'var(--input-border)' }}>
                           <table className="w-full min-w-[44rem] table-fixed text-xs border-collapse">
                             <thead>
-                              <tr style={{ backgroundColor: 'var(--control-bg)' }}>
+                              <tr style={THEAD_ROW_STYLE}>
                                 {[
                                   ['Sub-Lessee', '34%'],
                                   ['Ref. Code', '15%'],
@@ -3376,8 +3547,8 @@ export function ProponentsManagement({
                 lists (dbo.contact_person / dbo.signatory) in one card, same columns and
                 widths, saved together by the card's Save. */}
             <div
-              className="flex flex-col gap-3 rounded-xl border p-3"
-              style={{ borderColor: 'var(--input-border)', backgroundColor: 'color-mix(in oklab, var(--control-bg) 55%, transparent)' }}
+              className="flex flex-col gap-3 rounded-2xl border p-3"
+              style={CARD_STYLE}
             >
               <div
                 role="button"
@@ -3392,9 +3563,9 @@ export function ProponentsManagement({
                 }}
                 className={cn(
                   '-mx-3 -mt-3 flex cursor-pointer select-none items-center justify-between gap-2 px-3 py-2',
-                  contactsExpanded ? 'mb-1 rounded-t-xl border-b' : '-mb-3 rounded-xl',
+                  contactsExpanded ? 'mb-1 rounded-t-2xl border-b' : '-mb-3 rounded-2xl',
                 )}
-                style={{ borderColor: 'var(--input-border)', backgroundColor: 'var(--control-bg)' }}
+                style={CARD_HEAD_STYLE}
               >
                 <div className="flex min-w-0 items-center gap-2">
                   {contactsExpanded ? (
@@ -3404,9 +3575,7 @@ export function ProponentsManagement({
                   )}
                   {contactsExpanded || contactsEmpty ? (
                     <>
-                      <span className="shrink-0 text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--text)' }}>
-                        Contact Person &amp; Authorized Signatory
-                      </span>
+                      <span className="shrink-0"><CardTitle icon={UserRound}>Contact Person &amp; Authorized Signatory</CardTitle></span>
                       {!contactsExpanded ? (
                         <span className="ml-1 truncate text-[12px] font-medium text-orange-500">
                           No contact person or signatory yet — click to add.
@@ -3554,17 +3723,14 @@ export function ProponentsManagement({
                   {/* Stockholders (dbo.stockholder) — same card layout as the Profile's
                       property schedule: Add and Save in the header. */}
                   <div
-                    className="flex flex-col gap-3 rounded-xl border p-3"
-                    style={{ borderColor: 'var(--input-border)', backgroundColor: 'color-mix(in oklab, var(--control-bg) 55%, transparent)' }}
+                    className="flex flex-col gap-3 rounded-2xl border p-3"
+                    style={CARD_STYLE}
                   >
                     <div
-                      className="-mx-3 -mt-3 flex items-center justify-between gap-2 rounded-t-xl border-b px-3 py-2"
-                      style={{ borderColor: 'var(--input-border)', backgroundColor: 'var(--control-bg)' }}
+                      className="-mx-3 -mt-3 flex items-center justify-between gap-2 rounded-t-2xl border-b px-3 py-2.5"
+                      style={CARD_HEAD_STYLE}
                     >
-                      <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--text)' }}>
-                        Stockholders
-                        <span className="ml-1.5 font-normal normal-case tracking-normal text-secondary">({form.stockholders.length})</span>
-                      </span>
+                      <CardTitle icon={Users} count={form.stockholders.length}>Stockholders</CardTitle>
                       <div className="flex items-center gap-2">
                         <button
                           type="button"
@@ -3617,16 +3783,14 @@ export function ProponentsManagement({
                         stockholders table. Its own contact person, separate from the locator's
                         Contact Person list. */}
                     <div
-                      className="flex flex-col gap-3 rounded-xl border p-3"
-                      style={{ borderColor: 'var(--input-border)', backgroundColor: 'color-mix(in oklab, var(--control-bg) 55%, transparent)' }}
+                      className="flex flex-col gap-3 rounded-2xl border p-3"
+                      style={CARD_STYLE}
                     >
                       <div
-                        className="-mx-3 -mt-3 mb-1 flex items-center justify-between gap-2 rounded-t-xl border-b px-3 py-2"
-                        style={{ borderColor: 'var(--input-border)', backgroundColor: 'var(--control-bg)' }}
+                        className="-mx-3 -mt-3 mb-1 flex items-center justify-between gap-2 rounded-t-2xl border-b px-3 py-2.5"
+                        style={CARD_HEAD_STYLE}
                       >
-                        <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--text)' }}>
-                          SEC Registration Information
-                        </span>
+                        <CardTitle icon={Landmark}>SEC Registration Information</CardTitle>
                         <SectionSaveBar
                           allowed={editing ? canEdit : canAdd}
                           label="Save SEC Registration Information"
@@ -3733,16 +3897,14 @@ export function ProponentsManagement({
                         with the SEC Registration Information); the document is the
                         locator's Compliance upload, read only. */}
                     <div
-                      className="flex flex-col gap-3 rounded-xl border p-3"
-                      style={{ borderColor: 'var(--input-border)', backgroundColor: 'color-mix(in oklab, var(--control-bg) 55%, transparent)' }}
+                      className="flex flex-col gap-3 rounded-2xl border p-3"
+                      style={CARD_STYLE}
                     >
                       <div
-                        className="-mx-3 -mt-3 mb-1 flex items-center justify-between gap-2 rounded-t-xl border-b px-3 py-2"
-                        style={{ borderColor: 'var(--input-border)', backgroundColor: 'var(--control-bg)' }}
+                        className="-mx-3 -mt-3 mb-1 flex items-center justify-between gap-2 rounded-t-2xl border-b px-3 py-2.5"
+                        style={CARD_HEAD_STYLE}
                       >
-                        <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--text)' }}>
-                          GIS (General Information Sheet)
-                        </span>
+                        <CardTitle icon={FileSignature}>GIS (General Information Sheet)</CardTitle>
                         <SectionSaveBar
                           allowed={editing ? canEdit : canAdd}
                           label="Save GIS"
@@ -3960,19 +4122,16 @@ export function ProponentsManagement({
                 card; Add property (Standard / Non-standard) and the schedule's Save are in
                 the card header. */}
             <div
-              className="flex flex-col gap-3 rounded-xl border p-3"
-              style={{ borderColor: 'var(--input-border)', backgroundColor: 'color-mix(in oklab, var(--control-bg) 55%, transparent)' }}
+              className="flex flex-col gap-3 rounded-2xl border p-3"
+              style={CARD_STYLE}
             >
               <div
-                className="-mx-3 -mt-3 flex items-center justify-between gap-2 rounded-t-xl border-b px-3 py-2"
-                style={{ borderColor: 'var(--input-border)', backgroundColor: 'var(--control-bg)' }}
+                className="-mx-3 -mt-3 flex items-center justify-between gap-2 rounded-t-2xl border-b px-3 py-2.5"
+                style={CARD_HEAD_STYLE}
               >
-                <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--text)' }}>
+                <CardTitle icon={LayoutGrid} count={leaseView ? (viewedLease?.properties || []).length : form.properties.length}>
                   Property Schedule
-                  <span className="ml-1.5 font-normal normal-case tracking-normal text-secondary">
-                    ({leaseView ? (viewedLease?.properties || []).length : form.properties.length})
-                  </span>
-                </span>
+                </CardTitle>
                 {/* Editing is for the current lease only; an earlier lease's panel is read only. */}
                 <div className={cn('flex items-center gap-2', leaseView && 'hidden')}>
                   <div className="relative">
@@ -4055,7 +4214,7 @@ export function ProponentsManagement({
               <div className="min-w-0 overflow-x-auto rounded-lg border" style={{ borderColor: 'var(--input-border)' }}>
                 <table className="w-full text-xs border-collapse">
                   <thead>
-                    <tr style={{ backgroundColor: 'var(--control-bg)' }}>
+                    <tr style={THEAD_ROW_STYLE}>
                       {['No.', 'Year', 'Date From', 'Date To', 'Rate', 'Type of Property', 'Area (SQM)', 'Rate/SQM/MO', 'Currency', 'MGL/MO', 'Currency', ''].map(
                         (h, i) => (
                           <th
@@ -4296,12 +4455,12 @@ export function ProponentsManagement({
                 one card each so the labels read as separate groups. */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div
-                className="flex flex-col gap-2 rounded-xl border p-3"
-                style={{ borderColor: 'var(--input-border)', backgroundColor: 'color-mix(in oklab, var(--control-bg) 55%, transparent)' }}
+                className="flex flex-col gap-2 rounded-2xl border p-3"
+                style={CARD_STYLE}
               >
                 <div
-                  className="-mx-3 -mt-3 mb-1 rounded-t-xl border-b px-3 py-2 text-[10px] font-bold uppercase tracking-widest text-center"
-                  style={{ borderColor: 'var(--input-border)', backgroundColor: 'var(--control-bg)', color: 'var(--text)' }}
+                  className="-mx-3 -mt-3 mb-1 rounded-t-2xl border-b px-3 py-2.5 text-[10px] font-bold uppercase tracking-widest text-center"
+                  style={{ ...CARD_HEAD_STYLE, color: 'var(--text)' }}
                 >
                   Advance Lease Payment
                 </div>
@@ -4335,12 +4494,12 @@ export function ProponentsManagement({
               </div>
 
               <div
-                className="flex flex-col gap-2 rounded-xl border p-3"
-                style={{ borderColor: 'var(--input-border)', backgroundColor: 'color-mix(in oklab, var(--control-bg) 55%, transparent)' }}
+                className="flex flex-col gap-2 rounded-2xl border p-3"
+                style={CARD_STYLE}
               >
                 <div
-                  className="-mx-3 -mt-3 mb-1 rounded-t-xl border-b px-3 py-2 text-[10px] font-bold uppercase tracking-widest text-center"
-                  style={{ borderColor: 'var(--input-border)', backgroundColor: 'var(--control-bg)', color: 'var(--text)' }}
+                  className="-mx-3 -mt-3 mb-1 rounded-t-2xl border-b px-3 py-2.5 text-[10px] font-bold uppercase tracking-widest text-center"
+                  style={{ ...CARD_HEAD_STYLE, color: 'var(--text)' }}
                 >
                   Security Deposit
                 </div>
@@ -4374,12 +4533,12 @@ export function ProponentsManagement({
               </div>
 
               <div
-                className="flex flex-col gap-2 rounded-xl border p-3"
-                style={{ borderColor: 'var(--input-border)', backgroundColor: 'color-mix(in oklab, var(--control-bg) 55%, transparent)' }}
+                className="flex flex-col gap-2 rounded-2xl border p-3"
+                style={CARD_STYLE}
               >
                 <div
-                  className="-mx-3 -mt-3 mb-1 rounded-t-xl border-b px-3 py-2 text-[10px] font-bold uppercase tracking-widest text-center"
-                  style={{ borderColor: 'var(--input-border)', backgroundColor: 'var(--control-bg)', color: 'var(--text)' }}
+                  className="-mx-3 -mt-3 mb-1 rounded-t-2xl border-b px-3 py-2.5 text-[10px] font-bold uppercase tracking-widest text-center"
+                  style={{ ...CARD_HEAD_STYLE, color: 'var(--text)' }}
                 >
                   Performance Security
                 </div>
@@ -4417,16 +4576,14 @@ export function ProponentsManagement({
                 what the locator committed to vs. what it actually has — investment
                 amount and number of employees. Own Save, like the other cards. */}
             <div
-              className="flex flex-col gap-3 rounded-xl border p-3"
-              style={{ borderColor: 'var(--input-border)', backgroundColor: 'color-mix(in oklab, var(--control-bg) 55%, transparent)' }}
+              className="flex flex-col gap-3 rounded-2xl border p-3"
+              style={CARD_STYLE}
             >
               <div
-                className="-mx-3 -mt-3 flex items-center justify-between gap-2 rounded-t-xl border-b px-3 py-2"
-                style={{ borderColor: 'var(--input-border)', backgroundColor: 'var(--control-bg)' }}
+                className="-mx-3 -mt-3 flex items-center justify-between gap-2 rounded-t-2xl border-b px-3 py-2.5"
+                style={CARD_HEAD_STYLE}
               >
-                <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--text)' }}>
-                  Performance Commitment
-                </span>
+                <CardTitle icon={Target}>Performance Commitment</CardTitle>
                 <SectionSaveBar
                   allowed={editing ? canEdit : canAdd}
                   label="Save Performance Commitment"
@@ -4703,7 +4860,7 @@ function LeasePropertyTable({ properties }: { properties: any[] }) {
     <div className="min-w-0 overflow-x-auto rounded-lg border" style={{ borderColor: 'var(--input-border)' }}>
       <table className="w-full text-xs border-collapse">
         <thead>
-          <tr style={{ backgroundColor: 'var(--control-bg)' }}>
+          <tr style={THEAD_ROW_STYLE}>
             {['No.', 'Year', 'Date From', 'Date To', 'Rate', 'Type of Property', 'Area (SQM)', 'Rate/SQM/MO', 'MGL/MO'].map((h) => (
               <th
                 key={h}
@@ -4922,7 +5079,7 @@ export function RowsEditor<T extends { id?: number }>({
       <div className="flex-1 min-w-0 overflow-x-auto rounded-lg border" style={{ borderColor: 'var(--input-border)' }}>
         <table className={cn('w-full text-xs border-collapse', fixed && 'table-fixed min-w-[40rem]')}>
           <thead>
-            <tr style={{ backgroundColor: 'var(--control-bg)' }}>
+            <tr style={THEAD_ROW_STYLE}>
               <th
                 className="px-2 py-1.5 text-center font-semibold uppercase tracking-wide text-[9px] border-b w-10"
                 style={{ borderColor: 'var(--input-border)', color: 'var(--text-muted)' }}

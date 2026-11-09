@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowDown,
   ArrowUp,
+  ArrowUpDown,
   ChevronDown,
   ChevronUp,
   Database,
@@ -9,6 +10,7 @@ import {
   FileText,
   Filter,
   Loader2,
+  Plus,
   Save,
   Search,
   SlidersHorizontal,
@@ -17,6 +19,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { AppSelect } from '../ui/AppSelect';
+import { DatePicker, parseYmd, toYmd } from '../ui/DatePicker';
 import { EmptyState } from '../ui/EmptyState';
 import { cn } from '../../lib/utils';
 import { csvEscape, downloadBlob } from './reportUtils';
@@ -264,18 +267,48 @@ export function CustomReport() {
   const available = dataset.columns.filter((c) => !columns.includes(c.key) && (!q || c.label.toLowerCase().includes(q)));
   const shownRows = result ? result.rows.slice(0, PREVIEW_ROWS) : [];
   const activeFilters = Object.values(filters).filter(Boolean).length;
-  const panel = 'rounded-xl border p-3 flex flex-col gap-2.5';
-  const panelStyle = { borderColor: 'var(--border-subtle)', backgroundColor: 'var(--surface)' };
+  const templateName = templates.find((t) => String(t.id) === templateId)?.name;
+  const panel = 'rounded-2xl border flex flex-col';
+  const panelStyle = {
+    borderColor: 'var(--border-subtle)',
+    backgroundColor: 'var(--surface)',
+    boxShadow: '0 1px 2px rgb(0 0 0 / 0.04), 0 1px 3px rgb(0 0 0 / 0.05)',
+  };
+  const headTint = { borderColor: 'var(--border-subtle)', backgroundColor: 'color-mix(in oklab, var(--control-bg) 55%, var(--surface))' };
   const btn =
     'inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-[12px] font-semibold border disabled:opacity-50 disabled:cursor-not-allowed';
+  const linkBtn = 'rounded-md px-1.5 py-0.5 text-[11px] font-semibold text-secondary hover:bg-[var(--selected-bg)] hover:text-[var(--text)]';
+  // A "… from" / "… to" pair of date filters shows as one range picker.
+  type FilterSlot = { kind: 'one'; f: FilterDef } | { kind: 'range'; label: string; from: FilterDef; to: FilterDef };
+  const filterSlots: FilterSlot[] = [];
+  for (const f of dataset.filters) {
+    if (f.type === 'date' && / from$/i.test(f.label)) {
+      const to = dataset.filters.find((x) => x.type === 'date' && x.label.toLowerCase() === f.label.replace(/ from$/i, ' to').toLowerCase());
+      if (to) {
+        filterSlots.push({ kind: 'range', label: f.label.replace(/ from$/i, ''), from: f, to });
+        continue;
+      }
+    }
+    if (f.type === 'date' && / to$/i.test(f.label) && filterSlots.some((s) => s.kind === 'range' && s.to.key === f.key)) continue;
+    filterSlots.push({ kind: 'one', f });
+  }
+  const filterLabel = (f: FilterDef) => f.options?.find((o) => o.value === filters[f.key])?.label || (f.type === 'date' ? fmtDate(filters[f.key]) : filters[f.key]);
 
   return (
     <div className="flex flex-col gap-4">
       {/* Templates */}
-      <div className="flex flex-col gap-2 rounded-xl border p-3 sm:flex-row sm:items-center" style={panelStyle}>
-        <div className="flex min-w-0 flex-1 items-center gap-2">
-          <Save size={14} className="shrink-0 text-secondary" />
-          <span className="shrink-0 text-[11px] font-bold uppercase tracking-widest text-secondary">My templates</span>
+      <div className="flex flex-col gap-3 rounded-2xl border px-4 py-3 sm:flex-row sm:items-center" style={panelStyle}>
+        <div className="flex min-w-0 flex-1 items-center gap-3">
+          <span
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg"
+            style={{ backgroundColor: 'color-mix(in oklab, var(--nav-active-bg) 12%, transparent)', color: 'var(--nav-active-bg)' }}
+          >
+            <Save size={15} />
+          </span>
+          <div className="hidden shrink-0 sm:block">
+            <div className="text-[12.5px] font-semibold" style={{ color: 'var(--text)' }}>My templates</div>
+            <div className="text-[10.5px] text-secondary">{templates.length ? `${templates.length} saved` : 'Save a setup to reuse it'}</div>
+          </div>
           <div className="min-w-0 flex-1 sm:max-w-xs">
             <AppSelect
               options={templates.map((t) => ({ value: String(t.id), label: t.name, detail: datasets.find((d) => d.key === t.dataset)?.label || '' }))}
@@ -297,7 +330,7 @@ export function CustomReport() {
             className={btn}
             style={{ borderColor: 'var(--border)', color: 'var(--text)' }}
             disabled={!columns.length}
-            onClick={() => setSaveName(templates.find((t) => String(t.id) === templateId)?.name || '')}
+            onClick={() => setSaveName(templateName || '')}
           >
             <Save size={13} /> Save as template
           </button>
@@ -331,161 +364,159 @@ export function CustomReport() {
         )}
       </div>
 
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[22rem_minmax(0,1fr)]">
-        {/* Setup */}
-        <div className="flex flex-col gap-4">
+      <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-[20rem_minmax(0,1fr)]">
+        {/* Setup: a sticky sidebar that scrolls on its own. */}
+        <div className="flex flex-col gap-4 xl:sticky xl:top-4 xl:max-h-[calc(100vh-2rem)] xl:overflow-y-auto scrollbar-hide">
           <div className={panel} style={panelStyle}>
-            <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-widest text-secondary">
-              <Database size={13} /> 1 · Report on
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              {datasets.map((d) => (
-                <button
-                  key={d.key}
-                  type="button"
-                  onClick={() => pickDataset(d.key)}
-                  className="rounded-lg border px-2.5 py-2 text-left transition-colors"
-                  style={
-                    d.key === datasetKey
-                      ? { borderColor: 'var(--nav-active-bg)', backgroundColor: 'color-mix(in oklab, var(--nav-active-bg) 8%, transparent)' }
-                      : { borderColor: 'var(--border-subtle)' }
-                  }
-                >
-                  <div className="text-[12px] font-semibold" style={{ color: 'var(--text)' }}>
-                    {d.label}
-                  </div>
-                  <div className="text-[10px] leading-snug text-secondary">{d.description}</div>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className={panel} style={panelStyle}>
-            <div className="flex items-center justify-between gap-2">
-              <span className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-widest text-secondary">
-                <SlidersHorizontal size={13} /> 2 · Columns <span className="font-semibold normal-case tracking-normal">({columns.length})</span>
-              </span>
-              <span className="flex gap-2 text-[11px]">
-                <button type="button" className="font-semibold text-secondary hover:text-[var(--text)]" onClick={() => setColumns(dataset.columns.map((c) => c.key))}>
-                  All
-                </button>
-                <button type="button" className="font-semibold text-secondary hover:text-[var(--text)]" onClick={() => setColumns(dataset.defaults)}>
-                  Default
-                </button>
-                <button type="button" className="font-semibold text-secondary hover:text-[var(--text)]" onClick={() => setColumns([])}>
-                  Clear
-                </button>
-              </span>
-            </div>
-            {/* Chosen columns, in the order they'll appear. */}
-            {columns.length ? (
-              <div className="flex flex-col gap-1">
-                {columns.map((key, i) => (
-                  <div
-                    key={key}
-                    className="flex items-center gap-1.5 rounded-lg border px-2 py-1 text-[12px]"
-                    style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'color-mix(in oklab, var(--control-bg) 50%, transparent)' }}
+            <StepHead n={1} icon={Database} title="Report on" style={headTint} />
+            <div className="flex flex-col gap-1.5 p-3">
+              {datasets.map((d) => {
+                const on = d.key === datasetKey;
+                return (
+                  <button
+                    key={d.key}
+                    type="button"
+                    onClick={() => pickDataset(d.key)}
+                    className="flex items-start gap-2.5 rounded-xl border px-3 py-2 text-left transition-colors hover:bg-[var(--selected-bg)]"
+                    style={
+                      on
+                        ? { borderColor: 'var(--nav-active-bg)', backgroundColor: 'color-mix(in oklab, var(--nav-active-bg) 7%, transparent)' }
+                        : { borderColor: 'var(--border-subtle)' }
+                    }
                   >
-                    <span className="w-5 text-center text-[10px] font-bold text-secondary tabular-nums">{i + 1}</span>
-                    <span className="min-w-0 flex-1 truncate" style={{ color: 'var(--text)' }}>
-                      {colDef(key)?.label || key}
-                    </span>
-                    <button type="button" className="p-0.5 text-secondary disabled:opacity-30" disabled={i === 0} onClick={() => moveColumn(key, -1)} title="Move up">
-                      <ChevronUp size={13} />
-                    </button>
-                    <button
-                      type="button"
-                      className="p-0.5 text-secondary disabled:opacity-30"
-                      disabled={i === columns.length - 1}
-                      onClick={() => moveColumn(key, 1)}
-                      title="Move down"
+                    <span
+                      className="mt-0.5 flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full border-2"
+                      style={{ borderColor: on ? 'var(--nav-active-bg)' : 'var(--border)' }}
                     >
-                      <ChevronDown size={13} />
-                    </button>
-                    <button type="button" className="p-0.5 text-secondary hover:text-red-500" onClick={() => toggleColumn(key)} title="Remove">
-                      <X size={13} />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="rounded-lg border border-dashed px-3 py-2 text-[11px] text-secondary" style={{ borderColor: 'var(--border-subtle)' }}>
-                No columns yet — add some below.
-              </div>
-            )}
-            <div className="relative mt-1">
-              <Search size={13} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-secondary" />
-              <input
-                className="app-input h-8 w-full pl-8 text-[12px]"
-                placeholder="Add a column…"
-                value={columnSearch}
-                onChange={(e) => setColumnSearch(e.target.value)}
-              />
-            </div>
-            <div className="flex flex-wrap gap-1.5">
-              {available.map((c) => (
-                <button
-                  key={c.key}
-                  type="button"
-                  onClick={() => toggleColumn(c.key)}
-                  className="rounded-full border px-2 py-0.5 text-[11px] hover:bg-[var(--selected-bg)]"
-                  style={{ borderColor: 'var(--border-subtle)', color: 'var(--text)' }}
-                >
-                  + {c.label}
-                </button>
-              ))}
-              {!available.length ? <span className="text-[11px] text-secondary">{q ? 'No match.' : 'Every column is added.'}</span> : null}
+                      {on ? <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: 'var(--nav-active-bg)' }} /> : null}
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block text-[12.5px] font-semibold" style={{ color: 'var(--text)' }}>
+                        {d.label}
+                      </span>
+                      <span className="block text-[10.5px] leading-snug text-secondary">{d.description}</span>
+                    </span>
+                  </button>
+                );
+              })}
             </div>
           </div>
 
           <div className={panel} style={panelStyle}>
-            <div className="flex items-center justify-between gap-2">
-              <span className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-widest text-secondary">
-                <Filter size={13} /> 3 · Filters {activeFilters ? <span className="font-semibold normal-case tracking-normal">({activeFilters})</span> : null}
-              </span>
-              {activeFilters ? (
-                <button type="button" className="text-[11px] font-semibold text-secondary hover:text-[var(--text)]" onClick={() => setFilters({})}>
-                  Clear
-                </button>
-              ) : null}
-            </div>
-            <div className="grid grid-cols-1 gap-2.5">
-              {dataset.filters.map((f) => (
-                <label key={f.key} className="flex flex-col gap-1">
-                  <span className="text-[10px] font-semibold uppercase tracking-widest text-secondary">{f.label}</span>
-                  {f.type === 'select' ? (
-                    <AppSelect
-                      options={f.options || []}
-                      value={filters[f.key] || ''}
-                      onChange={(v) => setFilters((p) => ({ ...p, [f.key]: v || '' }))}
-                      placeholder="Any"
-                      isClearable
-                    />
-                  ) : (
-                    <input
-                      type="date"
-                      className="app-input h-9"
-                      value={filters[f.key] || ''}
-                      onChange={(e) => setFilters((p) => ({ ...p, [f.key]: e.target.value }))}
-                    />
-                  )}
-                </label>
-              ))}
+            <StepHead
+              n={2}
+              icon={SlidersHorizontal}
+              title="Columns"
+              count={columns.length}
+              style={headTint}
+              right={
+                <span className="flex gap-0.5">
+                  <button type="button" className={linkBtn} onClick={() => setColumns(dataset.columns.map((c) => c.key))}>
+                    All
+                  </button>
+                  <button type="button" className={linkBtn} onClick={() => setColumns(dataset.defaults)}>
+                    Default
+                  </button>
+                  <button type="button" className={linkBtn} onClick={() => setColumns([])}>
+                    Clear
+                  </button>
+                </span>
+              }
+            />
+            <div className="flex flex-col gap-2.5 p-3">
+              {/* Chosen columns, in the order they'll appear. */}
+              {columns.length ? (
+                <div className="flex flex-col overflow-hidden rounded-xl border" style={{ borderColor: 'var(--border-subtle)' }}>
+                  {columns.map((key, i) => (
+                    <div
+                      key={key}
+                      className={cn('group flex items-center gap-2 px-2.5 py-1.5 text-[12px] hover:bg-[var(--selected-bg)]', i > 0 && 'border-t')}
+                      style={{ borderColor: 'var(--border-subtle)' }}
+                    >
+                      <span
+                        className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-[10px] font-bold tabular-nums text-secondary"
+                        style={{ backgroundColor: 'var(--control-bg)' }}
+                      >
+                        {i + 1}
+                      </span>
+                      <span className="min-w-0 flex-1 truncate" style={{ color: 'var(--text)' }}>
+                        {colDef(key)?.label || key}
+                      </span>
+                      <span className="flex items-center opacity-60 group-hover:opacity-100">
+                        <button type="button" className="rounded p-0.5 text-secondary hover:text-[var(--text)] disabled:opacity-30" disabled={i === 0} onClick={() => moveColumn(key, -1)} title="Move up">
+                          <ChevronUp size={13} />
+                        </button>
+                        <button
+                          type="button"
+                          className="rounded p-0.5 text-secondary hover:text-[var(--text)] disabled:opacity-30"
+                          disabled={i === columns.length - 1}
+                          onClick={() => moveColumn(key, 1)}
+                          title="Move down"
+                        >
+                          <ChevronDown size={13} />
+                        </button>
+                        <button type="button" className="rounded p-0.5 text-secondary hover:text-red-500" onClick={() => toggleColumn(key)} title="Remove">
+                          <X size={13} />
+                        </button>
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="rounded-xl border border-dashed px-3 py-3 text-center text-[11px] text-secondary" style={{ borderColor: 'var(--border-subtle)' }}>
+                  No columns yet — add some below.
+                </div>
+              )}
+              <div className="flex flex-col gap-2 rounded-xl p-2.5" style={{ backgroundColor: 'color-mix(in oklab, var(--control-bg) 45%, transparent)' }}>
+                <div className="relative">
+                  <Search size={13} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-secondary" />
+                  <input
+                    className="app-input h-8 w-full pl-8 text-[12px]"
+                    placeholder={`Add a column… (${dataset.columns.length - columns.length} more)`}
+                    value={columnSearch}
+                    onChange={(e) => setColumnSearch(e.target.value)}
+                  />
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {available.map((c) => (
+                    <button
+                      key={c.key}
+                      type="button"
+                      onClick={() => toggleColumn(c.key)}
+                      className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] hover:border-[var(--nav-active-bg)]"
+                      style={{ borderColor: 'var(--border-subtle)', color: 'var(--text)', backgroundColor: 'var(--surface)' }}
+                    >
+                      <Plus size={10} className="text-secondary" /> {c.label}
+                    </button>
+                  ))}
+                  {!available.length ? <span className="text-[11px] text-secondary">{q ? 'No match.' : 'Every column is added.'}</span> : null}
+                </div>
+              </div>
             </div>
           </div>
         </div>
 
         {/* Result */}
-        <div className="flex min-w-0 flex-col gap-3 rounded-xl border p-3" style={panelStyle}>
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+        <div className={cn(panel, 'min-w-0 overflow-hidden')} style={panelStyle}>
+          <div className="flex flex-col gap-3 border-b px-4 py-3 sm:flex-row sm:items-center" style={{ borderColor: 'var(--border-subtle)' }}>
             <div className="min-w-0 flex-1">
-              <div className="text-[13px] font-bold" style={{ color: 'var(--text)' }}>
-                {templates.find((t) => String(t.id) === templateId)?.name || dataset.label}
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-[15px] font-bold" style={{ color: 'var(--text)' }}>
+                  {templateName || dataset.label}
+                </span>
+                {result ? (
+                  <span
+                    className="rounded-full px-2 py-0.5 text-[10.5px] font-semibold tabular-nums"
+                    style={{ backgroundColor: 'color-mix(in oklab, var(--nav-active-bg) 10%, transparent)', color: 'var(--text)' }}
+                  >
+                    {result.total.toLocaleString('en-US')} row{result.total === 1 ? '' : 's'}
+                  </span>
+                ) : null}
+                {running ? <Loader2 size={13} className="animate-spin text-secondary" /> : null}
               </div>
-              <div className="flex items-center gap-1.5 text-[11px] text-secondary">
-                {running ? <Loader2 size={12} className="animate-spin" /> : null}
+              <div className="mt-0.5 text-[11px] text-secondary">
                 {result
-                  ? `${result.total.toLocaleString('en-US')} row${result.total === 1 ? '' : 's'}${result.truncated ? ` — only the first ${maxRows.toLocaleString('en-US')}; narrow the filters` : ''}${
+                  ? `${columns.length} column${columns.length === 1 ? '' : 's'}${result.truncated ? ` · only the first ${maxRows.toLocaleString('en-US')} — narrow the filters` : ''}${
                       result.total > PREVIEW_ROWS ? ` · preview shows ${PREVIEW_ROWS}, the export has all` : ''
                     }`
                   : columns.length
@@ -497,7 +528,7 @@ export function CustomReport() {
               <button
                 type="button"
                 className={btn}
-                style={{ borderColor: 'var(--border)', color: 'var(--text)' }}
+                style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)', borderColor: 'transparent' }}
                 disabled={!result || running || Boolean(exporting)}
                 onClick={() => void exportExcel()}
               >
@@ -515,73 +546,250 @@ export function CustomReport() {
             </div>
           </div>
 
-          {error ? (
-            <div className="rounded-lg border px-3 py-2 text-[12px]" style={{ borderColor: '#ef444455', color: '#ef4444' }}>
-              {error}
+          {/* Filters: a bar right above the rows they narrow. */}
+          {dataset.filters.length ? (
+            <div className="flex flex-col gap-2 border-b px-4 py-3" style={headTint}>
+              <div className="flex items-center justify-between gap-2">
+                <span className="flex items-center gap-1.5 text-[11px] font-semibold" style={{ color: 'var(--text)' }}>
+                  <Filter size={12} className="text-secondary" /> Filters
+                  {activeFilters ? (
+                    <span className="rounded-full px-1.5 text-[10px] font-semibold tabular-nums" style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}>
+                      {activeFilters}
+                    </span>
+                  ) : null}
+                </span>
+                {activeFilters ? (
+                  <button type="button" className={linkBtn} onClick={() => setFilters({})}>
+                    Clear all
+                  </button>
+                ) : null}
+              </div>
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-5">
+                {filterSlots.map((slot) =>
+                  slot.kind === 'range' ? (
+                    <label key={slot.from.key} className="flex min-w-0 flex-col gap-1">
+                      <span className="text-[10px] font-semibold uppercase tracking-wider text-secondary">{slot.label}</span>
+                      <DatePicker
+                        mode="range"
+                        bordered
+                        fullWidth
+                        placeholder="Any date"
+                        value={[parseYmd(filters[slot.from.key]), parseYmd(filters[slot.to.key])]}
+                        onChange={(r: [Date | null, Date | null] | null) =>
+                          setFilters((p) => ({ ...p, [slot.from.key]: toYmd(r?.[0] ?? null), [slot.to.key]: toYmd(r?.[1] ?? null) }))
+                        }
+                      />
+                    </label>
+                  ) : (
+                    <label key={slot.f.key} className="flex min-w-0 flex-col gap-1">
+                      <span className="text-[10px] font-semibold uppercase tracking-wider text-secondary">{slot.f.label}</span>
+                      {slot.f.type === 'select' ? (
+                        <AppSelect
+                          options={slot.f.options || []}
+                          value={filters[slot.f.key] || ''}
+                          onChange={(v) => setFilters((p) => ({ ...p, [slot.f.key]: v || '' }))}
+                          placeholder="Any"
+                          isClearable
+                        />
+                      ) : (
+                        <DatePicker
+                          mode="single"
+                          bordered
+                          fullWidth
+                          placeholder="Any date"
+                          value={parseYmd(filters[slot.f.key])}
+                          onChange={(d: Date | null) => setFilters((p) => ({ ...p, [slot.f.key]: toYmd(d) }))}
+                        />
+                      )}
+                    </label>
+                  ),
+                )}
+              </div>
+              {activeFilters ? (
+                <div className="flex flex-wrap gap-1.5">
+                  {dataset.filters
+                    .filter((f) => filters[f.key])
+                    .map((f) => (
+                      <span
+                        key={f.key}
+                        className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px]"
+                        style={{ borderColor: 'var(--nav-active-bg)', color: 'var(--text)', backgroundColor: 'var(--surface)' }}
+                      >
+                        <span className="text-secondary">{f.label}:</span> {filterLabel(f)}
+                        <button type="button" className="text-secondary hover:text-red-500" onClick={() => setFilters((p) => ({ ...p, [f.key]: '' }))} title="Remove filter">
+                          <X size={11} />
+                        </button>
+                      </span>
+                    ))}
+                </div>
+              ) : null}
             </div>
           ) : null}
 
-          {result && result.columns.length ? (
-            <div className={cn('min-w-0 overflow-auto rounded-lg border max-h-[70vh] custom-scrollbar', running && 'opacity-60')} style={{ borderColor: 'var(--border-subtle)' }}>
-              <table className="w-full text-left text-[11px] border-collapse">
-                <thead className="sticky top-0 z-10" style={{ backgroundColor: 'var(--control-bg)' }}>
-                  <tr>
-                    {result.columns.map((c) => {
-                      const active = sort?.key === c.key;
-                      return (
-                        <th
-                          key={c.key}
-                          className={cn(
-                            'px-2.5 py-2 text-[10px] font-semibold uppercase tracking-wider whitespace-nowrap cursor-pointer select-none border-b',
-                            c.type === 'number' && 'text-right'
-                          )}
-                          style={{ borderColor: 'var(--border-subtle)', color: active ? 'var(--text)' : 'var(--text-muted)' }}
-                          onClick={() =>
-                            setSort((s) => (s?.key === c.key ? (s.dir === 'asc' ? { key: c.key, dir: 'desc' } : null) : { key: c.key, dir: 'asc' }))
-                          }
-                          title="Sort"
-                        >
-                          <span className="inline-flex items-center gap-1">
-                            {c.label}
-                            {active ? sort?.dir === 'asc' ? <ArrowUp size={11} /> : <ArrowDown size={11} /> : null}
-                          </span>
-                        </th>
-                      );
-                    })}
-                  </tr>
-                </thead>
-                <tbody>
-                  {shownRows.map((r, i) => (
-                    <tr key={i} className="border-t hover:bg-[var(--selected-bg)]" style={{ borderColor: 'var(--border-subtle)' }}>
-                      {r.map((v, j) => {
-                        const c = result.columns[j];
+          <div className="flex flex-col gap-3 p-3">
+            {error ? (
+              <div className="rounded-lg border px-3 py-2 text-[12px]" style={{ borderColor: '#ef444455', color: '#ef4444' }}>
+                {error}
+              </div>
+            ) : null}
+
+            {result && result.columns.length ? (
+              <div
+                className={cn('min-w-0 overflow-auto rounded-xl border max-h-[70vh] custom-scrollbar transition-opacity', running && 'opacity-60')}
+                style={{ borderColor: 'var(--border-subtle)' }}
+              >
+                <table className="w-full text-left text-[12px] border-collapse">
+                  <thead className="sticky top-0 z-10" style={{ backgroundColor: 'color-mix(in oklab, var(--control-bg) 80%, var(--surface))' }}>
+                    <tr>
+                      <th className="w-10 border-b px-3 py-2.5 text-right text-[10px] font-semibold text-secondary" style={{ borderColor: 'var(--border-subtle)' }}>
+                        #
+                      </th>
+                      {result.columns.map((c) => {
+                        const active = sort?.key === c.key;
                         return (
-                          <td
-                            key={j}
-                            className={cn('px-2.5 py-1.5 align-top max-w-[22rem]', c.type === 'number' ? 'text-right tabular-nums whitespace-nowrap' : c.type === 'date' ? 'whitespace-nowrap' : '')}
-                            style={{ color: v == null || v === '' ? 'var(--text-muted)' : 'var(--text)' }}
+                          <th
+                            key={c.key}
+                            className={cn(
+                              'group px-3 py-2.5 text-[10px] font-semibold uppercase tracking-wider whitespace-nowrap cursor-pointer select-none border-b hover:text-[var(--text)]',
+                              c.type === 'number' && 'text-right'
+                            )}
+                            style={{ borderColor: 'var(--border-subtle)', color: active ? 'var(--text)' : 'var(--text-muted)' }}
+                            onClick={() =>
+                              setSort((s) => (s?.key === c.key ? (s.dir === 'asc' ? { key: c.key, dir: 'desc' } : null) : { key: c.key, dir: 'asc' }))
+                            }
+                            title="Sort"
                           >
-                            <div className={c.type === 'text' ? 'line-clamp-2' : undefined}>{cellText(v, c.type)}</div>
-                          </td>
+                            <span className="inline-flex items-center gap-1">
+                              {c.label}
+                              {active ? (
+                                sort?.dir === 'asc' ? <ArrowUp size={11} /> : <ArrowDown size={11} />
+                              ) : (
+                                <ArrowUpDown size={10} className="opacity-0 group-hover:opacity-50" />
+                              )}
+                            </span>
+                          </th>
                         );
                       })}
                     </tr>
-                  ))}
-                  {!shownRows.length ? (
-                    <tr>
-                      <td colSpan={result.columns.length} className="px-3 py-8 text-center text-[12px] text-secondary">
-                        No rows match these filters.
-                      </td>
-                    </tr>
-                  ) : null}
-                </tbody>
-              </table>
-            </div>
-          ) : !columns.length ? (
-            <EmptyState title="No columns" description="Pick the columns you want on the left." />
-          ) : null}
+                  </thead>
+                  <tbody>
+                    {shownRows.map((r, i) => (
+                      <tr
+                        key={i}
+                        className="border-t hover:bg-[var(--selected-bg)]"
+                        style={{
+                          borderColor: 'var(--border-subtle)',
+                          backgroundColor: i % 2 ? 'color-mix(in oklab, var(--control-bg) 30%, transparent)' : undefined,
+                        }}
+                      >
+                        <td className="px-3 py-2 text-right align-top text-[10.5px] tabular-nums text-secondary">{i + 1}</td>
+                        {r.map((v, j) => {
+                          const c = result.columns[j];
+                          const empty = v == null || v === '';
+                          const isStatus = !empty && /status|new \/ renewal/i.test(c.label);
+                          return (
+                            <td
+                              key={j}
+                              className={cn(
+                                'px-3 py-2 align-top max-w-[22rem]',
+                                c.type === 'number' ? 'text-right tabular-nums whitespace-nowrap' : c.type === 'date' ? 'whitespace-nowrap tabular-nums' : '',
+                                j === 0 && !empty && 'font-semibold'
+                              )}
+                              style={{
+                                color: empty
+                                  ? 'var(--text-muted)'
+                                  : c.key === 'days_left' && typeof v === 'number'
+                                    ? v < 0
+                                      ? '#dc2626'
+                                      : v <= 90
+                                        ? '#b45309'
+                                        : 'var(--text)'
+                                    : 'var(--text)',
+                                fontWeight: c.key === 'days_left' && typeof v === 'number' && v <= 90 ? 600 : undefined,
+                              }}
+                            >
+                              {isStatus ? <StatusPill value={String(v)} /> : <div className={c.type === 'text' ? 'line-clamp-2' : undefined}>{cellText(v, c.type)}</div>}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    ))}
+                    {!shownRows.length ? (
+                      <tr>
+                        <td colSpan={result.columns.length + 1} className="px-3 py-10 text-center text-[12px] text-secondary">
+                          No rows match these filters.
+                        </td>
+                      </tr>
+                    ) : null}
+                  </tbody>
+                </table>
+              </div>
+            ) : !columns.length ? (
+              <EmptyState title="No columns" description="Pick the columns you want on the left." />
+            ) : null}
+          </div>
         </div>
       </div>
     </div>
+  );
+}
+
+/** Numbered step heading for the setup panels. */
+function StepHead({
+  n,
+  icon: Icon,
+  title,
+  count,
+  right,
+  style,
+}: {
+  n: number;
+  icon: React.ElementType;
+  title: string;
+  count?: number;
+  right?: React.ReactNode;
+  style: React.CSSProperties;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-2 rounded-t-2xl border-b px-3 py-2.5" style={style}>
+      <span className="flex items-center gap-2">
+        <span
+          className="flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold"
+          style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
+        >
+          {n}
+        </span>
+        <Icon size={13} className="text-secondary" />
+        <span className="text-[12.5px] font-semibold" style={{ color: 'var(--text)' }}>
+          {title}
+        </span>
+        {count !== undefined ? (
+          <span className="rounded-full px-1.5 text-[10px] font-semibold tabular-nums text-secondary" style={{ backgroundColor: 'var(--control-bg)' }}>
+            {count}
+          </span>
+        ) : null}
+      </span>
+      {right}
+    </div>
+  );
+}
+
+/** Status-like values as a coloured pill (green / red / amber / neutral). */
+function StatusPill({ value }: { value: string }) {
+  const v = value.toUpperCase();
+  const tone = /RENEWAL IN PROCESS/.test(v)
+    ? { fg: '#2563eb', bg: 'rgba(59,130,246,.12)' }
+    : /^(ACTIVE|APPROVED|CURRENT|COMPLETED|RENEWAL)$/.test(v) || v.includes('APPROVED')
+    ? { fg: '#15803d', bg: 'rgba(34,197,94,.14)' }
+    : /INACTIVE|EXPIRED|REJECT|DISAPPROV|CANCEL|DECLIN/.test(v)
+      ? { fg: '#dc2626', bg: 'rgba(239,68,68,.12)' }
+      : /EXPIRING|PENDING|FOR_|FOR |EVALUAT|REVIEW|RETURN|PROCESS|SUBMIT|NEW/.test(v)
+        ? { fg: '#b45309', bg: 'rgba(245,158,11,.14)' }
+        : { fg: 'var(--text-muted)', bg: 'var(--control-bg)' };
+  return (
+    <span className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2 py-0.5 text-[10.5px] font-semibold" style={{ color: tone.fg, backgroundColor: tone.bg }}>
+      <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: 'currentColor' }} />
+      {value.replace(/_/g, ' ')}
+    </span>
   );
 }
