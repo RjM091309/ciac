@@ -307,15 +307,17 @@ function useIsPhone() {
 
 
 type ReportKey = 'applications' | 'summary' | 'investments' | 'locator-status' | 'stockholders' | 'gis' | 'custom';
-const REPORTS: { key: ReportKey; label: string }[] = [
+// hidden: the tab is hidden for now (the report itself is kept).
+const ALL_REPORTS: { key: ReportKey; label: string; hidden?: boolean }[] = [
   { key: 'applications', label: 'Applications' },
-  { key: 'summary', label: 'Summary' },
-  { key: 'investments', label: 'Quarterly Investments' },
-  { key: 'locator-status', label: 'Locator Status' },
-  { key: 'stockholders', label: 'Stockholders & Nationality' },
-  { key: 'gis', label: 'GIS Filing' },
+  { key: 'summary', label: 'Summary', hidden: true },
+  { key: 'investments', label: 'Quarterly Investments', hidden: true },
+  { key: 'locator-status', label: 'Locator Status', hidden: true },
+  { key: 'stockholders', label: 'Stockholders & Nationality', hidden: true },
+  { key: 'gis', label: 'GIS Filing', hidden: true },
   { key: 'custom', label: 'Custom Report' },
 ];
+const REPORTS = ALL_REPORTS.filter((r) => !r.hidden);
 
 /** The Reports page: one tab per report (?report=… in the address bar). The
  * period reports share one year/quarter, kept while switching tabs. */

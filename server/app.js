@@ -241,6 +241,8 @@ initializeDatabase()
     require("./lib/complianceReminders").start();
     // Deletes audit log entries past the retention set in Portal Settings (0 = keep forever).
     require("./lib/auditRetention").start();
+    // Emails the Custom Report templates ticked "Recurring every month" to the Account Officers.
+    require("./lib/monthlyReports").start();
   })
   .catch(() => {
     // If DB is down, you can still view login page.

@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowDown,
+  CalendarClock,
   ArrowUp,
   ArrowUpDown,
   ChevronDown,
@@ -10,6 +11,7 @@ import {
   FileText,
   Filter,
   Loader2,
+  Mail,
   Plus,
   Printer,
   Save,
@@ -29,6 +31,8 @@ import { cn } from '../../lib/utils';
 import { csvEscape, downloadBlob } from './reportUtils';
 import { downloadPdf, downloadWorkbook, xlDate, type PdfSection, type XlsxColumn, type XlsxGroup, type XlsxSheet } from './reportExports';
 import { fmtDate } from './reportParts';
+import { QuickTotal } from './QuickTotal';
+import { MonthPicker } from '../ui/MonthPicker';
 
 // Reports & Analytics → Custom Report: the user picks what to report on
 // (dataset), which columns, and the filters; the rows show as a preview and
@@ -51,6 +55,18 @@ type Template = {
   /** The user's own (only the owner can change or delete it). */
   mine: boolean;
   owner: string | null;
+  /** Recurring every month: emailed to the Account Officers, recur_from–recur_to ('YYYY-MM'). */
+  recurring?: boolean;
+  recur_from?: string | null;
+  recur_to?: string | null;
+  last_sent_month?: string | null;
+  last_sent_at?: string | null;
+};
+const monthText = (ym?: string | null) =>
+  ym ? new Date(`${ym}-01T00:00:00`).toLocaleDateString('en-US', { month: 'short', year: 'numeric' }) : '';
+const thisMonth = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 };
 type Sort = { key: string; dir: 'asc' | 'desc' } | null;
 
@@ -93,6 +109,12 @@ export function CustomReport() {
   const [templateId, setTemplateId] = useState('');
   const [saveName, setSaveName] = useState<string | null>(null);
   const [saveShared, setSaveShared] = useState(false);
+  // Recurring every month (emailed to the Account Officers from–to).
+  const [saveRecurring, setSaveRecurring] = useState(false);
+  const [saveFrom, setSaveFrom] = useState(thisMonth());
+  const [saveTo, setSaveTo] = useState('');
+  const [recipients, setRecipients] = useState<{ name: string; email: string; own_only: boolean }[] | null>(null);
+  const [sendingTest, setSendingTest] = useState(false);
   // Summary: rows counted by one column ('' = off).
   const [groupBy, setGroupBy] = useState('');
   // Results table: a quick search over the rows, and pages.
@@ -184,12 +206,20 @@ export function CustomReport() {
   }
 
   // Saving under an existing name of the user's replaces that template.
-  async function saveTemplate(name = (saveName || '').trim(), shared = saveShared) {
+  async function saveTemplate(
+    name = (saveName || '').trim(),
+    shared = saveShared,
+    schedule: { recurring: boolean; recur_from: string | null; recur_to: string | null } = {
+      recurring: saveRecurring,
+      recur_from: saveRecurring ? saveFrom : null,
+      recur_to: saveRecurring ? saveTo : null,
+    }
+  ) {
     if (!name || !dataset) return;
     try {
       const json = await api('/api/reports/custom/templates', {
         method: 'POST',
-        body: JSON.stringify({ name, dataset: dataset.key, columns, filters, sort, shared }),
+        body: JSON.stringify({ name, dataset: dataset.key, columns, filters, sort, shared, ...schedule }),
       });
       setTemplates(json.data.templates);
       setTemplateId(String(json.data.id));
@@ -199,6 +229,36 @@ export function CustomReport() {
       toast.error(e?.message || 'Save failed');
     }
   }
+
+  async function sendTest() {
+    if (!templateId) return;
+    setSendingTest(true);
+    try {
+      const json = await api(`/api/reports/custom/templates/${templateId}/send-test`, { method: 'POST' });
+      toast.success(`Test sent to ${json?.data?.email || 'your email'}`);
+    } catch (e: any) {
+      toast.error(e?.message || 'Could not send the test');
+    } finally {
+      setSendingTest(false);
+    }
+  }
+
+  // Opens the save form for the current template (same name = replace) to set its schedule.
+  function editSchedule() {
+    if (!currentTemplate) return;
+    setSaveName(currentTemplate.name);
+    setSaveShared(currentTemplate.shared);
+    setSaveRecurring(true);
+    setSaveFrom(currentTemplate.recur_from || thisMonth());
+    setSaveTo(currentTemplate.recur_to || '');
+  }
+
+  useEffect(() => {
+    if (!saveRecurring || recipients) return;
+    api('/api/reports/custom/monthly-recipients')
+      .then((j) => setRecipients(j.data || []))
+      .catch(() => setRecipients([]));
+  }, [saveRecurring, recipients]);
 
   async function deleteTemplate() {
     if (!templateId) return;
@@ -427,30 +487,30 @@ export function CustomReport() {
   return (
     <div className="flex flex-col gap-4">
       {/* Templates */}
-      <div className="flex flex-col gap-3 rounded-2xl border px-4 py-3 sm:flex-row sm:items-center" style={panelStyle}>
+      <div className="flex flex-col gap-3 rounded-2xl border px-4 py-3 sm:flex-row sm:flex-wrap sm:items-center" style={panelStyle}>
         <div className="flex min-w-0 flex-1 items-center gap-3">
           <span
-            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg"
-            style={{ backgroundColor: 'color-mix(in oklab, var(--nav-active-bg) 12%, transparent)', color: 'var(--nav-active-bg)' }}
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg"
+            style={{ backgroundColor: 'color-mix(in oklab, var(--nav-active-bg) 10%, transparent)', color: 'var(--nav-active-bg)' }}
           >
             <Save size={15} />
           </span>
-          <div className="hidden shrink-0 sm:block">
+          <div className="hidden w-32 shrink-0 sm:block">
             <div className="text-[12.5px] font-semibold" style={{ color: 'var(--text)' }}>Templates</div>
             <div className="text-[10.5px] text-secondary">
               {templates.length
-                ? `${templates.filter((t) => t.mine).length} mine · ${templates.filter((t) => !t.mine).length} shared with me`
+                ? `${templates.filter((t) => t.mine).length} mine · ${templates.filter((t) => !t.mine).length} shared`
                 : 'Save a setup to reuse it'}
             </div>
           </div>
-          <div className="min-w-0 flex-1 sm:max-w-xs">
+          <div className="min-w-0 flex-1 sm:max-w-sm">
             <AppSelect
               options={templates.map((t) => {
                 const what = datasets.find((d) => d.key === t.dataset)?.label || '';
                 return {
                   value: String(t.id),
                   label: t.name,
-                  detail: t.mine ? `${what}${t.shared ? ' · Shared' : ''}` : `${what} · by ${t.owner || 'another user'}`,
+                  detail: `${t.mine ? `${what}${t.shared ? ' · Shared' : ''}` : `${what} · by ${t.owner || 'another user'}`}${t.recurring ? ' · Monthly' : ''}`,
                 };
               })}
               value={templateId}
@@ -460,77 +520,210 @@ export function CustomReport() {
             />
           </div>
           {currentTemplate?.mine ? (
-            <button type="button" className={btn} style={{ borderColor: '#ef444466', color: '#ef4444' }} onClick={() => void deleteTemplate()} title="Delete this template">
-              <Trash2 size={13} />
+            <button
+              type="button"
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-secondary transition-colors hover:bg-red-50 hover:text-red-500"
+              onClick={() => void deleteTemplate()}
+              title="Delete this template"
+            >
+              <Trash2 size={14} />
             </button>
           ) : currentTemplate ? (
-            <span className="hidden text-[11px] text-secondary md:inline">Shared by {currentTemplate.owner || 'another user'} — save a copy to change it</span>
+            <span className="hidden text-[11px] text-secondary md:inline">by {currentTemplate.owner || 'another user'} · save a copy to change it</span>
           ) : null}
         </div>
         {saveName === null ? (
-          <div className="flex flex-wrap items-center gap-2">
-            {currentTemplate?.mine ? (
+          <>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                className={btn}
+                style={{ borderColor: 'var(--border)', color: 'var(--text)' }}
+                disabled={!columns.length}
+                onClick={() => {
+                  setSaveName(currentTemplate?.mine ? '' : currentTemplate ? `${currentTemplate.name} (copy)` : '');
+                  setSaveShared(false);
+                  setSaveRecurring(false);
+                  setSaveFrom(thisMonth());
+                  setSaveTo('');
+                }}
+              >
+                <Plus size={13} /> {currentTemplate ? 'Save as new' : 'Save as template'}
+              </button>
+              {currentTemplate?.mine ? (
+                <button
+                  type="button"
+                  className={btn}
+                  style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)', borderColor: 'transparent' }}
+                  disabled={!columns.length}
+                  onClick={() =>
+                    void saveTemplate(currentTemplate.name, currentTemplate.shared, {
+                      recurring: Boolean(currentTemplate.recurring),
+                      recur_from: currentTemplate.recur_from ?? null,
+                      recur_to: currentTemplate.recur_to ?? null,
+                    })
+                  }
+                  title={`Save the current setup into "${currentTemplate.name}"`}
+                >
+                  <Save size={13} /> Save changes
+                </button>
+              ) : null}
+            </div>
+
+            {/* Monthly email: status of the open template, and its actions. */}
+            {currentTemplate && (currentTemplate.mine || currentTemplate.recurring) ? (
+              <div
+                className="flex basis-full flex-wrap items-center gap-x-3 gap-y-2 rounded-xl px-3 py-2"
+                style={
+                  currentTemplate.recurring
+                    ? { backgroundColor: 'color-mix(in oklab, #16a34a 7%, var(--surface))', border: '1px solid color-mix(in oklab, #16a34a 22%, transparent)' }
+                    : { backgroundColor: 'color-mix(in oklab, var(--control-bg) 50%, var(--surface))', border: '1px solid var(--border-subtle)' }
+                }
+              >
+                <CalendarClock size={14} style={{ color: currentTemplate.recurring ? '#15803d' : 'var(--text-muted)' }} />
+                <div className="min-w-0 flex-1 text-[11.5px]">
+                  {currentTemplate.recurring ? (
+                    <>
+                      <span className="font-semibold" style={{ color: '#15803d' }}>
+                        Monthly email
+                      </span>
+                      <span className="text-secondary">
+                        {' '}
+                        · {monthText(currentTemplate.recur_from)} – {monthText(currentTemplate.recur_to)} · to the Account Officers ·{' '}
+                        {currentTemplate.last_sent_month ? `last sent ${monthText(currentTemplate.last_sent_month)}` : 'not sent yet'}
+                      </span>
+                    </>
+                  ) : (
+                    <span className="text-secondary">Not emailed monthly — set it up to send this report to the Account Officers every month.</span>
+                  )}
+                </div>
+                <div className="flex items-center gap-1">
+                  {currentTemplate.recurring ? (
+                    <button
+                      type="button"
+                      className={linkBtn}
+                      disabled={sendingTest}
+                      onClick={() => void sendTest()}
+                      title="Emails a copy only to you — the email address on your account"
+                    >
+                      <span className="inline-flex items-center gap-1">
+                        {sendingTest ? <Loader2 size={12} className="animate-spin" /> : <Mail size={12} />} Send test to me
+                      </span>
+                    </button>
+                  ) : null}
+                  {currentTemplate.mine ? (
+                    <button type="button" className={linkBtn} onClick={editSchedule}>
+                      {currentTemplate.recurring ? 'Edit' : 'Set up monthly email'}
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
+          </>
+        ) : (
+          <div className="flex basis-full flex-col gap-3 border-t pt-3" style={{ borderColor: 'var(--border-subtle)' }}>
+            {/* Name */}
+            <div className="flex flex-col gap-1">
+              <span className="text-[10.5px] font-semibold uppercase tracking-wider text-secondary">Template name</span>
+              <input
+                autoFocus
+                className="app-input h-9 w-full sm:max-w-md"
+                placeholder="e.g. Monthly locator list"
+                value={saveName}
+                maxLength={120}
+                onChange={(e) => setSaveName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') void saveTemplate();
+                  if (e.key === 'Escape') setSaveName(null);
+                }}
+              />
+            </div>
+
+            {/* Options: Share / Recurring every month */}
+            <div className="grid grid-cols-1 gap-2 lg:grid-cols-2">
+              <OptionCard
+                checked={saveShared}
+                onChange={setSaveShared}
+                icon={Share2}
+                title="Share with other users"
+                text="Everyone with access to Reports can open and run it. Only you can change or delete it."
+              />
+              <OptionCard
+                checked={saveRecurring}
+                onChange={setSaveRecurring}
+                icon={CalendarClock}
+                title="Recurring every month"
+                text="Emailed as an Excel file to every Account Officer at the start of each month."
+              >
+                {saveRecurring ? (
+                  <div className="mt-2.5 flex flex-col gap-2.5">
+                    <div className="flex flex-wrap items-center gap-2 text-[11.5px] text-secondary">
+                      <span className="w-9">From</span>
+                      <MonthPicker value={saveFrom} min={thisMonth()} onChange={setSaveFrom} />
+                      <span>to</span>
+                      <MonthPicker value={saveTo} min={saveFrom || thisMonth()} onChange={setSaveTo} placeholder="Until…" />
+                    </div>
+                    {saveFrom === thisMonth() ? (
+                      <div className="text-[11px] text-amber-700">This month is included — its copy goes out within a few hours of saving.</div>
+                    ) : null}
+                    <div>
+                      <div className="mb-1 text-[10.5px] font-semibold uppercase tracking-wider text-secondary">Sent to</div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {recipients === null ? (
+                          <span className="text-[11px] text-secondary">Loading…</span>
+                        ) : recipients.length ? (
+                          recipients.map((r) => (
+                            <span
+                              key={r.email}
+                              className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px]"
+                              style={{ borderColor: 'var(--border-subtle)', color: 'var(--text)' }}
+                              title={r.email}
+                            >
+                              {r.name}
+                              <span className="text-secondary">· {r.own_only ? 'own locators' : 'all locators'}</span>
+                            </span>
+                          ))
+                        ) : (
+                          <span className="text-[11px] text-secondary">No active Account Officer with an email.</span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+              </OptionCard>
+            </div>
+
+            {/* Actions */}
+            <div className="flex justify-end gap-2">
+              <button type="button" className={btn} style={{ borderColor: 'var(--border)', color: 'var(--text)' }} onClick={() => setSaveName(null)}>
+                Cancel
+              </button>
               <button
                 type="button"
                 className={btn}
                 style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)', borderColor: 'transparent' }}
-                disabled={!columns.length}
-                onClick={() => void saveTemplate(currentTemplate.name, currentTemplate.shared)}
-                title={`Save the current setup into "${currentTemplate.name}"`}
+                disabled={!saveName.trim() || (saveRecurring && (!saveFrom || !saveTo || saveFrom > saveTo))}
+                onClick={() => void saveTemplate()}
               >
-                <Save size={13} /> Save changes
+                <Save size={13} /> Save template
               </button>
-            ) : null}
-            <button
-              type="button"
-              className={btn}
-              style={{ borderColor: 'var(--border)', color: 'var(--text)' }}
-              disabled={!columns.length}
-              onClick={() => {
-                setSaveName(currentTemplate?.mine ? '' : currentTemplate ? `${currentTemplate.name} (copy)` : '');
-                setSaveShared(false);
-              }}
-            >
-              <Save size={13} /> {currentTemplate ? 'Save as new' : 'Save as template'}
-            </button>
-          </div>
-        ) : (
-          <div className="flex flex-wrap items-center gap-2">
-            <input
-              autoFocus
-              className="app-input h-9 w-56"
-              placeholder="e.g. Quarterly locator list"
-              value={saveName}
-              maxLength={120}
-              onChange={(e) => setSaveName(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') void saveTemplate();
-                if (e.key === 'Escape') setSaveName(null);
-              }}
-            />
-            <label
-              className="inline-flex cursor-pointer items-center gap-1.5 text-[11.5px] font-medium"
-              style={{ color: 'var(--text)' }}
-              title="Every Reports user can open it; only you can change it"
-            >
-              <input type="checkbox" checked={saveShared} onChange={(e) => setSaveShared(e.target.checked)} />
-              <Share2 size={12} className="text-secondary" /> Share
-            </label>
-            <button
-              type="button"
-              className={btn}
-              style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)', borderColor: 'transparent' }}
-              disabled={!saveName.trim()}
-              onClick={() => void saveTemplate()}
-            >
-              Save
-            </button>
-            <button type="button" className={btn} style={{ borderColor: 'var(--border)', color: 'var(--text)' }} onClick={() => setSaveName(null)}>
-              <X size={13} />
-            </button>
+            </div>
           </div>
         )}
       </div>
+
+      {/* "Total ___ by ___ as of [year]": the Registered Locators filters apply. */}
+      <QuickTotal
+        filters={datasetKey === 'locators' ? Object.fromEntries(Object.entries(filters).filter(([k]) => k !== 'missing')) : {}}
+        filterText={
+          datasetKey === 'locators'
+            ? (dataset?.filters || [])
+                .filter((f) => f.key !== 'missing' && filters[f.key])
+                .map((f) => `${f.label}: ${f.options?.find((o) => o.value === filters[f.key])?.label || (f.type === 'date' ? fmtDate(filters[f.key]) : filters[f.key])}`)
+                .join(' · ')
+            : ''
+        }
+      />
 
       <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-[20rem_minmax(0,1fr)]">
         {/* Setup: a sticky sidebar that scrolls on its own. */}
@@ -1042,6 +1235,45 @@ export function CustomReport() {
 }
 
 /** Numbered step heading for the setup panels. */
+/** A tickable option tile (the template save form's Share / Recurring). */
+function OptionCard({
+  checked,
+  onChange,
+  icon: Icon,
+  title,
+  text,
+  children,
+}: {
+  checked: boolean;
+  onChange: (next: boolean) => void;
+  icon: React.ComponentType<{ size?: number; className?: string }>;
+  title: string;
+  text: string;
+  children?: React.ReactNode;
+}) {
+  return (
+    <div
+      className="rounded-xl border px-3 py-2.5 transition-colors"
+      style={
+        checked
+          ? { borderColor: 'var(--nav-active-bg)', backgroundColor: 'color-mix(in oklab, var(--nav-active-bg) 5%, var(--surface))' }
+          : { borderColor: 'var(--border-subtle)' }
+      }
+    >
+      <label className="flex cursor-pointer items-start gap-2.5">
+        <input type="checkbox" className="mt-0.5" checked={checked} onChange={(e) => onChange(e.target.checked)} />
+        <span className="min-w-0">
+          <span className="flex items-center gap-1.5 text-[12.5px] font-semibold" style={{ color: 'var(--text)' }}>
+            <Icon size={13} className="text-secondary" /> {title}
+          </span>
+          <span className="block text-[11px] leading-snug text-secondary">{text}</span>
+        </span>
+      </label>
+      {children ? <div className="pl-6">{children}</div> : null}
+    </div>
+  );
+}
+
 function StepHead({
   n,
   icon: Icon,

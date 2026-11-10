@@ -153,6 +153,27 @@ exports.customRun = async (req, res) => {
   }
 };
 
+// "Total ___ by ___ as of / in [year]".
+exports.customQuickTotal = async (req, res) => {
+  try {
+    const b = req.body || {};
+    const data = await CustomReport.quickTotal({
+      measure: String(b.measure || ""),
+      by: String(b.by || ""),
+      period: b.period === "in" ? "in" : "asof",
+      year: b.year,
+      filters: b.filters,
+      ownOfficerId: await aoLevel2Id(req.user),
+    });
+    return res.json({ success: true, data });
+  } catch (error) {
+    if (error.status === 400) return res.status(400).json({ success: false, message: error.message });
+    return fail(res, error, "Quick total");
+  }
+};
+
+exports.customQuickTotalOptions = async (req, res) => res.json({ success: true, data: CustomReport.quickTotalOptions() });
+
 exports.customTemplates = async (req, res) => {
   try {
     return res.json({ success: true, data: await CustomReport.listTemplates(req.user.id) });
@@ -168,6 +189,31 @@ exports.saveCustomTemplate = async (req, res) => {
   } catch (error) {
     if (error.status === 400) return res.status(400).json({ success: false, message: error.message });
     return fail(res, error, "Save custom report template");
+  }
+};
+
+// Emails a test copy of a template's monthly report to the user asking.
+exports.sendCustomTemplateTest = async (req, res) => {
+  try {
+    const r = await require("../lib/monthlyReports").sendTest(req.params.id, req.user);
+    if (!r.sent) {
+      const why = r.reason === "SMTP_NOT_CONFIGURED" ? "Email isn't set up (Portal Settings → Email)." : "The email could not be sent.";
+      return res.status(502).json({ success: false, message: why });
+    }
+    return res.json({ success: true, data: r });
+  } catch (error) {
+    if (error.status === 400 || error.status === 404) return res.status(error.status).json({ success: false, message: error.message });
+    return fail(res, error, "Send monthly report test");
+  }
+};
+
+// Who gets the monthly reports (shown beside the Recurring checkbox).
+exports.monthlyReportRecipients = async (req, res) => {
+  try {
+    const list = await require("../lib/monthlyReports").recipients();
+    return res.json({ success: true, data: list.map((r) => ({ name: r.name, email: r.email, own_only: r.ownOnly })) });
+  } catch (error) {
+    return fail(res, error, "Monthly report recipients");
   }
 };
 

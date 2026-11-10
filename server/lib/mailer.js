@@ -61,7 +61,7 @@ function withSignature({ text, html }, { subject = "", sender = null } = {}) {
  * copied when Portal Settings says so. Without it (or with the setting off):
  * the system sender.
  */
-async function sendMail({ to, cc, subject, text, html, sender = null }) {
+async function sendMail({ to, cc, subject, text, html, sender = null, attachments = null }) {
   const config = siteSettings.mailConfig();
   const officer =
     sender && sender.email && siteSettings.getters.mailOfficerSender() && config.from
@@ -90,6 +90,7 @@ async function sendMail({ to, cc, subject, text, html, sender = null }) {
       ...(ccList ? { cc: ccList } : {}),
       subject,
       ...withSignature({ text, html }, { subject, sender: officer ? sender : null }),
+      ...(attachments && attachments.length ? { attachments } : {}),
     });
     return { sent: true };
   } catch (error) {
