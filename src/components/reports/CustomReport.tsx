@@ -39,7 +39,8 @@ import { fmtDate } from './reportParts';
 type ColumnDef = { key: string; label: string; type: 'text' | 'date' | 'number' };
 type FilterDef = { key: string; label: string; type: 'select' | 'date'; options?: { value: string; label: string }[] };
 type Dataset = { key: string; label: string; description: string; columns: ColumnDef[]; defaults: string[]; filters: FilterDef[] };
-type Result = { columns: ColumnDef[]; rows: (string | number | null)[][]; total: number; truncated: boolean };
+// missing: blank rows per column among the filtered rows (Missing filter aside).
+type Result = { columns: ColumnDef[]; rows: (string | number | null)[][]; total: number; truncated: boolean; missing?: Record<string, number> };
 type Template = {
   id: number;
   name: string;
@@ -411,6 +412,16 @@ export function CustomReport() {
     if (f.type === 'date' && / to$/i.test(f.label) && filterSlots.some((s) => s.kind === 'range' && s.to.key === f.key)) continue;
     filterSlots.push({ kind: 'one', f });
   }
+  // "Missing data in": only the columns that actually have blanks (with how
+  // many) — the one already chosen stays listed.
+  const filterOptions = (f: FilterDef) => {
+    const opts = f.options || [];
+    const counts = result?.missing;
+    if (f.key !== 'missing' || !counts) return opts;
+    return opts
+      .filter((o) => counts[o.value] || o.value === filters.missing)
+      .map((o) => ({ ...o, label: `${o.label} (${(counts[o.value] || 0).toLocaleString('en-US')})` }));
+  };
   const filterLabel = (f: FilterDef) => f.options?.find((o) => o.value === filters[f.key])?.label || (f.type === 'date' ? fmtDate(filters[f.key]) : filters[f.key]);
 
   return (
@@ -752,7 +763,7 @@ export function CustomReport() {
                       <span className="text-[10px] font-semibold uppercase tracking-wider text-secondary">{slot.f.label}</span>
                       {slot.f.type === 'select' ? (
                         <AppSelect
-                          options={slot.f.options || []}
+                          options={filterOptions(slot.f)}
                           value={filters[slot.f.key] || ''}
                           onChange={(v) => setFilters((p) => ({ ...p, [slot.f.key]: v || '' }))}
                           placeholder="Any"

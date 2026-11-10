@@ -4,6 +4,11 @@
  * backfill-legacy-profile-fields.js (which only carried half of it and hung
  * every locator on a shared placeholder login).
  *
+ * BRIDGE kept every renewal / extension / amendment as its own row; here they
+ * become one locator with Lease Agreements history (see buildChains).
+ * BRIDGE's RefCode is the SEC Registration No. (registration_no here); the
+ * Ref. Code (per lease, typed by the Account Officer) is left blank.
+ *
  * Each legacy locator (dbLocator, not deleted) becomes a Registered Locator
  * encoded the same way as one added by hand on Registered Locator → New
  * Locator (is_manual_registration): no application, Start/End Term typed in,
@@ -187,6 +192,14 @@ async function ensureImportSchema() {
       );
       CREATE UNIQUE INDEX UX_legacy_import_files ON dbo.legacy_import_files(proponent_id, sha1);
     END
+    -- Which locator / lease each legacy row became (renewals share a locator).
+    IF OBJECT_ID('dbo.legacy_import_map', 'U') IS NULL
+      CREATE TABLE dbo.legacy_import_map (
+        legacy_ref_no NVARCHAR(50) NOT NULL PRIMARY KEY,
+        proponent_id INT NOT NULL,
+        lease_id INT NULL,
+        created_at DATETIME2(3) NOT NULL CONSTRAINT DF_legacy_import_map_created_at DEFAULT (SYSUTCDATETIME())
+      );
   `);
 }
 const hasImportMarker = async () =>
@@ -322,9 +335,12 @@ function mapLocator(row, lk) {
   // is kept on the record, at the end of Business Activities.
   const legacyIndustryNote = industryText && (industry.fromContract || !industry.code) ? `Industry (BRIDGE): ${industryText}` : null;
   const activities = [txt(row.BusinessType), legacyIndustryNote].filter(Boolean).join("\n\n") || null;
+  const ids = secAndTin(row);
   return {
     refNo: String(row.RefNo).trim(),
-    businessName: txt(row.Tenant, 255) || `Legacy Locator ${row.RefNo}`,
+    businessName: cleanName(row.Tenant) || `Legacy Locator ${row.RefNo}`,
+    secNo: ids.sec,
+    tin: ids.tin,
     officerName,
     officerId,
     industryText,
@@ -341,15 +357,145 @@ function mapLocator(row, lk) {
   };
 }
 
+
+// ---------- renewals → one locator ----------
+//
+// BRIDGE kept every renewal / extension / amendment as its own row; here a
+// locator is one company and its renewals are Lease Agreements history (one
+// current lease). Rows of the same company are chained into one locator:
+//   - "RENEWAL" / "EXTENSION" in the name → after the lease that ended just
+//     before it starts;
+//   - "AMENDMENT" → onto the lease it overlaps (same (A)/(B)… label);
+//   - no marker, starting the day the previous lease ended → its renewal.
+// Anything else — leases running side by side (other buildings, billboards,
+// (A)/(B)/(C) leases) — is a locator of its own.
+
+const DAY = 86400000;
+const toTime = (d) => (d ? new Date(`${d}T00:00:00Z`).getTime() : null);
+const SUFFIX_WORDS = new Set(["INC", "CORP", "CORPORATION", "PHILS", "PHIL", "PHILIPPINES", "CO", "LTD", "LLC", "THE", "OF"]);
+/** The company part of a legacy Tenant ("SONIMETRIX, INC. (3RD RENEWAL)" → "SONIMETRIX"). */
+function companyKey(tenant) {
+  return String(tenant || "")
+    .toUpperCase()
+    .replace(/\(.*$/, "")
+    .replace(/[^A-Z0-9]+/g, " ")
+    .split(" ")
+    .filter((w) => w && !SUFFIX_WORDS.has(w))
+    .join(" ");
+}
+const MARKER = /\(([^)]*\b(RENEWAL|EXTENSION|AMENDMENT|AMEND|LETTER AMENDMENT)\b[^)]*)\)?/gi;
+/** The locator's name without the lease markers ("… (3RD RENEWAL)"). */
+function cleanName(tenant) {
+  const s = String(tenant || "")
+    .replace(MARKER, "")
+    .replace(/\s+(\d+(ST|ND|RD|TH)\s+)?(LETTER\s+)?(RENEWAL|EXTENSION|AMENDMENT)\b[^()]*$/i, "") // a bare trailing marker
+    .replace(/\s+/g, " ")
+    .replace(/[\s,]+$/, "")
+    .trim();
+  return s ? s.slice(0, 255) : null;
+}
+function leaseKind(tenant) {
+  const s = String(tenant || "").toUpperCase();
+  if (/AMEND/.test(s)) return "amend";
+  if (/RENEWAL|EXTENSION/.test(s)) return "renewal";
+  return "";
+}
+const leaseLabel = (tenant) => (String(tenant || "").toUpperCase().match(/\(([A-E])\)/) || [])[1] || "";
+const tinKey = (v) => String(v || "").replace(/\D/g, "").slice(0, 9) || null;
+const looksTin = (v) => /^\d{3}-?\d{3}-?\d{3}(-?\d{3,5})?$/.test(String(v || "").trim());
+const looksSec = (v) => /^[A-Z]{1,3}\d{4}-?\d{3,7}$|^\d{10}$/i.test(String(v || "").trim());
+/** BRIDGE's RefCode is the SEC Registration No.; a few rows have it and the TIN swapped. */
+function secAndTin(row) {
+  let sec = txt(row.RefCode, 100);
+  let tin = txt(row.TINNo);
+  if (sec && tin && looksTin(sec) && looksSec(tin)) [sec, tin] = [tin, sec];
+  if (sec && !looksSec(sec)) sec = null; // "213", a TIN, … — not an SEC number
+  return { sec: sec ? sec.toUpperCase() : null, tin };
+}
+
+/** The legacy rows grouped into chains (oldest lease first; the last is current). */
+function buildChains(rows) {
+  const info = (r) => ({
+    row: r,
+    start: toTime(ymd(r.StartTerm)),
+    end: toTime(ymd(r.EndTerm)),
+    signed: toTime(ymd(r.SignedDT)) ?? 0,
+    kind: leaseKind(r.Tenant),
+    label: leaseLabel(r.Tenant),
+    tin: tinKey(secAndTin(r).tin),
+  });
+  const byCompany = new Map();
+  for (const r of rows) {
+    const k = companyKey(r.Tenant) || `#${r.RefNo}`;
+    if (!byCompany.has(k)) byCompany.set(k, []);
+    byCompany.get(k).push(info(r));
+  }
+  const chains = [];
+  for (const items of byCompany.values()) {
+    const own = [];
+    const tail = (c) => c[c.length - 1];
+    const labelOk = (c, x) => !x.label || c.every((y) => !y.label || y.label === x.label);
+    const tinOf = (c) => new Set(c.map((y) => y.tin).filter(Boolean));
+    const pick = (cands, x) =>
+      cands.sort(
+        (a, b) =>
+          Number(tinOf(b).has(x.tin)) - Number(tinOf(a).has(x.tin)) ||
+          (tail(b).end ?? 0) - (tail(a).end ?? 0) ||
+          b.length - a.length
+      )[0];
+    const startOrder = (a, b) =>
+      (a.start ?? 0) - (b.start ?? 0) || Number(!a.kind) - Number(!b.kind) || a.signed - b.signed;
+    // Renewals and plain leases by start date; amendments afterwards, by date signed.
+    const firstPass = items.filter((x) => x.kind !== "amend").sort(startOrder);
+    const amendments = items.filter((x) => x.kind === "amend").sort((a, b) => a.signed - b.signed || (a.start ?? 0) - (b.start ?? 0));
+    for (const x of [...firstPass, ...amendments]) {
+      let cands = [];
+      if (x.start != null) {
+        if (x.kind === "amend") {
+          cands = own.filter((c) => {
+            const y = tail(c);
+            return labelOk(c, x) && y.start != null && y.end != null && x.end != null && y.start <= x.end && x.start <= y.end;
+          });
+        } else if (x.kind === "renewal") {
+          cands = own.filter((c) => {
+            const y = tail(c);
+            return labelOk(c, x) && y.end != null && y.start < x.start && y.end <= x.start + 31 * DAY;
+          });
+        } else {
+          cands = own.filter((c) => {
+            const y = tail(c);
+            const tins = tinOf(c);
+            return (
+              labelOk(c, x) && y.end != null && x.start - y.end >= 0 && x.start - y.end <= DAY &&
+              (!x.tin || !tins.size || tins.has(x.tin))
+            );
+          });
+        }
+      }
+      const into = cands.length ? pick(cands, x) : null;
+      if (into) into.push(x);
+      else own.push([x]);
+    }
+    chains.push(...own);
+  }
+  return chains.map((c) => c.map((x) => x.row));
+}
+
+/** The latest row of the chain that has something for `has` (else the current row). */
+const latestWith = (chain, has) => [...chain].reverse().find(has) || chain[chain.length - 1];
+
 // The dbo.proponents columns a legacy locator fills (ref_no aside) — one
 // source for the import and --resync. TIN is plain here (encrypted on write).
 function profileValues(row, m) {
   return {
     business_name: m.businessName,
-    tin: txt(row.TINNo),
+    // BRIDGE's RefCode (an SEC number for most) is both: the SEC Registration
+    // No. and, as is, the Ref. Code of the current lease (see planChains).
+    ref_code: m.refCode ?? null,
+    registration_no: m.secNo ?? null,
+    tin: m.tin ?? null,
     address: txt(row.Address, 1000),
     lease_address: txt(row.ActualAddress, 1000),
-    ref_code: txt(row.RefCode, 100),
     location: txt(row.Location, 500),
     business_activities: m.activities,
     industry_code: m.industryCode,
@@ -412,7 +558,22 @@ const investmentFields = (row) => ({
 
 // ---------- import ----------
 
-async function createLocator(row, m, children, actorId) {
+/** A chain's stockholders / contacts / signatories: from the latest of its
+ * rows that has any (BRIDGE often left them on the first row only). */
+function chainKids(chain, legacy) {
+  const get = (map, r) => map.get(String(r.RefNo).trim()) || [];
+  const latest = (map) => get(map, latestWith(chain, (r) => get(map, r).length > 0));
+  return { stockholders: latest(legacy.stockholders), contacts: latest(legacy.contacts), signatories: latest(legacy.signatories) };
+}
+const filled = (obj) => Object.values(obj).some((v) => v !== null && v !== undefined && v !== "");
+const finRow = (chain) => latestWith(chain, (r) => filled(financialFields(r)));
+const invRow = (chain) => latestWith(chain, (r) => filled(investmentFields(r)));
+
+/** One locator for a chain: the profile from its current (last) row, one
+ * Lease Agreement per row (the last current, the rest history), each with its
+ * building details as its property schedule. */
+async function createLocator(chain, m, kids, actorId, lk, refCodes) {
+  const row = chain[chain.length - 1];
   return runInTransaction(async (tx) => {
     const values = profileValues(row, m);
     const cols = Object.keys(values);
@@ -426,21 +587,39 @@ async function createLocator(row, m, children, actorId) {
         (NULL, @param0, ${cols.map((_, i) => `@param${i + 1}`).join(", ")},
          1, 1, @param${cols.length + 1}, @param${cols.length + 2}, SYSUTCDATETIME())
       `,
-      [m.refNo, ...cols.map((c) => dbValue(c, values[c])), row.EncodedDT || new Date(), row.EditedDT || null]
+      [m.refNo, ...cols.map((c) => dbValue(c, values[c])), chain[0].EncodedDT || new Date(), row.EditedDT || null]
     );
     const id = inserted?.recordset?.[0]?.id;
     if (!id) throw new Error("insert returned no id");
 
-    await Stockholder.syncForProponent(tx, id, stockholderRows(children.stockholders), actorId);
-    await ContactPerson.syncForProponent(tx, id, personRows(children.contacts, "ContactPerson"), actorId);
-    await Signatory.syncForProponent(tx, id, personRows(children.signatories, "Signatory"), actorId);
-    await FinancialTerms.upsertForProponent(tx, id, financialFields(row), actorId);
-    await Investment.upsertForProponent(tx, id, investmentFields(row), actorId);
-    if (txt(row.BuildingDetails)) {
+    await Stockholder.syncForProponent(tx, id, stockholderRows(kids.stockholders), actorId);
+    await ContactPerson.syncForProponent(tx, id, personRows(kids.contacts, "ContactPerson"), actorId);
+    await Signatory.syncForProponent(tx, id, personRows(kids.signatories, "Signatory"), actorId);
+    await FinancialTerms.upsertForProponent(tx, id, financialFields(finRow(chain)), actorId);
+    await Investment.upsertForProponent(tx, id, investmentFields(invRow(chain)), actorId);
+
+    for (let i = 0; i < chain.length; i += 1) {
+      const r = chain[i];
+      const current = i === chain.length - 1;
+      const start = ymd(r.StartTerm);
+      const end = ymd(r.EndTerm);
+      const lease = await tx.query(
+        `INSERT INTO dbo.proponent_leases (proponent_id, ref_code, contract_type_id, date_signed, start_term, end_term, is_current, created_by)
+         OUTPUT INSERTED.id
+         VALUES (@param0, @param7, @param1, @param2, @param3, @param4, @param5, @param6)`,
+        [id, resolveContractType(txt(r.TypeContract), lk), ymd(r.SignedDT), start, end, current ? 1 : 0, actorId, refCodes.get(String(r.RefNo).trim()) ?? null]
+      );
+      const leaseId = lease?.recordset?.[0]?.id ?? null;
+      if (txt(r.BuildingDetails)) {
+        await tx.query(
+          `INSERT INTO dbo.proponent_properties (proponent_id, lease_id, sort_order, type_of_property, date_from, date_to, rate_currency, mgl_currency, created_at)
+           VALUES (@param0, @param1, 1, @param2, @param3, @param4, 'PHP', 'PHP', SYSUTCDATETIME())`,
+          [id, leaseId, txt(r.BuildingDetails, 255), start, end]
+        );
+      }
       await tx.query(
-        `INSERT INTO dbo.proponent_properties (proponent_id, sort_order, type_of_property, date_from, date_to, rate_currency, mgl_currency, created_at)
-         VALUES (@param0, 1, @param1, @param2, @param3, 'PHP', 'PHP', SYSUTCDATETIME())`,
-        [id, txt(row.BuildingDetails, 255), m.start, m.end]
+        `INSERT INTO dbo.legacy_import_map (legacy_ref_no, proponent_id, lease_id) VALUES (@param0, @param1, @param2)`,
+        [String(r.RefNo).trim(), id, leaseId]
       );
     }
     return id;
@@ -522,58 +701,121 @@ async function importDocuments(proponentId, refNo, actorId) {
   return { added, bytes };
 }
 
+/** legacy Ref No → proponent id, for rows this import already brought in. */
+async function importedMap() {
+  const exists = (await selectData(`SELECT OBJECT_ID('dbo.legacy_import_map', 'U') AS id`))?.[0]?.id;
+  if (!exists) return new Map();
+  const rows = await selectData(`SELECT legacy_ref_no, proponent_id FROM dbo.legacy_import_map`);
+  return new Map(rows.map((r) => [String(r.legacy_ref_no), r.proponent_id]));
+}
+
+/** The chains with their mapping, SEC numbers kept unique (one company, one
+ * number): a company split over several locators (leases side by side) keeps
+ * it on the one with the most leases / the latest end; the others are listed. */
+function planChains(legacy, lk) {
+  const chains = buildChains(legacy.locators);
+  const plans = chains.map((chain) => {
+    const row = chain[chain.length - 1];
+    const m = mapLocator(row, lk);
+    // SEC No. / TIN: the latest row that has one.
+    m.secNo = secAndTin(latestWith(chain, (r) => secAndTin(r).sec)).sec;
+    m.tin = m.tin || secAndTin(latestWith(chain, (r) => secAndTin(r).tin)).tin;
+    return { chain, row, m };
+  });
+  const order = [...plans].sort(
+    (a, b) => b.chain.length - a.chain.length || String(ymd(b.row.EndTerm) || "").localeCompare(String(ymd(a.row.EndTerm) || ""))
+  );
+  const taken = new Map();
+  const secDropped = [];
+  for (const p of order) {
+    const sec = p.m.secNo;
+    if (!sec) continue;
+    if (taken.has(sec)) {
+      secDropped.push(`${p.m.refNo} ${p.m.businessName} (SEC ${sec} is on ${taken.get(sec)})`);
+      p.m.secNo = null;
+    } else taken.set(sec, `${p.m.refNo} ${p.m.businessName}`);
+  }
+  // Ref. Code per lease = BRIDGE's RefCode as is. A Ref. Code is never used
+  // twice (not even within a locator's own history), so where BRIDGE repeats
+  // one, current leases get it first, then earlier leases newest first.
+  const refCodes = new Map();
+  const codeTaken = new Map();
+  const codeDropped = [];
+  const entries = [
+    ...order.map((p) => ({ p, r: p.chain[p.chain.length - 1] })),
+    ...order.flatMap((p) => [...p.chain].reverse().slice(1).map((r) => ({ p, r }))),
+  ];
+  for (const { p, r } of entries) {
+    const code = txt(r.RefCode, 50);
+    if (!code) continue;
+    const key = code.toUpperCase();
+    if (codeTaken.has(key)) {
+      codeDropped.push(`${String(r.RefNo).trim()} (${p.m.businessName}): "${code}" is on ${codeTaken.get(key)}`);
+      continue;
+    }
+    codeTaken.set(key, `${String(r.RefNo).trim()} ${p.m.businessName}`);
+    refCodes.set(String(r.RefNo).trim(), code);
+  }
+  for (const p of plans) p.m.refCode = refCodes.get(p.m.refNo) ?? null;
+  return { plans, secDropped, refCodes, codeDropped };
+}
+
 async function runImport() {
-  const marker = await hasImportMarker();
   if (APPLY) {
     // The app's own tables (normally created by the backend on start).
-    for (const m of [Proponent, Stockholder, ContactPerson, Signatory, FinancialTerms, Investment, ProponentDocument]) await m.ensureSchema();
+    for (const mod of [Proponent, Stockholder, ContactPerson, Signatory, FinancialTerms, Investment, ProponentDocument]) await mod.ensureSchema();
+    await require("../models/ProponentLease").ensureSchema();
     await ensureImportSchema();
   }
   const lk = await loadLookups();
   const legacy = await loadLegacy();
+  const { plans, secDropped, refCodes, codeDropped } = planChains(legacy, lk);
+  const imported = await importedMap();
   const refNos = legacy.locators.map((r) => String(r.RefNo).trim());
-  const existing = new Map();
-  if (refNos.length) {
+  const inApp = new Set();
+  for (let i = 0; i < refNos.length; i += 500) {
+    const part = refNos.slice(i, i + 500);
     const rows = await selectData(
-      `SELECT id, ref_no${marker || APPLY ? ", legacy_imported_at" : ", NULL AS legacy_imported_at"} FROM dbo.proponents
-       WHERE ref_no IN (${refNos.map((_, i) => `@param${i}`).join(", ")})`,
-      refNos
+      `SELECT ref_no FROM dbo.proponents WHERE ref_no IN (${part.map((_, j) => `@param${j}`).join(", ")})`,
+      part
     );
-    for (const r of rows) existing.set(String(r.ref_no), r);
+    rows.forEach((r) => inApp.add(String(r.ref_no)));
   }
 
   console.log(`${APPLY ? "IMPORTING" : "DRY RUN — nothing is written (add --apply)"} from ${LEGACY_DB}${ONLY ? `, Ref No ${ONLY}` : ""}`);
-  console.log(`Legacy locators (not deleted): ${legacy.locators.length}\n`);
+  console.log(`Legacy rows (not deleted): ${legacy.locators.length} → ${plans.length} locator(s)\n`);
 
-  const stats = { created: 0, skippedOther: 0, resumed: 0, docs: 0, docBytes: 0, failed: 0, permits: 0 };
+  const stats = { created: 0, skippedOther: 0, resumed: 0, docs: 0, docBytes: 0, failed: 0, permits: 0, leases: 0 };
   const unmatched = { officer: new Map(), industry: new Map(), contractType: new Map() };
-  const fromContract = new Map(); // Industry Type taken from the Type of Contract
+  const fromContract = new Map();
   const bump = (map, k) => k && map.set(k, (map.get(k) || 0) + 1);
   let plannedDocs = 0;
   let plannedBytes = 0;
-  let children = { stockholders: 0, contacts: 0, signatories: 0, withEmail: 0 };
+  const children = { stockholders: 0, contacts: 0, signatories: 0, withEmail: 0 };
+  const merged = [];
 
-  for (const row of legacy.locators) {
-    const m = mapLocator(row, lk);
-    const kids = {
-      stockholders: legacy.stockholders.get(m.refNo) || [],
-      contacts: legacy.contacts.get(m.refNo) || [],
-      signatories: legacy.signatories.get(m.refNo) || [],
-    };
-    const docs = legacy.docs.get(m.refNo) || [];
+  for (const { chain, row, m } of plans) {
+    const kids = chainKids(chain, legacy);
+    const docs = chain.flatMap((r) => legacy.docs.get(String(r.RefNo).trim()) || []);
     if (m.officerName && !m.officerId && !NO_OFFICERS) bump(unmatched.officer, m.officerName);
     if (!m.industryCode) bump(unmatched.industry, m.industryText || "(blank)");
     if (m.industryFromContract) bump(fromContract, `${m.tocText} → ${[...lk.industries.entries()].find(([, c]) => c === m.industryCode)?.[0]}`);
-    if (m.tocText && !m.contractTypeId) bump(unmatched.contractType, m.tocText);
+    for (const r of chain) if (txt(r.TypeContract) && !resolveContractType(txt(r.TypeContract), lk)) bump(unmatched.contractType, txt(r.TypeContract));
+    if (chain.length > 1) {
+      merged.push(
+        `  ${m.refNo} ${m.businessName}: ` +
+          chain.map((r) => `${String(r.RefNo).trim()} (${ymd(r.StartTerm) || "?"} → ${ymd(r.EndTerm) || "?"})`).join(" ⇒ ")
+      );
+    }
 
-    const found = existing.get(m.refNo);
-    if (found && !found.legacy_imported_at) {
+    const importedId = chain.map((r) => imported.get(String(r.RefNo).trim())).find(Boolean) || null;
+    if (!importedId && chain.some((r) => inApp.has(String(r.RefNo).trim()))) {
       stats.skippedOther += 1;
       console.log(`- ${m.refNo} ${m.businessName}: already in the app (not from this import) — left alone`);
       continue;
     }
     plannedDocs += docs.length;
-    plannedBytes += docs.reduce((s, d) => s + Number(d.size || 0), 0);
+    plannedBytes += docs.reduce((sum, d) => sum + Number(d.size || 0), 0);
     children.stockholders += kids.stockholders.length;
     children.contacts += kids.contacts.length;
     children.signatories += kids.signatories.length;
@@ -581,23 +823,26 @@ async function runImport() {
 
     if (!APPLY) continue;
     try {
-      let id = found?.id;
+      let id = importedId;
       if (!id) {
-        id = await createLocator(row, m, kids, m.createdBy);
+        id = await createLocator(chain, m, kids, m.createdBy, lk, refCodes);
         stats.created += 1;
+        stats.leases += chain.length;
         if (await createLeasePermit(id, m, m.createdBy)) stats.permits += 1;
       } else {
         stats.resumed += 1;
       }
       let docNote = "";
       if (!SKIP_DOCS && docs.length) {
-        const r = await importDocuments(id, m.refNo, m.createdBy);
-        stats.docs += r.added;
-        stats.docBytes += r.bytes;
-        docNote = ` | ${r.added} document(s) ${mb(r.bytes)}`;
+        for (const r of chain) {
+          const res = await importDocuments(id, String(r.RefNo).trim(), m.createdBy);
+          stats.docs += res.added;
+          stats.docBytes += res.bytes;
+        }
+        docNote = ` | documents done`;
       }
       console.log(
-        `${found ? "~" : "+"} ${m.refNo} ${m.businessName}${m.officerId ? "" : " (no Account Officer)"} | ` +
+        `${importedId ? "~" : "+"} ${m.refNo} ${m.businessName}${chain.length > 1 ? ` [${chain.length} leases]` : ""}${m.officerId ? "" : " (no Account Officer)"} | ` +
           `${kids.stockholders.length} stockholder(s), ${kids.contacts.length} contact(s), ${kids.signatories.length} signator${kids.signatories.length === 1 ? "y" : "ies"}${docNote}`
       );
     } catch (error) {
@@ -608,12 +853,24 @@ async function runImport() {
 
   const list = (map) => [...map.entries()].map(([k, n]) => `"${k}" (${n})`).join(", ") || "none";
   console.log("\n================ Summary ================");
+  console.log(`Renewals / amendments merged into one locator (${merged.length}):\n${merged.join("\n") || "  none"}`);
+  // Same company, same lease dates, not merged: billboards / lots side by side,
+  // or the same lease encoded twice in BRIDGE — worth a look.
+  const sameDates = new Map();
+  for (const { row, m } of plans) {
+    const k = `${companyKey(row.Tenant)}|${ymd(row.StartTerm)}|${ymd(row.EndTerm)}`;
+    if (!sameDates.has(k)) sameDates.set(k, []);
+    sameDates.get(k).push(`${m.refNo} ${m.businessName}`);
+  }
+  const dupes = [...sameDates.values()].filter((v) => v.length > 1);
+  console.log(`Same company and lease dates, kept as separate locators — check for duplicates (${dupes.length}):\n${dupes.map((v) => `  ${v.join("  |  ")}`).join("\n") || "  none"}`);
+  console.log(`Ref. Code (BRIDGE RefCode as is) on ${refCodes.size} lease(s); left blank where BRIDGE repeats it (${codeDropped.length}):\n${codeDropped.map((x) => `  ${x}`).join("\n") || "  none"}`);
+  console.log(`SEC Registration No. kept on one locator only (${secDropped.length}):\n${secDropped.map((x) => `  ${x}`).join("\n") || "  none"}`);
   if (APPLY) {
-    console.log(`Created ${stats.created} locator(s) (+${stats.permits} lease permit(s)), resumed ${stats.resumed}, failed ${stats.failed}.`);
+    console.log(`Created ${stats.created} locator(s) with ${stats.leases} lease(s) (+${stats.permits} lease permit(s)), resumed ${stats.resumed}, failed ${stats.failed}.`);
     console.log(`Documents imported: ${stats.docs} (${mb(stats.docBytes)})${SKIP_DOCS ? " — skipped (--skip-documents)" : ""}.`);
   } else {
-    const toCreate = legacy.locators.length - stats.skippedOther - [...existing.values()].filter((e) => e.legacy_imported_at).length;
-    console.log(`Would create ${toCreate} locator(s); ${stats.skippedOther} already in the app are left alone.`);
+    console.log(`Would create ${plans.length - stats.skippedOther} locator(s) from ${legacy.locators.length} row(s); ${stats.skippedOther} already in the app are left alone.`);
     console.log(`Stockholders ${children.stockholders}, contact persons ${children.contacts}, signatories ${children.signatories} (${children.withEmail} with an email).`);
     console.log(`Documents: ${plannedDocs} file(s), ${mb(plannedBytes)}${SKIP_DOCS ? " — would be skipped (--skip-documents)" : ""} — make sure the uploads drive has room.`);
   }
@@ -678,8 +935,9 @@ async function runResync() {
   const unmatchedOfficers = new Map();
   const bump = (map, k) => map.set(k, (map.get(k) || 0) + 1);
 
-  for (const row of legacy.locators) {
-    const m = mapLocator(row, lk);
+  const { plans, refCodes } = planChains(legacy, lk);
+  const mapExists = (await selectData(`SELECT OBJECT_ID('dbo.legacy_import_map', 'U') AS id`))?.[0]?.id;
+  for (const { chain, row, m } of plans) {
     const cur = current.get(m.refNo);
     if (!cur) {
       stats.notImported += 1;
@@ -700,10 +958,11 @@ async function runResync() {
       if (!same(have, v)) changes.push({ col, from: have, to: v });
     }
 
+    const raw = chainKids(chain, legacy);
     const kids = {
-      stockholders: stockholderRows(legacy.stockholders.get(m.refNo) || []),
-      contacts: personRows(legacy.contacts.get(m.refNo) || [], "ContactPerson"),
-      signatories: personRows(legacy.signatories.get(m.refNo) || [], "Signatory"),
+      stockholders: stockholderRows(raw.stockholders),
+      contacts: personRows(raw.contacts, "ContactPerson"),
+      signatories: personRows(raw.signatories, "Signatory"),
     };
     const SH = ["name", "nationality", "subscribed", "paid", "ownership"];
     const PP = ["name", "designation", "contact_no", "email"];
@@ -714,17 +973,20 @@ async function runResync() {
       childSync.push("contacts");
     if (listKey(await Signatory.listForProponent(cur.id), PP) !== listKey(kids.signatories.filter((r) => r.name), PP))
       childSync.push("signatories");
-    const fin = financialFields(row);
+    const fin = financialFields(finRow(chain));
     const finHave = await FinancialTerms.getForProponent(cur.id);
     if (Object.keys(fin).some((k) => !same(finHave[k], fin[k]))) childSync.push("financial terms");
-    const inv = investmentFields(row);
+    const inv = investmentFields(invRow(chain));
     const invHave = await Investment.getForProponent(cur.id);
     if (Object.keys(inv).some((k) => !same(invHave[k], inv[k]))) childSync.push("investment");
 
     const building = txt(row.BuildingDetails, 255);
+    // The current lease's schedule (earlier leases keep their own).
     const props = await selectData(
-      `SELECT id, type_of_property, date_from, date_to FROM dbo.proponent_properties
-       WHERE proponent_id = @param0 AND is_active = 1 ORDER BY sort_order, id`,
+      `SELECT pp.id, pp.type_of_property, pp.date_from, pp.date_to FROM dbo.proponent_properties pp
+       WHERE pp.proponent_id = @param0 AND pp.is_active = 1
+         AND (pp.lease_id IS NULL OR pp.lease_id IN (SELECT id FROM dbo.proponent_leases WHERE proponent_id = @param0 AND is_current = 1))
+       ORDER BY pp.sort_order, pp.id`,
       [cur.id]
     );
     const prop = props[0];
@@ -735,6 +997,21 @@ async function runResync() {
     const permit = (await Permit.listByProponent(cur.id)).find((x) => x.permit_type === "CONTRACT" && !x.application_id);
     const permitChange = m.end && (!permit || !same(permit.issue_date, m.start) || !same(permit.expiry_date, m.end));
     if (permitChange) childSync.push(permit ? "lease permit dates" : "lease permit (new)");
+
+    // Earlier leases' Ref. Codes (the current one follows the locator's ref_code).
+    const historyCodes = mapExists
+      ? (
+          await selectData(
+            `SELECT m.legacy_ref_no, l.id, l.ref_code FROM dbo.legacy_import_map m
+             JOIN dbo.proponent_leases l ON l.id = m.lease_id
+             WHERE m.proponent_id = @param0 AND l.is_current = 0`,
+            [cur.id]
+          )
+        )
+          .map((l) => ({ id: l.id, from: l.ref_code, to: refCodes.get(String(l.legacy_ref_no)) ?? null }))
+          .filter((l) => !same(l.from, l.to))
+      : [];
+    if (historyCodes.length) childSync.push("earlier leases' Ref. Codes");
 
     if (!changes.length && !childSync.length) {
       stats.same += 1;
@@ -768,6 +1045,9 @@ async function runResync() {
         if (childSync.includes("investment")) await Investment.upsertForProponent(tx, cur.id, inv, m.createdBy);
         // The current lease row mirrors Ref. Code, Date Signed, Start/End and Type of Contract.
         await ProponentLease.syncCurrentFromProponent(tx, cur.id, null);
+        for (const l of historyCodes) {
+          await tx.query(`UPDATE dbo.proponent_leases SET ref_code = @param1, updated_at = GETDATE() WHERE id = @param0`, [l.id, l.to]);
+        }
         if (propChange) {
           const leaseId = await ProponentLease.currentLeaseId(cur.id, tx);
           if (prop) {
@@ -837,6 +1117,7 @@ async function runRemove() {
       const files = await selectData(`SELECT storage_path FROM dbo.proponent_documents WHERE proponent_id = @param0`, [p.id]);
       await runInTransaction(async (tx) => {
         const tables = [
+          "legacy_import_map",
           "legacy_import_files",
           "proponent_documents",
           "permits",
@@ -849,6 +1130,8 @@ async function runRemove() {
           "locator_compliance_documents",
           "locator_compliance_items",
           "proponent_profile_change_requests",
+          "proponent_extensions",
+          "proponent_leases",
         ];
         for (const t of tables) {
           await tx.query(

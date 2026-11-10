@@ -537,10 +537,11 @@ exports.getById = async (req, res) => {
     const row = await Proponent.getProponentById(id);
     if (!row) return res.status(404).json({ success: false, message: "Proponent not found" });
 
-    // The latest GIS upload on the locator's Compliance page (Stockholders tab, read only).
+    // The latest GIS — Compliance upload, Documents tab or an application's
+    // GIS requirement (Stockholders tab's GIS card, read only; opened below).
     let gis_document = null;
     try {
-      gis_document = await require("../models/ComplianceDocument").latestGisSummary(id);
+      gis_document = await require("../lib/gisDocument").latestGisSummary(id);
     } catch (error) {
       console.error("GIS document lookup error:", error);
     }
@@ -672,6 +673,33 @@ exports.downloadDocument = async (req, res) => {
     return res.download(abs, downloadName);
   } catch (error) {
     console.error("Download proponent document error:", error);
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
+  }
+};
+
+/** Opens the locator's latest GIS (lib/gisDocument), wherever it was filed. */
+exports.downloadGisDocument = async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ success: false, message: "Invalid id" });
+    const doc = await require("../lib/gisDocument").latestGisDocument(id);
+    const abs = doc ? resolveStoredPath(doc.storage_path) : null;
+    if (!abs || !fs.existsSync(abs)) return res.status(404).json({ success: false, message: "No GIS file for this locator." });
+    const downloadName = doc.original_file_name || doc.file_name || path.basename(abs);
+    AuditLog.recordFileAccess(req, {
+      kind: "DOCUMENT",
+      entityType: "proponent",
+      entityId: id,
+      details: { gis_source: doc.source, document_id: doc.id, file_name: downloadName },
+    });
+    if (doc.content_type) res.type(doc.content_type);
+    if (req.query.view === "1") {
+      res.setHeader("Content-Disposition", contentDisposition("inline", downloadName));
+      return res.sendFile(abs);
+    }
+    return res.download(abs, downloadName);
+  } catch (error) {
+    console.error("Download GIS document error:", error);
     return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };

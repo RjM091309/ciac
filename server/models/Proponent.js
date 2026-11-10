@@ -998,7 +998,8 @@ async function listSublessorOptions() {
   const rows = await selectData(
     `SELECT p.id, p.business_name, p.ref_no, p.ref_code
      FROM dbo.proponents p
-     WHERE p.is_active = 1 AND p.sublessor_id IS NULL AND p.account_officer_id IS NOT NULL
+     WHERE p.is_active = 1 AND p.sublessor_id IS NULL
+       AND (p.account_officer_id IS NOT NULL OR p.is_manual_registration = 1)
      ORDER BY p.business_name`
   );
   return rows.map((r) => ({ id: r.id, business_name: r.business_name, ref_no: r.ref_no ?? null, ref_code: r.ref_code ?? null }));
@@ -1018,6 +1019,7 @@ async function listProponentsForLocatorList({ accountOfficerId = null } = {}) {
       p.is_active,
       p.created_at,
       creator.full_name AS encoded_by,
+      ao.full_name AS assigned_ao,
       COALESCE(apptype.name, manual_apptype.name) AS business_type,
       COALESCE(ct.effective_start, p.manual_start_term) AS start_term,
       COALESCE(ct.effective_end, p.manual_end_term) AS end_term,
@@ -1025,6 +1027,7 @@ async function listProponentsForLocatorList({ accountOfficerId = null } = {}) {
       open_ren.application_no AS renewal_application_no
     FROM dbo.proponents p
     LEFT JOIN dbo.users creator ON creator.id = p.created_by
+    LEFT JOIN dbo.users ao ON ao.id = p.account_officer_id
     -- A renewal still being decided (shown as REN-… next to the LOC Ref No).
     OUTER APPLY (
       SELECT TOP (1) r.application_no
@@ -1050,8 +1053,10 @@ async function listProponentsForLocatorList({ accountOfficerId = null } = {}) {
       WHERE a2.proponent_id = p.id AND a2.status = 'APPROVED'
       ORDER BY c.effective_end DESC, c.id DESC
     ) ct
-    WHERE p.account_officer_id IS NOT NULL
-      AND (@param0 IS NULL OR p.account_officer_id = @param0)
+    -- Every locator (not only those with an Account Officer yet — imported /
+    -- hand-registered ones wait for Level 1 to assign one); a Level 2 Account
+    -- Officer sees their own.
+    WHERE (@param0 IS NULL OR p.account_officer_id = @param0)
     ORDER BY p.id DESC
     `,
     [toInt(accountOfficerId)]
@@ -1067,6 +1072,7 @@ async function listProponentsForLocatorList({ accountOfficerId = null } = {}) {
     is_active: p.is_active,
     created_at: p.created_at ?? null,
     encoded_by: p.encoded_by ?? null,
+    assigned_ao: p.assigned_ao ?? null,
     business_type: p.business_type ?? null,
     start_term: p.start_term ?? null,
     end_term: p.end_term ?? null,

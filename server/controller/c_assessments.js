@@ -592,7 +592,7 @@ async function stockholdersPayload(req, applicationId) {
   // The latest GIS upload on the locator's Compliance page (read-only here).
   let gis_document = null;
   try {
-    gis_document = await require("../models/ComplianceDocument").latestGisSummary(app.proponent_id);
+    gis_document = await require("../lib/gisDocument").latestGisSummary(app.proponent_id);
   } catch (error) {
     console.error("GIS document lookup error:", error);
   }

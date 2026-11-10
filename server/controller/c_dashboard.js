@@ -515,7 +515,7 @@ async function buildStaffDashboard({ user, sidebarPermissions, widgetPermissions
       summary.locators = aoProponentIds
         ? aoProponentIds.size
         : Number((await selectData(
-            `SELECT COUNT(1) AS n FROM dbo.proponents WHERE is_active = 1 AND account_officer_id IS NOT NULL`
+            `SELECT COUNT(1) AS n FROM dbo.proponents WHERE is_active = 1 AND (account_officer_id IS NOT NULL OR is_manual_registration = 1)`
           ))?.[0]?.n || 0);
     }
     const stats = {};

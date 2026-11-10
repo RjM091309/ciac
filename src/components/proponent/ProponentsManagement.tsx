@@ -6,7 +6,9 @@ import {
   ChevronDown,
   ChevronRight,
   Copy,
+  ExternalLink,
   FileSignature,
+  FileText,
   Landmark,
   LayoutGrid,
   Lock,
@@ -256,6 +258,8 @@ type LocatorDynamicRow = {
   end_term: string | null;
   lease_term: string | null;
   encoded_by: string | null;
+  /** The Account Officer assigned to the locator (null = unassigned). */
+  assigned_ao?: string | null;
   /** A renewal still being decided — the Ref No then shows as REN-… (same number). */
   renewal_application_no?: string | null;
   /** The latest Extension Date (Extension Date card). */
@@ -1000,6 +1004,10 @@ export function ProponentsManagement({
   const [confirmReactivateId, setConfirmReactivateId] = useState<number | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [termFilter, setTermFilter] = useState<'all' | LeaseStatus>('all');
+  // '' = all; '__none__' = no Account Officer assigned; else the AO's name.
+  const [aoFilter, setAoFilter] = useState('');
+  // '' = all; '__none__' = no Industry; else the Industry name.
+  const [industryFilter, setIndustryFilter] = useState('');
   const [pageSize, setPageSize] = useState(50);
   const [page, setPage] = useState(1);
   const [highlightedProponentId, setHighlightedProponentId] = useState<number | null>(null);
@@ -1144,6 +1152,7 @@ export function ProponentsManagement({
         end_term: d?.end_term ?? null,
         lease_term: d?.lease_term ?? null,
         encoded_by: d?.encoded_by ?? null,
+        assigned_ao: d?.assigned_ao ?? null,
         renewal_application_no: d?.renewal_application_no ?? null,
         extension_date: d?.extension_date ?? null,
       };
@@ -1241,8 +1250,13 @@ export function ProponentsManagement({
   const [loginInfo, setLoginInfo] = useState<{ status: string | null; email: string | null; username: string | null } | null>(null);
   // The latest GIS upload on the locator's Compliance page (from GET /:id),
   // shown read only beside Latest GIS Filing on the Stockholders tab (A-16).
+  // The latest GIS wherever it was filed (Compliance, Documents tab or an
+  // application's GIS requirement) — opened from the GIS card.
   const [gisDocument, setGisDocument] = useState<{
+    source?: 'compliance' | 'locator' | 'application';
+    label?: string | null;
     original_file_name: string | null;
+    year?: number | null;
     status: string | null;
     validity_to: string | null;
   } | null>(null);
@@ -1478,9 +1492,33 @@ export function ProponentsManagement({
     return { all: rows.length, active, expired };
   }, [rows]);
 
+  // Filter options built from the list itself, with counts.
+  const countOptions = (values: (string | null | undefined)[], noneLabel: string) => {
+    const counts = new Map<string, number>();
+    let none = 0;
+    for (const v of values) {
+      const k = (v || '').trim();
+      if (k) counts.set(k, (counts.get(k) || 0) + 1);
+      else none += 1;
+    }
+    const opts = [...counts.entries()]
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([k, n]) => ({ value: k, label: k, detail: String(n) }));
+    return none ? [{ value: '__none__', label: noneLabel, detail: String(none) }, ...opts] : opts;
+  };
+  const aoOptions = useMemo(() => countOptions(rows.map((p) => p.assigned_ao), 'Unassigned'), [rows]);
+  const industryFilterOptions = useMemo(() => countOptions(rows.map((p) => p.business_type), 'No industry'), [rows]);
+
   const filteredRows = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
-    const byTerm = termFilter === 'all' ? rows : rows.filter((p) => leaseStatus(p.end_term) === termFilter);
+    const matches = (v: string | null | undefined, f: string) =>
+      !f || (f === '__none__' ? !(v || '').trim() : (v || '').trim() === f);
+    const byTerm = rows.filter(
+      (p) =>
+        (termFilter === 'all' || leaseStatus(p.end_term) === termFilter) &&
+        matches(p.assigned_ao, aoFilter) &&
+        matches(p.business_type, industryFilter)
+    );
     if (!q) return byTerm;
     return byTerm.filter((p) => {
       const statusStr = p.is_active === 1 ? 'active' : 'inactive';
@@ -1494,10 +1532,11 @@ export function ProponentsManagement({
         (p.contact_no || '').toLowerCase().includes(q) ||
         (p.address || '').toLowerCase().includes(q) ||
         (p.business_type || '').toLowerCase().includes(q) ||
+        (p.assigned_ao || '').toLowerCase().includes(q) ||
         statusStr.includes(q)
       );
     });
-  }, [rows, searchQuery, termFilter]);
+  }, [rows, searchQuery, termFilter, aoFilter, industryFilter]);
 
   const totalPages = useMemo(() => {
     return Math.max(1, Math.ceil(filteredRows.length / Math.max(1, pageSize)));
@@ -1527,7 +1566,7 @@ export function ProponentsManagement({
 
   useEffect(() => {
     setPage(1);
-  }, [searchQuery, pageSize, termFilter]);
+  }, [searchQuery, pageSize, termFilter, aoFilter, industryFilter]);
 
   useEffect(() => {
     if (page > totalPages) setPage(totalPages);
@@ -2363,6 +2402,26 @@ export function ProponentsManagement({
               ]}
             />
           </div>
+          <div className="w-40 shrink-0 sm:w-48">
+            <AppSelect
+              compact
+              isClearable
+              placeholder="All industries"
+              value={industryFilter}
+              onChange={(value) => setIndustryFilter(String(value || ''))}
+              options={industryFilterOptions}
+            />
+          </div>
+          <div className="w-40 shrink-0 sm:w-52">
+            <AppSelect
+              compact
+              isClearable
+              placeholder="All Account Officers"
+              value={aoFilter}
+              onChange={(value) => setAoFilter(String(value || ''))}
+              options={aoOptions}
+            />
+          </div>
           </div>
           {canAdd ? (
           <button
@@ -2445,7 +2504,7 @@ export function ProponentsManagement({
                     <div className="truncate" style={{ color: 'var(--text)' }}>{displayLeaseTerm(p)}</div>
                   </div>
                 </div>
-                {p.encoded_by ? <div className="mt-2 text-[10px] text-secondary">Encoded by {p.encoded_by}</div> : null}
+                <div className="mt-2 text-[10px] text-secondary">AO: {p.assigned_ao || <span className="italic">Unassigned</span>}</div>
               </button>
             ))}
           </div>
@@ -2454,7 +2513,7 @@ export function ProponentsManagement({
             <table className="min-w-full text-left text-xs">
               <thead>
                 <tr style={{ borderBottom: '1px solid var(--border-subtle)' }}>
-                  {['Ref Code', 'Tenant', 'Address', 'Industry', 'Start Term', 'End Term', 'Lease Term', 'Encoded By'].map((col) => (
+                  {['Ref Code', 'Tenant', 'Address', 'Industry', 'Start Term', 'End Term', 'Lease Term', 'Assigned AO'].map((col) => (
                     <th
                       key={col}
                       className="px-3 py-2.5 text-[10px] uppercase tracking-wider text-secondary whitespace-nowrap"
@@ -2505,7 +2564,11 @@ export function ProponentsManagement({
                       </span>
                     </td>
                     <td className="px-3 py-2 text-[11px] text-secondary whitespace-nowrap">{displayLeaseTerm(p)}</td>
-                    <td className="px-3 py-2 text-[11px] text-secondary whitespace-nowrap">{p.encoded_by || '—'}</td>
+                    <td className="px-3 py-2 text-[11px] whitespace-nowrap">
+                      {p.assigned_ao
+                        ? <span style={{ color: 'var(--text)' }}>{p.assigned_ao}</span>
+                        : <span className="italic text-secondary">Unassigned</span>}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -3927,19 +3990,31 @@ export function ProponentsManagement({
                             onChange={(d) => setForm((p) => ({ ...p, sec_gis_date: dateToDateInputValue(d) }))}
                           />
                         </Field>
-                        <Field compact label="GIS Document (Compliance)">
+                        <Field compact label="GIS Document">
                           <div
                             className="app-form-control app-form-control-sm flex h-9 items-center gap-2 text-[12px]"
                             style={{ backgroundColor: 'var(--control-bg)', cursor: 'default' }}
-                            title="Uploaded by the locator on their Compliance page (or by the Compliance Officer)"
+                            title="The latest GIS: Compliance upload, Documents tab, or the GIS requirement of an application"
                           >
-                            {gisDocument ? (
+                            {gisDocument && editing ? (
                               <>
-                                <span className="truncate font-medium" style={{ color: 'var(--text)' }}>
-                                  {gisDocument.original_file_name || 'GIS'}
-                                </span>
-                                <span className="shrink-0 text-secondary">
-                                  · {String(gisDocument.status || '').replace(/_/g, ' ').toLowerCase() || 'uploaded'}
+                                <button
+                                  type="button"
+                                  onClick={() => window.open(`/api/proponents/${editing.id}/gis-document/file?view=1`, '_blank')}
+                                  className="inline-flex min-w-0 items-center gap-1.5 font-medium text-blue-600 hover:underline cursor-pointer"
+                                  title="Open the GIS"
+                                >
+                                  <FileText size={13} className="shrink-0" />
+                                  <span className="truncate">{gisDocument.label || gisDocument.original_file_name || 'GIS'}</span>
+                                  <ExternalLink size={11} className="shrink-0 opacity-70" />
+                                </button>
+                                <span className="shrink-0 truncate text-secondary">
+                                  ·{' '}
+                                  {gisDocument.source === 'compliance'
+                                    ? `Compliance · ${String(gisDocument.status || '').replace(/_/g, ' ').toLowerCase() || 'uploaded'}`
+                                    : gisDocument.source === 'application'
+                                      ? 'Application requirement'
+                                      : 'Documents tab'}
                                   {gisDocument.validity_to ? ` · valid until ${fmtDate(gisDocument.validity_to)}` : ''}
                                 </span>
                               </>

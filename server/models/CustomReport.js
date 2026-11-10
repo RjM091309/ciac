@@ -81,12 +81,16 @@ const LOCATOR_COLUMNS = {
   account_officer: { label: "Account Officer", sql: personName("ao") },
 };
 
+// A Registered Locator: assigned an Account Officer, or registered by hand /
+// imported from BRIDGE (those wait for Level 1 to assign one).
+const REGISTERED = "(p.account_officer_id IS NOT NULL OR p.is_manual_registration = 1)";
+
 const DATASETS = {
   locators: {
     label: "Registered Locators",
     description: "One row per registered locator.",
     from: `FROM dbo.proponents p ${CONTRACT_TYPE_APPLY} ${LEASE_APPLY}`,
-    where: ["p.account_officer_id IS NOT NULL"],
+    where: [REGISTERED],
     order: "p.business_name",
     columns: {
       ...LOCATOR_COLUMNS,
@@ -176,7 +180,7 @@ const DATASETS = {
     label: "Stockholders",
     description: "One row per stockholder of a registered locator.",
     from: `FROM dbo.stockholder s INNER JOIN dbo.proponents p ON p.id = s.proponent_id ${CONTRACT_TYPE_APPLY}`,
-    where: ["s.is_active = 1", "p.account_officer_id IS NOT NULL"],
+    where: ["s.is_active = 1", REGISTERED],
     order: "p.business_name, s.id",
     columns: {
       ...LOCATOR_COLUMNS,
@@ -202,7 +206,7 @@ const DATASETS = {
       LEFT JOIN dbo.contracts lc ON lc.id = l.contract_id
       LEFT JOIN dbo.type_of_contract ltoc ON ltoc.id = COALESCE(l.contract_type_id, lc.contract_type_id)
       LEFT JOIN dbo.users ao ON ao.id = p.account_officer_id`,
-    where: ["l.is_active = 1", "p.account_officer_id IS NOT NULL"],
+    where: ["l.is_active = 1", REGISTERED],
     order: "p.business_name, l.is_current DESC, l.id DESC",
     columns: {
       business_name: { label: "Locator", sql: "p.business_name" },
@@ -291,6 +295,9 @@ async function catalog() {
   }));
 }
 
+/** True when the column's value is null or only spaces. */
+const blankSql = (expr) => `NULLIF(LTRIM(RTRIM(CONVERT(NVARCHAR(4000), ${expr}))), '') IS NULL`;
+
 function badRequest(message) {
   return Object.assign(new Error(message), { status: 400 });
 }
@@ -312,12 +319,13 @@ async function run({ dataset, columns, filters = {}, sort = null, ownOfficerId =
     return `@param${params.length - 1}`;
   };
   const where = [...d.where];
+  let missingClause = null;
   for (const [key, raw] of Object.entries(filters || {})) {
     const value = String(raw ?? "").trim();
     if (key === MISSING_FILTER) {
       const c = value && d.columns[value];
       if (!c || c.type === "number" || c.noMissing) continue;
-      where.push(`NULLIF(LTRIM(RTRIM(CONVERT(NVARCHAR(4000), ${c.sql}))), '') IS NULL`);
+      missingClause = blankSql(c.sql);
       continue;
     }
     const f = d.filters[key];
@@ -326,6 +334,19 @@ async function run({ dataset, columns, filters = {}, sort = null, ownOfficerId =
     where.push(f.sql.replace("@v", param(f.type === "date" ? value : value.slice(0, 200))));
   }
   if (ownOfficerId) where.push(`p.account_officer_id = ${param(Number(ownOfficerId))}`);
+
+  // "Missing data in" offers only the columns that actually have blanks among
+  // these rows (the other filters applied, not the Missing one), with counts.
+  const missingKeys = Object.entries(d.columns)
+    .filter(([, c]) => c.type !== "number" && !c.noMissing)
+    .map(([k]) => k);
+  let missing = {};
+  if (missingKeys.length) {
+    const agg = missingKeys.map((k, i) => `SUM(CASE WHEN ${blankSql(d.columns[k].sql)} THEN 1 ELSE 0 END) AS m${i}`).join(", ");
+    const [counts] = await selectData(`SELECT ${agg} ${d.from} WHERE ${where.join(" AND ")}`, params);
+    missing = Object.fromEntries(missingKeys.map((k, i) => [k, Number(counts?.[`m${i}`]) || 0]).filter(([, n]) => n > 0));
+  }
+  if (missingClause) where.push(missingClause);
 
   const select = keys.map((k, i) => `${d.columns[k].sql} AS c${i}`).join(", ");
   const sortKey = sort?.key && d.columns[sort.key] ? sort.key : null;
@@ -355,6 +376,7 @@ async function run({ dataset, columns, filters = {}, sort = null, ownOfficerId =
     rows,
     total: rows.length,
     truncated,
+    missing,
   };
 }
 
