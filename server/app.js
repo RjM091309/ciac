@@ -204,6 +204,8 @@ initializeDatabase()
       ["land use", () => LandUse.ensureSchema()],
       // Seeded once with OPEN SPACE / STRUCTURE only when the table is first created.
       ["type of property", () => PropertyType.ensureSchema()],
+      // Extension Date history (needs dbo.proponents + dbo.proponent_leases first).
+      ["extensions", () => require("./models/ProponentExtension").ensureSchema()],
       ["development timeline", () => require("./models/ProponentMilestone").ensureSchema()],
       // Compliance checklist columns (applicability) + uploaded documents —
       // dashboards and the locator portal read them before anyone opens the module.
