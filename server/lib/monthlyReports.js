@@ -44,12 +44,14 @@ async function buildFor(template, month, ownOfficerId) {
     ownOfficerId,
   });
   const ds = CustomReport.DATASETS[template.dataset];
+  // Title, sheet and subtitle as the page's own Excel download names them.
   const title = `${template.name} — ${monthLabel(month)}`;
-  const asOf = new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
-  const subtitle = `${ds?.label || template.dataset} · As of ${asOf}${ownOfficerId ? " · Your locators" : ""}${
-    result.truncated ? ` · First ${CustomReport.MAX_ROWS.toLocaleString("en-US")} rows only` : ""
-  }`;
-  const buffer = await CustomReport.buildWorkbook(result, { title, subtitle, sheetName: template.name });
+  const asOf = `As of ${new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}`;
+  const applied = await CustomReport.filterText(template.dataset, cfg.filters || {});
+  if (ownOfficerId) applied.push("Your locators only");
+  if (result.truncated) applied.push(`First ${CustomReport.MAX_ROWS.toLocaleString("en-US")} rows only`);
+  const subtitle = [asOf, ...applied].join(" · ");
+  const buffer = await CustomReport.buildWorkbook(result, { title, subtitle, sheetName: ds?.label || template.name });
   const fileName = `${template.name.replace(/[^A-Za-z0-9]+/g, "-")}-${month}.xlsx`;
   return { buffer, fileName, rows: result.total, title };
 }

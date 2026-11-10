@@ -738,45 +738,151 @@ async function markSent(id, month) {
   ]);
 }
 
-/** A run result as an Excel workbook (Buffer): title, subtitle, header row,
- * rows, and a TOTAL row for the number columns. */
-async function buildWorkbook(result, { title, subtitle, sheetName = "Report" }) {
+/** A run result as an Excel workbook (Buffer), laid out exactly like the
+ * Custom Report's own Excel download (src/components/reports/reportExports.ts):
+ * Arial, title row 3, "AGENCY:" row 5 with the subtitle under it, grey bold
+ * header on row 7 (frozen, repeated on print), thin borders, landscape A4,
+ * and a highlighted TOTAL row for the number columns. */
+async function buildWorkbook(result, { title, subtitle, sheetName = "Report", empty = "No rows match these filters." }) {
   const ExcelJS = require("exceljs");
+  const site = require("../lib/siteSettings").getters;
+  const FONT = "Arial";
+  const HEADER_FILL = "FFD8D8D8";
+  const HIGHLIGHT_FILL = "FFFFF2CC";
+  const TITLE_ROW = 3;
+  const AGENCY_ROW = 5;
+  const HEADER_ROW = 7;
+  const thin = { style: "thin" };
+  const medium = { style: "medium" };
+
   const wb = new ExcelJS.Workbook();
-  const ws = wb.addWorksheet(String(sheetName).replace(/[\\/?*[\]:]/g, " ").slice(0, 31) || "Report");
-  const n = Math.max(1, result.columns.length);
-  ws.addRow([title]).font = { bold: true, size: 14 };
-  ws.addRow([subtitle]).font = { italic: true, size: 10, color: { argb: "FF666666" } };
-  ws.mergeCells(1, 1, 1, n);
-  ws.mergeCells(2, 1, 2, n);
-  ws.addRow([]);
-  const head = ws.addRow(result.columns.map((c) => c.label));
-  head.eachCell((cell) => {
-    cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
-    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1F2937" } };
-    cell.alignment = { vertical: "middle", wrapText: true };
+  wb.creator = site.orgShortName();
+  wb.created = new Date();
+  const sheet = wb.addWorksheet(String(sheetName).replace(/[\\/?*[\]:]/g, " ").slice(0, 31) || "Report", {
+    views: [{ state: "frozen", ySplit: HEADER_ROW }],
+    pageSetup: {
+      orientation: "landscape",
+      paperSize: 9,
+      fitToPage: true,
+      fitToWidth: 1,
+      fitToHeight: 0,
+      horizontalCentered: true,
+      margins: { left: 0.24, right: 0.24, top: 0.75, bottom: 0.75, header: 0.3, footer: 0.3 },
+      printTitlesRow: `${HEADER_ROW}:${HEADER_ROW}`,
+    },
   });
-  const toDate = (v) => (v ? new Date(`${v}T00:00:00Z`) : null);
-  for (const r of result.rows) {
-    ws.addRow(r.map((v, i) => (result.columns[i].type === "date" ? toDate(v) : v)));
+
+  // Same column specs as the page's exportExcel().
+  const columns = result.columns.map((c) => ({
+    header: c.label,
+    width: c.type === "date" || c.type === "number" ? 14 : Math.min(45, Math.max(14, c.label.length + 4)),
+    align: c.type === "number" ? "right" : "left",
+    numFmt: c.type === "date" ? "mmm d, yyyy" : c.type === "number" ? "#,##0.##" : undefined,
+  }));
+  const lastCol = Math.max(1, columns.length);
+  sheet.columns = columns.map((c) => ({ width: c.width }));
+
+  sheet.mergeCells(TITLE_ROW, 1, TITLE_ROW, lastCol);
+  const titleCell = sheet.getCell(TITLE_ROW, 1);
+  titleCell.value = String(title || "").toUpperCase();
+  titleCell.font = { name: FONT, size: 14, bold: true };
+  titleCell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+  sheet.getRow(TITLE_ROW).height = 22;
+
+  const agency = sheet.getCell(AGENCY_ROW, 1);
+  agency.value = `AGENCY: ${String(site.orgName() || site.orgShortName()).toUpperCase()}`;
+  agency.font = { name: FONT, size: 12, bold: true };
+  if (subtitle) {
+    const sub = sheet.getCell(AGENCY_ROW + 1, 1);
+    sub.value = subtitle;
+    sub.font = { name: FONT, size: 11, bold: true };
   }
+
+  const header = sheet.getRow(HEADER_ROW);
+  header.height = 45;
+  columns.forEach((c, i) => {
+    const cell = header.getCell(i + 1);
+    cell.value = c.header;
+    cell.font = { name: FONT, size: 11, bold: true };
+    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: HEADER_FILL } };
+    cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+    cell.border = { top: medium, bottom: thin, left: i === 0 ? medium : thin, right: i === lastCol - 1 ? medium : thin };
+  });
+
+  // DATE values as date-only Excel values (no time-zone shift).
+  const xlDate = (ymd) => {
+    if (!ymd) return null;
+    const [y, m, d] = String(ymd).slice(0, 10).split("-").map(Number);
+    return y && m && d ? new Date(Date.UTC(y, m - 1, d)) : null;
+  };
+  const records = result.rows.map((r) => ({ cells: r.map((v, i) => (result.columns[i].type === "date" ? xlDate(v) : v)) }));
   const summable = (c) => c.type === "number" && !/%/.test(c.label) && !/days left/i.test(c.label);
   if (result.columns.some(summable) && result.rows.length) {
-    const total = ws.addRow(
-      result.columns.map((c, i) =>
+    records.push({
+      highlight: true,
+      cells: result.columns.map((c, i) =>
         summable(c) ? result.rows.reduce((s, r) => s + (typeof r[i] === "number" ? r[i] : 0), 0) : i === 0 ? "TOTAL" : null
-      )
-    );
-    total.font = { bold: true };
+      ),
+    });
   }
-  result.columns.forEach((c, i) => {
-    const col = ws.getColumn(i + 1);
-    col.width = c.type === "date" || c.type === "number" ? 16 : Math.min(45, Math.max(14, c.label.length + 4));
-    if (c.type === "date") col.numFmt = "mmm d, yyyy";
-    if (c.type === "number") col.numFmt = "#,##0.##";
-  });
-  ws.views = [{ state: "frozen", ySplit: 4 }];
+
+  let r = HEADER_ROW + 1;
+  if (!records.length) {
+    sheet.mergeCells(r, 1, r, lastCol);
+    const cell = sheet.getCell(r, 1);
+    cell.value = empty;
+    cell.font = { name: FONT, size: 11, italic: true };
+    cell.alignment = { horizontal: "center", vertical: "middle" };
+    cell.border = { top: thin, bottom: thin, left: thin, right: thin };
+    sheet.getRow(r).height = 24;
+  }
+  for (const rec of records) {
+    const row = sheet.getRow(r);
+    // Excel doesn't auto-fit generated rows: size each from its longest wrapped text.
+    const lines = Math.max(
+      1,
+      ...columns.map((c, i) => {
+        const v = rec.cells[i];
+        return typeof v === "string" && v ? Math.ceil(v.length / Math.max(1, c.width * 0.8)) : 1;
+      })
+    );
+    row.height = Math.max(20, lines * 15 + 8);
+    columns.forEach((c, i) => {
+      const cell = row.getCell(i + 1);
+      const value = rec.cells[i] ?? null;
+      cell.value = value;
+      cell.font = { name: FONT, size: 11 };
+      cell.alignment = { horizontal: c.align || "center", vertical: "middle", wrapText: true };
+      cell.border = { top: thin, bottom: thin, left: thin, right: thin };
+      if (c.numFmt && typeof value !== "string") cell.numFmt = c.numFmt;
+      if (rec.highlight) cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: HIGHLIGHT_FILL } };
+    });
+    r += 1;
+  }
   return Buffer.from(await wb.xlsx.writeBuffer());
 }
 
-module.exports = { DATASETS, MAX_ROWS, catalog, run, quickTotal, quickTotalOptions, getTemplate, listDueRecurring, markSent, buildWorkbook, ensureSchema, listTemplates, saveTemplate, deleteTemplate };
+/** The template's filters in words ("Type of Contract: DIRECT LEASE"), as the
+ * page's export subtitle shows them. */
+async function filterText(dataset, filters = {}) {
+  const d = DATASETS[dataset];
+  if (!d) return [];
+  const options = await optionLists();
+  const out = [];
+  for (const [k, raw] of Object.entries(filters || {})) {
+    const v = String(raw ?? "").trim();
+    if (!v) continue;
+    if (k === MISSING_FILTER) {
+      if (d.columns[v]) out.push(`Missing data in: ${d.columns[v].label}`);
+      continue;
+    }
+    const f = d.filters[k];
+    if (!f) continue;
+    const label = f.options ? (options[f.options] || []).find((o) => o.value === v)?.label : null;
+    const dateText = f.type === "date" ? new Date(`${v}T00:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" }) : null;
+    out.push(`${f.label}: ${label || dateText || v}`);
+  }
+  return out;
+}
+
+module.exports = { DATASETS, MAX_ROWS, catalog, run, quickTotal, quickTotalOptions, getTemplate, listDueRecurring, markSent, buildWorkbook, filterText, ensureSchema, listTemplates, saveTemplate, deleteTemplate };
