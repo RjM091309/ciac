@@ -21,6 +21,10 @@ import {
   Trash2,
   UserRound,
   Users,
+  Settings,
+  ClipboardList,
+  Factory,
+  Hammer,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { toast } from 'sonner';
@@ -34,6 +38,7 @@ import { EmptyState } from '../ui/EmptyState';
 import { useSessionStorageCachedResource } from '../../hooks/useSessionStorageCachedResource';
 import { useControlPanelAccess } from '../../context/ControlPanelAccessContext';
 import { LocatorDocumentsTab, uploadLocatorDocument, type PendingLocatorDocument } from './LocatorDocumentsTab';
+import { PropertyTypesModal, useCanManagePropertyTypes } from '../FileMaintenance/PropertyTypesModal';
 import { useLiveRefresh } from '../../lib/liveData';
 
 type ChangeRequestRow = {
@@ -158,7 +163,7 @@ type PropertyRateType = 'STANDARD' | 'NON_STANDARD';
 
 // Property schedule dropdowns.
 const PROPERTY_YEARS = Array.from({ length: 11 }, (_, k) => String(2020 + k)); // 2020–2030
-const PROPERTY_TYPES = ['OPEN SPACE', 'STRUCTURE'];
+// Type of Property options come from File Maintenance (/api/proponents/property-types).
 // Year / Type of Property only take values from their lists (any case):
 // an older free-text value that isn't one of them shows as "Select ..." and
 // has to be picked again before the schedule can be saved.
@@ -213,7 +218,7 @@ function missingPropertyFields(row: PropertyRow): Set<keyof PropertyRow> {
     if (!value || (PROPERTY_NUMERIC.has(key) && parseAmount(value) === null)) missing.add(key);
   }
   if (!asOption(PROPERTY_YEARS, row.year)) missing.add('year');
-  if (!asOption(PROPERTY_TYPES, row.type_of_property)) missing.add('type_of_property');
+  if (!String(row.type_of_property || '').trim()) missing.add('type_of_property');
   if (row.date_from && row.date_to && row.date_to < row.date_from) missing.add('date_to');
   return missing;
 }
@@ -424,6 +429,135 @@ export type ContactPersonRow = {
 // Signatories have exactly the same columns as contact persons.
 type SignatoryRow = ContactPersonRow;
 
+// ---- Stockholders: Ownership % (computed, read only) ----
+// Ownership % = the stockholder's Subscribed ÷ the Subscribed Capital (SEC /
+// GIS) × 100; without a Subscribed Capital, ÷ the stockholders' total
+// Subscribed. Recomputed on every change and when a locator is loaded.
+const amountOf = (v?: string | null) => {
+  const n = Number(String(v ?? '').replace(/,/g, ''));
+  return Number.isFinite(n) ? n : 0;
+};
+function ownershipBase(rows: StockholderRow[], subscribedCapital: string): { base: number; fromCapital: boolean } {
+  const capital = amountOf(subscribedCapital);
+  if (capital > 0) return { base: capital, fromCapital: true };
+  return { base: rows.reduce((sum, r) => sum + amountOf(r.subscribed), 0), fromCapital: false };
+}
+function ownershipOf(subscribed: string, base: number): string {
+  const sub = amountOf(subscribed);
+  if (!(base > 0) || !(sub > 0)) return '';
+  return String(Math.round((sub / base) * 10000) / 100);
+}
+/** Every row's Ownership % from the current base (Subscribed Capital changed). */
+export function recomputeAllOwnership(rows: StockholderRow[], subscribedCapital: string): StockholderRow[] {
+  const { base } = ownershipBase(rows, subscribedCapital);
+  return rows.map((r) => ({ ...r, ownership: ownershipOf(r.subscribed, base) }));
+}
+/** After a stockholders-table edit: Ownership % is read only, so every row is
+ * recomputed from its Subscribed. */
+export function withOwnership(_prev: StockholderRow[], next: StockholderRow[], subscribedCapital: string): StockholderRow[] {
+  return recomputeAllOwnership(next, subscribedCapital);
+}
+
+/** Ownership % can't go past 100 — one stockholder or all together (same
+ * rule as the server). The message, or null. */
+export function ownershipError(rows: StockholderRow[], subscribedCapital = ''): string | null {
+  const capital = amountOf(subscribedCapital);
+  const totalSubscribed = rows.reduce((sum, r) => sum + amountOf(r.subscribed), 0);
+  if (capital > 0 && totalSubscribed > capital + 0.005) {
+    const fmt = (n: number) => n.toLocaleString('en-US', { maximumFractionDigits: 2 });
+    return `Total Subscribed (${fmt(totalSubscribed)}) is more than the Subscribed Capital (${fmt(capital)}) — Ownership would go over 100%.`;
+  }
+  const over = rows.find((r) => amountOf(r.ownership) > 100);
+  if (over) return `Ownership % of ${over.name.trim() || 'a stockholder'} can't be more than 100%.`;
+  const total = Math.round(rows.reduce((sum, r) => sum + amountOf(r.ownership), 0) * 100) / 100;
+  // Each row is rounded to 2 decimals, so the total may be a hair over 100.
+  if (total > 100 + 0.005 * rows.length) return `Total Ownership is ${total}% — it can't be more than 100%.`;
+  return null;
+}
+
+/** Warns while typing (not only on Save): a toast the moment Ownership % goes
+ * past 100, cleared once it's back within it. Returns the problem (or null). */
+export function useOwnershipNotice(rows: StockholderRow[], subscribedCapital: string, enabled = true): string | null {
+  const message = enabled ? ownershipError(rows, subscribedCapital) : null;
+  const shown = useRef(false);
+  useEffect(() => {
+    // One toast when the problem appears (same id = never stacked), not one per keystroke.
+    if (message && !shown.current) toast.warning(message, { id: 'ownership-over' });
+    shown.current = Boolean(message);
+  }, [message]);
+  return message;
+}
+
+/** The stockholders table's red outlines: the row checks (after a blocked
+ * save) plus Subscribed (what drives Ownership %) while it goes over 100. */
+export function stockholderInvalidKeys(row: StockholderRow, showRowChecks: boolean, ownershipOver: boolean): Set<string> | null {
+  const base = showRowChecks ? invalidRowKeys(row, STOCKHOLDER_RULES) : null;
+  if (!ownershipOver) return base;
+  const out = new Set<string>(base ?? []);
+  out.add('subscribed');
+  out.add('ownership');
+  return out;
+}
+
+/** The stockholders table's Total row: Subscribed, Paid and Ownership %. */
+export function stockholderTotals(rows: StockholderRow[]): Partial<Record<string, string>> {
+  const sum = (key: 'subscribed' | 'paid' | 'ownership') => rows.reduce((total, r) => total + amountOf(r[key]), 0);
+  const money = (n: number) => n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return {
+    name: 'Total',
+    subscribed: money(sum('subscribed')),
+    paid: money(sum('paid')),
+    ownership: `${(Math.round(sum('ownership') * 100) / 100).toLocaleString('en-US', { maximumFractionDigits: 2 })}%`,
+  };
+}
+
+/** "Add stockholder" when the Subscribed Capital is already fully subscribed
+ * (Ownership at 100%): the notice to show instead of adding a row, or null. */
+export function ownershipFullNotice(rows: StockholderRow[], subscribedCapital: string): string | null {
+  const capital = amountOf(subscribedCapital);
+  if (!(capital > 0)) return null; // no capital: Ownership is shared out of the stockholders' own total
+  const totalSubscribed = rows.reduce((sum, r) => sum + amountOf(r.subscribed), 0);
+  if (totalSubscribed + 0.005 < capital) return null;
+  return `Ownership is already 100% — the Subscribed Capital (${capital.toLocaleString('en-US', {
+    maximumFractionDigits: 2,
+  })}) is fully subscribed. Raise the Subscribed Capital or lower a stockholder's Subscribed first.`;
+}
+
+/** Under the stockholders table: totals against the Subscribed Capital. */
+export function OwnershipSummary({ rows, subscribedCapital }: { rows: StockholderRow[]; subscribedCapital: string }) {
+  if (!rows.length) return null;
+  const totalSubscribed = rows.reduce((sum, r) => sum + amountOf(r.subscribed), 0);
+  const totalOwnership = Math.round(rows.reduce((sum, r) => sum + amountOf(r.ownership), 0) * 100) / 100;
+  const capital = amountOf(subscribedCapital);
+  const subscribedOff = capital > 0 && Math.abs(totalSubscribed - capital) > 0.005;
+  const ownershipOff = Math.abs(totalOwnership - 100) > 0.005;
+  const ownershipOver = Boolean(ownershipError(rows, subscribedCapital));
+  const fmt = (n: number) => n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const pct = (n: number) => n.toLocaleString('en-US', { maximumFractionDigits: 2 });
+  return (
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-1 text-[11px]">
+      <span style={{ color: subscribedOff ? '#d97706' : 'var(--text)' }}>
+        Total Subscribed: <span className="font-semibold tabular-nums">{fmt(totalSubscribed)}</span>
+        {capital > 0 ? (
+          <span className="text-secondary">
+            {' '}
+            of Subscribed Capital <span className="tabular-nums">{fmt(capital)}</span>
+            {subscribedOff ? ' — doesn’t match' : ''}
+          </span>
+        ) : null}
+      </span>
+      <span style={{ color: ownershipOver ? '#dc2626' : ownershipOff ? '#d97706' : 'var(--text)' }}>
+        Total Ownership: <span className="font-semibold tabular-nums">{pct(totalOwnership)}%</span>
+        {ownershipOver ? (
+          <span className="font-semibold"> — can’t be more than 100% (won’t save)</span>
+        ) : ownershipOff ? (
+          <span className="text-secondary"> — should be 100%</span>
+        ) : null}
+      </span>
+    </div>
+  );
+}
+
 export function blankStockholderRow(): StockholderRow {
   return { name: '', nationality: '', subscribed: '', paid: '', ownership: '' };
 }
@@ -584,11 +718,30 @@ export function rowsError<T>(title: string, rows: T[], rules: RowRule<T>[]): str
 // The sections that can be saved on their own (see saveSection).
 type SectionKey = 'stockholders' | 'contacts' | 'properties' | 'investment' | 'sec';
 
+/** Development Timeline (Performance Commitment, 4-11): four fixed milestones,
+ * each with the date it happened and remarks. */
+const MILESTONES = [
+  { code: 'A', label: 'Submission of Construction Plans', icon: ClipboardList },
+  { code: 'B', label: 'Start of Construction', icon: Hammer },
+  { code: 'C', label: 'Completion of Construction', icon: Building2 },
+  { code: 'D', label: 'Start of Operation', icon: Factory },
+] as const;
+type MilestoneRow = { code: string; date: string; remarks: string };
+const blankTimeline = (): MilestoneRow[] => MILESTONES.map((m) => ({ code: m.code, date: '', remarks: '' }));
+function mapTimeline(rows: any): MilestoneRow[] {
+  const byCode = new Map((Array.isArray(rows) ? rows : []).map((r: any) => [String(r.code), r]));
+  return MILESTONES.map((m) => {
+    const r: any = byCode.get(m.code);
+    return { code: m.code, date: r?.date ? String(r.date).slice(0, 10) : '', remarks: r?.remarks || '' };
+  });
+}
+
 // SEC Registration Information card: the SEC fields kept on dbo.proponents
 // plus the ones in dbo.proponent_sec_registration. Saved together by the
 // card's own Save (PUT /api/proponents/:id/sec-registration) and by the
 // panel's main Save.
 const SEC_PROPONENT_KEYS = [
+  'registration_type',
   'registration_no',
   'tin',
   'address',
@@ -628,8 +781,8 @@ export function mapStockholderRows(rows: any): StockholderRow[] {
     id: r.id,
     name: r.name || '',
     nationality: r.nationality || '',
-    subscribed: r.subscribed != null ? formatAmountInput(String(r.subscribed)) : '',
-    paid: r.paid != null ? formatAmountInput(String(r.paid)) : '',
+    subscribed: r.subscribed != null ? formatMoney(r.subscribed) : '',
+    paid: r.paid != null ? formatMoney(r.paid) : '',
     ownership: r.ownership != null ? String(r.ownership) : '',
   }));
 }
@@ -656,10 +809,10 @@ function mapPropertyRows(rows: any): PropertyRow[] {
     date_from: toDateInputValue(row.date_from),
     date_to: toDateInputValue(row.date_to),
     type_of_property: row.type_of_property || '',
-    area_sqm: row.area_sqm || '',
-    rate_sqm_mo: row.rate_sqm_mo || '',
+    area_sqm: formatIfNumeric(row.area_sqm),
+    rate_sqm_mo: formatMoney(row.rate_sqm_mo),
     rate_currency: row.rate_currency || 'PHP',
-    mgl_mo: row.mgl_mo || '',
+    mgl_mo: formatMoney(row.mgl_mo),
     mgl_currency: row.mgl_currency || 'PHP',
   }));
 }
@@ -807,9 +960,23 @@ export function formatAmountInput(value: string): string {
   return firstDot === -1 ? withCommas : `${withCommas}.${decPart}`;
 }
 
+/** Whole-number counts (No. of Employees): digits only, with commas. */
+export function formatCountInput(value: string): string {
+  return formatAmountInput(value.replace(/[^\d]/g, ''));
+}
+
 /** Loaded free-text amounts: comma-format only a plain number ("1000000" ->
  * "1,000,000"); anything else (e.g. older "USD 1M") is shown as saved. */
-function formatIfNumeric(value?: string | null): string {
+/** Money: a plain number shown with commas and always 2 decimals
+ * ("10000" -> "10,000.00"); anything else (blank, older free text) as is. */
+export function formatMoney(value?: unknown): string {
+  const text = String(value ?? '').trim();
+  if (!/^[\d,]*(\.\d*)?$/.test(text) || !/\d/.test(text)) return text;
+  const n = Number(text.replace(/,/g, ''));
+  return Number.isFinite(n) ? n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : text;
+}
+
+export function formatIfNumeric(value?: unknown): string {
   const text = String(value ?? '').trim();
   return /^[\d,]+(\.\d+)?$/.test(text) ? formatAmountInput(text) : text;
 }
@@ -860,6 +1027,7 @@ const BLANK_PROFILE_FORM = {
   ref_code: '',
   lease_address: '',
   account_officer_id: '',
+  registration_type: '',
   sec_registration_date: '',
   date_signed: '',
   // Encoded lease term (only while there's no approved contract).
@@ -893,6 +1061,7 @@ const BLANK_PROFILE_FORM = {
   performance_security_currency: 'PHP',
   investment_commitment: '',
   investment_actual: '',
+  development_timeline: blankTimeline(),
   employee_commitment: '',
   employee_actual: '',
   // SEC Registration Information card (dbo.proponent_sec_registration)
@@ -959,6 +1128,29 @@ export function ProponentsManagement({
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   // "+" on the property schedule asks Standard vs Non-standard first.
   const [propertyTypePickerOpen, setPropertyTypePickerOpen] = useState(false);
+  // Type of Property (File Maintenance): the dropdown's options, and its pop-up
+  // maintenance opened from the Property Schedule's settings button.
+  const [propertyTypes, setPropertyTypes] = useState<{ id: number; name: string; is_active: number }[]>([]);
+  const [propertyTypesOpen, setPropertyTypesOpen] = useState(false);
+  const canManagePropertyTypes = useCanManagePropertyTypes();
+  const loadPropertyTypes = useCallback(async () => {
+    try {
+      const res = await fetch(api('/api/proponents/property-types'), { credentials: 'include' });
+      const json = await res.json().catch(() => ({}));
+      if (res.ok && Array.isArray(json?.data)) setPropertyTypes(json.data);
+    } catch {
+      /* keep what's there */
+    }
+  }, []);
+  useEffect(() => {
+    void loadPropertyTypes();
+  }, [loadPropertyTypes]);
+  /** Active types; a row's saved type that's since been deactivated still shows. */
+  const propertyTypeOptions = (current: string) => {
+    const names = propertyTypes.filter((t) => Number(t.is_active) === 1).map((t) => t.name);
+    const cur = String(current || '').trim();
+    return cur && !names.some((n) => n.toUpperCase() === cur.toUpperCase()) ? [cur, ...names] : names;
+  };
   // A section's own save on a New Locator: creates the locator (with what's
   // entered so far) and keeps the panel open on it, instead of closing.
   // A ref so it survives the duplicate-check confirm, which calls save again.
@@ -1285,6 +1477,8 @@ export function ProponentsManagement({
   const [extensionSaving, setExtensionSaving] = useState(false);
   const [extensionRemove, setExtensionRemove] = useState<ExtensionRow | null>(null);
   const [showPastExtensions, setShowPastExtensions] = useState(false);
+  // Registration Information card: switching to DTI with stockholders listed asks first.
+  const [regTypeConfirm, setRegTypeConfirm] = useState(false);
   const loadExtensions = useCallback(async (proponentId: number) => {
     try {
       const res = await fetch(api(`/api/proponents/${proponentId}/extensions`), { credentials: 'include' });
@@ -1400,6 +1594,7 @@ export function ProponentsManagement({
       investment_actual,
       employee_commitment,
       employee_actual,
+      development_timeline,
       ...afterSections
     } = f;
     const rest: Record<string, unknown> = { ...afterSections };
@@ -1415,7 +1610,7 @@ export function ProponentsManagement({
         stockholders: JSON.stringify(stockholders),
         contacts: JSON.stringify([contact_persons, signatories]),
         properties: JSON.stringify(properties),
-        investment: JSON.stringify([investment_commitment, investment_actual, employee_commitment, employee_actual]),
+        investment: JSON.stringify([investment_commitment, investment_actual, employee_commitment, employee_actual, development_timeline]),
       } as Record<SectionKey, string>,
     };
   };
@@ -1713,6 +1908,7 @@ export function ProponentsManagement({
           lease_address: data.lease_address || '',
           account_officer_id: data.account_officer_id != null ? String(data.account_officer_id) : '',
           sec_registration_date: toDateInputValue(data.sec_registration_date),
+          registration_type: data.registration_type || '',
           date_signed: toDateInputValue(data.date_signed),
           start_term: toDateInputValue(data.manual_start_term),
           end_term: toDateInputValue(data.manual_end_term),
@@ -1723,29 +1919,30 @@ export function ProponentsManagement({
           land_use: data.land_use || '',
           extension_date: toDateInputValue(data.extension_date),
           extension_remarks: data.extension_remarks || '',
-          authorized_capital: data.authorized_capital || '',
+          authorized_capital: formatMoney(data.authorized_capital),
           authorized_capital_currency: data.authorized_capital_currency || 'PHP',
-          subscribed_capital: data.subscribed_capital || '',
-          subscribed_capital_currency: data.subscribed_capital_currency || 'PHP',
-          paid_up_capital: data.paid_up_capital || '',
-          paid_up_capital_currency: data.paid_up_capital_currency || 'PHP',
+          subscribed_capital: formatMoney(data.subscribed_capital),
+          subscribed_capital_currency: data.authorized_capital_currency || data.subscribed_capital_currency || 'PHP',
+          paid_up_capital: formatMoney(data.paid_up_capital),
+          paid_up_capital_currency: data.authorized_capital_currency || data.paid_up_capital_currency || 'PHP',
           contract_type_id: data.contract_type_id != null ? String(data.contract_type_id) : '',
           industry_code: data.industry_code || '',
           business_activities: data.business_activities || '',
           nationality: data.nationality || '',
           advance_lease_payment_months: data.advance_lease_payment_months || '',
-          advance_lease_payment_amount: data.advance_lease_payment_amount || '',
+          advance_lease_payment_amount: formatMoney(data.advance_lease_payment_amount),
           advance_lease_payment_currency: data.advance_lease_payment_currency || 'PHP',
           security_deposit_months: data.security_deposit_months || '',
-          security_deposit_amount: data.security_deposit_amount || '',
+          security_deposit_amount: formatMoney(data.security_deposit_amount),
           security_deposit_currency: data.security_deposit_currency || 'PHP',
           performance_security_months: data.performance_security_months || '',
-          performance_security_amount: data.performance_security_amount || '',
+          performance_security_amount: formatMoney(data.performance_security_amount),
           performance_security_currency: data.performance_security_currency || 'PHP',
-          investment_commitment: formatIfNumeric(data.investment_commitment),
-          investment_actual: formatIfNumeric(data.investment_actual),
-          employee_commitment: data.employee_commitment || '',
-          employee_actual: data.employee_actual || '',
+          investment_commitment: formatMoney(data.investment_commitment),
+          investment_actual: formatMoney(data.investment_actual),
+          development_timeline: mapTimeline(data.development_timeline),
+          employee_commitment: formatIfNumeric(data.employee_commitment),
+          employee_actual: formatIfNumeric(data.employee_actual),
           sec_company_email: data.sec_company_email || '',
           sec_company_telephone: data.sec_company_telephone || '',
           sec_company_mobile: data.sec_company_mobile || '',
@@ -1758,7 +1955,7 @@ export function ProponentsManagement({
           sec_contact_mobile: data.sec_contact_mobile || '',
           properties: mapPropertyRows(data.properties),
           land_use_id: data.land_use_id != null ? String(data.land_use_id) : '',
-          stockholders: mapStockholderRows(data.stockholders),
+          stockholders: recomputeAllOwnership(mapStockholderRows(data.stockholders), formatMoney(data.subscribed_capital)),
           contact_persons: mapContactRows(data.contact_persons),
           signatories: mapContactRows(data.signatories),
         };
@@ -1806,7 +2003,12 @@ export function ProponentsManagement({
   /** Validates the row tables; on a problem shows it, outlines the fields and returns false. */
   function checkRowTables(which: { stockholders?: boolean; contacts?: boolean }): boolean {
     const problems: [keyof typeof showRowErrors, string | null][] = [];
-    if (which.stockholders) problems.push(['stockholders', rowsError('Stockholders', form.stockholders, STOCKHOLDER_RULES)]);
+    if (which.stockholders) {
+      problems.push([
+        'stockholders',
+        rowsError('Stockholders', form.stockholders, STOCKHOLDER_RULES) ?? ownershipError(form.stockholders, form.subscribed_capital),
+      ]);
+    }
     if (which.contacts) {
       problems.push([
         'contacts',
@@ -1866,6 +2068,11 @@ export function ProponentsManagement({
                   investment_actual: form.investment_actual.trim() || null,
                   employee_commitment: form.employee_commitment.trim() || null,
                   employee_actual: form.employee_actual.trim() || null,
+                  development_timeline: form.development_timeline.map((m) => ({
+                    code: m.code,
+                    date: m.date || null,
+                    remarks: m.remarks.trim() || null,
+                  })),
                 }
               : { properties: form.properties.map(toPropertyPayload) };
 
@@ -1882,7 +2089,7 @@ export function ProponentsManagement({
       const data = json.data || {};
       const saved =
         section === 'stockholders'
-          ? { stockholders: mapStockholderRows(data.stockholders) }
+          ? { stockholders: recomputeAllOwnership(mapStockholderRows(data.stockholders), form.subscribed_capital) }
           : section === 'contacts'
             ? { contact_persons: mapContactRows(data.contact_persons), signatories: mapContactRows(data.signatories) }
             : section === 'sec'
@@ -1892,16 +2099,23 @@ export function ProponentsManagement({
                     key === 'sec_registration_date' || key === 'sec_gis_date'
                       ? toDateInputValue(data[key])
                       : key.endsWith('_currency')
-                        ? data[key] || 'PHP'
-                        : data[key] || '',
+                        ? (key === 'subscribed_capital_currency' || key === 'paid_up_capital_currency'
+                            ? data.authorized_capital_currency
+                            : null) ||
+                          data[key] ||
+                          'PHP'
+                        : key.endsWith('_capital')
+                          ? formatMoney(data[key])
+                          : data[key] || '',
                   ]),
                 )
             : section === 'investment'
               ? {
-                  investment_commitment: formatIfNumeric(data.investment_commitment),
-                  investment_actual: formatIfNumeric(data.investment_actual),
-                  employee_commitment: data.employee_commitment || '',
-                  employee_actual: data.employee_actual || '',
+                  investment_commitment: formatMoney(data.investment_commitment),
+                  investment_actual: formatMoney(data.investment_actual),
+                  employee_commitment: formatIfNumeric(data.employee_commitment),
+                  employee_actual: formatIfNumeric(data.employee_actual),
+                  development_timeline: mapTimeline(data.development_timeline),
                 }
               : { properties: mapPropertyRows(data.properties) };
       const nextForm = { ...form, ...saved };
@@ -1952,7 +2166,8 @@ export function ProponentsManagement({
     // don't block saving the rest.
     if (
       !checkRowTables({
-        stockholders: sectionDirty.stockholders || (!editing && form.stockholders.length > 0),
+        // DTI: the (hidden) stockholders list isn't checked.
+        stockholders: regType !== 'DTI' && (sectionDirty.stockholders || (!editing && form.stockholders.length > 0)),
         contacts:
           sectionDirty.contacts || (!editing && (form.contact_persons.length > 0 || form.signatories.length > 0)),
       })
@@ -2042,14 +2257,14 @@ export function ProponentsManagement({
         business_activities: form.business_activities.trim() || null,
         nationality: form.nationality.trim() || null,
         advance_lease_payment_months: form.advance_lease_payment_months.trim() || null,
-        advance_lease_payment_amount: form.advance_lease_payment_amount.trim() || null,
-        advance_lease_payment_currency: form.advance_lease_payment_currency || null,
+        advance_lease_payment_amount: finAmount(form.advance_lease_payment_amount).trim() || null,
+        advance_lease_payment_currency: finCurrency(form.advance_lease_payment_currency) || null,
         security_deposit_months: form.security_deposit_months.trim() || null,
-        security_deposit_amount: form.security_deposit_amount.trim() || null,
-        security_deposit_currency: form.security_deposit_currency || null,
+        security_deposit_amount: finAmount(form.security_deposit_amount).trim() || null,
+        security_deposit_currency: finCurrency(form.security_deposit_currency) || null,
         performance_security_months: form.performance_security_months.trim() || null,
-        performance_security_amount: form.performance_security_amount.trim() || null,
-        performance_security_currency: form.performance_security_currency || null,
+        performance_security_amount: finAmount(form.performance_security_amount).trim() || null,
+        performance_security_currency: finCurrency(form.performance_security_currency) || null,
         investment_commitment: form.investment_commitment.trim() || null,
         investment_actual: form.investment_actual.trim() || null,
         employee_commitment: form.employee_commitment.trim() || null,
@@ -2317,6 +2532,45 @@ export function ProponentsManagement({
   const secNoTaken = useTakenCheck('registration_no', form.registration_no, editing?.registration_no);
 
   const viewedLease = viewLeaseId !== null ? leases.find((l) => l.id === viewLeaseId) || null : null;
+  // Advance Lease Payment / Security Deposit / Performance Security are in
+  // months of MGL, so their currency follows the Property Schedule's MGL
+  // currency (the first row's; Standard = the rate's) — locked like MGL/MO.
+  const scheduleRow = form.properties[0];
+  const scheduleCurrency = scheduleRow
+    ? (scheduleRow.rate_type === 'STANDARD' ? scheduleRow.rate_currency : scheduleRow.mgl_currency) || ''
+    : '';
+  const finCurrency = (own: string) => scheduleCurrency || own;
+  // Their Amount is the monthly MGL from the Property Schedule: the MGL/MO of
+  // the schedule's first period (the rows with the earliest Date From — all
+  // properties leased then), so only the Months are typed. Total = Months × Amount.
+  const mglBasis = (() => {
+    const rows = form.properties.filter((r) => {
+      const mgl = r.rate_type === 'STANDARD' ? computeStandardMgl(r) : r.mgl_mo;
+      return parseAmount(mgl) !== null;
+    });
+    if (!rows.length) return '';
+    const starts = rows.map((r) => r.date_from).filter(Boolean).sort();
+    const first = starts[0];
+    const firstPeriod = first ? rows.filter((r) => r.date_from === first) : [rows[0]];
+    const total = firstPeriod.reduce(
+      (sum, r) => sum + (parseAmount(r.rate_type === 'STANDARD' ? computeStandardMgl(r) : r.mgl_mo) ?? 0),
+      0,
+    );
+    return (Math.round(total * 100) / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  })();
+  const finAmount = (own: string) => mglBasis || own;
+  const finAmountTitle = mglBasis
+    ? 'MGL/MO from the Property Schedule (first period) — set automatically'
+    : 'Add the Property Schedule first — the Amount is its MGL/MO';
+  const finCurrencyTitle = 'Same as the Property Schedule’s MGL currency';
+  const regType = registrationTypeOf(form.registration_type);
+  const regLabels = registrationLabels(regType);
+  // Ownership % over 100: a notice while typing, and the fields outlined.
+  const ownershipProblem = useOwnershipNotice(
+    form.stockholders,
+    form.subscribed_capital,
+    activeProfileTab === 'Stockholders' && regType !== 'DTI',
+  );
   // The current lease runs past its End Term when the latest Extension Date is
   // later: Lease Agreements shows the new end and the extended term.
   const currentStart = String((termEditable ? form.start_term : editing?.start_term) || '').slice(0, 10);
@@ -2841,12 +3095,10 @@ export function ProponentsManagement({
                     {name}
                   </div>
                   <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-secondary">
-                    {editing.ref_no ? <span className="tabular-nums font-medium">{editing.ref_no}</span> : null}
-                    {form.ref_code ? (
-                      <>
-                        <span aria-hidden>·</span>
-                        <span>Ref. Code {form.ref_code}</span>
-                      </>
+                    {editing.ref_no ? (
+                      <span>
+                        System ID: <span className="tabular-nums font-medium">{editing.ref_no}</span>
+                      </span>
                     ) : null}
                     {contractLabel ? (
                       <>
@@ -2867,6 +3119,27 @@ export function ProponentsManagement({
                       </>
                     ) : null}
                   </div>
+                </div>
+                {/* The current lease's Ref. Code, on the right — typed in here and saved
+                    with Update. Never reused: checked as it's typed (another locator or an
+                    earlier lease) and again by the server on save. */}
+                <div className="ml-auto flex shrink-0 flex-col items-end gap-0.5" style={{ maxWidth: '45%' }}>
+                  <input
+                    className="w-56 max-w-full rounded-md border bg-transparent px-2 py-1 text-right text-sm font-bold tabular-nums outline-none focus:border-[var(--nav-active-bg)] disabled:cursor-default"
+                    style={{
+                      color: 'var(--text)',
+                      borderColor: refCodeTaken ? '#ef4444' : 'transparent',
+                    }}
+                    value={form.ref_code}
+                    placeholder="Ref. Code"
+                    title="Ref. Code (current lease) — click to edit"
+                    aria-label="Ref. Code (current lease)"
+                    disabled={formLocked || leaseView || loadingLocation}
+                    onFocus={(e) => (e.currentTarget.style.borderColor = refCodeTaken ? '#ef4444' : 'var(--input-border)')}
+                    onBlur={(e) => (e.currentTarget.style.borderColor = refCodeTaken ? '#ef4444' : 'transparent')}
+                    onChange={(e) => setForm((p) => ({ ...p, ref_code: e.target.value }))}
+                  />
+                  {refCodeTaken ? <span className="text-[10px] leading-tight text-red-500">{refCodeTaken}</span> : null}
                 </div>
               </div>
               <div
@@ -2925,11 +3198,6 @@ export function ProponentsManagement({
                 style={CARD_HEAD_STYLE}
               >
                 <CardTitle icon={Building2}>Locator Details</CardTitle>
-                {editing?.ref_no ? (
-                  <span className="text-[10px] text-secondary tabular-nums" title="System Ref No">
-                    {editing.ref_no}
-                  </span>
-                ) : null}
               </div>
               {/* Row 1 and Row 2 share this exact column template (same track sizes, same gap,
                   same column count) so their edges line up vertically — Row 2 nests
@@ -3076,19 +3344,18 @@ export function ProponentsManagement({
                   <thead>
                     <tr style={THEAD_ROW_STYLE}>
                       {[
-                        ['Ref. Code', '15%'],
-                        ['SEC Reg. No.', '12%'],
-                        ['Type', '13%'],
-                        ['Date Signed', '13%'],
-                        ['Start Term', '13%'],
-                        ['End Term', '13%'],
-                        ['Lease Term', '10%'],
-                        ['Status', '11%'],
+                        ['SEC/DTI Reg. No.', '15%'],
+                        ['Type', '17%'],
+                        ['Date Signed', '15%'],
+                        ['Start Term', '15%'],
+                        ['End Term', '15%'],
+                        ['Lease Term', '11%'],
+                        ['Status', '12%'],
                       ].map(([h, w]) => (
                         <th
                           key={h}
                           className="px-2 py-1.5 text-left font-semibold uppercase tracking-wide text-[9px] border-b"
-                          style={{ borderColor: 'var(--input-border)', color: 'var(--text-muted)', width: w }}
+                          style={{ borderColor: 'var(--input-border)', color: 'var(--text)', width: w }}
                         >
                           {h}
                         </th>
@@ -3099,17 +3366,6 @@ export function ProponentsManagement({
                     {/* Current lease: the panel's own fields (not shown while viewing an earlier lease) */}
                     {leaseView ? null : (
                     <tr style={{ backgroundColor: 'var(--surface)' }}>
-                      <td className="px-1 py-1 border-b align-top" style={{ borderColor: 'var(--input-border)' }}>
-                        <input
-                          className="app-form-control app-form-control-sm h-9 w-full"
-                          style={refCodeTaken ? { borderColor: '#ef4444' } : undefined}
-                          value={form.ref_code}
-                          placeholder="Type the Ref. Code"
-                          disabled={loadingLocation}
-                          onChange={(e) => setForm((p) => ({ ...p, ref_code: e.target.value }))}
-                        />
-                        {refCodeTaken ? <div className="mt-0.5 px-1 text-[10px] leading-tight text-red-500">{refCodeTaken}</div> : null}
-                      </td>
                       <td className="px-2 py-1 border-b align-top" style={{ borderColor: 'var(--input-border)' }}>
                         <div className="flex h-9 items-center truncate" style={{ color: 'var(--text-muted)' }} title="From SEC Registration Information (fixed)">
                           {form.registration_no || '—'}
@@ -3189,14 +3445,13 @@ export function ProponentsManagement({
                             onClick={leaseView || !editing ? undefined : () => setNestedLocator({ locatorId: editing.id, leaseId: l.id })}
                             title={leaseView ? undefined : 'Open this lease'}
                           >
-                            <td className="px-2 py-2 border-b font-medium" style={{ borderColor: 'var(--input-border)', color: 'var(--text)' }}>
-                              {l.ref_code || <span className="text-secondary">—</span>}
-                              <div className="text-[10px] font-normal text-secondary">{l.application_no || l.contract_no || 'Encoded lease'}</div>
-                            </td>
                             <td className="px-2 py-2 border-b text-secondary" style={{ borderColor: 'var(--input-border)' }}>
                               {form.registration_no || '—'}
                             </td>
-                            <td className="px-2 py-2 border-b" style={{ borderColor: 'var(--input-border)' }}>{l.contract_type_name || '—'}</td>
+                            <td className="px-2 py-2 border-b" style={{ borderColor: 'var(--input-border)' }}>
+                              {l.contract_type_name || '—'}
+                              <div className="text-[10px] text-secondary">{l.application_no || l.contract_no || 'Encoded lease'}</div>
+                            </td>
                             <td className="px-2 py-2 border-b" style={{ borderColor: 'var(--input-border)' }}>{fmtDate(l.date_signed)}</td>
                             <td className="px-2 py-2 border-b" style={{ borderColor: 'var(--input-border)' }}>{fmtDate(l.start_term)}</td>
                             <td className="px-2 py-2 border-b" style={{ borderColor: 'var(--input-border)' }}>{fmtDate(l.end_term)}</td>
@@ -3263,7 +3518,7 @@ export function ProponentsManagement({
                           <th
                             key={h}
                             className="px-2 py-1.5 text-left font-semibold uppercase tracking-wide text-[9px] border-b"
-                            style={{ borderColor: 'var(--input-border)', color: 'var(--text-muted)', width: w }}
+                            style={{ borderColor: 'var(--input-border)', color: 'var(--text)', width: w }}
                           >
                             {h}
                           </th>
@@ -3490,7 +3745,7 @@ export function ProponentsManagement({
                                   <th
                                     key={h || i}
                                     className="px-2 py-1.5 text-left font-semibold uppercase tracking-wide text-[9px] border-b"
-                                    style={{ borderColor: 'var(--input-border)', color: 'var(--text-muted)', width: w }}
+                                    style={{ borderColor: 'var(--input-border)', color: 'var(--text)', width: w }}
                                   >
                                     {h}
                                   </th>
@@ -3783,67 +4038,9 @@ export function ProponentsManagement({
               <fieldset disabled={formLocked && activeProfileTab !== 'Documents'} className="content min-w-0">
                 {activeProfileTab === 'Stockholders' ? (
                   <div className="flex flex-col gap-4">
-                  {/* Stockholders (dbo.stockholder) — same card layout as the Profile's
-                      property schedule: Add and Save in the header. */}
-                  <div
-                    className="flex flex-col gap-3 rounded-2xl border p-3"
-                    style={CARD_STYLE}
-                  >
-                    <div
-                      className="-mx-3 -mt-3 flex items-center justify-between gap-2 rounded-t-2xl border-b px-3 py-2.5"
-                      style={CARD_HEAD_STYLE}
-                    >
-                      <CardTitle icon={Users} count={form.stockholders.length}>Stockholders</CardTitle>
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          disabled={loadingLocation}
-                          onClick={() => {
-                            setShowRowErrors((prev) => ({ ...prev, stockholders: false }));
-                            setForm((p) => ({ ...p, stockholders: [...p.stockholders, blankStockholderRow()] }));
-                          }}
-                          className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[11px] font-semibold cursor-pointer disabled:cursor-not-allowed disabled:opacity-60 hover:bg-[var(--selected-bg)]"
-                          style={{ borderColor: 'var(--input-border)', color: 'var(--text)', backgroundColor: 'var(--surface)' }}
-                        >
-                          <Plus size={12} /> Add stockholder
-                        </button>
-                        {(form.stockholders.length > 0 || sectionDirty.stockholders) && (
-                          <SectionSaveBar
-                            allowed={editing ? canEdit : canAdd}
-                            label="Save Stockholders"
-                            isEditing={Boolean(editing)}
-                            hasContent={form.stockholders.length > 0}
-                            dirty={sectionDirty.stockholders}
-                            saving={savingSection === 'stockholders'}
-                            disabled={saving || loadingLocation}
-                            onSave={() => void saveSection('stockholders')}
-                          />
-                        )}
-                      </div>
-                    </div>
-                    <RowsEditor<StockholderRow>
-                      rows={form.stockholders}
-                      disabled={loadingLocation}
-                      emptyText="No stockholders yet — use Add stockholder."
-                      hideSideActions
-                      rowNoun="stockholder"
-                      confirmDelete={askRowDelete}
-                      invalidKeys={(row) => (showRowErrors.stockholders ? invalidRowKeys(row, STOCKHOLDER_RULES) : null)}
-                      columns={[
-                        { key: 'name', label: 'Stockholder Name', width: '30%', placeholder: 'Full name' },
-                        { key: 'nationality', label: 'Nationality', width: '18%', placeholder: 'Select nationality', options: NATIONALITIES },
-                        { key: 'subscribed', label: 'Subscribed', width: '18%', numeric: true, amount: true, placeholder: '0.00' },
-                        { key: 'paid', label: 'Paid', width: '18%', numeric: true, amount: true, placeholder: '0.00' },
-                        { key: 'ownership', label: 'Ownership %', width: '16%', numeric: true, placeholder: '0' },
-                      ]}
-                      onChange={(next) => setForm((p) => ({ ...p, stockholders: next }))}
-                      blankRow={blankStockholderRow}
-                    />
-                  </div>
-
                     {/* SEC Registration Information — modelled on the SEC forms (Company
-                        Information, Contact Person Information, purposes, capital), below the
-                        stockholders table. Its own contact person, separate from the locator's
+                        Information, Contact Person Information, purposes, capital), first on the
+                        tab, above the stockholders table. Its own contact person, separate from the locator's
                         Contact Person list. */}
                     <div
                       className="flex flex-col gap-3 rounded-2xl border p-3"
@@ -3853,10 +4050,10 @@ export function ProponentsManagement({
                         className="-mx-3 -mt-3 mb-1 flex items-center justify-between gap-2 rounded-t-2xl border-b px-3 py-2.5"
                         style={CARD_HEAD_STYLE}
                       >
-                        <CardTitle icon={Landmark}>SEC Registration Information</CardTitle>
+                        <CardTitle icon={Landmark}>{regLabels.card}</CardTitle>
                         <SectionSaveBar
                           allowed={editing ? canEdit : canAdd}
-                          label="Save SEC Registration Information"
+                          label={regLabels.save}
                           isEditing={Boolean(editing)}
                           hasContent={[...SEC_PROPONENT_KEYS, ...SEC_DETAIL_KEYS].some((k) => !k.endsWith('_currency') && String(form[k] ?? '').trim() !== '')}
                           dirty={sectionDirty.sec}
@@ -3866,12 +4063,22 @@ export function ProponentsManagement({
                         />
                       </div>
 
+                      <RegistrationTypeToggle
+                        value={regType}
+                        disabled={loadingLocation}
+                        onChange={(next) => {
+                          // DTI hides the stockholders: ask first when there are any.
+                          if (next === 'DTI' && form.stockholders.length > 0) setRegTypeConfirm(true);
+                          else setForm((p) => ({ ...p, registration_type: next }));
+                        }}
+                      />
+
                       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
                         <div className="flex flex-col gap-1">
-                          {secTextField('registration_no', 'SEC Registration No.', 'e.g. CS201811260')}
+                          {secTextField('registration_no', regLabels.no, regLabels.noPlaceholder)}
                           {secNoTaken ? <span className="text-[11px] text-red-500">{secNoTaken}</span> : null}
                         </div>
-                        <Field compact label="SEC Registration Date">
+                        <Field compact label={regLabels.date}>
                           <DatePicker
                             mode="single"
                             fullWidth
@@ -3906,23 +4113,37 @@ export function ProponentsManagement({
                           currency={form.authorized_capital_currency}
                           disabled={loadingLocation}
                           onAmountChange={(v) => setForm((p) => ({ ...p, authorized_capital: v }))}
-                          onCurrencyChange={(v) => setForm((p) => ({ ...p, authorized_capital_currency: v }))}
+                          // Subscribed and Paid-up follow the Authorized Capital Stock's currency.
+                          onCurrencyChange={(v) =>
+                            setForm((p) => ({
+                              ...p,
+                              authorized_capital_currency: v,
+                              subscribed_capital_currency: v,
+                              paid_up_capital_currency: v,
+                            }))
+                          }
                         />
                         <CapitalField
                           label="Subscribed Capital"
                           amount={form.subscribed_capital}
-                          currency={form.subscribed_capital_currency}
+                          currency={form.authorized_capital_currency}
+                          currencyText
+                          currencyTitle="Same as the Authorized Capital Stock's currency"
                           disabled={loadingLocation}
-                          onAmountChange={(v) => setForm((p) => ({ ...p, subscribed_capital: v }))}
-                          onCurrencyChange={(v) => setForm((p) => ({ ...p, subscribed_capital_currency: v }))}
+                          onAmountChange={(v) =>
+                            setForm((p) => ({ ...p, subscribed_capital: v, stockholders: recomputeAllOwnership(p.stockholders, v) }))
+                          }
+                          onCurrencyChange={() => undefined}
                         />
                         <CapitalField
                           label="Paid-up Capital"
                           amount={form.paid_up_capital}
-                          currency={form.paid_up_capital_currency}
+                          currency={form.authorized_capital_currency}
+                          currencyText
+                          currencyTitle="Same as the Authorized Capital Stock's currency"
                           disabled={loadingLocation}
                           onAmountChange={(v) => setForm((p) => ({ ...p, paid_up_capital: v }))}
-                          onCurrencyChange={(v) => setForm((p) => ({ ...p, paid_up_capital_currency: v }))}
+                          onCurrencyChange={() => undefined}
                         />
                       </div>
 
@@ -3945,7 +4166,7 @@ export function ProponentsManagement({
 
                       <div className="flex flex-col gap-2 rounded-lg border p-3" style={{ borderColor: 'var(--input-border)' }}>
                         <div className="text-[10px] font-bold uppercase tracking-widest text-secondary">
-                          SEC Contact Person
+                          {regLabels.contact}
                         </div>
                         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
                           {secTextField('sec_contact_name', 'Name of Contact Person')}
@@ -3955,6 +4176,78 @@ export function ProponentsManagement({
                         </div>
                       </div>
                     </div>
+
+                  {/* DTI (sole proprietorship): no stockholders. */}
+                  {regType === 'DTI' ? null : (
+                  <>
+                  {/* Stockholders (dbo.stockholder) — same card layout as the Profile's
+                      property schedule: Add and Save in the header. */}
+                  <div
+                    className="flex flex-col gap-3 rounded-2xl border p-3"
+                    style={CARD_STYLE}
+                  >
+                    <div
+                      className="-mx-3 -mt-3 flex items-center justify-between gap-2 rounded-t-2xl border-b px-3 py-2.5"
+                      style={CARD_HEAD_STYLE}
+                    >
+                      <CardTitle icon={Users} count={form.stockholders.length}>Stockholders</CardTitle>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          disabled={loadingLocation}
+                          onClick={() => {
+                            const full = ownershipFullNotice(form.stockholders, form.subscribed_capital);
+                            if (full) {
+                              toast.warning(full, { id: 'ownership-full' });
+                              return;
+                            }
+                            setShowRowErrors((prev) => ({ ...prev, stockholders: false }));
+                            setForm((p) => ({ ...p, stockholders: [...p.stockholders, blankStockholderRow()] }));
+                          }}
+                          className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[11px] font-semibold cursor-pointer disabled:cursor-not-allowed disabled:opacity-60 hover:bg-[var(--selected-bg)]"
+                          style={{ borderColor: 'var(--input-border)', color: 'var(--text)', backgroundColor: 'var(--surface)' }}
+                        >
+                          <Plus size={12} /> Add stockholder
+                        </button>
+                        {(form.stockholders.length > 0 || sectionDirty.stockholders) && (
+                          <SectionSaveBar
+                            allowed={editing ? canEdit : canAdd}
+                            label="Save Stockholders"
+                            isEditing={Boolean(editing)}
+                            hasContent={form.stockholders.length > 0}
+                            dirty={sectionDirty.stockholders}
+                            saving={savingSection === 'stockholders'}
+                            disabled={saving || loadingLocation}
+                            onSave={() => void saveSection('stockholders')}
+                          />
+                        )}
+                      </div>
+                    </div>
+                    <RowsEditor<StockholderRow>
+                      rows={form.stockholders}
+                      disabled={loadingLocation}
+                      emptyText="No stockholders yet — use Add stockholder."
+                      hideSideActions
+                      rowNoun="stockholder"
+                      confirmDelete={askRowDelete}
+                      invalidKeys={(row) => stockholderInvalidKeys(row, showRowErrors.stockholders, Boolean(ownershipProblem))}
+                      columns={[
+                        { key: 'name', label: 'Stockholder Name', width: '30%', placeholder: 'Full name' },
+                        { key: 'nationality', label: 'Nationality', width: '18%', placeholder: 'Select nationality', options: NATIONALITIES },
+                        { key: 'subscribed', label: 'Subscribed', width: '18%', numeric: true, amount: true, placeholder: '0.00' },
+                        { key: 'paid', label: 'Paid', width: '18%', numeric: true, amount: true, placeholder: '0.00' },
+                        { key: 'ownership', label: 'Ownership %', width: '16%', numeric: true, placeholder: '—', readOnly: true },
+                      ]}
+                      onChange={(next) =>
+                        setForm((p) => ({ ...p, stockholders: withOwnership(p.stockholders, next, p.subscribed_capital) }))
+                      }
+                      blankRow={blankStockholderRow}
+                      totals={stockholderTotals(form.stockholders)}
+                    />
+                    <OwnershipSummary rows={form.stockholders} subscribedCapital={form.subscribed_capital} />
+                  </div>
+                  </>
+                  )}
 
                     {/* GIS (General Information Sheet): the filing date is typed in (saved
                         with the SEC Registration Information); the document is the
@@ -4055,18 +4348,27 @@ export function ProponentsManagement({
                     </span>
                     <button
                       type="button"
-                      disabled={loadingLocation || !form.sec_primary_purpose.trim()}
+                      disabled={loadingLocation}
                       onClick={() => {
                         const current = form.business_activities.trim();
                         const primary = form.sec_primary_purpose.trim();
-                        if (current === primary) return;
+                        if (current === primary) {
+                          if (!current) toast.info('Type the Business Activities or the Primary Purpose first.');
+                          return;
+                        }
+                        // No Primary Purpose yet: the other way round — fill it from the Business Activities.
+                        if (!primary) {
+                          setForm((p) => ({ ...p, sec_primary_purpose: p.business_activities.trim() }));
+                          toast.success('Copied to the Primary Purpose — save it on the Stockholders tab.');
+                          return;
+                        }
                         if (current) setConfirmCopyPurpose(true);
                         else copyPrimaryPurpose();
                       }}
                       title={
                         form.sec_primary_purpose.trim()
-                          ? 'Copy the Primary Purpose from the SEC Registration Information card'
-                          : 'No Primary Purpose yet — add it on the Stockholders tab (SEC Registration Information)'
+                          ? 'Copy the Primary Purpose from the Registration Information card'
+                          : 'No Primary Purpose yet — copies the Business Activities into it'
                       }
                       className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-semibold cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 hover:bg-[var(--selected-bg)]"
                       style={{ color: 'var(--text)' }}
@@ -4209,6 +4511,18 @@ export function ProponentsManagement({
                 </CardTitle>
                 {/* Editing is for the current lease only; an earlier lease's panel is read only. */}
                 <div className={cn('flex items-center gap-2', leaseView && 'hidden')}>
+                  {canManagePropertyTypes ? (
+                    <button
+                      type="button"
+                      onClick={() => setPropertyTypesOpen(true)}
+                      className="inline-flex h-[26px] w-[26px] items-center justify-center rounded-md border cursor-pointer hover:bg-[var(--selected-bg)]"
+                      style={{ borderColor: 'var(--input-border)', color: 'var(--text)', backgroundColor: 'var(--surface)' }}
+                      title="Type of Property — File Maintenance"
+                      aria-label="Type of Property settings"
+                    >
+                      <Settings size={13} />
+                    </button>
+                  ) : null}
                   <div className="relative">
                     <button
                       type="button"
@@ -4290,12 +4604,12 @@ export function ProponentsManagement({
                 <table className="w-full text-xs border-collapse">
                   <thead>
                     <tr style={THEAD_ROW_STYLE}>
-                      {['No.', 'Year', 'Date From', 'Date To', 'Rate', 'Type of Property', 'Area (SQM)', 'Rate/SQM/MO', 'Currency', 'MGL/MO', 'Currency', ''].map(
+                      {['No.', 'Year', 'Date From', 'Date To', 'Rate', 'Type of Property', 'Area (SQM)', 'Rate/SQM/MO', 'MGL/MO', ''].map(
                         (h, i) => (
                           <th
                             key={`${h}-${i}`}
                             className="px-2 py-1.5 text-left font-semibold uppercase tracking-wide text-[9px] border-b"
-                            style={{ borderColor: 'var(--input-border)', color: 'var(--text-muted)' }}
+                            style={{ borderColor: 'var(--input-border)', color: 'var(--text)' }}
                           >
                             {h}
                           </th>
@@ -4321,12 +4635,12 @@ export function ProponentsManagement({
                         missing?.has(key) ? ' [&>*]:rounded-md [&>*]:ring-1 [&>*]:ring-red-500' : '';
                       return (
                       <tr key={i}>
-                        <td className="px-2 py-1 border-b text-center" style={{ borderColor: 'var(--input-border)' }}>
-                          {i + 1}
+                        <td className="px-2 py-1 align-top border-b text-center" style={{ borderColor: 'var(--input-border)' }}>
+                          <div className="flex h-9 items-center justify-center">{i + 1}</div>
                         </td>
-                        <td className={`px-1 py-1 border-b${miss('year')}`} style={{ borderColor: 'var(--input-border)' }}>
+                        <td className={`px-1 py-1 align-top border-b${miss('year')}`} style={{ borderColor: 'var(--input-border)' }}>
                           <BoxSelect
-                            className="w-full min-w-[110px]"
+                            className="w-full min-w-[110px] h-9"
                             options={PROPERTY_YEARS}
                             value={asOption(PROPERTY_YEARS, row.year)}
                             placeholder="Select year"
@@ -4339,7 +4653,8 @@ export function ProponentsManagement({
                             }
                           />
                         </td>
-                        <td className={`px-1 py-1 border-b w-36${miss('date_from')}`} style={{ borderColor: 'var(--input-border)' }}>
+                        <td className={`px-1 py-1 align-top border-b w-36${miss('date_from')}`} style={{ borderColor: 'var(--input-border)' }}>
+                          <div className="h-9 [&>*]:h-full">
                           <DatePicker
                             mode="single"
                             fullWidth
@@ -4355,8 +4670,10 @@ export function ProponentsManagement({
                               }))
                             }
                           />
+                          </div>
                         </td>
-                        <td className={`px-1 py-1 border-b w-36${miss('date_to')}`} style={{ borderColor: 'var(--input-border)' }}>
+                        <td className={`px-1 py-1 align-top border-b w-36${miss('date_to')}`} style={{ borderColor: 'var(--input-border)' }}>
+                          <div className="h-9 [&>*]:h-full">
                           <DatePicker
                             mode="single"
                             fullWidth
@@ -4372,11 +4689,12 @@ export function ProponentsManagement({
                               }))
                             }
                           />
+                          </div>
                         </td>
-                        <td className={`px-1 py-1 border-b whitespace-nowrap${miss('rate_type')}`} style={{ borderColor: 'var(--input-border)' }}>
+                        <td className={`px-1 py-1 align-top border-b whitespace-nowrap${miss('rate_type')}`} style={{ borderColor: 'var(--input-border)' }}>
                           {/* Switchable: Non-standard → Standard recomputes MGL, so it asks first. */}
                           <BoxSelect
-                            className="w-full min-w-[150px]"
+                            className="w-full min-w-[150px] h-9"
                             options={[
                               { value: 'STANDARD', label: 'Standard' },
                               { value: 'NON_STANDARD', label: 'Non-standard' },
@@ -4410,11 +4728,11 @@ export function ProponentsManagement({
                             }}
                           />
                         </td>
-                        <td className={`px-1 py-1 border-b${miss('type_of_property')}`} style={{ borderColor: 'var(--input-border)' }}>
+                        <td className={`px-1 py-1 align-top border-b${miss('type_of_property')}`} style={{ borderColor: 'var(--input-border)' }}>
                           <BoxSelect
-                            className="w-full min-w-[140px]"
-                            options={PROPERTY_TYPES}
-                            value={asOption(PROPERTY_TYPES, row.type_of_property)}
+                            className="w-full min-w-[140px] h-9"
+                            options={propertyTypeOptions(row.type_of_property)}
+                            value={asOption(propertyTypeOptions(row.type_of_property), row.type_of_property)}
                             placeholder="Select type"
                             disabled={loadingLocation}
                             onChange={(value) =>
@@ -4425,73 +4743,71 @@ export function ProponentsManagement({
                             }
                           />
                         </td>
-                        <td className={`px-1 py-1 border-b${miss('area_sqm')}`} style={{ borderColor: 'var(--input-border)' }}>
+                        <td className={`px-1 py-1 align-top border-b${miss('area_sqm')}`} style={{ borderColor: 'var(--input-border)' }}>
                           <input
-                            className="app-form-control app-form-control-sm w-full min-w-[5.5rem] tabular-nums"
+                            className="app-form-control app-form-control-sm h-9 w-full min-w-[8rem] tabular-nums"
                             value={row.area_sqm}
-                            disabled={loadingLocation}
-                            onChange={(e) =>
-                              setForm((p) => ({
-                                ...p,
-                                properties: p.properties.map((r, ri) => (ri === i ? updatePropertyRow(r, { area_sqm: e.target.value }) : r)),
-                              }))
-                            }
-                          />
-                        </td>
-                        <td className={`px-1 py-1 border-b${miss('rate_sqm_mo')}`} style={{ borderColor: 'var(--input-border)' }}>
-                          <input
-                            className="app-form-control app-form-control-sm w-full min-w-[6.5rem] tabular-nums"
-                            value={row.rate_sqm_mo}
+                            placeholder="0.00"
                             disabled={loadingLocation}
                             onChange={(e) =>
                               setForm((p) => ({
                                 ...p,
                                 properties: p.properties.map((r, ri) =>
-                                  ri === i ? updatePropertyRow(r, { rate_sqm_mo: formatAmountInput(e.target.value) }) : r,
+                                  ri === i ? updatePropertyRow(r, { area_sqm: formatAmountInput(e.target.value) }) : r,
                                 ),
                               }))
                             }
                           />
                         </td>
-                        <td className={`px-1 py-1 border-b${miss('rate_currency')}`} style={{ borderColor: 'var(--input-border)' }}>
-                          <BoxSelect
-                            className="w-full min-w-[100px]"
-                            options={CURRENCY_OPTIONS}
-                            value={row.rate_currency}
+                        <td
+                          className={`px-1 py-1 align-top border-b${miss('rate_sqm_mo')}${miss('rate_currency')}`}
+                          style={{ borderColor: 'var(--input-border)' }}
+                        >
+                          <AmountCurrencyBox
+                            className="w-full min-w-[11rem] h-9"
+                            amount={row.rate_sqm_mo}
+                            currency={row.rate_currency}
                             disabled={loadingLocation}
-                            onChange={(value) =>
+                            onAmountChange={(value) =>
+                              setForm((p) => ({
+                                ...p,
+                                properties: p.properties.map((r, ri) => (ri === i ? updatePropertyRow(r, { rate_sqm_mo: value }) : r)),
+                              }))
+                            }
+                            onCurrencyChange={(value) =>
                               setForm((p) => ({
                                 ...p,
                                 properties: p.properties.map((r, ri) => (ri === i ? updatePropertyRow(r, { rate_currency: value }) : r)),
                               }))
                             }
                           />
+                          {/* Non-standard: Rate/SQM/MO is still required — 0 when there's none. */}
+                          {row.rate_type === 'NON_STANDARD' ? (
+                            <div className="mt-0.5 px-1 text-[10px] leading-tight text-secondary">Input 0 if blank</div>
+                          ) : null}
                         </td>
-                        <td className={`px-1 py-1 border-b${miss('mgl_mo')}`} style={{ borderColor: 'var(--input-border)' }}>
-                          <input
-                            className="app-form-control app-form-control-sm w-full min-w-[8.5rem] tabular-nums"
-                            value={row.mgl_mo}
-                            disabled={loadingLocation || row.rate_type === 'STANDARD'}
+                        {/* MGL/MO + its currency: Standard computes both (Area × Rate, the rate's currency). */}
+                        <td
+                          className={`px-1 py-1 align-top border-b${miss('mgl_mo')}${miss('mgl_currency')}`}
+                          style={{ borderColor: 'var(--input-border)' }}
+                        >
+                          <AmountCurrencyBox
+                            className="w-full min-w-[13rem] h-9"
+                            amount={row.mgl_mo}
+                            currency={row.mgl_currency}
+                            disabled={loadingLocation}
+                            amountDisabled={row.rate_type === 'STANDARD'}
+                            currencyDisabled={row.rate_type === 'STANDARD'}
                             readOnly={row.rate_type === 'STANDARD'}
                             title={row.rate_type === 'STANDARD' ? 'Computed: Area × Rate/SQM/MO' : undefined}
-                            onChange={(e) =>
+                            currencyTitle={row.rate_type === 'STANDARD' ? 'Same as the rate’s currency' : undefined}
+                            onAmountChange={(value) =>
                               setForm((p) => ({
                                 ...p,
-                                properties: p.properties.map((r, ri) =>
-                                  ri === i ? updatePropertyRow(r, { mgl_mo: formatAmountInput(e.target.value) }) : r,
-                                ),
+                                properties: p.properties.map((r, ri) => (ri === i ? updatePropertyRow(r, { mgl_mo: value }) : r)),
                               }))
                             }
-                          />
-                        </td>
-                        <td className={`px-1 py-1 border-b${miss('mgl_currency')}`} style={{ borderColor: 'var(--input-border)' }}>
-                          <BoxSelect
-                            className="w-full min-w-[100px]"
-                            options={CURRENCY_OPTIONS}
-                            value={row.mgl_currency}
-                            disabled={loadingLocation || row.rate_type === 'STANDARD'}
-                            title={row.rate_type === 'STANDARD' ? 'Same as the rate’s currency' : undefined}
-                            onChange={(value) =>
+                            onCurrencyChange={(value) =>
                               setForm((p) => ({
                                 ...p,
                                 properties: p.properties.map((r, ri) => (ri === i ? updatePropertyRow(r, { mgl_currency: value }) : r)),
@@ -4499,7 +4815,7 @@ export function ProponentsManagement({
                             }
                           />
                         </td>
-                        <td className="px-1 py-1 border-b text-center" style={{ borderColor: 'var(--input-border)' }}>
+                        <td className="px-1 py-1 align-top border-b text-center" style={{ borderColor: 'var(--input-border)' }}>
                           <button
                             type="button"
                             disabled={loadingLocation}
@@ -4509,7 +4825,7 @@ export function ProponentsManagement({
                               if (blankRow) remove();
                               else askRowDelete(`property row ${i + 1}`, remove);
                             }}
-                            className="inline-flex h-7 w-7 items-center justify-center rounded-md cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 hover:bg-[var(--selected-bg)]"
+                            className="inline-flex h-9 w-7 items-center justify-center rounded-md cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 hover:bg-[var(--selected-bg)]"
                             style={{ color: blankRow ? 'var(--text-muted)' : '#ef4444' }}
                             title={blankRow ? `Remove empty row ${i + 1}` : `Delete row ${i + 1}`}
                             aria-label={blankRow ? `Remove empty row ${i + 1}` : `Delete row ${i + 1}`}
@@ -4554,16 +4870,20 @@ export function ProponentsManagement({
                 <CapitalField
                   inline
                   label="Amount"
-                  amount={form.advance_lease_payment_amount}
-                  currency={form.advance_lease_payment_currency}
+                  amount={finAmount(form.advance_lease_payment_amount)}
+                  currency={finCurrency(form.advance_lease_payment_currency)}
+                  currencyText
+                  amountReadOnly
+                  amountTitle={finAmountTitle}
+                  currencyTitle={finCurrencyTitle}
                   disabled={loadingLocation}
                   onAmountChange={(v) => setForm((p) => ({ ...p, advance_lease_payment_amount: v }))}
                   onCurrencyChange={(v) => setForm((p) => ({ ...p, advance_lease_payment_currency: v }))}
                 />
                 <TotalAmountField
                   months={form.advance_lease_payment_months}
-                  amount={form.advance_lease_payment_amount}
-                  currency={form.advance_lease_payment_currency}
+                  amount={finAmount(form.advance_lease_payment_amount)}
+                  currency={finCurrency(form.advance_lease_payment_currency)}
                 />
                 </div>
               </div>
@@ -4593,16 +4913,20 @@ export function ProponentsManagement({
                 <CapitalField
                   inline
                   label="Amount"
-                  amount={form.security_deposit_amount}
-                  currency={form.security_deposit_currency}
+                  amount={finAmount(form.security_deposit_amount)}
+                  currency={finCurrency(form.security_deposit_currency)}
+                  currencyText
+                  amountReadOnly
+                  amountTitle={finAmountTitle}
+                  currencyTitle={finCurrencyTitle}
                   disabled={loadingLocation}
                   onAmountChange={(v) => setForm((p) => ({ ...p, security_deposit_amount: v }))}
                   onCurrencyChange={(v) => setForm((p) => ({ ...p, security_deposit_currency: v }))}
                 />
                 <TotalAmountField
                   months={form.security_deposit_months}
-                  amount={form.security_deposit_amount}
-                  currency={form.security_deposit_currency}
+                  amount={finAmount(form.security_deposit_amount)}
+                  currency={finCurrency(form.security_deposit_currency)}
                 />
                 </div>
               </div>
@@ -4632,16 +4956,20 @@ export function ProponentsManagement({
                 <CapitalField
                   inline
                   label="Amount"
-                  amount={form.performance_security_amount}
-                  currency={form.performance_security_currency}
+                  amount={finAmount(form.performance_security_amount)}
+                  currency={finCurrency(form.performance_security_currency)}
+                  currencyText
+                  amountReadOnly
+                  amountTitle={finAmountTitle}
+                  currencyTitle={finCurrencyTitle}
                   disabled={loadingLocation}
                   onAmountChange={(v) => setForm((p) => ({ ...p, performance_security_amount: v }))}
                   onCurrencyChange={(v) => setForm((p) => ({ ...p, performance_security_currency: v }))}
                 />
                 <TotalAmountField
                   months={form.performance_security_months}
-                  amount={form.performance_security_amount}
-                  currency={form.performance_security_currency}
+                  amount={finAmount(form.performance_security_amount)}
+                  currency={finCurrency(form.performance_security_currency)}
                 />
                 </div>
               </div>
@@ -4663,7 +4991,10 @@ export function ProponentsManagement({
                   allowed={editing ? canEdit : canAdd}
                   label="Save Performance Commitment"
                   isEditing={Boolean(editing)}
-                  hasContent={[form.investment_commitment, form.investment_actual, form.employee_commitment, form.employee_actual].some((v) => v.trim() !== '')}
+                  hasContent={
+                    [form.investment_commitment, form.investment_actual, form.employee_commitment, form.employee_actual].some((v) => v.trim() !== '') ||
+                    form.development_timeline.some((m) => m.date || m.remarks.trim())
+                  }
                   dirty={sectionDirty.investment}
                   saving={savingSection === 'investment'}
                   disabled={saving || loadingLocation}
@@ -4693,13 +5024,115 @@ export function ProponentsManagement({
                         value={form[key]}
                         disabled={loadingLocation}
                         onChange={(e) => {
-                          const value = row.amount ? formatAmountInput(e.target.value) : e.target.value.replace(/[^\d]/g, '');
+                          const value = row.amount ? formatAmountInput(e.target.value) : formatCountInput(e.target.value);
                           setForm((p) => ({ ...p, [key]: value }));
+                        }}
+                        onBlur={() => {
+                          if (!row.amount) return;
+                          setForm((p) => ({ ...p, [key]: formatMoney(p[key]) }));
                         }}
                       />
                     ))}
                   </React.Fragment>
                 ))}
+              </div>
+
+              {/* Development Timeline (4-11): when each milestone happened, with remarks. */}
+              <div className="flex flex-col gap-2 border-t pt-3" style={{ borderColor: 'var(--input-border)' }}>
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--text)' }}>
+                    Development Timeline
+                  </span>
+                  <span className="text-[10px] text-secondary">
+                    {form.development_timeline.filter((m) => m.date).length} of {MILESTONES.length} done
+                  </span>
+                </div>
+                {/* A stepper: one step per milestone, done steps filled and joined by the
+                    progress line; each step's date and remarks under it. */}
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                  {MILESTONES.map((m, mi) => {
+                    const row = form.development_timeline.find((r) => r.code === m.code) ?? { code: m.code, date: '', remarks: '' };
+                    const setRow = (patch: Partial<MilestoneRow>) =>
+                      setForm((p) => ({
+                        ...p,
+                        development_timeline: p.development_timeline.map((r) => (r.code === m.code ? { ...r, ...patch } : r)),
+                      }));
+                    const done = Boolean(row.date);
+                    const nextDone = Boolean(form.development_timeline.find((r) => r.code === MILESTONES[mi + 1]?.code)?.date);
+                    const last = mi === MILESTONES.length - 1;
+                    return (
+                      <div key={m.code} className="relative flex flex-col gap-2">
+                        {/* Step marker centred over its card; on wide screens a line runs
+                            from this marker's centre to the next one's, across the gap
+                            (gap-3 = 0.75rem). */}
+                        <div className="relative flex h-8 items-center xl:justify-center">
+                          {last ? null : (
+                            <span
+                              className="absolute left-1/2 top-1/2 hidden h-0.5 -translate-y-1/2 rounded-full xl:block"
+                              style={{
+                                width: 'calc(100% + 0.75rem)',
+                                backgroundColor: done && nextDone ? '#16a34a' : 'var(--input-border)',
+                              }}
+                              aria-hidden
+                            />
+                          )}
+                          <span
+                            className="relative z-10 flex h-8 w-8 shrink-0 items-center justify-center rounded-full border-2 text-[12px] font-bold"
+                            style={
+                              done
+                                ? { backgroundColor: '#16a34a', borderColor: '#16a34a', color: '#fff' }
+                                : { backgroundColor: 'var(--surface)', borderColor: 'var(--input-border)', color: 'var(--text-muted)' }
+                            }
+                            aria-hidden
+                          >
+                            <m.icon size={15} />
+                          </span>
+                        </div>
+                        <div
+                          className="flex flex-1 flex-col gap-2 rounded-xl border p-3"
+                          style={{
+                            borderColor: done ? 'color-mix(in oklab, #16a34a 45%, var(--input-border))' : 'var(--input-border)',
+                            backgroundColor: done ? 'color-mix(in oklab, #22c55e 7%, var(--surface))' : 'var(--surface)',
+                          }}
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="text-[12px] font-semibold leading-tight" style={{ color: 'var(--text)' }}>
+                              {m.label}
+                            </div>
+                            <span
+                              className="shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold"
+                              style={
+                                done
+                                  ? { backgroundColor: 'color-mix(in oklab, #22c55e 18%, transparent)', color: '#15803d' }
+                                  : { backgroundColor: 'var(--control-bg)', color: 'var(--text-muted)' }
+                              }
+                            >
+                              {done ? 'Done' : 'Pending'}
+                            </span>
+                          </div>
+                          <div className="h-9 [&>*]:h-full">
+                            <DatePicker
+                              mode="single"
+                              fullWidth
+                              boxed
+                              placeholder="Date"
+                              value={dateInputToDate(row.date)}
+                              onChange={(d: Date | null) => setRow({ date: dateToDateInputValue(d) })}
+                            />
+                          </div>
+                          <textarea
+                            className="app-form-control app-form-control-sm min-h-[3.5rem] w-full resize-y"
+                            placeholder="Remarks"
+                            maxLength={500}
+                            value={row.remarks}
+                            disabled={loadingLocation}
+                            onChange={(e) => setRow({ remarks: e.target.value })}
+                          />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             </div>
 
@@ -4778,6 +5211,24 @@ export function ProponentsManagement({
           }}
         />
       ) : null}
+
+      <PropertyTypesModal
+        open={propertyTypesOpen}
+        onClose={() => setPropertyTypesOpen(false)}
+        onChanged={() => void loadPropertyTypes()}
+      />
+
+      <ConfirmModal
+        open={regTypeConfirm}
+        title="Switch to DTI?"
+        description="A DTI-registered business (sole proprietorship) has no stockholders, so the Stockholders list is hidden. The rows already saved are kept, not deleted — switching back to SEC shows them again."
+        confirmText="Switch to DTI"
+        onCancel={() => setRegTypeConfirm(false)}
+        onConfirm={() => {
+          setForm((p) => ({ ...p, registration_type: 'DTI' }));
+          setRegTypeConfirm(false);
+        }}
+      />
 
       <ConfirmModal
         open={extensionRemove !== null}
@@ -4940,7 +5391,7 @@ function LeasePropertyTable({ properties }: { properties: any[] }) {
               <th
                 key={h}
                 className="px-2 py-1.5 text-left font-semibold uppercase tracking-wide text-[9px] border-b"
-                style={{ borderColor: 'var(--input-border)', color: 'var(--text-muted)' }}
+                style={{ borderColor: 'var(--input-border)', color: 'var(--text)' }}
               >
                 {h}
               </th>
@@ -4957,9 +5408,9 @@ function LeasePropertyTable({ properties }: { properties: any[] }) {
                 fmtDate(r.date_to),
                 r.rate_type === 'STANDARD' ? 'Standard' : r.rate_type === 'NON_STANDARD' ? 'Non-standard' : '—',
                 r.type_of_property || '—',
-                r.area_sqm || '—',
-                r.rate_sqm_mo ? `${r.rate_sqm_mo} ${r.rate_currency || ''}` : '—',
-                r.mgl_mo ? `${r.mgl_mo} ${r.mgl_currency || ''}` : '—',
+                r.area_sqm ? formatIfNumeric(r.area_sqm) : '—',
+                r.rate_sqm_mo ? `${formatMoney(r.rate_sqm_mo)} ${r.rate_currency || ''}` : '—',
+                r.mgl_mo ? `${formatMoney(r.mgl_mo)} ${r.mgl_currency || ''}` : '—',
               ].map((v, ci) => (
                 <td key={ci} className="px-2 py-1.5 border-b" style={{ borderColor: 'var(--input-border)', color: 'var(--text)' }}>
                   {v}
@@ -5115,6 +5566,7 @@ export function RowsEditor<T extends { id?: number }>({
   invalidKeys,
   confirmDelete,
   rowNoun = 'row',
+  totals,
 }: {
   rows: T[];
   /** width: fixed column width (e.g. '30%'); when any column sets one the table
@@ -5131,6 +5583,8 @@ export function RowsEditor<T extends { id?: number }>({
     /** A fixed dropdown instead of a text box; a saved value that isn't in the list
      * shows as the placeholder (must be picked again). */
     options?: readonly string[];
+    /** Computed, not typed (e.g. Ownership %): shown, never edited. */
+    readOnly?: boolean;
   }[];
   disabled?: boolean;
   emptyText: string;
@@ -5147,6 +5601,8 @@ export function RowsEditor<T extends { id?: number }>({
   confirmDelete?: (what: string, proceed: () => void) => void;
   /** Used in the delete prompt, e.g. "contact person". */
   rowNoun?: string;
+  /** A "Total" row under the table: column key -> the figure to show. */
+  totals?: Partial<Record<string, string>>;
 }) {
   const fixed = columns.some((c) => c.width);
   return (
@@ -5157,7 +5613,7 @@ export function RowsEditor<T extends { id?: number }>({
             <tr style={THEAD_ROW_STYLE}>
               <th
                 className="px-2 py-1.5 text-center font-semibold uppercase tracking-wide text-[9px] border-b w-10"
-                style={{ borderColor: 'var(--input-border)', color: 'var(--text-muted)' }}
+                style={{ borderColor: 'var(--input-border)', color: 'var(--text)' }}
               >
                 No.
               </th>
@@ -5165,7 +5621,7 @@ export function RowsEditor<T extends { id?: number }>({
                 <th
                   key={c.key}
                   className="px-2 py-1.5 text-left font-semibold uppercase tracking-wide text-[9px] border-b"
-                  style={{ borderColor: 'var(--input-border)', color: 'var(--text-muted)', width: c.width }}
+                  style={{ borderColor: 'var(--input-border)', color: 'var(--text)', width: c.width }}
                 >
                   {c.label}
                 </th>
@@ -5213,12 +5669,23 @@ export function RowsEditor<T extends { id?: number }>({
                         </div>
                       ) : (
                       <input
-                        className={cn('app-form-control app-form-control-sm w-full', c.className)}
+                        className={cn('app-form-control app-form-control-sm w-full', c.className, c.readOnly && 'cursor-default tabular-nums')}
+                        style={c.readOnly ? { backgroundColor: 'var(--control-bg)' } : undefined}
                         inputMode={c.numeric ? 'decimal' : undefined}
                         placeholder={c.placeholder}
                         value={String(row[c.key] ?? '')}
                         disabled={disabled}
+                        readOnly={c.readOnly}
+                        tabIndex={c.readOnly ? -1 : undefined}
+                        title={c.readOnly ? 'Computed automatically' : undefined}
+                        onBlur={() => {
+                          if (!c.amount || c.readOnly) return;
+                          const current = String(row[c.key] ?? '');
+                          const money = formatMoney(current);
+                          if (money !== current) onChange(rows.map((r, ri) => (ri === i ? { ...r, [c.key]: money } : r)));
+                        }}
                         onChange={(e) => {
+                          if (c.readOnly) return;
                           const value = c.amount
                             ? formatAmountInput(e.target.value)
                             : c.numeric
@@ -5252,6 +5719,19 @@ export function RowsEditor<T extends { id?: number }>({
               })
             )}
           </tbody>
+          {totals && rows.length > 0 ? (
+            <tfoot>
+              <tr style={THEAD_ROW_STYLE}>
+                <td />
+                {columns.map((c, ci) => (
+                  <td key={c.key} className="px-3 py-2 text-[11px] font-bold tabular-nums" style={{ color: 'var(--text)' }}>
+                    {totals[c.key] ?? (ci === 0 ? 'Total' : '')}
+                  </td>
+                ))}
+                <td />
+              </tr>
+            </tfoot>
+          ) : null}
         </table>
       </div>
       {hideSideActions ? null : (
@@ -5296,9 +5776,9 @@ function Field({
         inline
           ? // Beside the control: readable size, as written ("Months MGL"), right-aligned against it.
             'text-right text-[12px] leading-tight'
-          : cn('text-secondary uppercase tracking-widest', compact ? 'text-[9px]' : 'text-[11px]'),
+          : cn('uppercase tracking-widest', compact ? 'text-[9px]' : 'text-[11px]'),
       )}
-      style={inline ? { color: 'var(--text)' } : undefined}
+      style={{ color: 'var(--text)' }}
     >
       {label}
     </div>
@@ -5361,12 +5841,163 @@ function BoxSelect({
 
 // Vertical tab list for the SidePanel (mirrors a left-side tab-head layout),
 // styled with this app's own tokens rather than any reference screenshot's colors.
+/** SEC (corporation / partnership) or DTI (sole proprietorship). Blank = not
+ * chosen yet, treated as SEC. */
+export type RegistrationType = 'SEC' | 'DTI';
+export const registrationTypeOf = (value?: string | null): RegistrationType =>
+  String(value || '').toUpperCase() === 'DTI' ? 'DTI' : 'SEC';
+/** Labels of the Registration Information card for the chosen agency. */
+export function registrationLabels(type: RegistrationType) {
+  return type === 'DTI'
+    ? {
+        card: 'DTI Registration Information',
+        no: 'DTI Registration No.',
+        noPlaceholder: 'e.g. 1234567',
+        date: 'DTI Registration Date',
+        contact: 'DTI Contact Person',
+        save: 'Save DTI Registration Information',
+      }
+    : {
+        card: 'SEC Registration Information',
+        no: 'SEC Registration No.',
+        noPlaceholder: 'e.g. CS201811260',
+        date: 'SEC Registration Date',
+        contact: 'SEC Contact Person',
+        save: 'Save SEC Registration Information',
+      };
+}
+
+/** "Registered with: [SEC] [DTI]" — DTI (sole proprietorship) has no stockholders. */
+export function RegistrationTypeToggle({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: RegistrationType;
+  onChange: (value: RegistrationType) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <span className="text-[9px] font-semibold uppercase tracking-widest" style={{ color: 'var(--text)' }}>
+        Registered with
+      </span>
+      <div className="inline-flex rounded-lg border p-0.5" style={{ borderColor: 'var(--input-border)', backgroundColor: 'var(--control-bg)' }}>
+        {(
+          [
+            ['SEC', 'SEC', 'Corporation / partnership'],
+            ['DTI', 'DTI', 'Sole proprietorship — no stockholders'],
+          ] as const
+        ).map(([v, label, hint]) => (
+          <button
+            key={v}
+            type="button"
+            title={hint}
+            disabled={disabled}
+            aria-pressed={value === v}
+            onClick={() => value !== v && onChange(v)}
+            className="rounded-md px-3 py-1 text-[11px] font-semibold cursor-pointer disabled:cursor-not-allowed disabled:opacity-60"
+            style={
+              // The chosen one is solid (same as the app's primary buttons) so it reads at a glance.
+              value === v
+                ? { backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)', boxShadow: '0 1px 2px rgba(0,0,0,.15)' }
+                : { color: 'var(--text-muted)' }
+            }
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      <span className="text-[10px] text-secondary">
+        {value === 'DTI' ? 'Sole proprietorship — no stockholders' : 'Corporation / partnership'}
+      </span>
+    </div>
+  );
+}
+
+/** Amount and currency in one bordered box — the amount and the currency
+ * are borderless inside it, split by a thin divider. */
+export function AmountCurrencyBox({
+  amount,
+  currency,
+  disabled,
+  amountDisabled,
+  currencyDisabled,
+  readOnly,
+  className,
+  title,
+  currencyTitle,
+  currencyText,
+  onAmountChange,
+  onCurrencyChange,
+}: {
+  amount: string;
+  currency: string;
+  disabled?: boolean;
+  amountDisabled?: boolean;
+  currencyDisabled?: boolean;
+  /** Show the currency as plain text (no dropdown) — it's set elsewhere. */
+  currencyText?: boolean;
+  readOnly?: boolean;
+  className?: string;
+  title?: string;
+  currencyTitle?: string;
+  onAmountChange: (value: string) => void;
+  onCurrencyChange: (value: string) => void;
+}) {
+  return (
+    <div className={cn('app-form-control app-form-control-sm flex items-stretch p-0 overflow-hidden', className)}>
+      <input
+        className="flex-1 min-w-0 border-0 bg-transparent outline-none px-2 py-1 tabular-nums"
+        style={{ color: amountDisabled ? 'var(--text-muted)' : 'var(--text)' }}
+        value={amount}
+        disabled={disabled || amountDisabled}
+        readOnly={readOnly}
+        title={title}
+        placeholder="0.00"
+        onChange={(e) => onAmountChange(formatAmountInput(e.target.value))}
+        onBlur={() => {
+          const money = formatMoney(amount);
+          if (money !== amount) onAmountChange(money);
+        }}
+      />
+      {currencyText ? (
+        <div
+          className="shrink-0 flex items-center justify-end px-3 text-[11px] font-semibold text-secondary"
+          style={{ borderLeft: '1px solid var(--input-border)', minWidth: '4rem' }}
+          title={currencyTitle}
+        >
+          {currency || 'PHP'}
+        </div>
+      ) : (
+      <div className="shrink-0 flex items-stretch" style={{ borderLeft: '1px solid var(--input-border)', width: '5.5rem' }} title={currencyTitle}>
+        <AppSelect
+          options={CURRENCY_OPTIONS.map((c) => ({ value: c, label: c }))}
+          value={currency}
+          onChange={onCurrencyChange}
+          isClearable={false}
+          isDisabled={disabled || currencyDisabled}
+          compact
+          boxed
+          minHeight={26}
+        />
+      </div>
+      )}
+    </div>
+  );
+}
+
 export function CapitalField({
   label,
   amount,
   currency,
   disabled,
   inline,
+  currencyDisabled,
+  currencyTitle,
+  currencyText,
+  amountReadOnly,
+  amountTitle,
   onAmountChange,
   onCurrencyChange,
 }: {
@@ -5375,35 +6006,33 @@ export function CapitalField({
   currency: string;
   disabled?: boolean;
   inline?: boolean;
+  /** Currency set elsewhere (e.g. the Property Schedule's MGL currency). */
+  currencyDisabled?: boolean;
+  currencyTitle?: string;
+  /** Show the currency as text, no dropdown. */
+  currencyText?: boolean;
+  /** Computed elsewhere (e.g. from the Property Schedule's MGL/MO): shown, not typed. */
+  amountReadOnly?: boolean;
+  amountTitle?: string;
   onAmountChange: (value: string) => void;
   onCurrencyChange: (value: string) => void;
 }) {
   return (
     <Field compact inline={inline} label={label}>
-      {/* One bordered box for both — amount and currency are borderless
-          inside it, split by a thin divider, instead of two separate fields. */}
-      <div className={cn('app-form-control app-form-control-sm flex items-stretch p-0 overflow-hidden', inline && FIN_CARD_CONTROL_H)}>
-        <input
-          className="flex-1 min-w-0 border-0 bg-transparent outline-none px-2 py-1"
-          style={{ color: 'var(--text)' }}
-          value={amount}
-          disabled={disabled}
-          placeholder="0.00"
-          onChange={(e) => onAmountChange(formatAmountInput(e.target.value))}
-        />
-        <div className="shrink-0 flex items-stretch" style={{ borderLeft: '1px solid var(--input-border)', width: '5.5rem' }}>
-          <AppSelect
-            options={CURRENCY_OPTIONS.map((c) => ({ value: c, label: c }))}
-            value={currency}
-            onChange={onCurrencyChange}
-            isClearable={false}
-            isDisabled={disabled}
-            compact
-            boxed
-            minHeight={26}
-          />
-        </div>
-      </div>
+      <AmountCurrencyBox
+        amount={amount}
+        currency={currency}
+        disabled={disabled}
+        currencyDisabled={currencyDisabled}
+        currencyTitle={currencyTitle}
+        currencyText={currencyText}
+        amountDisabled={amountReadOnly}
+        readOnly={amountReadOnly}
+        title={amountTitle}
+        className={inline ? FIN_CARD_CONTROL_H : undefined}
+        onAmountChange={onAmountChange}
+        onCurrencyChange={onCurrencyChange}
+      />
     </Field>
   );
 }

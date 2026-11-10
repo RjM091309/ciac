@@ -58,9 +58,13 @@ export function Section({
   return (
     <div className="flex flex-col gap-2.5">
       <div className="flex items-center gap-2">
-        <Icon size={13} className="text-secondary" />
-        <span className="text-[10px] font-bold uppercase tracking-widest text-secondary">{title}</span>
-        <span className="h-px flex-1" style={{ backgroundColor: 'var(--input-border)' }} />
+        <span className="inline-flex" style={{ color: 'var(--text)' }}>
+          <Icon size={13} />
+        </span>
+        <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--text)' }}>
+          {title}
+        </span>
+        <span className="h-px flex-1" style={{ backgroundColor: 'var(--text)' }} />
       </div>
       {children}
     </div>

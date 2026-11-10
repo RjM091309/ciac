@@ -106,7 +106,11 @@ const editableOf = (f: Profile): Profile => ({
 });
 
 function Label({ children }: { children: React.ReactNode }) {
-  return <div className="text-[9px] font-semibold uppercase tracking-widest text-secondary">{children}</div>;
+  return (
+    <div className="text-[9px] font-semibold uppercase tracking-widest" style={{ color: 'var(--text)' }}>
+      {children}
+    </div>
+  );
 }
 
 function Cell({

@@ -72,6 +72,7 @@ router.get("/document-requirements", requireMenuAccess(MENU_KEY, "view"), propon
 router.get("/industries", requireMenuAccess(MENU_KEY, "view"), proponentsController.listIndustryOptions);
 // Also used by Locator Accounts' New Locator Account form.
 router.get("/ref-code-available", requireMenuAccess(MENU_KEY, "view"), proponentsController.refCodeAvailable);
+router.get("/property-types", requireMenuAccess(MENU_KEY, "view"), proponentsController.listPropertyTypeOptions);
 router.get("/land-uses", requireAnyMenuAccess([MENU_KEY, "settings:locator-users"], "view"), proponentsController.listLandUseOptions);
 // Proponent Accounts / New Proponent: the locator a new sub-lessee sub-leases from.
 router.get(

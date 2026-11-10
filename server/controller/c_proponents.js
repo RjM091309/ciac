@@ -221,6 +221,17 @@ exports.listLandUseOptions = async (req, res) => {
   }
 };
 
+// Type of Property dropdown on the Property Schedule (File Maintenance list).
+exports.listPropertyTypeOptions = async (req, res) => {
+  try {
+    const rows = await require("../models/PropertyType").listPropertyTypes();
+    return res.json({ success: true, data: rows.map((r) => ({ id: r.id, name: r.name, is_active: r.is_active })) });
+  } catch (error) {
+    console.error("List type of property options error:", error);
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
+  }
+};
+
 // Industry dropdown on the locator form — the Application Types catalog
 // (Industry is normally the latest filed application's type).
 exports.listIndustryOptions = async (req, res) => {
@@ -546,7 +557,14 @@ exports.getById = async (req, res) => {
       console.error("GIS document lookup error:", error);
     }
 
-    return res.json({ success: true, data: { ...row, gis_document } });
+    let development_timeline = [];
+    try {
+      development_timeline = await require("../models/ProponentMilestone").getForProponent(id);
+    } catch (error) {
+      console.error("Development timeline lookup error:", error);
+    }
+
+    return res.json({ success: true, data: { ...row, gis_document, development_timeline } });
   } catch (error) {
     console.error("Get proponent error:", error);
     return res.status(500).json({ success: false, message: publicErrorMessage(error) });
@@ -997,6 +1015,8 @@ exports.create = async (req, res) => {
     // Registered Locator only lists locators with an Account Officer. The
     // form hides that field from an Account Officer, so theirs defaults to them.
     let accountOfficerId = toNullableId(account_officer_id);
+    const ownershipProblem = require("../models/Stockholder").ownershipError(stockholders);
+    if (ownershipProblem) return res.status(400).json({ success: false, message: ownershipProblem });
     // A Level 2 Account Officer's new locator is always their own.
     const ownOnly = await accountOfficerScope(req);
     if (ownOnly !== null) accountOfficerId = ownOnly;
@@ -1078,6 +1098,10 @@ exports.create = async (req, res) => {
       // modal — every locator created here is a manual registration.
       is_manual_registration: true,
     });
+    // SEC or DTI (Registration Information card) — not a createProponent column.
+    if (row?.id && req.body?.registration_type !== undefined) {
+      await Proponent.updateProponent(row.id, { registration_type: req.body.registration_type });
+    }
     // A new locator has no contract/application yet, so Type of Contract and
     // Industry go straight to the manual fallback columns.
     if (row?.id) {
@@ -1115,6 +1139,7 @@ function sectionHandler(label, action, run) {
       if (!Number.isFinite(id)) return res.status(400).json({ success: false, message: "Invalid id" });
       const problem = run.validate(req.body || {});
       if (problem) return res.status(400).json({ success: false, message: problem });
+      const before = run.auditDetails ? await Proponent.getProponentById(id).catch(() => null) : null;
       const data = await run.save(id, req.body || {}, req.user?.id ?? null);
       if (!data) return res.status(404).json({ success: false, message: "Proponent not found" });
 
@@ -1125,7 +1150,12 @@ function sectionHandler(label, action, run) {
         action,
         entityType: "proponent",
         entityId: id,
-        details: { business_name: proponent?.business_name, section: label },
+        details: {
+          business_name: proponent?.business_name,
+          ref_no: proponent?.ref_no ?? null,
+          section: label,
+          ...(run.auditDetails ? run.auditDetails(before, proponent) : {}),
+        },
         req,
       });
 
@@ -1140,7 +1170,8 @@ function sectionHandler(label, action, run) {
 }
 
 exports.saveStockholders = sectionHandler("stockholders", "PROPONENT_STOCKHOLDERS_UPDATED", {
-  validate: (b) => (Array.isArray(b.stockholders) ? null : "stockholders must be a list"),
+  validate: (b) =>
+    Array.isArray(b.stockholders) ? require("../models/Stockholder").ownershipError(b.stockholders) : "stockholders must be a list",
   save: (id, b, actor) => Proponent.saveStockholders(id, b.stockholders, actor),
 });
 
@@ -1163,15 +1194,23 @@ exports.saveProperties = sectionHandler("properties", "PROPONENT_PROPERTIES_UPDA
   save: (id, b, actor) => Proponent.saveProperties(id, b.properties, actor),
 });
 
+// Performance Commitment card: investment / employees, plus the Development
+// Timeline (dbo.proponent_development_milestones) when sent.
 exports.saveInvestment = sectionHandler("investment", "PROPONENT_INVESTMENT_UPDATED", {
-  validate: (b) =>
-    ["investment_commitment", "investment_actual", "employee_commitment", "employee_actual"].some(
+  validate: (b) => {
+    const ProponentMilestone = require("../models/ProponentMilestone");
+    if (b.development_timeline !== undefined) {
+      const problem = ProponentMilestone.validate(b.development_timeline);
+      if (problem) return problem;
+    }
+    return ["investment_commitment", "investment_actual", "employee_commitment", "employee_actual", "development_timeline"].some(
       (k) => b[k] !== undefined
     )
       ? null
-      : "at least one investment field is required",
-  save: (id, b, actor) =>
-    Proponent.saveInvestment(
+      : "at least one investment field is required";
+  },
+  save: async (id, b, actor) => {
+    const data = await Proponent.saveInvestment(
       id,
       {
         investment_commitment: b.investment_commitment,
@@ -1180,7 +1219,14 @@ exports.saveInvestment = sectionHandler("investment", "PROPONENT_INVESTMENT_UPDA
         employee_actual: b.employee_actual,
       },
       actor
-    ),
+    );
+    if (!data) return null;
+    const ProponentMilestone = require("../models/ProponentMilestone");
+    const development_timeline = Array.isArray(b.development_timeline)
+      ? await ProponentMilestone.saveForProponent(id, b.development_timeline, actor)
+      : await ProponentMilestone.getForProponent(id);
+    return { ...data, development_timeline };
+  },
 });
 
 /* ---------------- Extensions card (dbo.proponent_extensions) ---------------- */
@@ -1291,9 +1337,18 @@ exports.saveSecRegistration = sectionHandler("sec_registration", "PROPONENT_SEC_
     if (b.sec_registration_date && !/^\d{4}-\d{2}-\d{2}/.test(String(b.sec_registration_date))) {
       return "sec_registration_date must be a date";
     }
+    if (b.registration_type != null && !["SEC", "DTI"].includes(String(b.registration_type).toUpperCase())) {
+      return "registration_type must be SEC or DTI";
+    }
     return null;
   },
   save: (id, b, actor) => Proponent.saveSecRegistration(id, b, actor),
+  // SEC <-> DTI switch (blank = SEC).
+  auditDetails: (before, after) => {
+    const from = before?.registration_type || "SEC";
+    const to = after?.registration_type || "SEC";
+    return from === to ? { registration_type: to } : { registration_type_from: from, registration_type_to: to };
+  },
 });
 
 /** PUT /:id/sublessor { sublessor_id } — links an existing locator as a
@@ -1401,6 +1456,8 @@ exports.update = async (req, res) => {
       const known = (await TypeOfContract.listTypeOfContracts()).find((t) => t.id === typeId);
       if (!known) return res.status(400).json({ success: false, message: "Unknown type of contract" });
     }
+    const ownershipProblem = require("../models/Stockholder").ownershipError(stockholders);
+    if (ownershipProblem) return res.status(400).json({ success: false, message: ownershipProblem });
     // Registered Locator only lists locators with an Account Officer, so it
     // can be changed but not cleared — and a Level 2 Account Officer can't
     // hand their locator to someone else (Level 1 assigns).
@@ -1429,6 +1486,7 @@ exports.update = async (req, res) => {
       // changed or cleared by this form.
       user_id: undefined,
       business_name,
+      registration_type: req.body?.registration_type,
       registration_no,
       tin,
       address,

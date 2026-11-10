@@ -7,6 +7,7 @@ const ApplicationType = require("../models/ApplicationType");
 const ControlPanelPermission = require("../models/ControlPanelPermission");
 const Assessment = require("../models/AssessmentEvaluation");
 const AuditLog = require("../models/AuditLog");
+const { recordRequirementAudit } = require("../lib/requirementAudit");
 const { diffChanges } = require("../lib/auditDiff");
 const { generateTempPassword } = require("../lib/password");
 const { sendTempPasswordEmail } = require("./c_users");
@@ -578,6 +579,7 @@ exports.addRequirementComment = async (req, res) => {
       authorRole: req.user?.role ?? null,
       message: String(message).trim(),
     });
+    await recordRequirementAudit(req, id, "REQUIREMENT_COMMENT_ADDED", { message: String(message).trim().slice(0, 300) });
     const rows = await Workflow.listRequirementComments(id);
     return res.status(201).json({ success: true, data: rows });
   } catch (error) {
@@ -600,6 +602,7 @@ exports.acknowledgeRequirement = async (req, res) => {
     if (!requirement) return res.status(404).json({ success: false, message: "Application requirement not found" });
 
     const updated = await Workflow.acknowledgeRequirement(id, { acknowledgedBy: req.user?.id ?? null });
+    await recordRequirementAudit(req, id, "REQUIREMENT_ACKNOWLEDGED", { status: requirement.status ?? null });
     return res.json({ success: true, data: updated });
   } catch (error) {
     console.error("Acknowledge requirement error:", error);

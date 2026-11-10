@@ -128,7 +128,7 @@ const SCENARIOS: Scenario[] = [
         details: [
           'Proponent Information: business name, principal and lease address, location, land use, proposed lease term, contact no., business activities, contact person and authorized signatory.',
           'Performance Commitment: the investment and number of employees committed. The Actual figures are the Account Officer’s once it’s a Registered Locator.',
-          'Stockholders / GIS: the stockholders and the SEC registration details (capital, purposes, SEC contact person, latest GIS filing). The Ref. Code is set later on Registered Locator; the GIS file itself stays a Compliance document.',
+          'Stockholders / GIS: whether the proponent is registered with SEC or DTI, its registration details (capital, purposes, contact person, latest GIS filing) and — for SEC only — the stockholders. The Ref. Code is set later on Registered Locator; the GIS file itself stays a Compliance document.',
         ],
       },
       {
@@ -233,7 +233,7 @@ const SCENARIOS: Scenario[] = [
           'Lease Agreements shows the current lease; past leases are folded under “View past leases”, and each opens read only (its terms and property schedule) in a panel over the locator.',
           'Extension Date: each extension (date and remarks, under the current lease) is added as its own row and kept as history — the latest shows first, earlier ones under “View past extensions”; removing one is a soft delete, and adds/removals are in the Audit Log.',
           'Sub-Lease: each sub-lessee is a locator of its own — added (or linked) from the Sub-Lessees card of the locator it sub-leases from, and opened in its own panel over that locator.',
-          'Stockholders tab: stockholders, SEC Registration Information (capital, purposes, SEC contact person) and GIS — the latest GIS filing date, with the locator’s GIS document from Compliance shown read only.',
+          'Stockholders tab: Registration Information first — registered with SEC (corporation / partnership) or DTI (sole proprietorship), with registration no. and date, capital, purposes and contact person — then the stockholders (SEC only; a DTI locator has none) and GIS: the latest GIS filing date, with the locator’s GIS document from Compliance shown read only.',
           'The contract permit counts down to expiry — it shows on Renewal Tracking once expiring (6 months left).',
           'The locator gets a renewal reminder email then, and monthly after that, until the renewal is filed.',
           'The locator can still upload requirements that were to follow.',

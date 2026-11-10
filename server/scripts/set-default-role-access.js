@@ -31,6 +31,7 @@ const DEFAULTS = {
     "settings:application-types": ALL,
     "settings:building": ALL,
     "settings:land-use": ALL,
+    "settings:property-types": ALL,
   },
   // Approved Queue, Registered Locators, renewals and permits.
   "ACCOUNT OFFICER": {

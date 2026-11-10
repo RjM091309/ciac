@@ -377,7 +377,8 @@ export function AppSidebar({
     canView('settings:application-types') ||
     canView('settings:type-of-contract') ||
     canView('settings:building') ||
-    canView('settings:land-use');
+    canView('settings:land-use') ||
+    canView('settings:property-types');
   const showSystemGroup = showSystemSettings || showFileMaintenance;
 
   // Officer/Locator-style restricted roles (previewed or real) get a flat
@@ -423,6 +424,7 @@ export function AppSidebar({
     canView('settings:type-of-contract') && { key: 'settings:type-of-contract', label: 'Type of Contract', active: view === 'settings:type-of-contract', onClick: () => onViewChange('settings:type-of-contract') },
     canView('settings:building') && { key: 'settings:building', label: 'Building', active: view === 'settings:building', onClick: () => onViewChange('settings:building') },
     canView('settings:land-use') && { key: 'settings:land-use', label: 'Land Use', active: view === 'settings:land-use', onClick: () => onViewChange('settings:land-use') },
+    canView('settings:property-types') && { key: 'settings:property-types', label: 'Type of Property', active: view === 'settings:property-types', onClick: () => onViewChange('settings:property-types') },
   ].filter(Boolean) as SidebarLeaf[];
 
   const dropdownItems: Record<string, SidebarLeaf[]> = {

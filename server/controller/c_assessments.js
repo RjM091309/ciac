@@ -1,6 +1,7 @@
 const Assessment = require("../models/AssessmentEvaluation");
 const Workflow = require("../models/ApplicationWorkflow");
 const AuditLog = require("../models/AuditLog");
+const { recordRequirementAudit } = require("../lib/requirementAudit");
 const { publicErrorMessage } = require("../lib/httpError");
 const { departmentOf } = require("../lib/departments");
 const { checkMenuAllowed } = require("../middleware/m_auth");
@@ -569,6 +570,7 @@ exports.saveCommitment = async (req, res) => {
 // Same edit rule as Proponent Information.
 
 const SEC_FIELDS_BDO = [
+  "registration_type",
   "registration_no",
   "tin",
   "address",
@@ -580,6 +582,13 @@ const SEC_FIELDS_BDO = [
   "paid_up_capital",
   "paid_up_capital_currency",
 ];
+
+/** { registration_type_from, registration_type_to } when SEC / DTI changed (blank = SEC). */
+function registrationTypeChange(before, after) {
+  const from = before?.registration_type || "SEC";
+  const to = after?.registration_type || "SEC";
+  return from === to ? {} : { registration_type_from: from, registration_type_to: to };
+}
 
 async function stockholdersPayload(req, applicationId) {
   const app = await Workflow.getApplicationById(applicationId);
@@ -630,18 +639,31 @@ exports.saveStockholders = async (req, res) => {
     const SecRegistration = require("../models/SecRegistration");
     const patch = { updated_by: req.user?.id ?? null };
     for (const key of SEC_FIELDS_BDO) if (b[key] !== undefined) patch[key] = b[key];
-    if (Array.isArray(b.stockholders)) patch.stockholders = b.stockholders;
+    if (Array.isArray(b.stockholders)) {
+      const ownershipProblem = require("../models/Stockholder").ownershipError(b.stockholders);
+      if (ownershipProblem) return res.status(400).json({ success: false, message: ownershipProblem });
+      patch.stockholders = b.stockholders;
+    }
     patch.sec_registration = SecRegistration.pickFields(b);
+    const before = await Proponent.getProponentById(app.proponent_id).catch(() => null);
     // One transaction: stockholders, the SEC columns on proponents, and the
     // proponent_sec_registration row.
     await Proponent.updateProponent(app.proponent_id, patch);
+    const after = await Proponent.getProponentById(app.proponent_id).catch(() => null);
     await AuditLog.record({
       actorId: req.user?.id,
       actorUsername: req.user?.username,
       action: "PROPONENT_STOCKHOLDERS_UPDATED",
       entityType: "proponent",
       entityId: app.proponent_id,
-      details: { application_no: app.application_no, section: "stockholders_gis", via: "evaluation" },
+      details: {
+        application_no: app.application_no,
+        business_name: after?.business_name ?? before?.business_name ?? null,
+        ref_no: after?.ref_no ?? null,
+        section: "stockholders_gis",
+        via: "evaluation",
+        ...registrationTypeChange(before, after),
+      },
       req,
     });
     return res.json({ success: true, data: await stockholdersPayload(req, id) });
@@ -692,6 +714,16 @@ exports.saveTerms = async (req, res) => {
     if (!(await ensureCanAct(req, res, id))) return undefined;
     if (!(await ensureTermsEditable(res, id, req))) return undefined;
     const data = await Terms.saveDraft(id, req.body?.body, req.user?.id ?? null);
+    const app = await Workflow.getApplicationById(id).catch(() => null);
+    await AuditLog.record({
+      actorId: req.user?.id,
+      actorUsername: req.user?.username,
+      action: "APPLICATION_TERMS_SAVED",
+      entityType: "application",
+      entityId: id,
+      details: { application_no: app?.application_no ?? null, proponent_name: app?.proponent_name ?? app?.business_name ?? null },
+      req,
+    });
     return res.json({ success: true, data });
   } catch (error) {
     return fail(res, error, "Save terms");
@@ -966,12 +998,18 @@ exports.updateRequirementStatus = async (req, res) => {
     if (!status || !String(status).trim()) {
       return res.status(400).json({ success: false, message: "status is required" });
     }
+    const before = await Workflow.getApplicationRequirementById(id).catch(() => null);
     const row = await Workflow.updateApplicationRequirementStatus(id, {
       status: String(status).trim(),
       remarks: remarks ?? null,
       updated_by: req.user?.id ?? null,
     });
     if (!row) return res.status(404).json({ success: false, message: "Application requirement not found" });
+    await recordRequirementAudit(req, id, "REQUIREMENT_STATUS_UPDATED", {
+      from: before?.status ?? null,
+      to: String(status).trim(),
+      remarks: remarks ? String(remarks).slice(0, 300) : null,
+    });
     return res.json({ success: true, data: row });
   } catch (error) {
     return fail(res, error, "Update requirement status (assessment)");
@@ -989,6 +1027,7 @@ exports.updateRequirementRemarks = async (req, res) => {
       updated_by: req.user?.id ?? null,
     });
     if (!row) return res.status(404).json({ success: false, message: "Application requirement not found" });
+    await recordRequirementAudit(req, id, "REQUIREMENT_REMARKS_UPDATED", { remarks: remarks ? String(remarks).slice(0, 300) : null });
     return res.json({ success: true, data: row });
   } catch (error) {
     return fail(res, error, "Update requirement remarks (assessment)");
@@ -1026,6 +1065,7 @@ exports.addRequirementComment = async (req, res) => {
       authorRole: req.user?.role ?? null,
       message: String(message).trim(),
     });
+    await recordRequirementAudit(req, id, "REQUIREMENT_COMMENT_ADDED", { message: String(message).trim().slice(0, 300) });
     const rows = await Workflow.listRequirementComments(id);
     return res.status(201).json({ success: true, data: rows });
   } catch (error) {

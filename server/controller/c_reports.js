@@ -185,6 +185,15 @@ exports.customTemplates = async (req, res) => {
 exports.saveCustomTemplate = async (req, res) => {
   try {
     const id = await CustomReport.saveTemplate(req.user.id, req.body || {});
+    await AuditLog.record({
+      actorId: req.user?.id,
+      actorUsername: req.user?.username,
+      action: "REPORT_TEMPLATE_SAVED",
+      entityType: "report_template",
+      entityId: id ?? null,
+      details: { name: String(req.body?.name || "").trim().slice(0, 120), dataset: req.body?.dataset ?? null, shared: Boolean(req.body?.shared) },
+      req,
+    });
     return res.json({ success: true, data: { id, templates: await CustomReport.listTemplates(req.user.id) } });
   } catch (error) {
     if (error.status === 400) return res.status(400).json({ success: false, message: error.message });
@@ -219,8 +228,18 @@ exports.monthlyReportRecipients = async (req, res) => {
 
 exports.deleteCustomTemplate = async (req, res) => {
   try {
+    const before = (await CustomReport.listTemplates(req.user.id)).find((t) => String(t.id) === String(req.params.id)) || null;
     const ok = await CustomReport.deleteTemplate(req.user.id, req.params.id);
     if (!ok) return res.status(404).json({ success: false, message: "Template not found" });
+    await AuditLog.record({
+      actorId: req.user?.id,
+      actorUsername: req.user?.username,
+      action: "REPORT_TEMPLATE_DELETED",
+      entityType: "report_template",
+      entityId: Number(req.params.id) || null,
+      details: { name: before?.name ?? null, dataset: before?.dataset ?? null },
+      req,
+    });
     return res.json({ success: true, data: await CustomReport.listTemplates(req.user.id) });
   } catch (error) {
     return fail(res, error, "Delete custom report template");

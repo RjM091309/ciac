@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Banknote, Lock, TrendingUp, Users } from 'lucide-react';
 import { toast } from 'sonner';
 import { Card, ReasonBanner, SaveButton } from './tabParts';
+import { formatMoney } from '../proponent/ProponentsManagement';
 
 /**
  * Evaluation Queue → "Performance Commitment" tab (B-10): the BDO encodes what
@@ -40,10 +41,10 @@ export function PerformanceCommitmentTab({ applicationId, canEdit = true }: { ap
 
   const apply = (d: any) => {
     const next = {
-      investment_commitment: formatIfNumeric(d?.investment_commitment),
-      employee_commitment: String(d?.employee_commitment ?? ''),
-      investment_actual: formatIfNumeric(d?.investment_actual),
-      employee_actual: String(d?.employee_actual ?? ''),
+      investment_commitment: formatMoney(d?.investment_commitment),
+      employee_commitment: formatIfNumeric(d?.employee_commitment),
+      investment_actual: formatMoney(d?.investment_actual),
+      employee_actual: formatIfNumeric(d?.employee_actual),
       editable: Boolean(d?.editable),
       reason: d?.reason ?? null,
     };
@@ -113,7 +114,8 @@ export function PerformanceCommitmentTab({ applicationId, canEdit = true }: { ap
       actual: 'employee_actual' as const,
       placeholder: '0',
       inputMode: 'numeric' as const,
-      clean: (v: string) => v.replace(/[^\d]/g, ''),
+      // Whole number, with commas.
+      clean: (v: string) => formatAmountInput(v.replace(/[^\d]/g, '')),
     },
   ];
 
@@ -151,7 +153,9 @@ export function PerformanceCommitmentTab({ applicationId, canEdit = true }: { ap
                 </div>
               </div>
               <label className="flex flex-col gap-1">
-                <span className="text-[9px] font-semibold uppercase tracking-widest text-secondary">Commitment</span>
+                <span className="text-[9px] font-semibold uppercase tracking-widest" style={{ color: 'var(--text)' }}>
+                  Commitment
+                </span>
                 <input
                   className="app-form-control w-full h-11 text-[16px] font-semibold tabular-nums"
                   inputMode={row.inputMode}
@@ -160,6 +164,11 @@ export function PerformanceCommitmentTab({ applicationId, canEdit = true }: { ap
                   onChange={(e) => {
                     const value = row.clean(e.target.value);
                     setForm((p) => (p ? { ...p, [row.key]: value } : p));
+                  }}
+                  onBlur={() => {
+                    // Money (Investment): always 2 decimals.
+                    if (row.inputMode !== 'decimal') return;
+                    setForm((p) => (p ? { ...p, [row.key]: formatMoney(p[row.key]) } : p));
                   }}
                 />
               </label>

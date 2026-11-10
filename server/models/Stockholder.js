@@ -132,4 +132,20 @@ async function syncForProponent(tx, proponentId, rows, actorId) {
   }
 }
 
-module.exports = { ensureSchema, listForProponent, syncForProponent };
+/** Ownership % can't go past 100 — for one stockholder or all of them
+ * together. Returns the message, or null when fine (blank counts as 0). */
+function ownershipError(rows) {
+  if (!Array.isArray(rows)) return null;
+  const pct = (v) => {
+    const n = Number(String(v ?? "").replace(/,/g, ""));
+    return Number.isFinite(n) ? n : 0;
+  };
+  const over = rows.find((r) => pct(r?.ownership) > 100);
+  if (over) return `Ownership % of ${String(over?.name || "a stockholder").trim() || "a stockholder"} can't be more than 100%.`;
+  const total = Math.round(rows.reduce((sum, r) => sum + pct(r?.ownership), 0) * 100) / 100;
+  // Each row is rounded to 2 decimals, so the total may be a hair over 100.
+  if (total > 100 + 0.005 * rows.length) return `Total Ownership is ${total}% — it can't be more than 100%.`;
+  return null;
+}
+
+module.exports = { ensureSchema, listForProponent, syncForProponent, ownershipError };

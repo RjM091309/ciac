@@ -8,19 +8,31 @@ import { cn } from '../../lib/utils';
 import {
   CapitalField,
   NATIONALITIES,
+  OwnershipSummary,
+  ownershipError,
+  ownershipFullNotice,
+  stockholderInvalidKeys,
+  stockholderTotals,
+  useOwnershipNotice,
+  RegistrationTypeToggle,
   RowsEditor,
   STOCKHOLDER_RULES,
   blankStockholderRow,
+  formatMoney,
   invalidRowKeys,
   mapStockholderRows,
+  registrationLabels,
+  registrationTypeOf,
+  recomputeAllOwnership,
   rowsError,
   toStockholderPayload,
+  withOwnership,
   type StockholderRow,
 } from '../proponent/ProponentsManagement';
 
 /**
  * Evaluation Queue → "Stockholders / GIS" tab (B-11): the stockholders and the
- * SEC registration details (as on the General Information Sheet), encoded by
+ * SEC or DTI registration details (as on the General Information Sheet), encoded by
  * the BDO while evaluating. Same rows as the Registered Locator's Stockholders
  * tab (GET/PUT /api/assessments/:id/stockholders). No Ref. Code here — it's set
  * on the Registered Locator only. The GIS file is the locator's "GIS"
@@ -28,6 +40,7 @@ import {
  */
 
 const SEC_TEXT = [
+  'registration_type',
   'registration_no',
   'tin',
   'address',
@@ -64,9 +77,14 @@ function toForm(d: any): Form {
         ? ymd(v)
         : key.endsWith('_currency')
           ? String(v || 'PHP')
-          : String(v ?? '');
+          : key.endsWith('_capital')
+            ? formatMoney(v)
+            : String(v ?? '');
   }
-  f.stockholders = mapStockholderRows(d?.stockholders);
+  // Subscribed and Paid-up follow the Authorized Capital Stock's currency.
+  f.subscribed_capital_currency = f.authorized_capital_currency;
+  f.paid_up_capital_currency = f.authorized_capital_currency;
+  f.stockholders = recomputeAllOwnership(mapStockholderRows(d?.stockholders), f.subscribed_capital);
   return f;
 }
 
@@ -77,7 +95,11 @@ function fmtDate(v: string | null | undefined) {
 }
 
 function Label({ children }: { children: React.ReactNode }) {
-  return <div className="text-[9px] font-semibold uppercase tracking-widest text-secondary">{children}</div>;
+  return (
+    <div className="text-[9px] font-semibold uppercase tracking-widest" style={{ color: 'var(--text)' }}>
+      {children}
+    </div>
+  );
 }
 
 function Cell({ label, children, className }: { label: string; children: React.ReactNode; className?: string }) {
@@ -129,6 +151,8 @@ export function StockholdersGisTab({ applicationId, canEdit = true }: { applicat
   const [saving, setSaving] = useState(false);
   const [showErrors, setShowErrors] = useState(false);
   const [rowDelete, setRowDelete] = useState<{ what: string; proceed: () => void } | null>(null);
+  // Switching to DTI with stockholders listed asks first.
+  const [regTypeConfirm, setRegTypeConfirm] = useState(false);
 
   const apply = (d: any) => {
     const next = toForm(d);
@@ -150,6 +174,12 @@ export function StockholdersGisTab({ applicationId, canEdit = true }: { applicat
   }, [applicationId]);
 
   const dirty = useMemo(() => Boolean(form && loaded && JSON.stringify(form) !== JSON.stringify(loaded.form)), [form, loaded]);
+  // Ownership % over 100: a notice while typing, and the fields outlined.
+  const ownershipProblem = useOwnershipNotice(
+    form?.stockholders ?? [],
+    form?.subscribed_capital ?? '',
+    Boolean(form) && registrationTypeOf(form?.registration_type) !== 'DTI',
+  );
 
   if (!form || !loaded) {
     return <div className="py-8 text-center text-[12px] text-secondary">Loading the stockholders…</div>;
@@ -158,9 +188,16 @@ export function StockholdersGisTab({ applicationId, canEdit = true }: { applicat
   const set = (patch: Partial<Form>) => setForm((p) => (p ? { ...p, ...patch } : p));
   const input = 'app-form-control app-form-control-sm w-full h-9';
 
+  const regType = registrationTypeOf(form.registration_type);
+  const regLabels = registrationLabels(regType);
+
   async function save() {
     if (!form) return;
-    const problem = rowsError('Stockholders', form.stockholders, STOCKHOLDER_RULES);
+    // DTI (sole proprietorship): the hidden stockholders list isn't checked.
+    const problem =
+      regType === 'DTI'
+        ? null
+        : rowsError('Stockholders', form.stockholders, STOCKHOLDER_RULES) ?? ownershipError(form.stockholders, form.subscribed_capital);
     if (problem) {
       setShowErrors(true);
       toast.error(problem);
@@ -180,7 +217,7 @@ export function StockholdersGisTab({ applicationId, canEdit = true }: { applicat
       if (!res.ok || json?.success === false) throw new Error(json?.message || 'Save failed');
       apply(json.data);
       setShowErrors(false);
-      toast.success('Stockholders and SEC registration saved');
+      toast.success(regType === 'DTI' ? 'DTI registration saved' : 'Stockholders and SEC registration saved');
     } catch (e: any) {
       toast.error(e?.message || 'Save failed');
     } finally {
@@ -209,10 +246,21 @@ export function StockholdersGisTab({ applicationId, canEdit = true }: { applicat
     <CapitalField
       label={label}
       amount={form[prefix]}
-      currency={form[`${prefix}_currency`]}
+      // Subscribed and Paid-up follow the Authorized Capital Stock's currency.
+      currency={form.authorized_capital_currency}
+      currencyText={prefix !== 'authorized_capital'}
+      currencyTitle={prefix !== 'authorized_capital' ? "Same as the Authorized Capital Stock's currency" : undefined}
       disabled={!editable}
-      onAmountChange={(v) => set({ [prefix]: v } as Partial<Form>)}
-      onCurrencyChange={(v) => set({ [`${prefix}_currency`]: v } as Partial<Form>)}
+      onAmountChange={(v) =>
+        set(
+          (prefix === 'subscribed_capital'
+            ? { subscribed_capital: v, stockholders: recomputeAllOwnership(form.stockholders, v) }
+            : { [prefix]: v }) as Partial<Form>,
+        )
+      }
+      onCurrencyChange={(v) =>
+        set({ authorized_capital_currency: v, subscribed_capital_currency: v, paid_up_capital_currency: v } as Partial<Form>)
+      }
     />
   );
   const gis = loaded.gis;
@@ -228,7 +276,9 @@ export function StockholdersGisTab({ applicationId, canEdit = true }: { applicat
       {!editable ? <ReasonBanner reason={loaded.reason} /> : null}
 
       {/* At a glance: how many, whether the shares add up, the mix, the GIS. */}
-      <div className="grid grid-cols-2 gap-3 @3xl:grid-cols-4">
+      <div className={cn('grid grid-cols-2 gap-3', regType === 'DTI' ? '@3xl:grid-cols-2' : '@3xl:grid-cols-4')}>
+        {regType === 'DTI' ? null : (
+        <>
         <StatTile icon={Users} label="Stockholders" value={String(form.stockholders.length)} />
         <StatTile
           icon={Percent}
@@ -243,6 +293,8 @@ export function StockholdersGisTab({ applicationId, canEdit = true }: { applicat
           value={String(nationalities.length)}
           hint={nationalities.slice(0, 3).join(', ') || undefined}
         />
+        </>
+        )}
         <StatTile
           icon={FileText}
           label="Latest GIS filing"
@@ -254,50 +306,22 @@ export function StockholdersGisTab({ applicationId, canEdit = true }: { applicat
 
       <fieldset disabled={!editable || saving} className="flex min-w-0 flex-col gap-4">
         <TabCard
-          title={`Stockholders (${form.stockholders.length})`}
-          icon={Users}
-          actions={
-            editable ? (
-              <button
-                type="button"
-                onClick={() => {
-                  setShowErrors(false);
-                  set({ stockholders: [...form.stockholders, blankStockholderRow()] });
-                }}
-                className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[11px] font-semibold cursor-pointer hover:bg-[var(--selected-bg)]"
-                style={{ borderColor: 'var(--input-border)', color: 'var(--text)', backgroundColor: 'var(--surface)' }}
-              >
-                <Plus size={12} /> Add stockholder
-              </button>
-            ) : null
-          }
+          title={regLabels.card}
+          icon={Landmark}
+          actions={editable && dirty ? <SaveButton saving={saving} onClick={() => void save()} /> : null}
         >
-          <RowsEditor<StockholderRow>
-            rows={form.stockholders}
+          <RegistrationTypeToggle
+            value={regType}
             disabled={!editable}
-            emptyText="No stockholders yet — use Add stockholder."
-            hideSideActions
-            rowNoun="stockholder"
-            confirmDelete={(what, proceed) => setRowDelete({ what, proceed })}
-            invalidKeys={(row) => (showErrors ? invalidRowKeys(row, STOCKHOLDER_RULES) : null)}
-            columns={[
-              { key: 'name', label: 'Stockholder Name', width: '30%', placeholder: 'Full name' },
-              { key: 'nationality', label: 'Nationality', width: '18%', placeholder: 'Select nationality', options: NATIONALITIES },
-              { key: 'subscribed', label: 'Subscribed', width: '18%', numeric: true, amount: true, placeholder: '0.00' },
-              { key: 'paid', label: 'Paid', width: '18%', numeric: true, amount: true, placeholder: '0.00' },
-              { key: 'ownership', label: 'Ownership %', width: '16%', numeric: true, placeholder: '0' },
-            ]}
-            onChange={(next) => set({ stockholders: next })}
-            blankRow={blankStockholderRow}
+            onChange={(next) => {
+              if (next === 'DTI' && form.stockholders.length > 0) setRegTypeConfirm(true);
+              else set({ registration_type: next });
+            }}
           />
-        </TabCard>
-
-        <TabCard title="SEC Registration Information" icon={Landmark}>
-          <div className="flex justify-end -mt-2">{editable && dirty ? <SaveButton saving={saving} onClick={() => void save()} /> : null}</div>
           <Section title="Registration" icon={Landmark}>
             <div className="grid grid-cols-1 gap-3 @xl:grid-cols-3">
-              {text('registration_no', 'SEC Registration No.', 'e.g. CS201811260')}
-              {date('sec_registration_date', 'SEC Registration Date')}
+              {text('registration_no', regLabels.no, regLabels.noPlaceholder)}
+              {date('sec_registration_date', regLabels.date)}
               {text('tin', 'TIN Number')}
             </div>
             <Cell label="Principal Office Address">
@@ -341,7 +365,7 @@ export function StockholdersGisTab({ applicationId, canEdit = true }: { applicat
               </Cell>
             </div>
           </Section>
-          <Section title="SEC Contact Person" icon={UserRound}>
+          <Section title={regLabels.contact} icon={UserRound}>
             <div className="grid grid-cols-1 gap-3 @xl:grid-cols-2 @4xl:grid-cols-4">
               {text('sec_contact_name', 'Name of Contact Person')}
               {text('sec_contact_email', 'Email Address')}
@@ -350,6 +374,55 @@ export function StockholdersGisTab({ applicationId, canEdit = true }: { applicat
             </div>
           </Section>
         </TabCard>
+
+        {/* DTI (sole proprietorship): no stockholders. */}
+        {regType === 'DTI' ? null : (
+        <TabCard
+          title={`Stockholders (${form.stockholders.length})`}
+          icon={Users}
+          actions={
+            editable ? (
+              <button
+                type="button"
+                onClick={() => {
+                  const full = ownershipFullNotice(form.stockholders, form.subscribed_capital);
+                  if (full) {
+                    toast.warning(full, { id: 'ownership-full' });
+                    return;
+                  }
+                  setShowErrors(false);
+                  set({ stockholders: [...form.stockholders, blankStockholderRow()] });
+                }}
+                className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[11px] font-semibold cursor-pointer hover:bg-[var(--selected-bg)]"
+                style={{ borderColor: 'var(--input-border)', color: 'var(--text)', backgroundColor: 'var(--surface)' }}
+              >
+                <Plus size={12} /> Add stockholder
+              </button>
+            ) : null
+          }
+        >
+          <RowsEditor<StockholderRow>
+            rows={form.stockholders}
+            disabled={!editable}
+            emptyText="No stockholders yet — use Add stockholder."
+            hideSideActions
+            rowNoun="stockholder"
+            confirmDelete={(what, proceed) => setRowDelete({ what, proceed })}
+            invalidKeys={(row) => stockholderInvalidKeys(row, showErrors, Boolean(ownershipProblem))}
+            columns={[
+              { key: 'name', label: 'Stockholder Name', width: '30%', placeholder: 'Full name' },
+              { key: 'nationality', label: 'Nationality', width: '18%', placeholder: 'Select nationality', options: NATIONALITIES },
+              { key: 'subscribed', label: 'Subscribed', width: '18%', numeric: true, amount: true, placeholder: '0.00' },
+              { key: 'paid', label: 'Paid', width: '18%', numeric: true, amount: true, placeholder: '0.00' },
+              { key: 'ownership', label: 'Ownership %', width: '16%', numeric: true, placeholder: '—', readOnly: true },
+            ]}
+            onChange={(next) => set({ stockholders: withOwnership(form.stockholders, next, form.subscribed_capital) })}
+            blankRow={blankStockholderRow}
+            totals={stockholderTotals(form.stockholders)}
+          />
+          <OwnershipSummary rows={form.stockholders} subscribedCapital={form.subscribed_capital} />
+        </TabCard>
+        )}
 
         <TabCard title="GIS (General Information Sheet)" icon={FileText}>
           <div className="grid grid-cols-1 gap-3 @xl:grid-cols-2">
@@ -398,6 +471,18 @@ export function StockholdersGisTab({ applicationId, canEdit = true }: { applicat
           </button>
         </div>
       ) : null}
+
+      <ConfirmModal
+        open={regTypeConfirm}
+        title="Switch to DTI?"
+        description="A DTI-registered business (sole proprietorship) has no stockholders, so the Stockholders list is hidden. The rows already saved are kept, not deleted — switching back to SEC shows them again."
+        confirmText="Switch to DTI"
+        onCancel={() => setRegTypeConfirm(false)}
+        onConfirm={() => {
+          set({ registration_type: 'DTI' });
+          setRegTypeConfirm(false);
+        }}
+      />
 
       <ConfirmModal
         open={rowDelete !== null}

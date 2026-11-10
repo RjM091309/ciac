@@ -33,6 +33,7 @@ const SecRegistration = require("./models/SecRegistration");
 const ProponentLease = require("./models/ProponentLease");
 const Building = require("./models/Building");
 const LandUse = require("./models/LandUse");
+const PropertyType = require("./models/PropertyType");
 const Workflow = require("./models/ApplicationWorkflow");
 const Contract = require("./models/Contract");
 const UserSession = require("./models/UserSession");
@@ -201,6 +202,9 @@ initializeDatabase()
       ["lease agreements (+ backfill)", () => ProponentLease.ensureSchema()],
       ["building", () => Building.ensureSchema()],
       ["land use", () => LandUse.ensureSchema()],
+      // Seeded once with OPEN SPACE / STRUCTURE only when the table is first created.
+      ["type of property", () => PropertyType.ensureSchema()],
+      ["development timeline", () => require("./models/ProponentMilestone").ensureSchema()],
       // Compliance checklist columns (applicability) + uploaded documents —
       // dashboards and the locator portal read them before anyone opens the module.
       [

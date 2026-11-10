@@ -39,6 +39,9 @@ const ApplicationTypesManagement = lazy(() => import('./components/FileMaintenan
 const TypeOfContractManagement = lazy(() => import('./components/FileMaintenance/TypeOfContract').then((m) => ({ default: m.TypeOfContractManagement })));
 const BuildingManagement = lazy(() => import('./components/FileMaintenance/Building').then((m) => ({ default: m.BuildingManagement })));
 const LandUseManagement = lazy(() => import('./components/FileMaintenance/LandUse').then((m) => ({ default: m.LandUseManagement })));
+const PropertyTypeManagement = lazy(() =>
+  import('./components/FileMaintenance/PropertyType').then((m) => ({ default: m.PropertyTypeManagement })),
+);
 const AuditLog = lazy(() => import('./components/settings/AuditLog').then((m) => ({ default: m.AuditLog })));
 const PortalSettings = lazy(() => import('./components/settings/PortalSettings').then((m) => ({ default: m.PortalSettings })));
 const WorkflowTopology = lazy(() => import('./components/settings/WorkflowTopology').then((m) => ({ default: m.WorkflowTopology })));
@@ -143,6 +146,7 @@ const VIEW_TO_PATH: Record<AppView, string> = {
   'settings:type-of-contract': '/settings/type-of-contract',
   'settings:building': '/settings/building',
   'settings:land-use': '/settings/land-use',
+  'settings:property-types': '/settings/property-types',
   'settings:audit-log': '/settings/audit-log',
   'settings:control-panel': '/settings/control-panel',
   'settings:portal': '/settings/portal',
@@ -708,6 +712,8 @@ export default function App() {
                 <BuildingManagement />
               ) : view === 'settings:land-use' ? (
                 <LandUseManagement />
+              ) : view === 'settings:property-types' ? (
+                <PropertyTypeManagement />
               ) : view === 'settings:audit-log' ? (
                 <AuditLog />
               ) : view === 'settings:control-panel' ? (
@@ -1000,6 +1006,21 @@ const LANDING_CONFIG: Record<AppView, LandingConfig> = {
     icon: FolderTree,
     stats: [
       { label: 'Total Land Uses', value: '—' },
+      { label: 'Active', value: '—' },
+      { label: 'Deactivated', value: '—' },
+    ],
+    table: {
+      columns: ['Name', 'Status'],
+      rows: [['—', '—']],
+    },
+  },
+  'settings:property-types': {
+    title: 'Type of Property',
+    description: 'Manage the types of property used on the Property Schedule.',
+    badge: 'File Maintenance',
+    icon: FolderTree,
+    stats: [
+      { label: 'Total Types of Property', value: '—' },
       { label: 'Active', value: '—' },
       { label: 'Deactivated', value: '—' },
     ],

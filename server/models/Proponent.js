@@ -166,6 +166,16 @@ async function createSchema() {
     )
       ALTER TABLE dbo.proponents ADD ref_no NVARCHAR(30) NULL;
   `);
+  // Who the business is registered with: 'SEC' (corporation / partnership) or
+  // 'DTI' (sole proprietorship — no stockholders). NULL = not chosen yet,
+  // treated as SEC (most locators are corporations).
+  await updateSchema(`
+    IF NOT EXISTS (
+      SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+      WHERE TABLE_NAME = 'proponents' AND COLUMN_NAME = 'registration_type'
+    )
+      ALTER TABLE dbo.proponents ADD registration_type NVARCHAR(10) NULL;
+  `);
   // Distinct from `address` (the full mailing address) — a short
   // zone/building label (e.g. "G PUYAT", "BERTAPHIL V"). Shown on the
   // per-locator detail/edit panel only, never in the Locators List table.
@@ -800,6 +810,7 @@ async function getProponentById(id) {
       p.account_officer_id,
       officer.full_name AS account_officer_name,
       p.sec_registration_date,
+      p.registration_type,
       p.date_signed,
       p.grace_period,
       p.is_sublease,
@@ -915,6 +926,7 @@ async function getProponentById(id) {
     account_officer_id: p.account_officer_id ?? null,
     account_officer_name: p.account_officer_name ?? null,
     sec_registration_date: p.sec_registration_date ?? null,
+    registration_type: p.registration_type ?? null,
     date_signed: p.date_signed ?? null,
     grace_period: p.grace_period ?? null,
     is_sublease: p.is_sublease ?? null,
@@ -1314,6 +1326,7 @@ async function updateProponent(
     lease_address,
     account_officer_id,
     sec_registration_date,
+    registration_type,
     date_signed,
     grace_period,
     is_sublease,
@@ -1386,6 +1399,7 @@ async function updateProponent(
   if (lease_address !== undefined) pushSet("lease_address = ?", lease_address);
   if (account_officer_id !== undefined) pushSet("account_officer_id = ?", toInt(account_officer_id));
   if (sec_registration_date !== undefined) pushSet("sec_registration_date = ?", sec_registration_date);
+  if (registration_type !== undefined) pushSet("registration_type = ?", normalizeRegistrationType(registration_type));
   if (date_signed !== undefined) pushSet("date_signed = ?", date_signed);
   if (grace_period !== undefined) pushSet("grace_period = ?", grace_period);
   if (is_sublease !== undefined) pushSet("is_sublease = ?", is_sublease === null ? null : is_sublease ? 1 : 0);
@@ -1613,6 +1627,7 @@ async function saveInvestment(id, fields, actorId) {
 // The SEC Registration Information card's own Save: the SEC fields kept on
 // dbo.proponents plus the ones in dbo.proponent_sec_registration, in one go.
 const SEC_PROPONENT_FIELDS = [
+  "registration_type",
   "registration_no",
   "tin",
   "address",
@@ -1625,6 +1640,12 @@ const SEC_PROPONENT_FIELDS = [
   "paid_up_capital",
   "paid_up_capital_currency",
 ];
+
+/** 'SEC' | 'DTI' | null (anything else). */
+function normalizeRegistrationType(value) {
+  const v = String(value ?? "").trim().toUpperCase();
+  return v === "SEC" || v === "DTI" ? v : null;
+}
 
 async function saveSecRegistration(id, body, actorId) {
   await ensureSchema();

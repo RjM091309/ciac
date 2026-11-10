@@ -132,8 +132,16 @@ const ACTION_LABELS: Record<string, string> = {
   PROPONENT_STOCKHOLDERS_UPDATED: 'Stockholders updated',
   PROPONENT_CONTACTS_UPDATED: 'Contacts updated',
   PROPONENT_PROPERTIES_UPDATED: 'Properties updated',
-  PROPONENT_INVESTMENT_UPDATED: 'Investment info updated',
+  PROPONENT_INVESTMENT_UPDATED: 'Performance Commitment updated',
+  PROPONENT_SEC_REGISTRATION_UPDATED: 'Registration info updated',
   PROPONENT_EXTENSION_ADDED: 'Extension added',
+  REQUIREMENT_STATUS_UPDATED: 'Requirement status updated',
+  REQUIREMENT_REMARKS_UPDATED: 'Requirement remarks updated',
+  REQUIREMENT_COMMENT_ADDED: 'Requirement comment added',
+  REQUIREMENT_ACKNOWLEDGED: 'Requirement acknowledged',
+  APPLICATION_TERMS_SAVED: 'Terms saved',
+  REPORT_TEMPLATE_SAVED: 'Report template saved',
+  REPORT_TEMPLATE_DELETED: 'Report template deleted',
   PROPONENT_EXTENSION_REMOVED: 'Extension removed',
   // Applications
   APPLICATION_DRAFT_SAVED: 'Draft saved',
@@ -227,6 +235,10 @@ const ACTION_LABELS: Record<string, string> = {
   LAND_USE_UPDATED: 'Land use updated',
   LAND_USE_DEACTIVATED: 'Land use deactivated',
   LAND_USE_REACTIVATED: 'Land use reactivated',
+  PROPERTY_TYPE_CREATED: 'Type of property created',
+  PROPERTY_TYPE_UPDATED: 'Type of property updated',
+  PROPERTY_TYPE_DEACTIVATED: 'Type of property deactivated',
+  PROPERTY_TYPE_REACTIVATED: 'Type of property reactivated',
   TYPE_OF_CONTRACT_CREATED: 'Type of contract created',
   TYPE_OF_CONTRACT_UPDATED: 'Type of contract updated',
   TYPE_OF_CONTRACT_DEACTIVATED: 'Type of contract deactivated',
@@ -334,6 +346,7 @@ function describeReportExport(d: Record<string, unknown>): string {
 }
 
 const FIELD_LABELS: Record<string, string> = {
+  registration_type: 'registered with (SEC/DTI)',
   username: 'username',
   email: 'email',
   phone: 'phone number',
@@ -498,6 +511,7 @@ const ENTITY_TYPE_LABELS: Record<string, string> = {
   proponent: 'Locator',
   application: 'Application',
   application_requirement: 'Requirement',
+  report_template: 'Report template',
   assessment_finding: 'Finding',
   assessment_charge: 'Charge',
   inspection: 'Inspection',
@@ -514,6 +528,7 @@ const ENTITY_TYPE_LABELS: Record<string, string> = {
   department: 'Department',
   building: 'Building',
   land_use: 'Land use',
+  property_type: 'Type of property',
   type_of_contract: 'Type of contract',
   report: 'Report',
   site_settings: 'Portal settings',
@@ -532,6 +547,7 @@ const ENTITY_NAME_FIELDS: Record<string, string[]> = {
   proponent: ['business_name'],
   application: ['application_no'],
   application_requirement: ['requirement_name'],
+  report_template: ['name'],
   assessment_finding: ['description'],
   assessment_charge: ['description'],
   inspection: ['title'],
@@ -548,6 +564,7 @@ const ENTITY_NAME_FIELDS: Record<string, string[]> = {
   department: ['name', 'code'],
   building: ['name'],
   land_use: ['name'],
+  property_type: ['name'],
   type_of_contract: ['name'],
   site_settings: ['asset_label', 'section_label'],
 };
@@ -719,13 +736,47 @@ function describeActivity(row: AuditLogRow): string {
         : `Requested profile changes for "${String(d.business_name ?? '')}"`;
     }
     case 'PROPONENT_STOCKHOLDERS_UPDATED':
-      return `Updated stockholders for "${String(d.business_name ?? '')}"`;
+    case 'PROPONENT_SEC_REGISTRATION_UPDATED': {
+      const what =
+        row.action === 'PROPONENT_SEC_REGISTRATION_UPDATED'
+          ? `${String(d.registration_type || 'SEC')} registration info`
+          : d.via === 'evaluation'
+            ? 'stockholders / registration info'
+            : 'stockholders';
+      const ref = d.ref_no ? ` (${String(d.ref_no)})` : d.application_no ? ` (${String(d.application_no)})` : '';
+      const name = d.business_name ? ` for "${String(d.business_name)}"` : '';
+      const switched = d.registration_type_from
+        ? ` — registered with ${String(d.registration_type_from)} → ${String(d.registration_type_to)}`
+        : '';
+      return `Updated ${what}${name}${ref}${switched}`;
+    }
     case 'PROPONENT_CONTACTS_UPDATED':
       return `Updated contacts/signatories for "${String(d.business_name ?? '')}"`;
     case 'PROPONENT_PROPERTIES_UPDATED':
       return `Updated property schedule for "${String(d.business_name ?? '')}"`;
     case 'PROPONENT_INVESTMENT_UPDATED':
-      return `Updated investment info for "${String(d.business_name ?? '')}"`;
+      return `Updated Performance Commitment (investment, employees, development timeline) for "${String(d.business_name ?? '')}"`;
+    case 'REQUIREMENT_STATUS_UPDATED':
+    case 'REQUIREMENT_REMARKS_UPDATED':
+    case 'REQUIREMENT_COMMENT_ADDED':
+    case 'REQUIREMENT_ACKNOWLEDGED': {
+      const req = d.requirement_name ? `"${String(d.requirement_name)}"` : 'a requirement';
+      const where = [d.application_no, d.business_name ? `"${String(d.business_name)}"` : null].filter(Boolean).join(' — ');
+      const on = where ? ` on ${where}` : '';
+      if (row.action === 'REQUIREMENT_STATUS_UPDATED') {
+        const change = d.from ? `${String(d.from)} → ${String(d.to ?? '')}` : String(d.to ?? '');
+        return `Set ${req}${on} to ${change}${d.remarks ? ` — "${String(d.remarks)}"` : ''}`;
+      }
+      if (row.action === 'REQUIREMENT_REMARKS_UPDATED') return `Updated remarks of ${req}${on}${d.remarks ? ` — "${String(d.remarks)}"` : ''}`;
+      if (row.action === 'REQUIREMENT_COMMENT_ADDED') return `Commented on ${req}${on}${d.message ? ` — "${String(d.message)}"` : ''}`;
+      return `Acknowledged ${req}${on}`;
+    }
+    case 'APPLICATION_TERMS_SAVED':
+      return `Saved the terms of ${String(d.application_no || 'an application')}${d.proponent_name ? ` for "${String(d.proponent_name)}"` : ''}`;
+    case 'REPORT_TEMPLATE_SAVED':
+      return `Saved report template "${String(d.name ?? '')}"${d.shared ? ' (shared)' : ''}`;
+    case 'REPORT_TEMPLATE_DELETED':
+      return `Deleted report template "${String(d.name ?? '')}"`;
     case 'PROPONENT_EXTENSION_ADDED':
     case 'PROPONENT_EXTENSION_REMOVED': {
       const verb = row.action === 'PROPONENT_EXTENSION_ADDED' ? 'Added' : 'Removed';

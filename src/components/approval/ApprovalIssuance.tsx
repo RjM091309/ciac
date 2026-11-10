@@ -19,6 +19,10 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '../../lib/utils';
+import { formatAmountInput, formatMoney } from '../proponent/ProponentsManagement';
+
+/** "1,234.50" -> 1234.5 (the inputs show commas). */
+const num = (v: string) => Number(String(v).replace(/,/g, ''));
 import { AppSelect } from '../ui/AppSelect';
 import { ConfirmModal } from '../ui/ConfirmModal';
 import { DatePicker, parseYmd, toYmd } from '../ui/DatePicker';
@@ -798,9 +802,9 @@ function ChargesTab({
   });
 
   const preview = useMemo(() => {
-    if (form.amount) return Number(form.amount) || 0;
-    const q = Number(form.quantity);
-    const r = Number(form.unit_rate);
+    if (form.amount) return num(form.amount) || 0;
+    const q = num(form.quantity);
+    const r = num(form.unit_rate);
     if (Number.isFinite(q) && Number.isFinite(r) && form.quantity && form.unit_rate) return Math.round(q * r * 100) / 100;
     return 0;
   }, [form]);
@@ -812,9 +816,9 @@ function ChargesTab({
         body: JSON.stringify({
           charge_type: form.charge_type,
           description: form.description.trim(),
-          quantity: form.quantity ? Number(form.quantity) : null,
-          unit_rate: form.unit_rate ? Number(form.unit_rate) : null,
-          amount: form.amount ? Number(form.amount) : undefined,
+          quantity: form.quantity ? num(form.quantity) : null,
+          unit_rate: form.unit_rate ? num(form.unit_rate) : null,
+          amount: form.amount ? num(form.amount) : undefined,
           rate_basis: form.rate_basis.trim() || null,
           remarks: form.remarks.trim() || null,
         }),
@@ -854,8 +858,12 @@ function ChargesTab({
                     {c.description}
                     {c.rate_basis ? <div className="text-[10px] text-secondary">{c.rate_basis}</div> : null}
                   </td>
-                  <td className="px-2.5 py-2 text-right tabular-nums">{c.quantity ?? '—'}</td>
-                  <td className="px-2.5 py-2 text-right tabular-nums">{c.unit_rate ?? '—'}</td>
+                  <td className="px-2.5 py-2 text-right tabular-nums">
+                    {c.quantity != null ? Number(c.quantity).toLocaleString('en-US', { maximumFractionDigits: 4 }) : '—'}
+                  </td>
+                  <td className="px-2.5 py-2 text-right tabular-nums">
+                    {c.unit_rate != null ? Number(c.unit_rate).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 }) : '—'}
+                  </td>
                   <td className="px-2.5 py-2 text-right tabular-nums font-semibold">{peso(c.amount)}</td>
                   {perms.canDelete ? (
                     <td className="px-2.5 py-2 text-right">
@@ -926,7 +934,7 @@ function ChargesTab({
                 className={inputCls}
                 inputMode="decimal"
                 value={form.quantity}
-                onChange={(e) => setForm((f) => ({ ...f, quantity: e.target.value }))}
+                onChange={(e) => setForm((f) => ({ ...f, quantity: formatAmountInput(e.target.value) }))}
               />
             </Field>
             <Field label="Unit rate">
@@ -934,7 +942,8 @@ function ChargesTab({
                 className={inputCls}
                 inputMode="decimal"
                 value={form.unit_rate}
-                onChange={(e) => setForm((f) => ({ ...f, unit_rate: e.target.value }))}
+                onChange={(e) => setForm((f) => ({ ...f, unit_rate: formatAmountInput(e.target.value) }))}
+                onBlur={() => setForm((f) => ({ ...f, unit_rate: formatMoney(f.unit_rate) }))}
               />
             </Field>
             <Field label="Amount (override)">
@@ -942,8 +951,9 @@ function ChargesTab({
                 className={inputCls}
                 inputMode="decimal"
                 value={form.amount}
-                onChange={(e) => setForm((f) => ({ ...f, amount: e.target.value }))}
-                placeholder={preview ? String(preview) : ''}
+                onChange={(e) => setForm((f) => ({ ...f, amount: formatAmountInput(e.target.value) }))}
+                onBlur={() => setForm((f) => ({ ...f, amount: formatMoney(f.amount) }))}
+                placeholder={preview ? preview.toLocaleString('en-US', { maximumFractionDigits: 2 }) : ''}
               />
             </Field>
           </div>

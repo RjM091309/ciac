@@ -32,6 +32,7 @@ export type AppView =
   | 'settings:type-of-contract'
   | 'settings:building'
   | 'settings:land-use'
+  | 'settings:property-types'
   | 'settings:control-panel'
   | 'settings:audit-log'
   | 'settings:portal'

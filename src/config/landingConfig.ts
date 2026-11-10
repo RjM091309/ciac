@@ -336,6 +336,22 @@ export const LANDING_CONFIG: Record<AppView, LandingConfig> = {
       rows: [['—', '—']],
     },
   },
+  'settings:property-types': {
+    title: 'Type of Property',
+    description: 'Maintain the types of property (Property Schedule).',
+    badge: 'Configuration',
+    icon: FolderTree,
+    isCrud: true,
+    stats: [
+      { label: 'Types of Property', value: '—' },
+      { label: 'Active', value: '—' },
+      { label: 'Deactivated', value: '—' },
+    ],
+    table: {
+      columns: ['Name', 'Status'],
+      rows: [['—', '—']],
+    },
+  },
   'settings:building': {
     title: 'Building',
     description: 'Maintain the list of buildings.',
