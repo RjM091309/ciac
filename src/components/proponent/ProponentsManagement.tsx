@@ -43,7 +43,6 @@ import { LocatorDocumentsTab, uploadLocatorDocument, type PendingLocatorDocument
 import { PropertyTypesModal, useCanManagePropertyTypes } from '../FileMaintenance/PropertyTypesModal';
 import { MglScheduleModal, buildMglSchedule, type MglSourceRow } from './MglScheduleModal';
 import { InvestmentYearsModal } from './InvestmentYearsModal';
-import { FilePreviewModal } from '../ui/FilePreviewModal';
 import { useLiveRefresh } from '../../lib/liveData';
 
 type ChangeRequestRow = {
@@ -1581,10 +1580,8 @@ export function ProponentsManagement({
   // shown read only beside Latest GIS Filing on the Stockholders tab (A-16).
   // The latest GIS wherever it was filed (Compliance, Documents tab or an
   // application's GIS requirement) — opened from the GIS card.
-  // The DTI certificate found for the locator (Registration card, DTI), and the
-  // file opened in the on-page preview (DTI certificate or GIS).
+  // The DTI certificate found for the locator (Registration card, DTI).
   const [dtiDocument, setDtiDocument] = useState<{ label: string | null; original_file_name: string | null; source: string } | null>(null);
-  const [filePreview, setFilePreview] = useState<{ url: string; title: string; subtitle?: string } | null>(null);
   const [gisDocument, setGisDocument] = useState<{
     source?: 'compliance' | 'locator' | 'application';
     label?: string | null;
@@ -4401,11 +4398,7 @@ export function ProponentsManagement({
                                   <button
                                     type="button"
                                     onClick={() =>
-                                      setFilePreview({
-                                        url: `/api/proponents/${editing.id}/dti-document/file`,
-                                        title: dtiDocument.label || dtiDocument.original_file_name || 'DTI Certificate',
-                                        subtitle: 'DTI Certificate of Business Name Registration',
-                                      })
+                                      window.open(`/api/proponents/${editing.id}/dti-document/file?view=1`, '_blank')
                                     }
                                     className="inline-flex min-w-0 items-center gap-1.5 font-medium text-blue-600 hover:underline cursor-pointer"
                                     title="View the DTI certificate"
@@ -4650,11 +4643,7 @@ export function ProponentsManagement({
                                 <button
                                   type="button"
                                   onClick={() =>
-                                    setFilePreview({
-                                      url: `/api/proponents/${editing.id}/gis-document/file`,
-                                      title: gisDocument.label || gisDocument.original_file_name || 'GIS',
-                                      subtitle: 'GIS (General Information Sheet)',
-                                    })
+                                    window.open(`/api/proponents/${editing.id}/gis-document/file?view=1`, '_blank')
                                   }
                                   className="inline-flex min-w-0 items-center gap-1.5 font-medium text-blue-600 hover:underline cursor-pointer"
                                   title="Open the GIS"
@@ -5843,14 +5832,6 @@ export function ProponentsManagement({
           </div>
         ) : null}
       </ConfirmModal>
-
-      <FilePreviewModal
-        open={filePreview !== null}
-        url={filePreview?.url ?? ''}
-        title={filePreview?.title ?? ''}
-        subtitle={filePreview?.subtitle}
-        onClose={() => setFilePreview(null)}
-      />
 
       <InvestmentYearsModal
         open={investmentYearsOpen}
