@@ -12,6 +12,8 @@ type ConfirmModalProps = {
   danger?: boolean;
   confirmDisabled?: boolean;
   children?: React.ReactNode;
+  /** Wider dialogs (e.g. one with a table); default max-w-md. */
+  widthClassName?: string;
   onConfirm: () => void | Promise<void>;
   onCancel: () => void;
 };
@@ -26,6 +28,7 @@ export function ConfirmModal({
   danger = false,
   confirmDisabled = false,
   children,
+  widthClassName = 'max-w-md',
   onConfirm,
   onCancel,
 }: ConfirmModalProps) {
@@ -48,7 +51,7 @@ export function ConfirmModal({
             onClick={!loading ? onCancel : undefined}
           />
           <motion.div
-            className="w-full max-w-md rounded-2xl border p-4 sm:p-5 relative z-10"
+            className={`w-full ${widthClassName} rounded-2xl border p-4 sm:p-5 relative z-10`}
             style={{ backgroundColor: 'var(--surface)', borderColor: 'var(--border-subtle)' }}
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}

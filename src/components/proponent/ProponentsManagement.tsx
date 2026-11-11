@@ -25,6 +25,8 @@ import {
   ClipboardList,
   Factory,
   Hammer,
+  CalendarRange,
+  TrendingUp,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { toast } from 'sonner';
@@ -39,6 +41,8 @@ import { useSessionStorageCachedResource } from '../../hooks/useSessionStorageCa
 import { useControlPanelAccess } from '../../context/ControlPanelAccessContext';
 import { LocatorDocumentsTab, uploadLocatorDocument, type PendingLocatorDocument } from './LocatorDocumentsTab';
 import { PropertyTypesModal, useCanManagePropertyTypes } from '../FileMaintenance/PropertyTypesModal';
+import { MglScheduleModal, buildMglSchedule, type MglSourceRow } from './MglScheduleModal';
+import { InvestmentYearsModal } from './InvestmentYearsModal';
 import { useLiveRefresh } from '../../lib/liveData';
 
 type ChangeRequestRow = {
@@ -162,7 +166,7 @@ type PropertyRow = {
 type PropertyRateType = 'STANDARD' | 'NON_STANDARD';
 
 // Property schedule dropdowns.
-const PROPERTY_YEARS = Array.from({ length: 11 }, (_, k) => String(2020 + k)); // 2020–2030
+const PROPERTY_YEARS = Array.from({ length: 66 }, (_, k) => String(2015 + k)); // 2015–2080 (long leases, escalations)
 // Type of Property options come from File Maintenance (/api/proponents/property-types).
 // Year / Type of Property only take values from their lists (any case):
 // an older free-text value that isn't one of them shows as "Select ..." and
@@ -186,6 +190,77 @@ function computeStandardMgl(row: Pick<PropertyRow, 'area_sqm' | 'rate_sqm_mo'>):
 
 /** Applies a field change; a Standard row keeps its MGL (and its currency)
  * in step with Area × Rate. */
+// ---- Escalation (4-08) ----
+// "Every N months, +P%": the row is split into consecutive periods of N months
+// up to the later of its own Date To and the lease's End Term (`untilYmd`) —
+// typically the first year is entered and escalated to the end; each period's rate (Standard: Rate/SQM, MGL computed;
+// Non-standard: MGL, and the rate when there is one) is the previous one × (1 + P%).
+const ymdToUtc = (ymd: string) => {
+  const [y, m, d] = ymd.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d));
+};
+const utcToYmd = (d: Date) => d.toISOString().slice(0, 10);
+function addMonthsUtc(date: Date, n: number): Date {
+  const y = date.getUTCFullYear();
+  const m = date.getUTCMonth() + n;
+  const last = new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
+  return new Date(Date.UTC(y, m, Math.min(date.getUTCDate(), last)));
+}
+function escalatePropertyRow(
+  row: PropertyRow,
+  everyMonths: number,
+  percent: number,
+  untilYmd = '',
+  /** The month of the first increase (e.g. 37 = 36 months at the base rate); default: right after one interval. */
+  firstIncreaseMonth = everyMonths + 1,
+): PropertyRow[] {
+  if (!row.date_from || !row.date_to || row.date_to < row.date_from || !(everyMonths > 0) || !(firstIncreaseMonth > 1)) return [row];
+  // Month offset where period k starts: 0, then the first increase, then every N months.
+  const offsetOf = (k: number) => (k === 0 ? 0 : firstIncreaseMonth - 1 + (k - 1) * everyMonths);
+  const first = ymdToUtc(row.date_from);
+  const last = ymdToUtc(untilYmd && untilYmd > row.date_to ? untilYmd : row.date_to);
+  const factorOf = (k: number) => Math.pow(1 + percent / 100, k);
+  const scaled = (value: string, k: number) => {
+    const n = parseAmount(value);
+    return n === null ? value : formatMoney(Math.round(n * factorOf(k) * 100) / 100);
+  };
+  const out: PropertyRow[] = [];
+  for (let k = 0; k < 200; k += 1) {
+    const start = addMonthsUtc(first, offsetOf(k));
+    if (start > last) break;
+    const nextStart = addMonthsUtc(first, offsetOf(k + 1));
+    const end = new Date(Math.min(nextStart.getTime() - 86_400_000, last.getTime()));
+    const base: PropertyRow = {
+      ...row,
+      id: k === 0 ? row.id : undefined, // the first period keeps the saved row
+      year: String(start.getUTCFullYear()),
+      date_from: utcToYmd(start),
+      date_to: utcToYmd(end),
+    };
+    out.push(
+      row.rate_type === 'STANDARD'
+        ? updatePropertyRow(base, { rate_sqm_mo: scaled(row.rate_sqm_mo, k) })
+        : { ...base, rate_sqm_mo: scaled(row.rate_sqm_mo, k), mgl_mo: scaled(row.mgl_mo, k) },
+    );
+  }
+  return out.length ? out : [row];
+}
+
+/** Same property: same Type of Property and Area (its yearly / escalated rows). */
+const samePropertyKey = (r: PropertyRow) => `${String(r.type_of_property || '').trim().toUpperCase()}|${parseAmount(r.area_sqm) ?? ''}`;
+/** Indexes of the other rows of the same property that start inside the escalated
+ * range — an earlier escalation's rows, replaced so nothing is counted twice. */
+function overlappedRowIndexes(rows: PropertyRow[], index: number, made: PropertyRow[]): number[] {
+  const row = rows[index];
+  if (!row || made.length < 2) return [];
+  const from = made[0].date_from;
+  const to = made[made.length - 1].date_to;
+  return rows
+    .map((r, i) => ({ r, i }))
+    .filter(({ r, i }) => i !== index && samePropertyKey(r) === samePropertyKey(row) && r.date_from > from && r.date_from <= to)
+    .map(({ i }) => i);
+}
+
 function updatePropertyRow(row: PropertyRow, patch: Partial<PropertyRow>): PropertyRow {
   const next = { ...row, ...patch };
   if (next.rate_type === 'STANDARD') {
@@ -727,6 +802,45 @@ const MILESTONES = [
   { code: 'D', label: 'Start of Operation', icon: Factory },
 ] as const;
 type MilestoneRow = { code: string; date: string; remarks: string };
+
+/** Performance Commitment per lease year (4-10). */
+type InvestmentYearRow = {
+  year_no: number;
+  investment_commitment: string;
+  investment_actual: string;
+  employee_commitment: string;
+  employee_actual: string;
+};
+const blankInvestmentYear = (year_no: number): InvestmentYearRow => ({
+  year_no,
+  investment_commitment: '',
+  investment_actual: '',
+  employee_commitment: '',
+  employee_actual: '',
+});
+/** Saved years; with none yet but older overall figures, they start as Year 1. */
+function mapInvestmentYears(data: any): InvestmentYearRow[] {
+  const rows: any[] = Array.isArray(data?.investment_years) ? data.investment_years : [];
+  if (rows.length) {
+    return rows.map((r) => ({
+      year_no: Number(r.year_no),
+      investment_commitment: formatMoney(r.investment_commitment),
+      investment_actual: formatMoney(r.investment_actual),
+      employee_commitment: formatIfNumeric(r.employee_commitment),
+      employee_actual: formatIfNumeric(r.employee_actual),
+    }));
+  }
+  const legacy = {
+    year_no: 1,
+    investment_commitment: formatMoney(data?.investment_commitment),
+    investment_actual: formatMoney(data?.investment_actual),
+    employee_commitment: formatIfNumeric(data?.employee_commitment),
+    employee_actual: formatIfNumeric(data?.employee_actual),
+  };
+  return [legacy.investment_commitment, legacy.investment_actual, legacy.employee_commitment, legacy.employee_actual].some(Boolean)
+    ? [legacy]
+    : [];
+}
 const blankTimeline = (): MilestoneRow[] => MILESTONES.map((m) => ({ code: m.code, date: '', remarks: '' }));
 function mapTimeline(rows: any): MilestoneRow[] {
   const byCode = new Map((Array.isArray(rows) ? rows : []).map((r: any) => [String(r.code), r]));
@@ -886,6 +1000,8 @@ type LeaseRow = {
   date_signed: string | null;
   start_term: string | null;
   end_term: string | null;
+  /** Billing basis (4-04): MONTH or YEAR. */
+  rate_period?: string;
   /** Earlier leases only: their property schedule (read-only). */
   properties?: any[];
 };
@@ -1062,6 +1178,7 @@ const BLANK_PROFILE_FORM = {
   investment_commitment: '',
   investment_actual: '',
   development_timeline: blankTimeline(),
+  investment_years: [] as InvestmentYearRow[],
   employee_commitment: '',
   employee_actual: '',
   // SEC Registration Information card (dbo.proponent_sec_registration)
@@ -1076,6 +1193,9 @@ const BLANK_PROFILE_FORM = {
   sec_contact_telephone: '',
   sec_contact_mobile: '',
   properties: [] as PropertyRow[],
+  // Billing basis of the lease's Property Schedule (4-04): the Rate/SQM and MGL
+  // amounts (rate_sqm_mo / mgl_mo) are per month or per year.
+  rate_period: 'MONTH' as 'MONTH' | 'YEAR',
   land_use_id: '',
   // Start empty, like the property schedule: every row listed must be complete.
   stockholders: [] as StockholderRow[],
@@ -1132,6 +1252,12 @@ export function ProponentsManagement({
   // maintenance opened from the Property Schedule's settings button.
   const [propertyTypes, setPropertyTypes] = useState<{ id: number; name: string; is_active: number }[]>([]);
   const [propertyTypesOpen, setPropertyTypesOpen] = useState(false);
+  // MGL Schedule pop-up: the Property Schedule broken down month by month.
+  const [mglScheduleRow, setMglScheduleRow] = useState<number | null>(null);
+  // Escalate (4-08): which row, every how many months, by what percent.
+  const [escalate, setEscalate] = useState<{ index: number; start: string; every: string; percent: string } | null>(null);
+  // Performance Commitment per lease year: its breakdown opens in a pop-up.
+  const [investmentYearsOpen, setInvestmentYearsOpen] = useState(false);
   const canManagePropertyTypes = useCanManagePropertyTypes();
   const loadPropertyTypes = useCallback(async () => {
     try {
@@ -1590,11 +1716,13 @@ export function ProponentsManagement({
       contact_persons,
       signatories,
       properties,
+      rate_period,
       investment_commitment,
       investment_actual,
       employee_commitment,
       employee_actual,
       development_timeline,
+      investment_years,
       ...afterSections
     } = f;
     const rest: Record<string, unknown> = { ...afterSections };
@@ -1609,8 +1737,15 @@ export function ProponentsManagement({
         sec: JSON.stringify(sec),
         stockholders: JSON.stringify(stockholders),
         contacts: JSON.stringify([contact_persons, signatories]),
-        properties: JSON.stringify(properties),
-        investment: JSON.stringify([investment_commitment, investment_actual, employee_commitment, employee_actual, development_timeline]),
+        properties: JSON.stringify([properties, rate_period]),
+        investment: JSON.stringify([
+          investment_commitment,
+          investment_actual,
+          employee_commitment,
+          employee_actual,
+          development_timeline,
+          investment_years,
+        ]),
       } as Record<SectionKey, string>,
     };
   };
@@ -1875,6 +2010,7 @@ export function ProponentsManagement({
     setLeases([]);
     setViewLeaseId(null);
     setShowPastLeases(false);
+    setInvestmentYearsOpen(false);
     setExtensions([]);
     setExtensionDraft({ extension_date: '', remarks: '' });
     setShowPastExtensions(false);
@@ -1941,6 +2077,7 @@ export function ProponentsManagement({
           investment_commitment: formatMoney(data.investment_commitment),
           investment_actual: formatMoney(data.investment_actual),
           development_timeline: mapTimeline(data.development_timeline),
+          investment_years: mapInvestmentYears(data),
           employee_commitment: formatIfNumeric(data.employee_commitment),
           employee_actual: formatIfNumeric(data.employee_actual),
           sec_company_email: data.sec_company_email || '',
@@ -1954,6 +2091,7 @@ export function ProponentsManagement({
           sec_contact_telephone: data.sec_contact_telephone || '',
           sec_contact_mobile: data.sec_contact_mobile || '',
           properties: mapPropertyRows(data.properties),
+          rate_period: (data.rate_period === 'YEAR' ? 'YEAR' : 'MONTH') as 'MONTH' | 'YEAR',
           land_use_id: data.land_use_id != null ? String(data.land_use_id) : '',
           stockholders: recomputeAllOwnership(mapStockholderRows(data.stockholders), formatMoney(data.subscribed_capital)),
           contact_persons: mapContactRows(data.contact_persons),
@@ -2073,8 +2211,16 @@ export function ProponentsManagement({
                     date: m.date || null,
                     remarks: m.remarks.trim() || null,
                   })),
+                  // Per lease year (4-10); the overall figures follow from them on the server.
+                  investment_years: investmentYearsShown.map((y) => ({
+                    year_no: y.year_no,
+                    investment_commitment: y.investment_commitment.trim() || null,
+                    investment_actual: y.investment_actual.trim() || null,
+                    employee_commitment: y.employee_commitment.trim() || null,
+                    employee_actual: y.employee_actual.trim() || null,
+                  })),
                 }
-              : { properties: form.properties.map(toPropertyPayload) };
+              : { properties: form.properties.map(toPropertyPayload), rate_period: form.rate_period };
 
       const path = section === 'sec' ? 'sec-registration' : section;
       const res = await fetch(api(`/api/proponents/${editing.id}/${path}`), {
@@ -2116,8 +2262,12 @@ export function ProponentsManagement({
                   employee_commitment: formatIfNumeric(data.employee_commitment),
                   employee_actual: formatIfNumeric(data.employee_actual),
                   development_timeline: mapTimeline(data.development_timeline),
+                  investment_years: mapInvestmentYears(data),
                 }
-              : { properties: mapPropertyRows(data.properties) };
+              : {
+                  properties: mapPropertyRows(data.properties),
+                  rate_period: (data.rate_period === 'YEAR' ? 'YEAR' : 'MONTH') as 'MONTH' | 'YEAR',
+                };
       const nextForm = { ...form, ...saved };
       setForm(nextForm);
       if (section === 'sec') {
@@ -2265,15 +2415,22 @@ export function ProponentsManagement({
         performance_security_months: form.performance_security_months.trim() || null,
         performance_security_amount: finAmount(form.performance_security_amount).trim() || null,
         performance_security_currency: finCurrency(form.performance_security_currency) || null,
-        investment_commitment: form.investment_commitment.trim() || null,
-        investment_actual: form.investment_actual.trim() || null,
-        employee_commitment: form.employee_commitment.trim() || null,
-        employee_actual: form.employee_actual.trim() || null,
+        // Overall Performance Commitment = what the lease years add up to (4-10),
+        // and the years themselves.
+        ...investmentOverall,
+        investment_years: investmentYearsShown.map((y) => ({
+          year_no: y.year_no,
+          investment_commitment: y.investment_commitment.trim() || null,
+          investment_actual: y.investment_actual.trim() || null,
+          employee_commitment: y.employee_commitment.trim() || null,
+          employee_actual: y.employee_actual.trim() || null,
+        })),
         ...secRegistrationPayload(form),
         stockholders: form.stockholders.map(toStockholderPayload),
         contact_persons: form.contact_persons.map(toContactPayload),
         signatories: form.signatories.map(toContactPayload),
         properties: form.properties.map(toPropertyPayload),
+        rate_period: form.rate_period,
       };
 
       // Type of Contract goes to the current contract when there is one,
@@ -2532,6 +2689,78 @@ export function ProponentsManagement({
   const secNoTaken = useTakenCheck('registration_no', form.registration_no, editing?.registration_no);
 
   const viewedLease = viewLeaseId !== null ? leases.find((l) => l.id === viewLeaseId) || null : null;
+  // Escalate saves the Property Schedule itself once the new rows are in the form.
+  const [autoSaveProperties, setAutoSaveProperties] = useState(false);
+  useEffect(() => {
+    if (!autoSaveProperties) return;
+    setAutoSaveProperties(false);
+    void saveSection('properties');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoSaveProperties]);
+  // Escalation runs to the lease's End Term (when it's later than the row's Date To).
+  const leaseEndYmd = String((termEditable ? form.end_term : editing?.end_term) || '').slice(0, 10);
+  // Escalate dialog: the rows it would make (2+ = something to escalate).
+  const escalatePreview: PropertyRow[] = (() => {
+    if (!escalate) return [];
+    const row = form.properties[escalate.index];
+    const every = Math.floor(Number(escalate.every));
+    const start = Math.floor(Number(escalate.start));
+    if (!row || !(every > 0) || !(start > 1)) return [];
+    const pct = Number(escalate.percent);
+    return escalatePropertyRow(row, every, Number.isFinite(pct) ? pct : 0, leaseEndYmd, start);
+  })();
+  // Rows an earlier escalation made that this one replaces.
+  const escalateReplaces = escalate ? overlappedRowIndexes(form.properties, escalate.index, escalatePreview) : [];
+  // Performance Commitment per lease year (4-10): one row per year of the lease
+  // term (Start–End), plus any saved beyond it or added by hand.
+  const leaseYearCount = (() => {
+    const start = String((termEditable ? form.start_term : editing?.start_term) || '').slice(0, 10);
+    const end = String((termEditable ? form.end_term : editing?.end_term) || '').slice(0, 10);
+    if (!start || !end || end < start) return 0;
+    const a = ymdToUtc(start);
+    const b = ymdToUtc(end);
+    const months = (b.getUTCFullYear() - a.getUTCFullYear()) * 12 + (b.getUTCMonth() - a.getUTCMonth()) + (b.getUTCDate() >= a.getUTCDate() ? 1 : 0);
+    return Math.max(1, Math.ceil(months / 12));
+  })();
+  const leaseStartYmd = String((termEditable ? form.start_term : editing?.start_term) || '').slice(0, 10);
+  const investmentYearsShown: InvestmentYearRow[] = (() => {
+    const count = Math.max(leaseYearCount, ...form.investment_years.map((y) => y.year_no), 0);
+    return Array.from({ length: count }, (_, k) => form.investment_years.find((y) => y.year_no === k + 1) ?? blankInvestmentYear(k + 1));
+  })();
+  // The current lease year (or Year 1 before the lease starts), highlighted.
+  const currentLeaseYear = (() => {
+    if (!leaseStartYmd) return 1;
+    const a = ymdToUtc(leaseStartYmd);
+    const now = new Date();
+    const months = (now.getUTCFullYear() - a.getUTCFullYear()) * 12 + (now.getUTCMonth() - a.getUTCMonth()) - (now.getUTCDate() < a.getUTCDate() ? 1 : 0);
+    return Math.min(Math.max(1, Math.floor(months / 12) + 1), Math.max(1, investmentYearsShown.length));
+  })();
+  const yearsWithFigures = investmentYearsShown.filter((y) =>
+    [y.investment_commitment, y.investment_actual, y.employee_commitment, y.employee_actual].some((v) => v.trim()),
+  ).length;
+
+  /** The overall figures from the years: investment summed, employees the highest year. */
+  const investmentOverall = (() => {
+    const pick = (key: keyof Omit<InvestmentYearRow, 'year_no'>, how: 'sum' | 'max') => {
+      const values = investmentYearsShown.map((y) => parseAmount(y[key])).filter((n): n is number => n !== null);
+      if (!values.length) return null;
+      return String(how === 'sum' ? Math.round(values.reduce((a, b) => a + b, 0) * 100) / 100 : Math.max(...values));
+    };
+    return {
+      investment_commitment: pick('investment_commitment', 'sum'),
+      investment_actual: pick('investment_actual', 'sum'),
+      employee_commitment: pick('employee_commitment', 'max'),
+      employee_actual: pick('employee_actual', 'max'),
+    };
+  })();
+  const setInvestmentYear = (year_no: number, patch: Partial<InvestmentYearRow>) =>
+    setForm((p) => {
+      const has = p.investment_years.some((y) => y.year_no === year_no);
+      const list = has
+        ? p.investment_years.map((y) => (y.year_no === year_no ? { ...y, ...patch } : y))
+        : [...p.investment_years, { ...blankInvestmentYear(year_no), ...patch }];
+      return { ...p, investment_years: list.sort((x, y) => x.year_no - y.year_no) };
+    });
   // Advance Lease Payment / Security Deposit / Performance Security are in
   // months of MGL, so their currency follows the Property Schedule's MGL
   // currency (the first row's; Standard = the rate's) — locked like MGL/MO.
@@ -2556,11 +2785,15 @@ export function ProponentsManagement({
       (sum, r) => sum + (parseAmount(r.rate_type === 'STANDARD' ? computeStandardMgl(r) : r.mgl_mo) ?? 0),
       0,
     );
-    return (Math.round(total * 100) / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    // A yearly lease (4-04): the monthly equivalent, MGL/YR ÷ 12.
+    const monthly = form.rate_period === 'YEAR' ? total / 12 : total;
+    return (Math.round(monthly * 100) / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   })();
   const finAmount = (own: string) => mglBasis || own;
   const finAmountTitle = mglBasis
-    ? 'MGL/MO from the Property Schedule (first period) — set automatically'
+    ? form.rate_period === 'YEAR'
+      ? 'MGL/YR ÷ 12 from the Property Schedule (first period) — set automatically'
+      : 'MGL/MO from the Property Schedule (first period) — set automatically'
     : 'Add the Property Schedule first — the Amount is its MGL/MO';
   const finCurrencyTitle = 'Same as the Property Schedule’s MGL currency';
   const regType = registrationTypeOf(form.registration_type);
@@ -4511,6 +4744,35 @@ export function ProponentsManagement({
                 </CardTitle>
                 {/* Editing is for the current lease only; an earlier lease's panel is read only. */}
                 <div className={cn('flex items-center gap-2', leaseView && 'hidden')}>
+                  {/* Billing basis (4-04): the Rate/SQM and MGL amounts are per month or per year. */}
+                  <div
+                    className="inline-flex rounded-md border p-0.5"
+                    style={{ borderColor: 'var(--input-border)', backgroundColor: 'var(--control-bg)' }}
+                    title="Billing basis of this lease: Rate/SQM and MGL per month or per year"
+                  >
+                    {(
+                      [
+                        ['MONTH', 'Monthly'],
+                        ['YEAR', 'Yearly'],
+                      ] as const
+                    ).map(([value, label]) => (
+                      <button
+                        key={value}
+                        type="button"
+                        disabled={loadingLocation}
+                        aria-pressed={form.rate_period === value}
+                        onClick={() => setForm((p) => ({ ...p, rate_period: value }))}
+                        className="rounded px-2 py-0.5 text-[11px] font-semibold cursor-pointer disabled:cursor-not-allowed"
+                        style={
+                          form.rate_period === value
+                            ? { backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }
+                            : { color: 'var(--text-muted)' }
+                        }
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
                   {canManagePropertyTypes ? (
                     <button
                       type="button"
@@ -4587,7 +4849,7 @@ export function ProponentsManagement({
               </div>
               {leaseView ? (
                 viewedLease ? (
-                  <LeasePropertyTable properties={viewedLease.properties || []} />
+                  <LeasePropertyTable properties={viewedLease.properties || []} period={viewedLease.rate_period} />
                 ) : (
                   <div className="text-[11px] text-secondary">Loading…</div>
                 )
@@ -4601,15 +4863,32 @@ export function ProponentsManagement({
                 </div>
               ) : (
               <div className="min-w-0 overflow-x-auto rounded-lg border" style={{ borderColor: 'var(--input-border)' }}>
-                <table className="w-full text-xs border-collapse">
+                <table className="w-full min-w-[60rem] lg:min-w-0 table-fixed text-xs border-collapse">
+                  <colgroup>
+                    {['3%', '8%', '11.5%', '11.5%', '10%', '11.5%', '6.5%', '15.25%', '15.25%', '7.5%'].map((w, i) => (
+                      <col key={i} style={{ width: w }} />
+                    ))}
+                  </colgroup>
                   <thead>
                     <tr style={THEAD_ROW_STYLE}>
-                      {['No.', 'Year', 'Date From', 'Date To', 'Rate', 'Type of Property', 'Area (SQM)', 'Rate/SQM/MO', 'MGL/MO', ''].map(
+                      {[
+                        'No.',
+                        'Year',
+                        'Date From',
+                        'Date To',
+                        'Rate',
+                        'Type of Property',
+                        'Area (SQM)',
+                        form.rate_period === 'YEAR' ? 'Rate/SQM/YR' : 'Rate/SQM/MO',
+                        form.rate_period === 'YEAR' ? 'MGL/YR' : 'MGL/MO',
+                        '',
+                      ].map(
                         (h, i) => (
                           <th
                             key={`${h}-${i}`}
-                            className="px-2 py-1.5 text-left font-semibold uppercase tracking-wide text-[9px] border-b"
+                            className="px-1 py-1.5 text-left font-semibold uppercase tracking-wide text-[9px] border-b truncate"
                             style={{ borderColor: 'var(--input-border)', color: 'var(--text)' }}
+                            title={h || undefined}
                           >
                             {h}
                           </th>
@@ -4640,7 +4919,7 @@ export function ProponentsManagement({
                         </td>
                         <td className={`px-1 py-1 align-top border-b${miss('year')}`} style={{ borderColor: 'var(--input-border)' }}>
                           <BoxSelect
-                            className="w-full min-w-[110px] h-9"
+                            className="w-full min-w-0 h-9"
                             options={PROPERTY_YEARS}
                             value={asOption(PROPERTY_YEARS, row.year)}
                             placeholder="Select year"
@@ -4653,8 +4932,8 @@ export function ProponentsManagement({
                             }
                           />
                         </td>
-                        <td className={`px-1 py-1 align-top border-b w-36${miss('date_from')}`} style={{ borderColor: 'var(--input-border)' }}>
-                          <div className="h-9 [&>*]:h-full">
+                        <td className={`px-1 py-1 align-top border-b${miss('date_from')}`} style={{ borderColor: 'var(--input-border)' }}>
+                          <div className="h-9 min-w-0 [&>*]:h-full">
                           <DatePicker
                             mode="single"
                             fullWidth
@@ -4672,8 +4951,8 @@ export function ProponentsManagement({
                           />
                           </div>
                         </td>
-                        <td className={`px-1 py-1 align-top border-b w-36${miss('date_to')}`} style={{ borderColor: 'var(--input-border)' }}>
-                          <div className="h-9 [&>*]:h-full">
+                        <td className={`px-1 py-1 align-top border-b${miss('date_to')}`} style={{ borderColor: 'var(--input-border)' }}>
+                          <div className="h-9 min-w-0 [&>*]:h-full">
                           <DatePicker
                             mode="single"
                             fullWidth
@@ -4694,7 +4973,7 @@ export function ProponentsManagement({
                         <td className={`px-1 py-1 align-top border-b whitespace-nowrap${miss('rate_type')}`} style={{ borderColor: 'var(--input-border)' }}>
                           {/* Switchable: Non-standard → Standard recomputes MGL, so it asks first. */}
                           <BoxSelect
-                            className="w-full min-w-[150px] h-9"
+                            className="w-full min-w-0 h-9"
                             options={[
                               { value: 'STANDARD', label: 'Standard' },
                               { value: 'NON_STANDARD', label: 'Non-standard' },
@@ -4730,7 +5009,7 @@ export function ProponentsManagement({
                         </td>
                         <td className={`px-1 py-1 align-top border-b${miss('type_of_property')}`} style={{ borderColor: 'var(--input-border)' }}>
                           <BoxSelect
-                            className="w-full min-w-[140px] h-9"
+                            className="w-full min-w-0 h-9"
                             options={propertyTypeOptions(row.type_of_property)}
                             value={asOption(propertyTypeOptions(row.type_of_property), row.type_of_property)}
                             placeholder="Select type"
@@ -4745,7 +5024,7 @@ export function ProponentsManagement({
                         </td>
                         <td className={`px-1 py-1 align-top border-b${miss('area_sqm')}`} style={{ borderColor: 'var(--input-border)' }}>
                           <input
-                            className="app-form-control app-form-control-sm h-9 w-full min-w-[8rem] tabular-nums"
+                            className="app-form-control app-form-control-sm h-9 w-full min-w-0 tabular-nums"
                             value={row.area_sqm}
                             placeholder="0.00"
                             disabled={loadingLocation}
@@ -4764,7 +5043,7 @@ export function ProponentsManagement({
                           style={{ borderColor: 'var(--input-border)' }}
                         >
                           <AmountCurrencyBox
-                            className="w-full min-w-[11rem] h-9"
+                            className="w-full min-w-0 h-9"
                             amount={row.rate_sqm_mo}
                             currency={row.rate_currency}
                             disabled={loadingLocation}
@@ -4792,7 +5071,7 @@ export function ProponentsManagement({
                           style={{ borderColor: 'var(--input-border)' }}
                         >
                           <AmountCurrencyBox
-                            className="w-full min-w-[13rem] h-9"
+                            className="w-full min-w-0 h-9"
                             amount={row.mgl_mo}
                             currency={row.mgl_currency}
                             disabled={loadingLocation}
@@ -4815,7 +5094,30 @@ export function ProponentsManagement({
                             }
                           />
                         </td>
-                        <td className="px-1 py-1 align-top border-b text-center" style={{ borderColor: 'var(--input-border)' }}>
+                        <td className="px-1 py-1 align-top border-b text-center whitespace-nowrap" style={{ borderColor: 'var(--input-border)' }}>
+                          {/* Escalation (4-08): split this row into periods with a rising rate. */}
+                          <button
+                            type="button"
+                            disabled={loadingLocation}
+                            onClick={() => setEscalate({ index: i, start: '37', every: '36', percent: '' })}
+                            className="inline-flex h-9 w-7 items-center justify-center rounded-md cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 hover:bg-[var(--selected-bg)]"
+                            style={{ color: 'var(--text)' }}
+                            title={`Escalate row ${i + 1} — e.g. +10% every 36 months`}
+                            aria-label={`Escalate row ${i + 1}`}
+                          >
+                            <TrendingUp size={14} />
+                          </button>
+                          {/* This row's MGL Schedule (month-by-month breakdown). */}
+                          <button
+                            type="button"
+                            onClick={() => setMglScheduleRow(i)}
+                            className="inline-flex h-9 w-7 items-center justify-center rounded-md cursor-pointer hover:bg-[var(--selected-bg)]"
+                            style={{ color: 'var(--text)' }}
+                            title={`MGL Schedule of row ${i + 1}`}
+                            aria-label={`MGL Schedule of row ${i + 1}`}
+                          >
+                            <CalendarRange size={14} />
+                          </button>
                           <button
                             type="button"
                             disabled={loadingLocation}
@@ -4993,7 +5295,10 @@ export function ProponentsManagement({
                   isEditing={Boolean(editing)}
                   hasContent={
                     [form.investment_commitment, form.investment_actual, form.employee_commitment, form.employee_actual].some((v) => v.trim() !== '') ||
-                    form.development_timeline.some((m) => m.date || m.remarks.trim())
+                    form.development_timeline.some((m) => m.date || m.remarks.trim()) ||
+                    form.investment_years.some((y) =>
+                      [y.investment_commitment, y.investment_actual, y.employee_commitment, y.employee_actual].some((v) => v.trim()),
+                    )
                   }
                   dirty={sectionDirty.investment}
                   saving={savingSection === 'investment'}
@@ -5001,40 +5306,63 @@ export function ProponentsManagement({
                   onSave={() => void saveSection('investment')}
                 />
               </div>
-              <div className="grid grid-cols-[max-content_minmax(0,1fr)_minmax(0,1fr)] items-center gap-x-3 gap-y-2">
-                <span />
-                <span className="text-[9px] font-semibold uppercase tracking-widest text-secondary">Commitment</span>
-                <span className="text-[9px] font-semibold uppercase tracking-widest text-secondary">Actual</span>
-                {(
-                  [
-                    { label: 'Investment', commitment: 'investment_commitment', actual: 'investment_actual', amount: true },
-                    { label: 'No. of Employees', commitment: 'employee_commitment', actual: 'employee_actual', amount: false },
-                  ] as const
-                ).map((row) => (
-                  <React.Fragment key={row.label}>
-                    <span className="text-right text-[12px] font-semibold leading-tight" style={{ color: 'var(--text)' }}>
-                      {row.label}
-                    </span>
-                    {([row.commitment, row.actual] as const).map((key) => (
-                      <input
-                        key={key}
-                        className="app-form-control app-form-control-sm h-9 w-full tabular-nums"
-                        inputMode={row.amount ? 'decimal' : 'numeric'}
-                        placeholder={row.amount ? '0.00' : '0'}
-                        value={form[key]}
-                        disabled={loadingLocation}
-                        onChange={(e) => {
-                          const value = row.amount ? formatAmountInput(e.target.value) : formatCountInput(e.target.value);
-                          setForm((p) => ({ ...p, [key]: value }));
-                        }}
-                        onBlur={() => {
-                          if (!row.amount) return;
-                          setForm((p) => ({ ...p, [key]: formatMoney(p[key]) }));
-                        }}
-                      />
-                    ))}
-                  </React.Fragment>
-                ))}
+              {/* Per lease year (4-10): the totals here; the year-by-year breakdown in a pop-up.
+                  Investment = the years added up; Employees = the highest year. */}
+              <div className="flex flex-col gap-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-[10px] text-secondary">
+                    {investmentYearsShown.length
+                      ? `${investmentYearsShown.length} lease year${investmentYearsShown.length === 1 ? '' : 's'} · ${yearsWithFigures} with figures · Year ${currentLeaseYear} is current`
+                      : 'Set the lease Start and End Term to break it down per year'}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setInvestmentYearsOpen(true)}
+                    className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[11px] font-semibold cursor-pointer hover:bg-[var(--selected-bg)]"
+                    style={{ borderColor: 'var(--input-border)', color: 'var(--text)', backgroundColor: 'var(--surface)' }}
+                  >
+                    <CalendarRange size={12} /> Per-year breakdown
+                  </button>
+                </div>
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  {(
+                    [
+                      ['Investment', 'investment_commitment', 'investment_actual', 'Total of the years'],
+                      ['No. of Employees', 'employee_commitment', 'employee_actual', 'Highest year (peak)'],
+                    ] as const
+                  ).map(([label, commitKey, actualKey, hint]) => {
+                    const commit = investmentOverall[commitKey];
+                    const actual = investmentOverall[actualKey];
+                    const money = commitKey === 'investment_commitment';
+                    const show = (v: string | null) =>
+                      v === null ? '—' : money ? formatMoney(v) : Number(v).toLocaleString('en-US');
+                    return (
+                      <div key={label} className="rounded-xl border p-3" style={{ borderColor: 'var(--input-border)' }}>
+                        <div className="flex items-baseline justify-between gap-2">
+                          <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--text)' }}>
+                            {label}
+                          </span>
+                          <span className="text-[10px] text-secondary">{hint}</span>
+                        </div>
+                        <div className="mt-2 grid grid-cols-2 gap-2">
+                          {(
+                            [
+                              ['Commitment', commit],
+                              ['Actual', actual],
+                            ] as const
+                          ).map(([k, v]) => (
+                            <div key={k}>
+                              <div className="text-[9px] font-semibold uppercase tracking-widest text-secondary">{k}</div>
+                              <div className="text-[15px] font-bold tabular-nums" style={{ color: 'var(--text)' }}>
+                                {show(v)}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
 
               {/* Development Timeline (4-11): when each milestone happened, with remarks. */}
@@ -5212,6 +5540,235 @@ export function ProponentsManagement({
         />
       ) : null}
 
+      <ConfirmModal
+        open={escalate !== null}
+        title={`Escalate row ${(escalate?.index ?? 0) + 1}`}
+        description="The base rate runs until the first increase; from then on the rate goes up by the percent every interval (compounded), up to the lease's End Term. The new rows can still be edited."
+        confirmText={editing ? 'Escalate & Save' : 'Escalate'}
+        widthClassName="max-w-2xl"
+        confirmDisabled={escalatePreview.length < 2 || !escalate || escalate.percent.trim() === '' || !(Number(escalate.percent) > 0)}
+        onCancel={() => setEscalate(null)}
+        onConfirm={() => {
+          if (!escalate) return;
+          const every = Math.floor(Number(escalate.every));
+          const start = Math.floor(Number(escalate.start));
+          const pct = Number(escalate.percent);
+          setShowPropertyErrors(false);
+          setForm((p) => {
+            const made = escalatePropertyRow(p.properties[escalate.index], every, pct, leaseEndYmd, start);
+            const replaced = new Set(overlappedRowIndexes(p.properties, escalate.index, made));
+            return {
+              ...p,
+              properties: p.properties.flatMap((r, ri) => (ri === escalate.index ? made : replaced.has(ri) ? [] : [r])),
+            };
+          });
+          setEscalate(null);
+          // A saved locator: the new rows are saved right away (after this render,
+          // so the save sees them). A New Locator saves them with its first Save.
+          if (editing) setAutoSaveProperties(true);
+          else toast.success('Row escalated — the new rows are saved with the locator.');
+        }}
+      >
+        {escalate ? (
+          <div className="mt-2 flex flex-col gap-2">
+            {(() => {
+              const row = form.properties[escalate.index];
+              return row && (!row.date_from || !row.date_to) ? (
+                <div className="text-[11px] text-red-500">Set this row's Date From and Date To first.</div>
+              ) : row ? (
+                <div className="text-[11px] text-secondary">
+                  {fmtDate(row.date_from)} – {fmtDate(row.date_to)} · {row.type_of_property || 'Property'}
+                </div>
+              ) : null;
+            })()}
+            <div className="grid grid-cols-3 gap-2">
+              <label className="flex flex-col gap-1">
+                <span className="text-[9px] font-semibold uppercase tracking-widest" style={{ color: 'var(--text)' }}>
+                  First increase on month
+                </span>
+                <input
+                  className="app-form-control app-form-control-sm h-9 tabular-nums"
+                  inputMode="numeric"
+                  value={escalate.start}
+                  onChange={(e) => setEscalate((x) => (x ? { ...x, start: e.target.value.replace(/[^\d]/g, '') } : x))}
+                  placeholder="e.g. 37"
+                  title="e.g. 37: months 1–36 at the base rate, the first increase on month 37"
+                />
+              </label>
+              <label className="flex flex-col gap-1">
+                <span className="text-[9px] font-semibold uppercase tracking-widest" style={{ color: 'var(--text)' }}>
+                  Then every (months)
+                </span>
+                <input
+                  className="app-form-control app-form-control-sm h-9 tabular-nums"
+                  inputMode="numeric"
+                  value={escalate.every}
+                  onChange={(e) => setEscalate((x) => (x ? { ...x, every: e.target.value.replace(/[^\d]/g, '') } : x))}
+                  placeholder="e.g. 36"
+                />
+              </label>
+              <label className="flex flex-col gap-1">
+                <span className="text-[9px] font-semibold uppercase tracking-widest" style={{ color: 'var(--text)' }}>
+                  Increase (%)
+                </span>
+                <input
+                  className="app-form-control app-form-control-sm h-9 tabular-nums"
+                  inputMode="decimal"
+                  value={escalate.percent}
+                  onChange={(e) => setEscalate((x) => (x ? { ...x, percent: e.target.value.replace(/[^\d.]/g, '') } : x))}
+                  placeholder="e.g. 10"
+                />
+              </label>
+            </div>
+            {escalateReplaces.length ? (
+              <div className="rounded-lg border px-2 py-1.5 text-[11px]" style={{ borderColor: 'var(--input-border)', color: 'var(--text)' }}>
+                Replaces row{escalateReplaces.length > 1 ? 's' : ''} {escalateReplaces.map((i) => i + 1).join(', ')} — the same property's
+                earlier rows in these dates — so nothing is counted twice.
+              </div>
+            ) : null}
+            {/* Review before saving: each period's rate and MGL, how many months (or
+                years, for a yearly lease) it runs, its subtotal, and the grand total —
+                the same figures the MGL Schedule shows. */}
+            {escalatePreview.length >= 2 ? (() => {
+              const yearly = form.rate_period === 'YEAR';
+              const unit = yearly ? 'yr' : 'mo';
+              const periods = escalatePreview.map((r, k) => {
+                const mglText = r.rate_type === 'STANDARD' ? computeStandardMgl(r) : r.mgl_mo;
+                const mgl = parseAmount(mglText) ?? 0;
+                const currency = (r.rate_type === 'STANDARD' ? r.rate_currency : r.mgl_currency) || 'PHP';
+                const { months } = buildMglSchedule(
+                  [{ no: k + 1, label: '', group: 'g', groupLabel: '', from: r.date_from, to: r.date_to, mgl, currency }],
+                  yearly ? 12 : 1,
+                );
+                const subtotal = months.reduce((sum, m) => sum + (m.totals[currency] ?? 0), 0);
+                const units = months.length;
+                const partial = months.some((m) => m.parts.some((pt) => pt.prorated));
+                return { r, k, mglText, currency, subtotal, units, partial };
+              });
+              const grand = periods.reduce((sum, x) => sum + x.subtotal, 0);
+              const currency = periods[0]?.currency || 'PHP';
+              const th = 'px-2 py-1.5 text-[9px] font-semibold uppercase tracking-wide border-b';
+              return (
+                <div className="max-h-64 overflow-y-auto rounded-lg border" style={{ borderColor: 'var(--input-border)' }}>
+                  <table className="w-full text-[11px] border-collapse">
+                    <thead className="sticky top-0" style={{ backgroundColor: 'var(--control-bg)' }}>
+                      <tr>
+                        <th className={`${th} text-left`} style={{ borderColor: 'var(--input-border)', color: 'var(--text)' }}>Period</th>
+                        <th className={`${th} text-right`} style={{ borderColor: 'var(--input-border)', color: 'var(--text)' }}>Rate/SQM</th>
+                        <th className={`${th} text-right`} style={{ borderColor: 'var(--input-border)', color: 'var(--text)' }}>MGL/{unit.toUpperCase()}</th>
+                        <th className={`${th} text-right`} style={{ borderColor: 'var(--input-border)', color: 'var(--text)' }}>{yearly ? 'Years' : 'Months'}</th>
+                        <th className={`${th} text-right`} style={{ borderColor: 'var(--input-border)', color: 'var(--text)' }}>Subtotal</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {periods.map((x) => (
+                        <tr key={x.k}>
+                          <td className="px-2 py-1 border-b whitespace-nowrap" style={{ borderColor: 'var(--input-border)', color: 'var(--text)' }}>
+                            {fmtDate(x.r.date_from)} – {fmtDate(x.r.date_to)}
+                          </td>
+                          <td className="px-2 py-1 border-b text-right tabular-nums whitespace-nowrap" style={{ borderColor: 'var(--input-border)', color: 'var(--text)' }}>
+                            {x.r.rate_sqm_mo || '—'}
+                            {x.k > 0 && Number(escalate.percent) > 0 ? <span className="ml-1 text-[#15803d]">+{escalate.percent}%</span> : null}
+                          </td>
+                          <td className="px-2 py-1 border-b text-right tabular-nums font-semibold whitespace-nowrap" style={{ borderColor: 'var(--input-border)', color: 'var(--text)' }}>
+                            {x.mglText || '—'}
+                          </td>
+                          <td className="px-2 py-1 border-b text-right tabular-nums" style={{ borderColor: 'var(--input-border)', color: 'var(--text)' }}>
+                            {x.units}
+                            {x.partial ? <span style={{ color: '#b45309' }} title="The last one is prorated (part of a month/year)">*</span> : null}
+                          </td>
+                          <td className="px-2 py-1 border-b text-right tabular-nums whitespace-nowrap" style={{ borderColor: 'var(--input-border)', color: 'var(--text)' }}>
+                            {formatMoney(Math.round(x.subtotal * 100) / 100)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot>
+                      <tr style={{ backgroundColor: 'var(--control-bg)' }}>
+                        <td colSpan={4} className="px-2 py-1.5 text-[11px] font-bold" style={{ color: 'var(--text)' }}>
+                          Grand Total · {periods.length} periods
+                        </td>
+                        <td className="px-2 py-1.5 text-right text-[11px] font-bold tabular-nums whitespace-nowrap" style={{ color: 'var(--text)' }}>
+                          {formatMoney(Math.round(grand * 100) / 100)} {currency}
+                        </td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                  {periods.some((x) => x.partial) ? (
+                    <div className="px-2 py-1 text-[10px] text-secondary">
+                      <span style={{ color: '#b45309' }}>*</span> includes a prorated (partial) {yearly ? 'year' : 'month'}.
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })() : (() => {
+              const row = form.properties[escalate.index];
+              return row?.date_from && row?.date_to && Number(escalate.every) > 0 && Number(escalate.start) > 1 ? (
+                <div className="rounded-lg border px-2 py-1.5 text-[11px]" style={{ borderColor: 'rgba(245,158,11,.35)', backgroundColor: 'rgba(245,158,11,.10)', color: '#b45309' }}>
+                  Nothing to escalate: the lease ends
+                  {leaseEndYmd ? ` (${fmtDate(leaseEndYmd)})` : ''} before month {escalate.start || '—'}. Use an earlier first
+                  increase, or set the lease's End Term.
+                </div>
+              ) : null;
+            })()}
+          </div>
+        ) : null}
+      </ConfirmModal>
+
+      <InvestmentYearsModal
+        open={investmentYearsOpen}
+        years={investmentYearsShown}
+        currentYear={currentLeaseYear}
+        yearStart={(n) => (leaseStartYmd ? fmtDate(utcToYmd(addMonthsUtc(ymdToUtc(leaseStartYmd), (n - 1) * 12))) : '')}
+        totals={{
+          investment_commitment: investmentOverall.investment_commitment ? formatMoney(investmentOverall.investment_commitment) : '',
+          investment_actual: investmentOverall.investment_actual ? formatMoney(investmentOverall.investment_actual) : '',
+          employee_commitment: investmentOverall.employee_commitment
+            ? Number(investmentOverall.employee_commitment).toLocaleString('en-US')
+            : '',
+          employee_actual: investmentOverall.employee_actual ? Number(investmentOverall.employee_actual).toLocaleString('en-US') : '',
+        }}
+        disabled={loadingLocation || formLocked}
+        format={{
+          typing: (key, v) => (key.startsWith('investment') ? formatAmountInput(v) : formatCountInput(v)),
+          leaving: (key, v) => (key.startsWith('investment') ? formatMoney(v) : v),
+        }}
+        onChange={(n, patch) => setInvestmentYear(n, patch)}
+        onAddYear={() => setInvestmentYear(investmentYearsShown.length + 1, {})}
+        onClose={() => setInvestmentYearsOpen(false)}
+      />
+
+      <MglScheduleModal
+        open={mglScheduleRow !== null}
+        period={form.rate_period}
+        locatorName={[
+          form.business_name.trim() || editing?.business_name || '',
+          mglScheduleRow !== null ? `Row ${mglScheduleRow + 1}` : '',
+        ]
+          .filter(Boolean)
+          .join(' · ')}
+        rows={form.properties
+          .map((r, i) => ({ r, i }))
+          .filter(({ i }) => i === mglScheduleRow)
+          .map(({ r, i }): MglSourceRow => ({
+          no: i + 1,
+          label: [r.type_of_property, r.year].filter(Boolean).join(' · ') || `Row ${i + 1}`,
+          // One column per property: same Type of Property and Area (its yearly escalations).
+          group: `${String(r.type_of_property || '').trim().toUpperCase()}|${parseAmount(r.area_sqm) ?? ''}`,
+          groupLabel: [
+            String(r.type_of_property || '').trim() || 'Property',
+            parseAmount(r.area_sqm) !== null ? `${formatIfNumeric(r.area_sqm)} SQM` : '',
+          ]
+            .filter(Boolean)
+            .join(' · '),
+          from: r.date_from,
+          to: r.date_to,
+          mgl: parseAmount(r.rate_type === 'STANDARD' ? computeStandardMgl(r) : r.mgl_mo) ?? NaN,
+          currency: (r.rate_type === 'STANDARD' ? r.rate_currency : r.mgl_currency) || 'PHP',
+        }))}
+        onClose={() => setMglScheduleRow(null)}
+      />
+
       <PropertyTypesModal
         open={propertyTypesOpen}
         onClose={() => setPropertyTypesOpen(false)}
@@ -5374,7 +5931,8 @@ export function ProponentsManagement({
 }
 
 /** An earlier lease's property schedule (A-03), read only. */
-function LeasePropertyTable({ properties }: { properties: any[] }) {
+function LeasePropertyTable({ properties, period }: { properties: any[]; period?: string }) {
+  const per = period === 'YEAR' ? 'YR' : 'MO';
   if (properties.length === 0) {
     return (
       <div className="rounded-lg border border-dashed px-3 py-2.5 text-[11px] text-secondary" style={{ borderColor: 'var(--input-border)' }}>
@@ -5387,7 +5945,7 @@ function LeasePropertyTable({ properties }: { properties: any[] }) {
       <table className="w-full text-xs border-collapse">
         <thead>
           <tr style={THEAD_ROW_STYLE}>
-            {['No.', 'Year', 'Date From', 'Date To', 'Rate', 'Type of Property', 'Area (SQM)', 'Rate/SQM/MO', 'MGL/MO'].map((h) => (
+            {['No.', 'Year', 'Date From', 'Date To', 'Rate', 'Type of Property', 'Area (SQM)', `Rate/SQM/${per}`, `MGL/${per}`].map((h) => (
               <th
                 key={h}
                 className="px-2 py-1.5 text-left font-semibold uppercase tracking-wide text-[9px] border-b"
@@ -5948,7 +6506,7 @@ export function AmountCurrencyBox({
   return (
     <div className={cn('app-form-control app-form-control-sm flex items-stretch p-0 overflow-hidden', className)}>
       <input
-        className="flex-1 min-w-0 border-0 bg-transparent outline-none px-2 py-1 tabular-nums"
+        className="w-0 flex-1 min-w-0 border-0 bg-transparent outline-none px-2 py-1 tabular-nums"
         style={{ color: amountDisabled ? 'var(--text-muted)' : 'var(--text)' }}
         value={amount}
         disabled={disabled || amountDisabled}
@@ -5970,7 +6528,7 @@ export function AmountCurrencyBox({
           {currency || 'PHP'}
         </div>
       ) : (
-      <div className="shrink-0 flex items-stretch" style={{ borderLeft: '1px solid var(--input-border)', width: '5.5rem' }} title={currencyTitle}>
+      <div className="shrink-0 flex items-stretch" style={{ borderLeft: '1px solid var(--input-border)', width: '4.75rem' }} title={currencyTitle}>
         <AppSelect
           options={CURRENCY_OPTIONS.map((c) => ({ value: c, label: c }))}
           value={currency}

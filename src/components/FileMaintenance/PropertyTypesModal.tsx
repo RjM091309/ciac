@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Check, Pencil, Plus, RotateCcw, Settings2, Trash2, X } from 'lucide-react';
 import { toast } from 'sonner';

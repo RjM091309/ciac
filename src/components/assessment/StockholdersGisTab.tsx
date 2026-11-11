@@ -19,7 +19,6 @@ import {
   STOCKHOLDER_RULES,
   blankStockholderRow,
   formatMoney,
-  invalidRowKeys,
   mapStockholderRows,
   registrationLabels,
   registrationTypeOf,

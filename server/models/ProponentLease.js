@@ -19,7 +19,7 @@
  *
  * Ref. Codes are never reused (see Proponent.assertUniqueField).
  */
-const { selectData, updateSchema } = require("../config/database");
+const { selectData, updateData, updateSchema } = require("../config/database");
 
 function toInt(v) {
   if (v === null || v === undefined || v === "") return null;
@@ -73,7 +73,37 @@ async function createSchema() {
     IF COL_LENGTH('dbo.proponent_properties', 'lease_id') IS NULL
       ALTER TABLE dbo.proponent_properties ADD lease_id INT NULL;
   `);
+  // Billing basis of the lease's Property Schedule (4-04): 'MONTH' (Rate/SQM/MO,
+  // MGL/MO) or 'YEAR' (Rate/SQM/YR, MGL/YR). NULL = MONTH (every older lease).
+  await updateSchema(`
+    IF COL_LENGTH('dbo.proponent_leases', 'rate_period') IS NULL
+      ALTER TABLE dbo.proponent_leases ADD rate_period NVARCHAR(10) NULL;
+  `);
   await backfill();
+}
+
+/** 'MONTH' | 'YEAR' (anything else = MONTH). */
+const ratePeriodOf = (v) => (String(v || "").toUpperCase() === "YEAR" ? "YEAR" : "MONTH");
+
+/** The current lease's billing basis. */
+async function currentRatePeriod(proponentId) {
+  await ensureSchema();
+  const rows = await selectData(
+    `SELECT TOP (1) rate_period FROM dbo.proponent_leases WHERE proponent_id = @param0 AND is_current = 1 AND is_active = 1 ORDER BY id DESC`,
+    [toInt(proponentId)]
+  );
+  return ratePeriodOf(rows[0]?.rate_period);
+}
+
+/** Sets the current lease's billing basis (creating the lease row if needed). */
+async function setCurrentRatePeriod(proponentId, period, actorId = null) {
+  await ensureSchema();
+  const leaseId = await currentLeaseId(proponentId);
+  if (!leaseId) return;
+  await updateData(
+    `UPDATE dbo.proponent_leases SET rate_period = @param1, updated_by = @param2, updated_at = GETDATE() WHERE id = @param0`,
+    [leaseId, ratePeriodOf(period), toInt(actorId)]
+  );
 }
 
 /** One-time, per locator: a locator with no lease rows gets them — one per
@@ -235,10 +265,11 @@ async function recordApprovedApplication(applicationId, actorId = null) {
       ]);
     }
     const inserted = await tx.query(
-      `INSERT INTO dbo.proponent_leases (proponent_id, contract_id, application_id, contract_type_id, start_term, end_term, is_current, created_by)
+      `INSERT INTO dbo.proponent_leases (proponent_id, contract_id, application_id, contract_type_id, start_term, end_term, is_current, created_by, rate_period)
        OUTPUT INSERTED.id
-       VALUES (@param0, @param1, @param2, @param3, CAST(@param4 AS DATE), CAST(@param5 AS DATE), 1, @param6)`,
-      [pid, app.contract_id, app.id, typeId, start, end, toInt(actorId)]
+       VALUES (@param0, @param1, @param2, @param3, CAST(@param4 AS DATE), CAST(@param5 AS DATE), 1, @param6,
+               (SELECT rate_period FROM dbo.proponent_leases WHERE id = @param7))`,
+      [pid, app.contract_id, app.id, typeId, start, end, toInt(actorId), curId ?? null]
     );
     const newId = inserted.recordset?.[0]?.id;
     if (curId && newId) {
@@ -266,7 +297,7 @@ async function listForProponent(proponentId) {
   const pid = toInt(proponentId);
   await currentLeaseId(pid);
   const leases = await selectData(
-    `SELECT l.id, l.ref_code, l.is_current, l.contract_id, l.application_id, l.date_signed,
+    `SELECT l.id, l.ref_code, l.is_current, l.contract_id, l.application_id, l.date_signed, l.rate_period,
             CAST(COALESCE(c.effective_start, l.start_term) AS DATE) AS start_term,
             CAST(COALESCE(c.effective_end, l.end_term) AS DATE) AS end_term,
             c.contract_no, a.application_no, a.is_renewal, toc.name AS contract_type_name
@@ -300,10 +331,19 @@ async function listForProponent(proponentId) {
     is_renewal: Boolean(l.is_renewal),
     contract_type_name: l.contract_type_name ?? null,
     date_signed: ymd(l.date_signed),
+    rate_period: ratePeriodOf(l.rate_period),
     start_term: ymd(l.start_term),
     end_term: ymd(l.end_term),
     properties: l.is_current ? undefined : props.filter((p) => p.lease_id === l.id),
   }));
 }
 
-module.exports = { ensureSchema, currentLeaseId, syncCurrentFromProponent, recordApprovedApplication, listForProponent };
+module.exports = {
+  ensureSchema,
+  currentLeaseId,
+  syncCurrentFromProponent,
+  recordApprovedApplication,
+  listForProponent,
+  currentRatePeriod,
+  setCurrentRatePeriod,
+};

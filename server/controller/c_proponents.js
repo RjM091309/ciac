@@ -557,6 +557,20 @@ exports.getById = async (req, res) => {
       console.error("GIS document lookup error:", error);
     }
 
+    let rate_period = "MONTH";
+    try {
+      rate_period = await require("../models/ProponentLease").currentRatePeriod(id);
+    } catch (error) {
+      console.error("Rate period lookup error:", error);
+    }
+
+    let investment_years = [];
+    try {
+      investment_years = await require("../models/ProponentInvestmentYear").getForProponent(id);
+    } catch (error) {
+      console.error("Investment years lookup error:", error);
+    }
+
     let development_timeline = [];
     try {
       development_timeline = await require("../models/ProponentMilestone").getForProponent(id);
@@ -564,7 +578,7 @@ exports.getById = async (req, res) => {
       console.error("Development timeline lookup error:", error);
     }
 
-    return res.json({ success: true, data: { ...row, gis_document, development_timeline } });
+    return res.json({ success: true, data: { ...row, gis_document, development_timeline, rate_period, investment_years } });
   } catch (error) {
     console.error("Get proponent error:", error);
     return res.status(500).json({ success: false, message: publicErrorMessage(error) });
@@ -1017,6 +1031,10 @@ exports.create = async (req, res) => {
     let accountOfficerId = toNullableId(account_officer_id);
     const ownershipProblem = require("../models/Stockholder").ownershipError(stockholders);
     if (ownershipProblem) return res.status(400).json({ success: false, message: ownershipProblem });
+    if (req.body?.investment_years !== undefined) {
+      const yearsProblem = require("../models/ProponentInvestmentYear").validate(req.body.investment_years);
+      if (yearsProblem) return res.status(400).json({ success: false, message: yearsProblem });
+    }
     // A Level 2 Account Officer's new locator is always their own.
     const ownOnly = await accountOfficerScope(req);
     if (ownOnly !== null) accountOfficerId = ownOnly;
@@ -1098,6 +1116,14 @@ exports.create = async (req, res) => {
       // modal — every locator created here is a manual registration.
       is_manual_registration: true,
     });
+    // Performance Commitment per lease year (4-10), when the form sends it.
+    if (row?.id && Array.isArray(req.body?.investment_years)) {
+      await require("../models/ProponentInvestmentYear").saveForProponent(row.id, req.body.investment_years, req.user?.id ?? null);
+    }
+    // Billing basis of the new lease's Property Schedule (4-04).
+    if (row?.id && req.body?.rate_period != null) {
+      await require("../models/ProponentLease").setCurrentRatePeriod(row.id, req.body.rate_period, req.user?.id ?? null);
+    }
     // SEC or DTI (Registration Information card) — not a createProponent column.
     if (row?.id && req.body?.registration_type !== undefined) {
       await Proponent.updateProponent(row.id, { registration_type: req.body.registration_type });
@@ -1190,8 +1216,20 @@ exports.saveContacts = sectionHandler("contacts", "PROPONENT_CONTACTS_UPDATED", 
 });
 
 exports.saveProperties = sectionHandler("properties", "PROPONENT_PROPERTIES_UPDATED", {
-  validate: (b) => (Array.isArray(b.properties) ? null : "properties must be a list"),
-  save: (id, b, actor) => Proponent.saveProperties(id, b.properties, actor),
+  validate: (b) => {
+    if (!Array.isArray(b.properties)) return "properties must be a list";
+    if (b.rate_period != null && !["MONTH", "YEAR"].includes(String(b.rate_period).toUpperCase())) {
+      return "rate_period must be MONTH or YEAR";
+    }
+    return null;
+  },
+  save: async (id, b, actor) => {
+    const data = await Proponent.saveProperties(id, b.properties, actor);
+    if (!data) return null;
+    const ProponentLease = require("../models/ProponentLease");
+    if (b.rate_period != null) await ProponentLease.setCurrentRatePeriod(id, b.rate_period, actor);
+    return { ...data, rate_period: await ProponentLease.currentRatePeriod(id) };
+  },
 });
 
 // Performance Commitment card: investment / employees, plus the Development
@@ -1203,29 +1241,39 @@ exports.saveInvestment = sectionHandler("investment", "PROPONENT_INVESTMENT_UPDA
       const problem = ProponentMilestone.validate(b.development_timeline);
       if (problem) return problem;
     }
-    return ["investment_commitment", "investment_actual", "employee_commitment", "employee_actual", "development_timeline"].some(
+    if (b.investment_years !== undefined) {
+      const problem = require("../models/ProponentInvestmentYear").validate(b.investment_years);
+      if (problem) return problem;
+    }
+    return ["investment_commitment", "investment_actual", "employee_commitment", "employee_actual", "development_timeline", "investment_years"].some(
       (k) => b[k] !== undefined
     )
       ? null
       : "at least one investment field is required";
   },
   save: async (id, b, actor) => {
-    const data = await Proponent.saveInvestment(
-      id,
-      {
-        investment_commitment: b.investment_commitment,
-        investment_actual: b.investment_actual,
-        employee_commitment: b.employee_commitment,
-        employee_actual: b.employee_actual,
-      },
-      actor
-    );
+    // Per lease year (4-10): the years are saved, and the overall figures are
+    // what they add up to (investment summed, employees the highest year).
+    const ProponentInvestmentYear = require("../models/ProponentInvestmentYear");
+    const years = Array.isArray(b.investment_years) ? b.investment_years : null;
+    const overall = years
+      ? ProponentInvestmentYear.totals(years)
+      : {
+          investment_commitment: b.investment_commitment,
+          investment_actual: b.investment_actual,
+          employee_commitment: b.employee_commitment,
+          employee_actual: b.employee_actual,
+        };
+    const data = await Proponent.saveInvestment(id, overall, actor);
     if (!data) return null;
+    const investment_years = years
+      ? await ProponentInvestmentYear.saveForProponent(id, years, actor)
+      : await ProponentInvestmentYear.getForProponent(id);
     const ProponentMilestone = require("../models/ProponentMilestone");
     const development_timeline = Array.isArray(b.development_timeline)
       ? await ProponentMilestone.saveForProponent(id, b.development_timeline, actor)
       : await ProponentMilestone.getForProponent(id);
-    return { ...data, development_timeline };
+    return { ...data, development_timeline, investment_years };
   },
 });
 
@@ -1458,6 +1506,10 @@ exports.update = async (req, res) => {
     }
     const ownershipProblem = require("../models/Stockholder").ownershipError(stockholders);
     if (ownershipProblem) return res.status(400).json({ success: false, message: ownershipProblem });
+    if (req.body?.investment_years !== undefined) {
+      const yearsProblem = require("../models/ProponentInvestmentYear").validate(req.body.investment_years);
+      if (yearsProblem) return res.status(400).json({ success: false, message: yearsProblem });
+    }
     // Registered Locator only lists locators with an Account Officer, so it
     // can be changed but not cleared — and a Level 2 Account Officer can't
     // hand their locator to someone else (Level 1 assigns).
@@ -1551,6 +1603,13 @@ exports.update = async (req, res) => {
       await Proponent.setManualClassification(id, { industry_code: classification.industryCode });
     }
     await applyLeaseTerm(id, leaseTerm, req.user?.id ?? null);
+    if (req.body?.rate_period != null) {
+      await require("../models/ProponentLease").setCurrentRatePeriod(id, req.body.rate_period, req.user?.id ?? null);
+    }
+    // Performance Commitment per lease year (4-10), when the form sends it.
+    if (Array.isArray(req.body?.investment_years)) {
+      await require("../models/ProponentInvestmentYear").saveForProponent(id, req.body.investment_years, req.user?.id ?? null);
+    }
     const refreshed = await Proponent.getProponentById(id);
     await notifyOfficerChange({
       proponent: refreshed || row,
