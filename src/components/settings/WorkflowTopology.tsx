@@ -224,12 +224,13 @@ const SCENARIOS: Scenario[] = [
       {
         lane: 'ao2',
         title: 'Registered Locator',
-        auto: ["Adds the locator to Registered Locator (one row), with the lease term from the contract; from now on it's shown by its LOC-… Ref No (also on Proponent Accounts).", "Scopes it so an Account Officer sees only their own locators.", "Counts the permit down to expiry; within 6 months it shows on Renewal Tracking and in Needs Attention.", "At 6 months left, emails the locator to renew (and tells the Account Officer), then a follow-up every month until the renewal is filed — each one logged."],
+        auto: ["Adds the locator to Registered Locator (one row), with the lease term from the contract; from now on it's shown by its LOC-… Ref No (also on Proponent Accounts).", "Scopes it so an Account Officer sees only their own locators.", "Counts the permit down to expiry; within 6 months it shows on Renewal Tracking and in Needs Attention.", "At 6 months left, emails the locator to renew (and tells the Account Officer), then a follow-up every month until the renewal is filed — each one logged.", "Every month, Custom Report templates ticked “Recurring every month” are emailed as Excel to every Account Officer (Level 2: their own locators only)."],
         status: 'One row per locator',
         where: 'Registered Locator',
         details: [
-          'The locator now appears in Registered Locator; an Account Officer sees only their own locators.',
-          'The Account Officer types the lease’s Ref. Code (never reused) and Date Signed under Lease Agreements; the proponent details the BDO encoded are already there.',
+          'The locator now appears in Registered Locator; an Account Officer sees only their own locators. The list shows each locator’s Assigned AO (“Unassigned” when none) and filters by Industry and Account Officer.',
+          'The Account Officer types the lease’s Ref. Code (never reused, in the locator header) and Date Signed; the proponent details the BDO encoded are already there.',
+          'Profile tab: Property Schedule — Monthly or Yearly rate, Escalate a row (e.g. +10% every 36 months) and its MGL Schedule month by month — and Performance Commitment per lease year: Commitment and Actual for investment and employees, with progress.',
           'Lease Agreements shows the current lease; past leases are folded under “View past leases”, and each opens read only (its terms and property schedule) in a panel over the locator.',
           'Extension Date: each extension (date and remarks, under the current lease) is added as its own row and kept as history — the latest shows first, earlier ones under “View past extensions”; removing one is a soft delete, and adds/removals are in the Audit Log.',
           'Sub-Lease: each sub-lessee is a locator of its own — added (or linked) from the Sub-Lessees card of the locator it sub-leases from, and opened in its own panel over that locator.',
