@@ -608,6 +608,58 @@ select.input-field:-webkit-autofill:focus {
 }
 
 /*
+ * Custom Report: List <-> Totals. The new view fades and rises in; the
+ * setup sidebar slides back in from the left when returning to List.
+ */
+@keyframes mode-swap-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes mode-side-in {
+  from { opacity: 0; transform: translateX(-12px); }
+  to { opacity: 1; transform: none; }
+}
+.mode-swap { animation: mode-swap-in 220ms cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+.mode-side { animation: mode-side-in 240ms cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+@media (prefers-reduced-motion: reduce) {
+  .mode-swap, .mode-side { animation: none; }
+}
+
+/*
+ * Tables / panels that scroll on their own (Custom Report): the scrollbar
+ * (vertical and horizontal) only shows while the pointer is over it — same
+ * thin ash thumb as the sidebar.
+ */
+.hover-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+  transition: scrollbar-color 160ms ease-out;
+}
+.hover-scrollbar:hover,
+.hover-scrollbar:focus-within {
+  scrollbar-color: color-mix(in oklab, var(--foreground) 22%, transparent) transparent;
+}
+.hover-scrollbar::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.hover-scrollbar::-webkit-scrollbar-track,
+.hover-scrollbar::-webkit-scrollbar-corner {
+  background: transparent;
+}
+.hover-scrollbar::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 9999px;
+}
+.hover-scrollbar:hover::-webkit-scrollbar-thumb,
+.hover-scrollbar:focus-within::-webkit-scrollbar-thumb {
+  background: color-mix(in oklab, var(--foreground) 20%, transparent);
+}
+.hover-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in oklab, var(--foreground) 34%, transparent);
+}
+
+/*
  * Fades the bottom edge of an overflowing list so a partially-clipped next
  * row reads as an intentional scroll cue instead of an abruptly cut-off card.
  */

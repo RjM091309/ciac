@@ -31,8 +31,9 @@ import { cn } from '../../lib/utils';
 import { csvEscape, downloadBlob } from './reportUtils';
 import { downloadPdf, downloadWorkbook, xlDate, type PdfSection, type XlsxColumn, type XlsxGroup, type XlsxSheet } from './reportExports';
 import { fmtDate } from './reportParts';
-import { QuickTotal } from './QuickTotal';
+import { QuickTotal, defaultTotalsConfig, type TotalsConfig } from './QuickTotal';
 import { MonthPicker } from '../ui/MonthPicker';
+import { ConfirmModal } from '../ui/ConfirmModal';
 
 // Reports & Analytics → Custom Report: the user picks what to report on
 // (dataset), which columns, and the filters; the rows show as a preview and
@@ -40,7 +41,7 @@ import { MonthPicker } from '../ui/MonthPicker';
 // user's own templates. Server: models/CustomReport.js (columns and filters
 // are a fixed catalog; a Level 2 Account Officer sees only their locators).
 
-type ColumnDef = { key: string; label: string; type: 'text' | 'date' | 'number' };
+type ColumnDef = { key: string; label: string; type: 'text' | 'date' | 'number'; /** Heading under Columns → Add a column. */ group?: string };
 type FilterDef = { key: string; label: string; type: 'select' | 'date'; options?: { value: string; label: string }[] };
 type Dataset = { key: string; label: string; description: string; columns: ColumnDef[]; defaults: string[]; filters: FilterDef[] };
 // missing: blank rows per column among the filtered rows (Missing filter aside).
@@ -49,7 +50,14 @@ type Template = {
   id: number;
   name: string;
   dataset: string;
-  config: { columns?: string[]; filters?: Record<string, string>; sort?: Sort | null };
+  config: {
+    columns?: string[];
+    filters?: Record<string, string>;
+    sort?: Sort | null;
+    /** Opens in List or Totals; Totals' sentence ("Total … by … as of …"). */
+    mode?: 'list' | 'totals';
+    totals?: TotalsConfig | null;
+  };
   /** Other Reports users can open it. */
   shared: boolean;
   /** The user's own (only the owner can change or delete it). */
@@ -83,7 +91,7 @@ async function api<T = any>(path: string, init?: RequestInit): Promise<T> {
 
 
 /** Number columns that make sense to add up (not percentages). */
-const summable = (c: ColumnDef) => c.type === 'number' && !/%/.test(c.label) && !/days left/i.test(c.label);
+const summable = (c: ColumnDef) => c.type === 'number' && !/%|days left|months/i.test(c.label);
 const fmtNum = (n: number) => n.toLocaleString('en-US', { maximumFractionDigits: 2 });
 
 function cellText(v: string | number | null, type: ColumnDef['type']) {
@@ -99,6 +107,13 @@ export function CustomReport() {
   const [datasetKey, setDatasetKey] = useState('locators');
   const [columns, setColumns] = useState<string[]>([]);
   const [filters, setFilters] = useState<Record<string, string>>({});
+  // List (the rows) or Totals ("Total ___ by ___ as of [year]").
+  const [mode, setMode] = useState<'list' | 'totals'>('list');
+  const [totalsConfig, setTotalsConfig] = useState<TotalsConfig>(defaultTotalsConfig);
+  // Columns → Add a column: the groups opened (all show while searching).
+  const [openGroups, setOpenGroups] = useState<string[]>([]);
+  // "More filters" opened (the ones past the first four).
+  const [moreFilters, setMoreFilters] = useState(false);
   const [sort, setSort] = useState<Sort>(null);
   const [columnSearch, setColumnSearch] = useState('');
   const [result, setResult] = useState<Result | null>(null);
@@ -115,6 +130,7 @@ export function CustomReport() {
   const [saveTo, setSaveTo] = useState('');
   const [recipients, setRecipients] = useState<{ name: string; email: string; own_only: boolean }[] | null>(null);
   const [sendingTest, setSendingTest] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
   // Summary: rows counted by one column ('' = off).
   const [groupBy, setGroupBy] = useState('');
   // Results table: a quick search over the rows, and pages.
@@ -148,6 +164,7 @@ export function CustomReport() {
     setDatasetKey(key);
     setColumns(d.defaults);
     setFilters({});
+    setOpenGroups([]);
     setSort(null);
     setGroupBy('');
     setTemplateId('');
@@ -203,6 +220,8 @@ export function CustomReport() {
     setColumns((t.config.columns || []).filter((k) => d.columns.some((c) => c.key === k)));
     setFilters(t.config.filters || {});
     setSort(t.config.sort || null);
+    setMode(t.config.mode === 'totals' ? 'totals' : 'list');
+    setTotalsConfig(t.config.totals ? { ...defaultTotalsConfig(), ...t.config.totals } : defaultTotalsConfig());
   }
 
   // Saving under an existing name of the user's replaces that template.
@@ -219,7 +238,17 @@ export function CustomReport() {
     try {
       const json = await api('/api/reports/custom/templates', {
         method: 'POST',
-        body: JSON.stringify({ name, dataset: dataset.key, columns, filters, sort, shared, ...schedule }),
+        body: JSON.stringify({
+          name,
+          dataset: dataset.key,
+          columns,
+          filters,
+          sort,
+          shared,
+          ...schedule,
+          mode,
+          totals: mode === 'totals' ? totalsConfig : null,
+        }),
       });
       setTemplates(json.data.templates);
       setTemplateId(String(json.data.id));
@@ -446,6 +475,13 @@ export function CustomReport() {
 
   const q = columnSearch.trim().toLowerCase();
   const available = dataset.columns.filter((c) => !columns.includes(c.key) && (!q || c.label.toLowerCase().includes(q)));
+  const availableGroups: [string, ColumnDef[]][] = [];
+  for (const c of available) {
+    const g = c.group || 'Columns';
+    const entry = availableGroups.find(([name]) => name === g);
+    if (entry) entry[1].push(c);
+    else availableGroups.push([g, [c]]);
+  }
   const shownRows = searchedRows.slice(pageStart, pageStart + pageSize);
   const activeFilters = Object.values(filters).filter(Boolean).length;
   const panel = 'rounded-2xl border flex flex-col';
@@ -482,10 +518,33 @@ export function CustomReport() {
       .filter((o) => counts[o.value] || o.value === filters.missing)
       .map((o) => ({ ...o, label: `${o.label} (${(counts[o.value] || 0).toLocaleString('en-US')})` }));
   };
-  const filterLabel = (f: FilterDef) => f.options?.find((o) => o.value === filters[f.key])?.label || (f.type === 'date' ? fmtDate(filters[f.key]) : filters[f.key]);
+  // The first four filters always show; the rest under "More filters" — a
+  // hidden one that has a value (e.g. from a template) shows anyway.
+  const slotKey = (slot: FilterSlot) => (slot.kind === 'range' ? slot.from.key : slot.f.key);
+  const filterValueSet = (slot: FilterSlot) =>
+    slot.kind === 'range' ? Boolean(filters[slot.from.key] || filters[slot.to.key]) : Boolean(filters[slot.f.key]);
+  const MAIN_FILTERS = 4;
+  // Totals ignore "Missing data in" (it narrows the List's rows only), so it isn't offered there.
+  const modeSlots = mode === 'totals' ? filterSlots.filter((slot) => slotKey(slot) !== 'missing') : filterSlots;
+  const shownSlots = modeSlots.filter((slot, i) => i < MAIN_FILTERS || moreFilters || filterValueSet(slot));
+  const moreSlots = modeSlots.slice(MAIN_FILTERS);
 
   return (
     <div className="flex flex-col gap-4">
+      <ConfirmModal
+        open={confirmDelete}
+        danger
+        title="Delete template?"
+        description={`"${currentTemplate?.name || ''}" will be deleted${currentTemplate?.shared ? ' for everyone it is shared with' : ''}${
+          currentTemplate?.recurring ? ', and its monthly email stops' : ''
+        }. This can't be undone.`}
+        confirmText="Delete"
+        onCancel={() => setConfirmDelete(false)}
+        onConfirm={async () => {
+          setConfirmDelete(false);
+          await deleteTemplate();
+        }}
+      />
       {/* Templates */}
       <div className="flex flex-col gap-3 rounded-2xl border px-4 py-3 sm:flex-row sm:flex-wrap sm:items-center" style={panelStyle}>
         <div className="flex min-w-0 flex-1 items-center gap-3">
@@ -510,7 +569,9 @@ export function CustomReport() {
                 return {
                   value: String(t.id),
                   label: t.name,
-                  detail: `${t.mine ? `${what}${t.shared ? ' · Shared' : ''}` : `${what} · by ${t.owner || 'another user'}`}${t.recurring ? ' · Monthly' : ''}`,
+                  detail: `${t.mine ? `${what}${t.shared ? ' · Shared' : ''}` : `${what} · by ${t.owner || 'another user'}`}${
+                    t.config.mode === 'totals' ? ' · Totals' : ''
+                  }${t.recurring ? ' · Monthly' : ''}`,
                 };
               })}
               value={templateId}
@@ -519,22 +580,25 @@ export function CustomReport() {
               isClearable
             />
           </div>
-          {currentTemplate?.mine ? (
-            <button
-              type="button"
-              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-secondary transition-colors hover:bg-red-50 hover:text-red-500"
-              onClick={() => void deleteTemplate()}
-              title="Delete this template"
-            >
-              <Trash2 size={14} />
-            </button>
-          ) : currentTemplate ? (
+          {currentTemplate && !currentTemplate.mine ? (
             <span className="hidden text-[11px] text-secondary md:inline">by {currentTemplate.owner || 'another user'} · save a copy to change it</span>
           ) : null}
         </div>
         {saveName === null ? (
           <>
             <div className="flex flex-wrap items-center gap-2">
+              {/* Delete sits with the template's other actions, set apart (and quieter) than Save. */}
+              {currentTemplate?.mine ? (
+                <button
+                  type="button"
+                  className="inline-flex items-center gap-1.5 rounded-lg border px-3 py-2 text-[12px] font-semibold transition-colors hover:bg-red-50"
+                  style={{ borderColor: '#ef444480', color: '#dc2626' }}
+                  onClick={() => setConfirmDelete(true)}
+                  title={`Delete "${currentTemplate.name}"`}
+                >
+                  <Trash2 size={13} /> Delete
+                </button>
+              ) : null}
               <button
                 type="button"
                 className={btn}
@@ -640,7 +704,7 @@ export function CustomReport() {
             </div>
 
             {/* Options: Share / Recurring every month */}
-            <div className="grid grid-cols-1 gap-2 lg:grid-cols-2">
+            <div className="grid grid-cols-1 items-start gap-2 lg:grid-cols-2">
               <OptionCard
                 checked={saveShared}
                 onChange={setSaveShared}
@@ -712,54 +776,23 @@ export function CustomReport() {
         )}
       </div>
 
-      {/* "Total ___ by ___ as of [year]": the Registered Locators filters apply. */}
-      <QuickTotal
-        filters={datasetKey === 'locators' ? Object.fromEntries(Object.entries(filters).filter(([k]) => k !== 'missing')) : {}}
-        filterText={
-          datasetKey === 'locators'
-            ? (dataset?.filters || [])
-                .filter((f) => f.key !== 'missing' && filters[f.key])
-                .map((f) => `${f.label}: ${f.options?.find((o) => o.value === filters[f.key])?.label || (f.type === 'date' ? fmtDate(filters[f.key]) : filters[f.key])}`)
-                .join(' · ')
-            : ''
-        }
-      />
-
-      <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-[20rem_minmax(0,1fr)]">
-        {/* Setup: a sticky sidebar that scrolls on its own. */}
-        <div className="flex flex-col gap-4 xl:sticky xl:top-4 xl:max-h-[calc(100vh-2rem)] xl:overflow-y-auto scrollbar-hide">
+      <div className={cn('grid grid-cols-1 items-start gap-4', mode === 'list' && 'xl:grid-cols-[20rem_minmax(0,1fr)]')}>
+        {/* Setup: a sticky sidebar that scrolls on its own. Totals don't use the
+            dataset or the columns, so it's hidden there (the table goes full width). */}
+        <div
+          key={`side-${mode}`}
+          className={cn('mode-side flex flex-col gap-4 xl:sticky xl:top-4 xl:max-h-[calc(100vh-2rem)] xl:overflow-y-auto scrollbar-hide', mode === 'totals' && 'hidden')}
+        >
           <div className={panel} style={panelStyle}>
             <StepHead n={1} icon={Database} title="Report on" style={headTint} />
             <div className="flex flex-col gap-1.5 p-3">
-              {datasets.map((d) => {
-                const on = d.key === datasetKey;
-                return (
-                  <button
-                    key={d.key}
-                    type="button"
-                    onClick={() => pickDataset(d.key)}
-                    className="flex items-start gap-2.5 rounded-xl border px-3 py-2 text-left transition-colors hover:bg-[var(--selected-bg)]"
-                    style={
-                      on
-                        ? { borderColor: 'var(--nav-active-bg)', backgroundColor: 'color-mix(in oklab, var(--nav-active-bg) 7%, transparent)' }
-                        : { borderColor: 'var(--border-subtle)' }
-                    }
-                  >
-                    <span
-                      className="mt-0.5 flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full border-2"
-                      style={{ borderColor: on ? 'var(--nav-active-bg)' : 'var(--border)' }}
-                    >
-                      {on ? <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: 'var(--nav-active-bg)' }} /> : null}
-                    </span>
-                    <span className="min-w-0">
-                      <span className="block text-[12.5px] font-semibold" style={{ color: 'var(--text)' }}>
-                        {d.label}
-                      </span>
-                      <span className="block text-[10.5px] leading-snug text-secondary">{d.description}</span>
-                    </span>
-                  </button>
-                );
-              })}
+              <AppSelect
+                isClearable={false}
+                value={datasetKey}
+                onChange={(v) => v && pickDataset(String(v))}
+                options={datasets.map((d) => ({ value: d.key, label: d.label }))}
+              />
+              <span className="px-1 text-[10.5px] leading-snug text-secondary">{dataset.description}</span>
             </div>
           </div>
 
@@ -838,20 +871,61 @@ export function CustomReport() {
                     onChange={(e) => setColumnSearch(e.target.value)}
                   />
                 </div>
-                <div className="flex flex-wrap gap-1.5">
-                  {available.map((c) => (
-                    <button
-                      key={c.key}
-                      type="button"
-                      onClick={() => toggleColumn(c.key)}
-                      className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] hover:border-[var(--nav-active-bg)]"
-                      style={{ borderColor: 'var(--border-subtle)', color: 'var(--text)', backgroundColor: 'var(--surface)' }}
-                    >
-                      <Plus size={10} className="text-secondary" /> {c.label}
-                    </button>
-                  ))}
-                  {!available.length ? <span className="text-[11px] text-secondary">{q ? 'No match.' : 'Every column is added.'}</span> : null}
-                </div>
+                {/* Grouped (Locator, Lease, Capital, …), each opened on a click; a
+                    search shows every match. One group only: just the chips. */}
+                {availableGroups.length > 1 ? (
+                  <div className="flex flex-col">
+                    {availableGroups.map(([group, cols]) => {
+                      const open = Boolean(q) || openGroups.includes(group);
+                      return (
+                        <div key={group} className="border-t first:border-t-0" style={{ borderColor: 'var(--border-subtle)' }}>
+                          <button
+                            type="button"
+                            className="flex w-full items-center gap-1.5 py-1.5 text-left text-[11px] font-semibold"
+                            style={{ color: 'var(--text)' }}
+                            onClick={() => setOpenGroups((cur) => (cur.includes(group) ? cur.filter((g) => g !== group) : [...cur, group]))}
+                          >
+                            {open ? <ChevronUp size={12} className="text-secondary" /> : <ChevronDown size={12} className="text-secondary" />}
+                            <span className="flex-1">{group}</span>
+                            <span className="rounded-full px-1.5 text-[10px] tabular-nums text-secondary" style={{ backgroundColor: 'var(--control-bg)' }}>
+                              {cols.length}
+                            </span>
+                          </button>
+                          {open ? (
+                            <div className="flex flex-wrap gap-1.5 pb-2">
+                              {cols.map((c) => (
+                                <button
+                                  key={c.key}
+                                  type="button"
+                                  onClick={() => toggleColumn(c.key)}
+                                  className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] hover:border-[var(--nav-active-bg)]"
+                                  style={{ borderColor: 'var(--border-subtle)', color: 'var(--text)', backgroundColor: 'var(--surface)' }}
+                                >
+                                  <Plus size={10} className="text-secondary" /> {c.label}
+                                </button>
+                              ))}
+                            </div>
+                          ) : null}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="flex flex-wrap gap-1.5">
+                    {available.map((c) => (
+                      <button
+                        key={c.key}
+                        type="button"
+                        onClick={() => toggleColumn(c.key)}
+                        className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] hover:border-[var(--nav-active-bg)]"
+                        style={{ borderColor: 'var(--border-subtle)', color: 'var(--text)', backgroundColor: 'var(--surface)' }}
+                      >
+                        <Plus size={10} className="text-secondary" /> {c.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {!available.length ? <span className="text-[11px] text-secondary">{q ? 'No match.' : 'Every column is added.'}</span> : null}
               </div>
             </div>
           </div>
@@ -862,30 +936,50 @@ export function CustomReport() {
           <div className="flex flex-col gap-3 border-b px-4 py-3 sm:flex-row sm:items-center" style={{ borderColor: 'var(--border-subtle)' }}>
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2">
-                <span className="text-[15px] font-bold" style={{ color: 'var(--text)' }}>
-                  {reportTitle}
-                </span>
-                {result ? (
-                  <span
-                    className="rounded-full px-2 py-0.5 text-[10.5px] font-semibold tabular-nums"
-                    style={{ backgroundColor: 'color-mix(in oklab, var(--nav-active-bg) 10%, transparent)', color: 'var(--text)' }}
-                  >
-                    {result.total.toLocaleString('en-US')} row{result.total === 1 ? '' : 's'}
-                  </span>
-                ) : null}
+                {/* List = the rows; Totals = "Total ___ by ___ as of [year]". */}
+                <div className="inline-flex gap-1 rounded-xl p-1" style={{ backgroundColor: 'var(--control-bg)' }} role="tablist">
+                  {(
+                    [
+                      ['list', 'List', 'Every row', FileText],
+                      ['totals', 'Totals', 'Sum by group', Sigma],
+                    ] as const
+                  ).map(([key, label, hint, Icon]) => (
+                    <button
+                      key={key}
+                      type="button"
+                      role="tab"
+                      aria-selected={mode === key}
+                      onClick={() => setMode(key)}
+                      className="inline-flex items-center gap-2.5 rounded-lg px-4 py-2 text-left transition-all duration-200 hover:text-[var(--text)]"
+                      style={
+                        mode === key
+                          ? { backgroundColor: 'var(--surface)', color: 'var(--text)', boxShadow: '0 1px 3px rgb(0 0 0 / 0.12)' }
+                          : { color: 'var(--text-muted)' }
+                      }
+                    >
+                      <Icon size={17} />
+                      <span className="flex flex-col leading-tight">
+                        <span className="text-[14px] font-bold">{label}</span>
+                        <span className="text-[10.5px] font-medium opacity-70">{hint}</span>
+                      </span>
+                    </button>
+                  ))}
+                </div>
                 {running ? <Loader2 size={13} className="animate-spin text-secondary" /> : null}
               </div>
-              <div className="mt-0.5 text-[11px] text-secondary">
-                {result
-                  ? `${columns.length} column${columns.length === 1 ? '' : 's'}${result.truncated ? ` · only the first ${maxRows.toLocaleString('en-US')} — narrow the filters` : ''}${
-                      rowSearch.trim() ? ` · ${searchedRows.length.toLocaleString('en-US')} match the search — the export has these` : ''
-                    }`
-                  : columns.length
-                    ? 'Loading…'
-                    : 'Choose at least one column'}
-              </div>
+              {/* Only when it matters: the rows were capped, or the search narrows what's exported. */}
+              {mode === 'list' && result && (result.truncated || rowSearch.trim()) ? (
+                <div className="mt-0.5 text-[11px]" style={{ color: '#b45309' }}>
+                  {[
+                    result.truncated ? `Only the first ${maxRows.toLocaleString('en-US')} rows — narrow the filters` : '',
+                    rowSearch.trim() ? `${searchedRows.length.toLocaleString('en-US')} match the search — the export has these` : '',
+                  ]
+                    .filter(Boolean)
+                    .join(' · ')}
+                </div>
+              ) : null}
             </div>
-            <div className="flex flex-wrap gap-2">
+            <div className={cn('flex flex-wrap gap-2', mode === 'totals' && 'hidden')}>
               <button
                 type="button"
                 className={btn}
@@ -917,11 +1011,18 @@ export function CustomReport() {
             </div>
           </div>
 
-          {/* Filters: a bar right above the rows they narrow. */}
+          {/* Filters: the dataset's first four always show; the rest open under
+              "More filters" (one of them that has a value stays shown). */}
           {dataset.filters.length ? (
-            <div className="flex flex-col gap-2 border-b px-4 py-3" style={headTint}>
+            <div className="flex flex-col gap-2 border-b px-4 py-3" style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'var(--surface)' }}>
               <div className="flex items-center justify-between gap-2">
                 <span className="flex items-center gap-1.5 text-[11px] font-semibold" style={{ color: 'var(--text)' }}>
+                  <span
+                    className="flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold"
+                    style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
+                  >
+                    3
+                  </span>
                   <Filter size={12} className="text-secondary" /> Filters
                   {activeFilters ? (
                     <span className="rounded-full px-1.5 text-[10px] font-semibold tabular-nums" style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}>
@@ -935,26 +1036,25 @@ export function CustomReport() {
                   </button>
                 ) : null}
               </div>
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-5">
-                {filterSlots.map((slot) =>
-                  slot.kind === 'range' ? (
-                    <label key={slot.from.key} className="flex min-w-0 flex-col gap-1">
-                      <span className="text-[10px] font-semibold uppercase tracking-wider text-secondary">{slot.label}</span>
-                      <DatePicker
-                        mode="range"
-                        bordered
-                        fullWidth
-                        placeholder="Any date"
-                        value={[parseYmd(filters[slot.from.key]), parseYmd(filters[slot.to.key])]}
-                        onChange={(r: [Date | null, Date | null] | null) =>
-                          setFilters((p) => ({ ...p, [slot.from.key]: toYmd(r?.[0] ?? null), [slot.to.key]: toYmd(r?.[1] ?? null) }))
-                        }
-                      />
-                    </label>
-                  ) : (
-                    <label key={slot.f.key} className="flex min-w-0 flex-col gap-1">
-                      <span className="text-[10px] font-semibold uppercase tracking-wider text-secondary">{slot.f.label}</span>
-                      {slot.f.type === 'select' ? (
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                {shownSlots.map((slot) => {
+                  const key = slotKey(slot);
+                  const label = slot.kind === 'range' ? slot.label : slot.f.label;
+                  return (
+                    <label key={key} className="flex min-w-0 flex-col gap-1">
+                      <span className="text-[10px] font-semibold uppercase tracking-wider text-secondary">{label}</span>
+                      {slot.kind === 'range' ? (
+                        <DatePicker
+                          mode="range"
+                          bordered
+                          fullWidth
+                          placeholder="Any date"
+                          value={[parseYmd(filters[slot.from.key]), parseYmd(filters[slot.to.key])]}
+                          onChange={(r: [Date | null, Date | null] | null) =>
+                            setFilters((p) => ({ ...p, [slot.from.key]: toYmd(r?.[0] ?? null), [slot.to.key]: toYmd(r?.[1] ?? null) }))
+                          }
+                        />
+                      ) : slot.f.type === 'select' ? (
                         <AppSelect
                           options={filterOptions(slot.f)}
                           value={filters[slot.f.key] || ''}
@@ -973,30 +1073,55 @@ export function CustomReport() {
                         />
                       )}
                     </label>
-                  ),
-                )}
+                  );
+                })}
               </div>
-              {activeFilters ? (
-                <div className="flex flex-wrap gap-1.5">
-                  {dataset.filters
-                    .filter((f) => filters[f.key])
-                    .map((f) => (
-                      <span
-                        key={f.key}
-                        className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px]"
-                        style={{ borderColor: 'var(--nav-active-bg)', color: 'var(--text)', backgroundColor: 'var(--surface)' }}
-                      >
-                        <span className="text-secondary">{f.label}:</span> {filterLabel(f)}
-                        <button type="button" className="text-secondary hover:text-red-500" onClick={() => setFilters((p) => ({ ...p, [f.key]: '' }))} title="Remove filter">
-                          <X size={11} />
-                        </button>
-                      </span>
-                    ))}
-                </div>
+              {moreSlots.length ? (
+                <button
+                  type="button"
+                  className="inline-flex w-fit items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-semibold text-secondary hover:bg-[var(--selected-bg)] hover:text-[var(--text)]"
+                  onClick={() => setMoreFilters((v) => !v)}
+                >
+                  {moreFilters ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                  {moreFilters ? 'Fewer filters' : `More filters (${moreSlots.length})`}
+                </button>
               ) : null}
             </div>
           ) : null}
 
+          <div key={`body-${mode}`} className="mode-swap">
+          {mode === 'totals' ? (
+            datasetKey === 'locators' ? (
+              <QuickTotal
+                embedded
+                config={totalsConfig}
+                onConfigChange={setTotalsConfig}
+                filters={Object.fromEntries(Object.entries(filters).filter(([k]) => k !== 'missing'))}
+                filterText={(dataset?.filters || [])
+                  .filter((f) => f.key !== 'missing' && filters[f.key])
+                  .map((f) => `${f.label}: ${f.options?.find((o) => o.value === filters[f.key])?.label || (f.type === 'date' ? fmtDate(filters[f.key]) : filters[f.key])}`)
+                  .join(' · ')}
+              />
+            ) : (
+              <div className="flex flex-col items-center gap-2 px-4 py-10 text-center">
+                <Sigma size={20} className="text-secondary" />
+                <div className="text-[13px] font-semibold" style={{ color: 'var(--text)' }}>
+                  Totals are for Registered Locators
+                </div>
+                <div className="max-w-sm text-[11.5px] text-secondary">
+                  Total investment, employees, leased area, MGL or locators — by nationality, industry, type of property and more.
+                </div>
+                <button
+                  type="button"
+                  className={btn}
+                  style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)', borderColor: 'transparent' }}
+                  onClick={() => pickDataset('locators')}
+                >
+                  Switch to Registered Locators
+                </button>
+              </div>
+            )
+          ) : (
           <div className="flex flex-col gap-3 p-3">
             {error ? (
               <div className="rounded-lg border px-3 py-2 text-[12px]" style={{ borderColor: '#ef444455', color: '#ef4444' }}>
@@ -1056,7 +1181,7 @@ export function CustomReport() {
                     Hide
                   </button>
                 </div>
-                <div className="max-h-72 overflow-auto custom-scrollbar">
+                <div className="max-h-72 overflow-auto hover-scrollbar">
                   <table className="w-full text-left text-[12px] border-collapse">
                     <thead className="sticky top-0" style={{ backgroundColor: 'var(--surface)' }}>
                       <tr className="text-[10px] uppercase tracking-wider text-secondary">
@@ -1105,7 +1230,7 @@ export function CustomReport() {
 
             {result && result.columns.length ? (
               <div
-                className={cn('min-w-0 overflow-auto rounded-xl border max-h-[70vh] custom-scrollbar transition-opacity', running && 'opacity-60')}
+                className={cn('min-w-0 overflow-auto rounded-xl border max-h-[70vh] hover-scrollbar transition-opacity', running && 'opacity-60')}
                 style={{ borderColor: 'var(--border-subtle)' }}
               >
                 <table className="w-full text-left text-[12px] border-collapse">
@@ -1228,6 +1353,8 @@ export function CustomReport() {
               <EmptyState title="No columns" description="Pick the columns you want on the left." />
             ) : null}
           </div>
+          )}
+          </div>
         </div>
       </div>
     </div>
@@ -1254,11 +1381,12 @@ function OptionCard({
   return (
     <div
       className="rounded-xl border px-3 py-2.5 transition-colors"
-      style={
-        checked
-          ? { borderColor: 'var(--nav-active-bg)', backgroundColor: 'color-mix(in oklab, var(--nav-active-bg) 5%, var(--surface))' }
-          : { borderColor: 'var(--border-subtle)' }
-      }
+      // Plain white either way; the checkbox shows the state (a ticked card
+      // only gets a slightly firmer border).
+      style={{
+        borderColor: checked ? 'var(--input-border)' : 'var(--border-subtle)',
+        backgroundColor: 'var(--surface)',
+      }}
     >
       <label className="flex cursor-pointer items-start gap-2.5">
         <input type="checkbox" className="mt-0.5" checked={checked} onChange={(e) => onChange(e.target.checked)} />

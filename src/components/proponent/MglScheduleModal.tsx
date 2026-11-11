@@ -55,7 +55,9 @@ export function buildMglSchedule(rows: MglSourceRow[], stepMonths = 1): { months
   const last = parse(valid.map((r) => r.to).sort().slice(-1)[0]);
   const months: Month[] = [];
   const gaps: number[] = [];
-  for (let k = 0; k < 600; k += 1) {
+  // Every period to the last Date To (a 75-year lease is 900 months); the cap
+  // only guards against a runaway date.
+  for (let k = 0; k < 1500; k += 1) {
     const start = addMonths(first, k * stepMonths);
     if (start > last) break;
     const nextStart = addMonths(first, (k + 1) * stepMonths);

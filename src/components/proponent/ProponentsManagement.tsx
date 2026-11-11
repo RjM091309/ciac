@@ -166,7 +166,9 @@ type PropertyRow = {
 type PropertyRateType = 'STANDARD' | 'NON_STANDARD';
 
 // Property schedule dropdowns.
-const PROPERTY_YEARS = Array.from({ length: 66 }, (_, k) => String(2015 + k)); // 2015–2080 (long leases, escalations)
+// 1990–2100: CSEZ leases run up to 75 years (e.g. 2010–2085), and an escalation
+// fills every period up to the End Term.
+const PROPERTY_YEARS = Array.from({ length: 111 }, (_, k) => String(1990 + k));
 // Type of Property options come from File Maintenance (/api/proponents/property-types).
 // Year / Type of Property only take values from their lists (any case):
 // an older free-text value that isn't one of them shows as "Select ..." and
@@ -225,7 +227,8 @@ function escalatePropertyRow(
     return n === null ? value : formatMoney(Math.round(n * factorOf(k) * 100) / 100);
   };
   const out: PropertyRow[] = [];
-  for (let k = 0; k < 200; k += 1) {
+  // To the End Term (a monthly step over a 75-year lease is 900 periods); the cap only guards a runaway date.
+  for (let k = 0; k < 1500; k += 1) {
     const start = addMonthsUtc(first, offsetOf(k));
     if (start > last) break;
     const nextStart = addMonthsUtc(first, offsetOf(k + 1));

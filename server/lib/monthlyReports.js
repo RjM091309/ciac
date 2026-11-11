@@ -36,13 +36,26 @@ async function recipients() {
 /** Builds one recipient's copy: { buffer, fileName, rows }. */
 async function buildFor(template, month, ownOfficerId) {
   const cfg = template.config || {};
-  const result = await CustomReport.run({
-    dataset: template.dataset,
-    columns: cfg.columns,
-    filters: cfg.filters || {},
-    sort: cfg.sort || null,
-    ownOfficerId,
-  });
+  // A Totals template: "Total … by …" as of the send date (this year), with its filters.
+  const totals = cfg.mode === "totals" && cfg.totals ? cfg.totals : null;
+  const result = totals
+    ? CustomReport.totalsAsTable(
+        await CustomReport.quickTotal({
+          measure: totals.measure,
+          by: totals.by,
+          period: totals.period,
+          year: new Date().getFullYear(),
+          filters: cfg.filters || {},
+          ownOfficerId,
+        })
+      )
+    : await CustomReport.run({
+        dataset: template.dataset,
+        columns: cfg.columns,
+        filters: cfg.filters || {},
+        sort: cfg.sort || null,
+        ownOfficerId,
+      });
   const ds = CustomReport.DATASETS[template.dataset];
   // Title, sheet and subtitle as the page's own Excel download names them.
   const title = `${template.name} — ${monthLabel(month)}`;
@@ -50,8 +63,15 @@ async function buildFor(template, month, ownOfficerId) {
   const applied = await CustomReport.filterText(template.dataset, cfg.filters || {});
   if (ownOfficerId) applied.push("Your locators only");
   if (result.truncated) applied.push(`First ${CustomReport.MAX_ROWS.toLocaleString("en-US")} rows only`);
+  // A Totals template says what it totals ("Total MGL per month by Type of Property").
+  if (totals) {
+    const opts = CustomReport.quickTotalOptions();
+    const m = opts.measures.find((x) => x.value === totals.measure)?.label || totals.measure;
+    const b = opts.by.find((x) => x.value === totals.by)?.label || totals.by;
+    applied.unshift(`Total ${m} by ${b}${totals.period === "in" ? ` (signed in ${new Date().getFullYear()})` : ""}`);
+  }
   const subtitle = [asOf, ...applied].join(" · ");
-  const buffer = await CustomReport.buildWorkbook(result, { title, subtitle, sheetName: ds?.label || template.name });
+  const buffer = await CustomReport.buildWorkbook(result, { title, subtitle, sheetName: totals ? "Totals" : ds?.label || template.name });
   const fileName = `${template.name.replace(/[^A-Za-z0-9]+/g, "-")}-${month}.xlsx`;
   return { buffer, fileName, rows: result.total, title };
 }

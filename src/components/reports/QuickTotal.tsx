@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { FileSpreadsheet, FileText, Loader2, Play, Sigma } from 'lucide-react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { FileSpreadsheet, FileText, Loader2, Sigma } from 'lucide-react';
 import { toast } from 'sonner';
 import { AppSelect } from '../ui/AppSelect';
 import { downloadPdf, downloadWorkbook, type XlsxColumn } from './reportExports';
@@ -39,13 +39,44 @@ async function post<T>(path: string, body: unknown): Promise<T> {
   return json.data as T;
 }
 
-export function QuickTotal({ filters, filterText }: { filters: Record<string, string>; filterText: string }) {
+/** The sentence "Total [measure] by [by] as of / in [year]" — kept in a Custom Report template. */
+export type TotalsConfig = { measure: string; by: string; period: 'asof' | 'in'; year: string };
+export const defaultTotalsConfig = (): TotalsConfig => ({
+  measure: 'investment',
+  by: 'nationality',
+  period: 'asof',
+  year: String(new Date().getFullYear()),
+});
+
+export function QuickTotal({
+  filters,
+  filterText,
+  embedded = false,
+  config,
+  onConfigChange,
+}: {
+  filters: Record<string, string>;
+  filterText: string;
+  /** Inside the Custom Report's result panel (its Totals mode): no card or heading of its own. */
+  embedded?: boolean;
+  /** Controlled by the page (so a template can save / restore it); else kept here. */
+  config?: TotalsConfig;
+  onConfigChange?: (next: TotalsConfig) => void;
+}) {
   const thisYear = new Date().getFullYear();
   const [opts, setOpts] = useState<{ measures: Opt[]; by: Opt[] } | null>(null);
-  const [measure, setMeasure] = useState('investment');
-  const [by, setBy] = useState('nationality');
-  const [period, setPeriod] = useState<'asof' | 'in'>('asof');
-  const [year, setYear] = useState(String(thisYear));
+  const [own, setOwn] = useState<TotalsConfig>(defaultTotalsConfig);
+  const cfg = config ?? own;
+  const setCfg = (patch: Partial<TotalsConfig>) => {
+    const next = { ...cfg, ...patch };
+    if (onConfigChange) onConfigChange(next);
+    else setOwn(next);
+  };
+  const { measure, by, period, year } = cfg;
+  const setMeasure = (v: string) => setCfg({ measure: v });
+  const setBy = (v: string) => setCfg({ by: v });
+  const setPeriod = (v: 'asof' | 'in') => setCfg({ period: v });
+  const setYear = (v: string) => setCfg({ year: v });
   const [result, setResult] = useState<Result | null>(null);
   const [running, setRunning] = useState(false);
   const [exporting, setExporting] = useState(false);
@@ -62,16 +93,32 @@ export function QuickTotal({ filters, filterText }: { filters: Record<string, st
     [thisYear]
   );
 
-  async function run() {
-    setRunning(true);
-    try {
-      setResult(await post<Result>('/api/reports/custom/quick-total', { measure, by, period, year: Number(year), filters }));
-    } catch (e: any) {
-      toast.error(e?.message || 'Could not compute the total');
-    } finally {
-      setRunning(false);
-    }
-  }
+  // Live, like the List: recomputed (debounced) whenever the sentence or the
+  // Custom Report's filters change; a stale answer never replaces a newer one.
+  const filtersKey = JSON.stringify(filters);
+  const requestSeq = useRef(0);
+  useEffect(() => {
+    if (!opts) return undefined;
+    const seq = ++requestSeq.current;
+    const t = window.setTimeout(async () => {
+      setRunning(true);
+      try {
+        const data = await post<Result>('/api/reports/custom/quick-total', {
+          measure,
+          by,
+          period,
+          year: Number(year),
+          filters: JSON.parse(filtersKey),
+        });
+        if (seq === requestSeq.current) setResult(data);
+      } catch (e: any) {
+        if (seq === requestSeq.current) toast.error(e?.message || 'Could not compute the total');
+      } finally {
+        if (seq === requestSeq.current) setRunning(false);
+      }
+    }, 300);
+    return () => window.clearTimeout(t);
+  }, [opts, measure, by, period, year, filtersKey]);
 
   const isCount = result?.measure.key === 'locators';
   // Columns of figures: the locator count, then the measure (per currency for investment).
@@ -79,7 +126,12 @@ export function QuickTotal({ filters, filterText }: { filters: Record<string, st
     ? result.fields.map((f) => ({
         key: f,
         // "Committed PHP" → "Committed (PHP)"; employees: "Committed"; area: the measure.
-        label: f === 'value' ? result.measure.label : f.replace(/^(\w+) (PHP|USD)$/, '$1 ($2)'),
+        label:
+          f === 'value'
+            ? result.measure.label
+            : /^(PHP|USD)$/.test(f)
+              ? `${result.measure.label} (${f})`
+              : f.replace(/^(\w+) (PHP|USD)$/, '$1 ($2)'),
       }))
     : [];
   const shareOf = (g: Group) => {
@@ -144,23 +196,29 @@ export function QuickTotal({ filters, filterText }: { filters: Record<string, st
   const word = 'text-[12.5px] font-semibold text-secondary';
   return (
     <div
-      className="rounded-2xl border"
-      style={{
-        borderColor: 'var(--border-subtle)',
-        backgroundColor: 'var(--surface)',
-        boxShadow: '0 1px 2px rgb(0 0 0 / 0.04), 0 1px 3px rgb(0 0 0 / 0.05)',
-      }}
+      className={embedded ? '' : 'rounded-2xl border'}
+      style={
+        embedded
+          ? undefined
+          : {
+              borderColor: 'var(--border-subtle)',
+              backgroundColor: 'var(--surface)',
+              boxShadow: '0 1px 2px rgb(0 0 0 / 0.04), 0 1px 3px rgb(0 0 0 / 0.05)',
+            }
+      }
     >
-      <div
-        className="flex items-center gap-2 border-b px-4 py-2.5"
-        style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'color-mix(in oklab, var(--control-bg) 55%, var(--surface))' }}
-      >
-        <Sigma size={14} className="text-secondary" />
-        <span className="text-[13px] font-bold" style={{ color: 'var(--text)' }}>
-          Quick total
-        </span>
-        <span className="text-[11px] text-secondary">Registered Locators · uses the filters set below</span>
-      </div>
+      {embedded ? null : (
+        <div
+          className="flex items-center gap-2 border-b px-4 py-2.5"
+          style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'color-mix(in oklab, var(--control-bg) 55%, var(--surface))' }}
+        >
+          <Sigma size={14} className="text-secondary" />
+          <span className="text-[13px] font-bold" style={{ color: 'var(--text)' }}>
+            Quick total
+          </span>
+          <span className="text-[11px] text-secondary">Registered Locators · uses the filters set below</span>
+        </div>
+      )}
 
       {/* The sentence: Total [measure] by [group] as of / in [year] */}
       <div className="flex flex-wrap items-center gap-2 px-4 py-3">
@@ -187,15 +245,7 @@ export function QuickTotal({ filters, filterText }: { filters: Record<string, st
         <div className="w-28">
           <AppSelect compact isClearable={false} value={year} onChange={(v) => setYear(String(v || thisYear))} options={years} />
         </div>
-        <button
-          type="button"
-          onClick={run}
-          disabled={running || !opts}
-          className="inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-[12px] font-semibold disabled:opacity-50"
-          style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
-        >
-          {running ? <Loader2 size={13} className="animate-spin" /> : <Play size={12} />} Run
-        </button>
+        {running ? <Loader2 size={14} className="animate-spin text-secondary" /> : null}
         {result ? (
           <span className="ml-auto flex gap-1.5">
             <button
@@ -239,7 +289,10 @@ export function QuickTotal({ filters, filterText }: { filters: Record<string, st
                 : ''}
             {valueCols.length > 1 ? ` Share is of the ${valueCols[0].label.toLowerCase()} total.` : ''}
           </div>
-          <div className="max-h-96 overflow-auto rounded-xl border custom-scrollbar" style={{ borderColor: 'var(--border-subtle)' }}>
+          <div
+            className={embedded ? 'overflow-x-auto rounded-xl border hover-scrollbar' : 'max-h-96 overflow-auto rounded-xl border hover-scrollbar'}
+            style={{ borderColor: 'var(--border-subtle)' }}
+          >
             <table className="w-full border-collapse text-left text-[12px]">
               <thead className="sticky top-0" style={{ backgroundColor: 'var(--surface)' }}>
                 <tr className="text-[10px] uppercase tracking-wider text-secondary">
