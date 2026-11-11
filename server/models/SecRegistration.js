@@ -29,8 +29,14 @@ const FIELDS = {
   sec_contact_email: "contact_email",
   sec_contact_telephone: "contact_telephone",
   sec_contact_mobile: "contact_mobile",
+  // DTI (sole proprietorship): what the Certificate of Business Name
+  // Registration shows besides the BN No. (registration_no) and the date
+  // issued / valid from (sec_registration_date).
+  dti_territorial_scope: "dti_territorial_scope",
+  dti_owner_name: "dti_owner_name",
+  dti_valid_until: "dti_valid_until",
 };
-const DATE_FIELDS = new Set(["sec_gis_date"]);
+const DATE_FIELDS = new Set(["sec_gis_date", "dti_valid_until"]);
 
 let ensurePromise = null;
 
@@ -72,6 +78,15 @@ async function createSchema() {
         CONSTRAINT UX_proponent_sec_registration_proponent UNIQUE (proponent_id)
       );
     END
+  `);
+  // DTI certificate fields (registered with DTI).
+  await updateSchema(`
+    IF COL_LENGTH('dbo.proponent_sec_registration', 'dti_territorial_scope') IS NULL
+      ALTER TABLE dbo.proponent_sec_registration ADD dti_territorial_scope NVARCHAR(30) NULL;
+    IF COL_LENGTH('dbo.proponent_sec_registration', 'dti_owner_name') IS NULL
+      ALTER TABLE dbo.proponent_sec_registration ADD dti_owner_name NVARCHAR(200) NULL;
+    IF COL_LENGTH('dbo.proponent_sec_registration', 'dti_valid_until') IS NULL
+      ALTER TABLE dbo.proponent_sec_registration ADD dti_valid_until DATE NULL;
   `);
 }
 

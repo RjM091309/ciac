@@ -60,10 +60,15 @@ const SEC_TEXT = [
   'sec_contact_email',
   'sec_contact_telephone',
   'sec_contact_mobile',
+  // DTI certificate (registered with DTI)
+  'dti_territorial_scope',
+  'dti_owner_name',
+  'dti_valid_until',
 ] as const;
 type SecKey = (typeof SEC_TEXT)[number];
 type Form = Record<SecKey, string> & { stockholders: StockholderRow[] };
 type GisDocument = { original_file_name: string | null; status: string | null; validity_to: string | null; uploaded_at: string | null } | null;
+type DtiDocument = { label: string | null; original_file_name: string | null; source: string } | null;
 
 const ymd = (v: unknown) => (v ? String(v).slice(0, 10) : '');
 
@@ -72,7 +77,7 @@ function toForm(d: any): Form {
   for (const key of SEC_TEXT) {
     const v = d?.[key];
     f[key] =
-      key === 'sec_registration_date' || key === 'sec_gis_date'
+      key === 'sec_registration_date' || key === 'sec_gis_date' || key === 'dti_valid_until'
         ? ymd(v)
         : key.endsWith('_currency')
           ? String(v || 'PHP')
@@ -145,7 +150,7 @@ function StatTile({
 }
 
 export function StockholdersGisTab({ applicationId, canEdit = true }: { applicationId: number; canEdit?: boolean }) {
-  const [loaded, setLoaded] = useState<{ form: Form; editable: boolean; reason: string | null; gis: GisDocument } | null>(null);
+  const [loaded, setLoaded] = useState<{ form: Form; editable: boolean; reason: string | null; gis: GisDocument; dti: DtiDocument } | null>(null);
   const [form, setForm] = useState<Form | null>(null);
   const [saving, setSaving] = useState(false);
   const [showErrors, setShowErrors] = useState(false);
@@ -155,7 +160,13 @@ export function StockholdersGisTab({ applicationId, canEdit = true }: { applicat
 
   const apply = (d: any) => {
     const next = toForm(d);
-    setLoaded({ form: next, editable: Boolean(d?.editable), reason: d?.reason ?? null, gis: d?.gis_document ?? null });
+    setLoaded({
+      form: next,
+      editable: Boolean(d?.editable),
+      reason: d?.reason ?? null,
+      gis: d?.gis_document ?? null,
+      dti: d?.dti_document ?? null,
+    });
     setForm(next);
   };
 
@@ -229,7 +240,7 @@ export function StockholdersGisTab({ applicationId, canEdit = true }: { applicat
       <input className={input} value={form[key]} placeholder={placeholder} onChange={(e) => set({ [key]: e.target.value } as Partial<Form>)} />
     </Cell>
   );
-  const date = (key: 'sec_registration_date' | 'sec_gis_date', label: string) => (
+  const date = (key: 'sec_registration_date' | 'sec_gis_date' | 'dti_valid_until', label: string) => (
     <Cell label={label}>
       <DatePicker
         mode="single"
@@ -317,6 +328,49 @@ export function StockholdersGisTab({ applicationId, canEdit = true }: { applicat
               else set({ registration_type: next });
             }}
           />
+          {regType === 'DTI' ? (
+            // DTI (sole proprietorship): only what the Certificate of Business Name Registration shows.
+            <Section title="DTI Certificate of Business Name Registration" icon={Landmark}>
+              <div className="grid grid-cols-1 gap-3 @xl:grid-cols-3">
+                {text('registration_no', 'Business Name No.', 'e.g. 3765278')}
+                <Cell label="Territorial Scope">
+                  <select
+                    className={input}
+                    value={form.dti_territorial_scope}
+                    onChange={(e) => set({ dti_territorial_scope: e.target.value })}
+                  >
+                    <option value="">Select scope</option>
+                    {['BARANGAY', 'CITY/MUNICIPALITY', 'REGIONAL', 'NATIONAL'].map((o) => (
+                      <option key={o} value={o}>
+                        {o}
+                      </option>
+                    ))}
+                  </select>
+                </Cell>
+                {text('dti_owner_name', 'Issued To (Owner)', 'e.g. JUAN D. DELA CRUZ')}
+              </div>
+              <div className="grid grid-cols-1 gap-3 @xl:grid-cols-3">
+                {date('sec_registration_date', 'Valid From')}
+                {date('dti_valid_until', 'Valid Until')}
+                <Cell label="DTI Certificate">
+                  <div
+                    className="flex min-h-9 items-center gap-2 rounded-lg border px-3 py-1.5 text-[12px]"
+                    style={{ borderColor: 'var(--input-border)', backgroundColor: 'var(--control-bg)', borderStyle: loaded.dti ? 'solid' : 'dashed' }}
+                    title="The certificate on the locator's Documents tab, or the DTI requirement of an application"
+                  >
+                    {loaded.dti ? (
+                      <span className="truncate font-semibold" style={{ color: 'var(--text)' }}>
+                        {loaded.dti.label || loaded.dti.original_file_name || 'DTI Certificate'}
+                      </span>
+                    ) : (
+                      <span className="text-secondary">Not uploaded yet</span>
+                    )}
+                  </div>
+                </Cell>
+              </div>
+            </Section>
+          ) : (
+          <>
           <Section title="Registration" icon={Landmark}>
             <div className="grid grid-cols-1 gap-3 @xl:grid-cols-3">
               {text('registration_no', regLabels.no, regLabels.noPlaceholder)}
@@ -372,6 +426,8 @@ export function StockholdersGisTab({ applicationId, canEdit = true }: { applicat
               {text('sec_contact_mobile', 'Mobile No.')}
             </div>
           </Section>
+          </>
+          )}
         </TabCard>
 
         {/* DTI (sole proprietorship): no stockholders. */}

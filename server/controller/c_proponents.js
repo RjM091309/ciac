@@ -557,6 +557,13 @@ exports.getById = async (req, res) => {
       console.error("GIS document lookup error:", error);
     }
 
+    let dti_document = null;
+    try {
+      dti_document = await require("../lib/dtiDocument").latestDtiSummary(id);
+    } catch (error) {
+      console.error("DTI document lookup error:", error);
+    }
+
     let rate_period = "MONTH";
     try {
       rate_period = await require("../models/ProponentLease").currentRatePeriod(id);
@@ -578,7 +585,10 @@ exports.getById = async (req, res) => {
       console.error("Development timeline lookup error:", error);
     }
 
-    return res.json({ success: true, data: { ...row, gis_document, development_timeline, rate_period, investment_years } });
+    return res.json({
+      success: true,
+      data: { ...row, gis_document, dti_document, development_timeline, rate_period, investment_years },
+    });
   } catch (error) {
     console.error("Get proponent error:", error);
     return res.status(500).json({ success: false, message: publicErrorMessage(error) });
@@ -732,6 +742,33 @@ exports.downloadGisDocument = async (req, res) => {
     return res.download(abs, downloadName);
   } catch (error) {
     console.error("Download GIS document error:", error);
+    return res.status(500).json({ success: false, message: publicErrorMessage(error) });
+  }
+};
+
+/** GET /:id/dti-document/file[?view=1] — the locator's DTI certificate (opened on the Registration card). */
+exports.downloadDtiDocument = async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ success: false, message: "Invalid id" });
+    const doc = await require("../lib/dtiDocument").latestDtiDocument(id);
+    const abs = doc ? resolveStoredPath(doc.storage_path) : null;
+    if (!abs || !fs.existsSync(abs)) return res.status(404).json({ success: false, message: "No DTI certificate for this locator." });
+    const downloadName = doc.original_file_name || doc.file_name || path.basename(abs);
+    AuditLog.recordFileAccess(req, {
+      kind: "DOCUMENT",
+      entityType: "proponent",
+      entityId: id,
+      details: { dti_source: doc.source, document_id: doc.id, file_name: downloadName },
+    });
+    if (doc.content_type) res.type(doc.content_type);
+    if (req.query.view === "1") {
+      res.setHeader("Content-Disposition", contentDisposition("inline", downloadName));
+      return res.sendFile(abs);
+    }
+    return res.download(abs, downloadName);
+  } catch (error) {
+    console.error("Download DTI document error:", error);
     return res.status(500).json({ success: false, message: publicErrorMessage(error) });
   }
 };

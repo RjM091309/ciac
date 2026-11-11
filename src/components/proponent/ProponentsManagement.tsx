@@ -43,6 +43,7 @@ import { LocatorDocumentsTab, uploadLocatorDocument, type PendingLocatorDocument
 import { PropertyTypesModal, useCanManagePropertyTypes } from '../FileMaintenance/PropertyTypesModal';
 import { MglScheduleModal, buildMglSchedule, type MglSourceRow } from './MglScheduleModal';
 import { InvestmentYearsModal } from './InvestmentYearsModal';
+import { FilePreviewModal } from '../ui/FilePreviewModal';
 import { useLiveRefresh } from '../../lib/liveData';
 
 type ChangeRequestRow = {
@@ -881,6 +882,10 @@ const SEC_DETAIL_KEYS = [
   'sec_contact_email',
   'sec_contact_telephone',
   'sec_contact_mobile',
+  // DTI certificate (registered with DTI)
+  'dti_territorial_scope',
+  'dti_owner_name',
+  'dti_valid_until',
 ] as const;
 type SecKey = (typeof SEC_PROPONENT_KEYS)[number] | (typeof SEC_DETAIL_KEYS)[number];
 
@@ -1195,6 +1200,9 @@ const BLANK_PROFILE_FORM = {
   sec_contact_email: '',
   sec_contact_telephone: '',
   sec_contact_mobile: '',
+  dti_territorial_scope: '',
+  dti_owner_name: '',
+  dti_valid_until: '',
   properties: [] as PropertyRow[],
   // Billing basis of the lease's Property Schedule (4-04): the Rate/SQM and MGL
   // amounts (rate_sqm_mo / mgl_mo) are per month or per year.
@@ -1573,6 +1581,10 @@ export function ProponentsManagement({
   // shown read only beside Latest GIS Filing on the Stockholders tab (A-16).
   // The latest GIS wherever it was filed (Compliance, Documents tab or an
   // application's GIS requirement) — opened from the GIS card.
+  // The DTI certificate found for the locator (Registration card, DTI), and the
+  // file opened in the on-page preview (DTI certificate or GIS).
+  const [dtiDocument, setDtiDocument] = useState<{ label: string | null; original_file_name: string | null; source: string } | null>(null);
+  const [filePreview, setFilePreview] = useState<{ url: string; title: string; subtitle?: string } | null>(null);
   const [gisDocument, setGisDocument] = useState<{
     source?: 'compliance' | 'locator' | 'application';
     label?: string | null;
@@ -1993,6 +2005,7 @@ export function ProponentsManagement({
     setLeases([]);
     setViewLeaseId(null);
     setGisDocument(null);
+    setDtiDocument(null);
     setExtensions([]);
     setExtensionDraft({ extension_date: '', remarks: '' });
     setLoaded(null);
@@ -2022,6 +2035,7 @@ export function ProponentsManagement({
     setEditing(p);
     setLoginInfo(null);
     setGisDocument(null);
+    setDtiDocument(null);
     setForm({
       user_id: p.user_id != null ? String(p.user_id) : '',
       business_name: p.business_name || '',
@@ -2041,6 +2055,7 @@ export function ProponentsManagement({
         const data = json?.data || {};
         setLoginInfo({ status: data.login_status ?? null, email: data.login_email ?? null, username: data.login_username ?? null });
         setGisDocument(data.gis_document ?? null);
+        setDtiDocument(data.dti_document ?? null);
         const profileFields = {
           location: data.location || '',
           ref_code: data.ref_code || '',
@@ -2093,6 +2108,9 @@ export function ProponentsManagement({
           sec_contact_email: data.sec_contact_email || '',
           sec_contact_telephone: data.sec_contact_telephone || '',
           sec_contact_mobile: data.sec_contact_mobile || '',
+          dti_territorial_scope: data.dti_territorial_scope || '',
+          dti_owner_name: data.dti_owner_name || '',
+          dti_valid_until: toDateInputValue(data.dti_valid_until),
           properties: mapPropertyRows(data.properties),
           rate_period: (data.rate_period === 'YEAR' ? 'YEAR' : 'MONTH') as 'MONTH' | 'YEAR',
           land_use_id: data.land_use_id != null ? String(data.land_use_id) : '',
@@ -2245,7 +2263,7 @@ export function ProponentsManagement({
               ? Object.fromEntries(
                   [...SEC_PROPONENT_KEYS, ...SEC_DETAIL_KEYS].map((key) => [
                     key,
-                    key === 'sec_registration_date' || key === 'sec_gis_date'
+                    key === 'sec_registration_date' || key === 'sec_gis_date' || key === 'dti_valid_until'
                       ? toDateInputValue(data[key])
                       : key.endsWith('_currency')
                         ? (key === 'subscribed_capital_currency' || key === 'paid_up_capital_currency'
@@ -4309,6 +4327,106 @@ export function ProponentsManagement({
                         }}
                       />
 
+                      {/* DTI (sole proprietorship): only what the Certificate of Business Name
+                          Registration shows; the certificate itself is linked below. */}
+                      {regType === 'DTI' ? (
+                        <div className="flex flex-col gap-3">
+                          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                            <Field compact label="Business Name">
+                              <input
+                                className="app-form-control app-form-control-sm"
+                                value={form.business_name}
+                                readOnly
+                                tabIndex={-1}
+                                style={{ backgroundColor: 'var(--control-bg)' }}
+                                title="The Locator's Name (Locator Details)"
+                              />
+                            </Field>
+                            <div className="flex flex-col gap-1">
+                              {secTextField('registration_no', 'Business Name No.', 'e.g. 3765278')}
+                              {secNoTaken ? <span className="text-[11px] text-red-500">{secNoTaken}</span> : null}
+                            </div>
+                            <Field compact label="Territorial Scope">
+                              <BoxSelect
+                                options={['BARANGAY', 'CITY/MUNICIPALITY', 'REGIONAL', 'NATIONAL']}
+                                value={form.dti_territorial_scope}
+                                onChange={(v) => setForm((p) => ({ ...p, dti_territorial_scope: v }))}
+                                placeholder="Select scope"
+                                disabled={loadingLocation}
+                                clearable
+                              />
+                            </Field>
+                          </div>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                            {secTextField('dti_owner_name', 'Issued To (Owner)', 'e.g. JUAN D. DELA CRUZ')}
+                            <Field compact label="Valid From">
+                              <DatePicker
+                                mode="single"
+                                fullWidth
+                                boxed
+                                placeholder="Select date"
+                                value={dateInputToDate(form.sec_registration_date)}
+                                onChange={(d) =>
+                                  setForm((p) => {
+                                    const from = dateToDateInputValue(d);
+                                    // A Business Name registration is valid for 5 years: suggest the end once.
+                                    const until =
+                                      !p.dti_valid_until && from
+                                        ? utcToYmd(new Date(Date.UTC(Number(from.slice(0, 4)) + 5, Number(from.slice(5, 7)) - 1, Number(from.slice(8, 10)))))
+                                        : p.dti_valid_until;
+                                    return { ...p, sec_registration_date: from, dti_valid_until: until };
+                                  })
+                                }
+                              />
+                            </Field>
+                            <Field compact label="Valid Until">
+                              <DatePicker
+                                mode="single"
+                                fullWidth
+                                boxed
+                                placeholder="Select date"
+                                value={dateInputToDate(form.dti_valid_until)}
+                                onChange={(d) => setForm((p) => ({ ...p, dti_valid_until: dateToDateInputValue(d) }))}
+                              />
+                            </Field>
+                          </div>
+                          <Field compact label="DTI Certificate">
+                            <div
+                              className="app-form-control app-form-control-sm flex h-9 items-center gap-2 text-[12px]"
+                              style={{ backgroundColor: 'var(--control-bg)', cursor: 'default' }}
+                              title="The certificate on the Documents tab, or the DTI requirement of an application"
+                            >
+                              {dtiDocument && editing ? (
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setFilePreview({
+                                        url: `/api/proponents/${editing.id}/dti-document/file`,
+                                        title: dtiDocument.label || dtiDocument.original_file_name || 'DTI Certificate',
+                                        subtitle: 'DTI Certificate of Business Name Registration',
+                                      })
+                                    }
+                                    className="inline-flex min-w-0 items-center gap-1.5 font-medium text-blue-600 hover:underline cursor-pointer"
+                                    title="View the DTI certificate"
+                                  >
+                                    <FileText size={13} className="shrink-0" />
+                                    <span className="truncate">{dtiDocument.label || dtiDocument.original_file_name || 'DTI Certificate'}</span>
+                                  </button>
+                                  <span className="shrink-0 truncate text-secondary">
+                                    · {dtiDocument.source === 'application' ? 'Application requirement' : 'Documents tab'}
+                                  </span>
+                                </>
+                              ) : (
+                                <span className="text-secondary">
+                                  {editing ? 'No DTI certificate uploaded yet — add it on the Documents tab' : 'After the locator is saved'}
+                                </span>
+                              )}
+                            </div>
+                          </Field>
+                        </div>
+                      ) : (
+                      <>
                       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
                         <div className="flex flex-col gap-1">
                           {secTextField('registration_no', regLabels.no, regLabels.noPlaceholder)}
@@ -4411,6 +4529,8 @@ export function ProponentsManagement({
                           {secTextField('sec_contact_mobile', 'Mobile No.')}
                         </div>
                       </div>
+                      </>
+                      )}
                     </div>
 
                   {/* DTI (sole proprietorship): no stockholders. */}
@@ -4529,7 +4649,13 @@ export function ProponentsManagement({
                               <>
                                 <button
                                   type="button"
-                                  onClick={() => window.open(`/api/proponents/${editing.id}/gis-document/file?view=1`, '_blank')}
+                                  onClick={() =>
+                                    setFilePreview({
+                                      url: `/api/proponents/${editing.id}/gis-document/file`,
+                                      title: gisDocument.label || gisDocument.original_file_name || 'GIS',
+                                      subtitle: 'GIS (General Information Sheet)',
+                                    })
+                                  }
                                   className="inline-flex min-w-0 items-center gap-1.5 font-medium text-blue-600 hover:underline cursor-pointer"
                                   title="Open the GIS"
                                 >
@@ -5717,6 +5843,14 @@ export function ProponentsManagement({
           </div>
         ) : null}
       </ConfirmModal>
+
+      <FilePreviewModal
+        open={filePreview !== null}
+        url={filePreview?.url ?? ''}
+        title={filePreview?.title ?? ''}
+        subtitle={filePreview?.subtitle}
+        onClose={() => setFilePreview(null)}
+      />
 
       <InvestmentYearsModal
         open={investmentYearsOpen}

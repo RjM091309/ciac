@@ -605,7 +605,13 @@ async function stockholdersPayload(req, applicationId) {
   } catch (error) {
     console.error("GIS document lookup error:", error);
   }
-  return { ...data, gis_document, ...(await profileEditState(req, applicationId)) };
+  let dti_document = null;
+  try {
+    dti_document = await require("../lib/dtiDocument").latestDtiSummary(app.proponent_id);
+  } catch (error) {
+    console.error("DTI document lookup error:", error);
+  }
+  return { ...data, gis_document, dti_document, ...(await profileEditState(req, applicationId)) };
 }
 
 exports.getStockholders = async (req, res) => {

@@ -99,6 +99,7 @@ router.post(
   proponentsController.uploadDocument
 );
 router.get("/:id/gis-document/file", requireMenuAccess(MENU_KEY, "view"), proponentsController.requireOwnLocator, proponentsController.downloadGisDocument);
+router.get("/:id/dti-document/file", requireMenuAccess(MENU_KEY, "view"), proponentsController.requireOwnLocator, proponentsController.downloadDtiDocument);
 router.get("/:id/documents/:docId/download", requireMenuAccess(MENU_KEY, "view"), proponentsController.requireOwnLocator, proponentsController.downloadDocument);
 router.delete("/:id/documents/:docId", requireMenuAccess(MENU_KEY, "edit"), proponentsController.requireOwnLocator, proponentsController.deleteDocument);
 router.post("/", requireMenuAccess(MENU_KEY, "add"), proponentsController.create);
