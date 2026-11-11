@@ -125,24 +125,29 @@ export function InvestmentYearsModal({
     { label: 'No. of Employees', c: 'employee_commitment', a: 'employee_actual', money: false },
   ] as const;
 
+  const range = year && yearStart(year.year_no)
+    ? `${yearStart(year.year_no)}${yearStart(year.year_no + 1) ? ` – ${yearStart(year.year_no + 1)}` : ''}`
+    : '';
+  const filledCount = years.filter(hasFigures).length;
+
   return createPortal(
-    <div className="fixed inset-0 z-[140] flex items-start justify-center px-3 pt-[8vh]">
+    <div className="fixed inset-0 z-[140] flex items-start justify-center px-3 pt-[6vh]">
       <div className="absolute inset-0" style={{ backgroundColor: 'rgba(0,0,0,.5)' }} onClick={onClose} />
       <div
-        className="relative z-10 flex w-full max-w-3xl flex-col overflow-hidden rounded-2xl border shadow-2xl"
+        className="relative z-10 flex max-h-[88vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border shadow-2xl"
         style={{ backgroundColor: 'var(--surface)', borderColor: 'var(--border-subtle)' }}
         role="dialog"
         aria-modal="true"
         aria-label="Performance Commitment per lease year"
       >
         {/* Title */}
-        <div className="flex items-center justify-between gap-3 px-6 pt-5">
+        <div className="flex items-start justify-between gap-3 border-b px-6 py-4" style={border}>
           <div>
             <div className="text-[16px] font-bold" style={{ color: 'var(--text)' }}>
               Performance Commitment
             </div>
-            <div className="text-[11px] text-secondary">
-              Per lease year · {years.length} year{years.length === 1 ? '' : 's'} · {years.filter(hasFigures).length} filled in
+            <div className="mt-0.5 text-[11px] text-secondary">
+              {years.length} lease year{years.length === 1 ? '' : 's'} · {filledCount} filled in
             </div>
           </div>
           <button type="button" className="rounded-lg p-1.5 text-secondary hover:bg-[var(--hover-bg)]" onClick={onClose} aria-label="Close">
@@ -150,31 +155,41 @@ export function InvestmentYearsModal({
           </button>
         </div>
 
-        {/* Summary strip */}
-        <div className="mx-6 mt-4 grid grid-cols-2 divide-x rounded-xl border" style={border}>
+        {/* Overall, across every year */}
+        <div className="grid grid-cols-1 gap-3 px-6 pt-4 sm:grid-cols-2">
           {(
             [
-              ['Total Investment', 'investment_commitment', 'investment_actual', '₱ '],
-              ['Peak Employees', 'employee_commitment', 'employee_actual', ''],
+              ['Total Investment', 'investment_commitment', 'investment_actual', '₱ ', 'Adds up across the years'],
+              ['Peak Employees', 'employee_commitment', 'employee_actual', '', 'The highest year'],
             ] as const
-          ).map(([label, c, a, prefix]) => {
+          ).map(([label, c, a, prefix, hint]) => {
             const pct = progressOf(totals[c], totals[a]);
+            const empty = !totals[c] && !totals[a];
             return (
-              <div key={label} className="flex flex-col gap-1 px-4 py-3" style={border}>
+              <div key={label} className="rounded-xl border px-4 py-3" style={border}>
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-[10px] font-bold uppercase tracking-widest text-secondary">{label}</span>
-                  {pct !== null ? (
-                    <span className="text-[10px] font-bold tabular-nums" style={{ color: toneOf(pct) }}>
-                      {pct}%
-                    </span>
-                  ) : null}
+                  <span className="text-[10px] text-secondary">{hint}</span>
                 </div>
-                <div className="flex items-baseline gap-1.5 tabular-nums">
-                  <span className="text-[16px] font-bold" style={{ color: 'var(--text)' }}>
-                    {totals[a] ? `${prefix}${totals[a]}` : '—'}
-                  </span>
-                  <span className="text-[11px] text-secondary">of {totals[c] ? `${prefix}${totals[c]}` : '—'} committed</span>
-                </div>
+                {empty ? (
+                  <div className="mt-1.5 text-[12px] italic text-secondary">Nothing filled in yet</div>
+                ) : (
+                  <>
+                    <div className="mt-1 flex items-baseline gap-1.5 tabular-nums">
+                      <span className="text-[16px] font-bold" style={{ color: 'var(--text)' }}>
+                        {totals[a] ? `${prefix}${totals[a]}` : `${prefix}0`}
+                      </span>
+                      <span className="text-[11px] text-secondary">
+                        actual of {totals[c] ? `${prefix}${totals[c]}` : '—'} committed
+                      </span>
+                    </div>
+                    {pct !== null ? (
+                      <div className="mt-2">
+                        <ProgressCell commitment={totals[c]} actual={totals[a]} />
+                      </div>
+                    ) : null}
+                  </>
+                )}
               </div>
             );
           })}
@@ -185,24 +200,11 @@ export function InvestmentYearsModal({
             Set the lease's Start and End Term — one entry per lease year appears here.
           </div>
         ) : (
-          <>
-            {/* Years */}
-            <div className="mt-4 flex items-center gap-2 px-6">
-              <button
-                type="button"
-                disabled={index <= 0}
-                onClick={() => go(-1)}
-                className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border cursor-pointer disabled:cursor-not-allowed disabled:opacity-40 hover:bg-[var(--selected-bg)]"
-                style={{ ...border, color: 'var(--text)' }}
-                aria-label="Previous year"
-              >
-                <ChevronLeft size={15} />
-              </button>
-              {/* All years at once, no scrolling: at least 10 a line (two lines up to 26 years). */}
-              <div
-                className="grid flex-1 gap-1.5 py-1"
-                style={{ gridTemplateColumns: `repeat(${Math.max(10, Math.min(13, Math.ceil(years.length / 2)))}, minmax(0, 1fr))` }}
-              >
+          <div className="mx-6 mt-4 grid min-h-0 flex-1 grid-cols-1 overflow-hidden rounded-xl border sm:grid-cols-[13rem_minmax(0,1fr)]" style={border}>
+            {/* Years — a list like a file explorer; the chosen one is highlighted */}
+            <div className="flex min-h-0 flex-col border-b sm:border-b-0 sm:border-r" style={border}>
+              <div className="px-3 pb-1.5 pt-3 text-[10px] font-bold uppercase tracking-widest text-secondary">Lease years</div>
+              <div className="hover-scrollbar max-h-40 flex-1 overflow-y-auto px-2 pb-2 sm:max-h-[19rem]">
                 {years.map((y) => {
                   const active = y.year_no === year?.year_no;
                   const current = y.year_no === currentYear;
@@ -211,109 +213,155 @@ export function InvestmentYearsModal({
                     <button
                       key={y.year_no}
                       type="button"
-                      data-year={y.year_no}
+                      ref={(el) => {
+                        if (el && active) el.scrollIntoView({ block: 'nearest' });
+                      }}
                       onClick={() => setSelected(y.year_no)}
-                      className="relative flex min-w-0 flex-col items-center rounded-lg border px-1 py-1.5 leading-tight cursor-pointer transition-colors"
-                      style={
-                        active
-                          ? { backgroundColor: 'var(--nav-active-bg)', borderColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }
-                          : { borderColor: current ? '#16a34a' : 'var(--input-border)', color: 'var(--text)' }
-                      }
-                      title={current ? 'Current lease year' : undefined}
+                      className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left cursor-pointer transition-colors ${
+                        active ? '' : 'hover:bg-[var(--selected-bg)]'
+                      }`}
+                      style={active ? { backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' } : { color: 'var(--text)' }}
                     >
-                      <span className="text-[11px] font-bold">Y{y.year_no}</span>
-                      <span className="text-[9px]" style={{ opacity: 0.65 }}>
-                        {yearOf(y.year_no) || '—'}
+                      <span
+                        className="h-2 w-2 shrink-0 rounded-full"
+                        style={
+                          filled
+                            ? { backgroundColor: '#16a34a' }
+                            : { border: '1.5px solid', borderColor: active ? 'currentColor' : 'var(--input-border)', opacity: active ? 0.6 : 1 }
+                        }
+                        title={filled ? 'Filled in' : 'Not filled in'}
+                      />
+                      <span className="text-[12px] font-semibold">Year {y.year_no}</span>
+                      <span className="text-[11px] tabular-nums" style={{ opacity: 0.6 }}>
+                        {yearOf(y.year_no)}
                       </span>
-                      {filled ? (
-                        <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full" style={{ backgroundColor: '#16a34a' }} aria-label="filled in" />
+                      {current ? (
+                        <span
+                          className="ml-auto rounded-full px-1.5 py-px text-[9px] font-bold uppercase tracking-wide"
+                          style={
+                            active
+                              ? { backgroundColor: 'rgba(255,255,255,.2)' }
+                              : { backgroundColor: 'color-mix(in oklab, #22c55e 18%, transparent)', color: '#15803d' }
+                          }
+                        >
+                          Now
+                        </span>
                       ) : null}
                     </button>
                   );
                 })}
               </div>
-              <button
-                type="button"
-                disabled={index >= years.length - 1}
-                onClick={() => go(1)}
-                className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border cursor-pointer disabled:cursor-not-allowed disabled:opacity-40 hover:bg-[var(--selected-bg)]"
-                style={{ ...border, color: 'var(--text)' }}
-                aria-label="Next year"
-              >
-                <ChevronRight size={15} />
-              </button>
+              <div className="border-t p-2" style={border}>
+                <button
+                  type="button"
+                  disabled={disabled}
+                  onClick={() => {
+                    onAddYear();
+                    setSelected(years.length + 1);
+                  }}
+                  className="inline-flex w-full items-center justify-center gap-1 rounded-lg border border-dashed py-1.5 text-[11px] font-semibold text-secondary cursor-pointer disabled:cursor-not-allowed disabled:opacity-60 hover:bg-[var(--selected-bg)]"
+                  style={border}
+                  title="A year beyond the lease term (e.g. an extension)"
+                >
+                  <Plus size={12} /> Add year
+                </button>
+              </div>
             </div>
 
             {/* The chosen year */}
             {year ? (
-              <div className="mx-6 mt-4 rounded-xl border" style={border}>
-                <div className="flex items-baseline justify-between gap-2 border-b px-4 py-2.5" style={border}>
-                  <div className="flex items-baseline gap-2">
-                    <span className="text-[14px] font-bold" style={{ color: 'var(--text)' }}>
-                      Year {year.year_no}
-                    </span>
-                    {year.year_no === currentYear ? (
-                      <span className="rounded-full px-2 py-0.5 text-[10px] font-semibold" style={{ backgroundColor: 'color-mix(in oklab, #22c55e 18%, transparent)', color: '#15803d' }}>
-                        Current
+              <div className="flex min-w-0 flex-col">
+                <div className="flex items-center justify-between gap-2 border-b px-5 py-3" style={border}>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[15px] font-bold" style={{ color: 'var(--text)' }}>
+                        Year {year.year_no}
                       </span>
-                    ) : null}
+                      {year.year_no === currentYear ? (
+                        <span className="rounded-full px-2 py-0.5 text-[10px] font-semibold" style={{ backgroundColor: 'color-mix(in oklab, #22c55e 18%, transparent)', color: '#15803d' }}>
+                          Current year
+                        </span>
+                      ) : null}
+                    </div>
+                    {range ? <div className="mt-0.5 text-[11px] text-secondary">{range}</div> : null}
                   </div>
-                  {yearStart(year.year_no) ? (
-                    <span className="text-[11px] text-secondary">
-                      {yearStart(year.year_no)}
-                      {yearStart(year.year_no + 1) ? ` – ${yearStart(year.year_no + 1)}` : ''}
-                    </span>
-                  ) : null}
+                  <div className="flex shrink-0 items-center gap-1">
+                    {[
+                      { step: -1, off: index <= 0, icon: <ChevronLeft size={15} />, label: 'Previous year' },
+                      { step: 1, off: index >= years.length - 1, icon: <ChevronRight size={15} />, label: 'Next year' },
+                    ].map((b) => (
+                      <button
+                        key={b.step}
+                        type="button"
+                        disabled={b.off}
+                        onClick={() => go(b.step)}
+                        className="grid h-8 w-8 place-items-center rounded-lg border cursor-pointer disabled:cursor-not-allowed disabled:opacity-40 hover:bg-[var(--selected-bg)]"
+                        style={{ ...border, color: 'var(--text)' }}
+                        aria-label={b.label}
+                        title={b.label}
+                      >
+                        {b.icon}
+                      </button>
+                    ))}
+                  </div>
                 </div>
-                <div className="grid grid-cols-[8.5rem_minmax(0,1fr)_minmax(0,1fr)_7.5rem] items-center gap-x-3 gap-y-3 px-4 py-4">
-                  <span />
-                  {['Commitment', 'Actual', 'Progress'].map((h) => (
-                    <span key={h} className="text-[9px] font-semibold uppercase tracking-widest text-secondary">
-                      {h}
-                    </span>
-                  ))}
-                  {rows.map((r) => (
-                    <React.Fragment key={r.label}>
-                      <span className="text-[12px] font-semibold" style={{ color: 'var(--text)' }}>
-                        {r.label}
-                      </span>
-                      {input(r.c, r.money)}
-                      {input(r.a, r.money)}
-                      <ProgressCell commitment={year[r.c]} actual={year[r.a]} />
-                    </React.Fragment>
-                  ))}
+
+                <div className="flex flex-col gap-4 px-5 py-4">
+                  {rows.map((r) => {
+                    const pct = progressOf(year[r.c], year[r.a]);
+                    return (
+                      <div key={r.label}>
+                        <div className="mb-2 flex items-center justify-between gap-2">
+                          <span className="text-[12px] font-bold" style={{ color: 'var(--text)' }}>
+                            {r.label}
+                          </span>
+                          {pct !== null ? (
+                            <span className="text-[11px] text-secondary">
+                              <span className="font-bold tabular-nums" style={{ color: toneOf(pct) }}>
+                                {pct}%
+                              </span>{' '}
+                              of commitment
+                            </span>
+                          ) : null}
+                        </div>
+                        <div className="grid grid-cols-2 gap-3">
+                          {(
+                            [
+                              ['Commitment', r.c],
+                              ['Actual', r.a],
+                            ] as const
+                          ).map(([h, key]) => (
+                            <label key={h} className="block">
+                              <span className="mb-1 block text-[10px] font-semibold uppercase tracking-widest text-secondary">{h}</span>
+                              {input(key, r.money)}
+                            </label>
+                          ))}
+                        </div>
+                        <div className="mt-2 h-1.5 overflow-hidden rounded-full" style={{ backgroundColor: 'var(--control-bg)' }}>
+                          {pct !== null ? (
+                            <div className="h-full rounded-full transition-[width]" style={{ width: `${Math.min(pct, 100)}%`, backgroundColor: toneOf(pct) }} />
+                          ) : null}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             ) : null}
-          </>
+          </div>
         )}
 
         {/* Footer */}
-        <div className="mt-5 flex items-center justify-between gap-2 border-t px-6 py-3" style={border}>
-          <span className="text-[11px] text-secondary">Investment adds up across the years · Employees takes the highest year</span>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              disabled={disabled}
-              onClick={() => {
-                onAddYear();
-                setSelected(years.length + 1);
-              }}
-              className="inline-flex items-center gap-1 rounded-lg border px-3 py-2 text-[12px] font-semibold cursor-pointer disabled:cursor-not-allowed disabled:opacity-60 hover:bg-[var(--selected-bg)]"
-              style={{ borderColor: 'var(--input-border)', color: 'var(--text)' }}
-              title="A year beyond the lease term (e.g. an extension)"
-            >
-              <Plus size={13} /> Add year
-            </button>
-            <button
-              type="button"
-              onClick={onClose}
-              className="rounded-lg px-5 py-2 text-[12px] font-semibold cursor-pointer hover:opacity-90"
-              style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
-            >
-              Done
-            </button>
-          </div>
+        <div className="mt-4 flex items-center justify-between gap-2 border-t px-6 py-3" style={border}>
+          <span className="text-[11px] text-secondary">Saved together with the locator's Save.</span>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg px-5 py-2 text-[12px] font-semibold cursor-pointer hover:opacity-90"
+            style={{ backgroundColor: 'var(--nav-active-bg)', color: 'var(--nav-active-text)' }}
+          >
+            Done
+          </button>
         </div>
       </div>
     </div>,

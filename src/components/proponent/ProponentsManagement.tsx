@@ -27,6 +27,7 @@ import {
   Hammer,
   CalendarRange,
   TrendingUp,
+  Pencil,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { toast } from 'sonner';
@@ -3374,22 +3375,33 @@ export function ProponentsManagement({
                 {/* The current lease's Ref. Code, on the right — typed in here and saved
                     with Update. Never reused: checked as it's typed (another locator or an
                     earlier lease) and again by the server on save. */}
-                <div className="ml-auto flex shrink-0 flex-col items-end gap-0.5" style={{ maxWidth: '45%' }}>
-                  <input
-                    className="w-56 max-w-full rounded-md border bg-transparent px-2 py-1 text-right text-sm font-bold tabular-nums outline-none focus:border-[var(--nav-active-bg)] disabled:cursor-default"
+                <div className="ml-auto flex shrink-0 flex-col items-end gap-1" style={{ maxWidth: '45%' }}>
+                  <label
+                    className="group flex max-w-full cursor-text items-center gap-2 rounded-full border py-1.5 pl-3.5 pr-4 transition-colors focus-within:border-[var(--nav-active-bg)] hover:border-[var(--input-border)]"
                     style={{
-                      color: 'var(--text)',
+                      backgroundColor: refCodeTaken
+                        ? 'color-mix(in oklab, #ef4444 8%, transparent)'
+                        : 'color-mix(in oklab, var(--nav-active-bg) 6%, transparent)',
                       borderColor: refCodeTaken ? '#ef4444' : 'transparent',
                     }}
-                    value={form.ref_code}
-                    placeholder="Ref. Code"
                     title="Ref. Code (current lease) — click to edit"
-                    aria-label="Ref. Code (current lease)"
-                    disabled={formLocked || leaseView || loadingLocation}
-                    onFocus={(e) => (e.currentTarget.style.borderColor = refCodeTaken ? '#ef4444' : 'var(--input-border)')}
-                    onBlur={(e) => (e.currentTarget.style.borderColor = refCodeTaken ? '#ef4444' : 'transparent')}
-                    onChange={(e) => setForm((p) => ({ ...p, ref_code: e.target.value }))}
-                  />
+                  >
+                    <span className="shrink-0 text-[10px] font-bold uppercase tracking-[0.14em] text-secondary">Ref</span>
+                    <span className="h-4 w-px shrink-0" style={{ backgroundColor: 'var(--input-border)' }} aria-hidden />
+                    <input
+                      className="min-w-0 max-w-full bg-transparent text-right text-[17px] font-bold tracking-wide tabular-nums outline-none placeholder:text-[13px] placeholder:font-semibold placeholder:tracking-normal disabled:cursor-default"
+                      // Grows with the code so a long one shows whole (e.g. CS2021090024570-…).
+                      style={{ color: 'var(--text)', width: `calc(${Math.max(form.ref_code.length, 10) + 1}ch + ${Math.max(form.ref_code.length, 10) * 0.05}em)` }}
+                      value={form.ref_code}
+                      placeholder="Add Ref. Code"
+                      aria-label="Ref. Code (current lease)"
+                      disabled={formLocked || leaseView || loadingLocation}
+                      onChange={(e) => setForm((p) => ({ ...p, ref_code: e.target.value }))}
+                    />
+                    {!(formLocked || leaseView || loadingLocation) ? (
+                      <Pencil size={12} className="shrink-0 text-secondary opacity-0 transition-opacity group-hover:opacity-70 group-focus-within:opacity-0" aria-hidden />
+                    ) : null}
+                  </label>
                   {refCodeTaken ? <span className="text-[10px] leading-tight text-red-500">{refCodeTaken}</span> : null}
                 </div>
               </div>
@@ -4980,17 +4992,16 @@ export function ProponentsManagement({
                   Non-standard row.
                 </div>
               ) : (
-              <div className="min-w-0 overflow-x-auto rounded-lg border" style={{ borderColor: 'var(--input-border)' }}>
+              <div className="hover-scrollbar min-w-0 overflow-x-auto rounded-lg border" style={{ borderColor: 'var(--input-border)' }}>
                 <table className="w-full min-w-[60rem] lg:min-w-0 table-fixed text-xs border-collapse">
                   <colgroup>
-                    {['3%', '8%', '11.5%', '11.5%', '10%', '11.5%', '6.5%', '15.25%', '15.25%', '7.5%'].map((w, i) => (
+                    {['9.5%', '11.5%', '11.5%', '10%', '11.5%', '6.5%', '15.25%', '15.25%', '9%'].map((w, i) => (
                       <col key={i} style={{ width: w }} />
                     ))}
                   </colgroup>
                   <thead>
                     <tr style={THEAD_ROW_STYLE}>
                       {[
-                        'No.',
                         'Year',
                         'Date From',
                         'Date To',
@@ -5032,9 +5043,6 @@ export function ProponentsManagement({
                         missing?.has(key) ? ' [&>*]:rounded-md [&>*]:ring-1 [&>*]:ring-red-500' : '';
                       return (
                       <tr key={i}>
-                        <td className="px-2 py-1 align-top border-b text-center" style={{ borderColor: 'var(--input-border)' }}>
-                          <div className="flex h-9 items-center justify-center">{i + 1}</div>
-                        </td>
                         <td className={`px-1 py-1 align-top border-b${miss('year')}`} style={{ borderColor: 'var(--input-border)' }}>
                           <BoxSelect
                             className="w-full min-w-0 h-9"
@@ -5212,46 +5220,57 @@ export function ProponentsManagement({
                             }
                           />
                         </td>
-                        <td className="px-1 py-1 align-top border-b text-center whitespace-nowrap" style={{ borderColor: 'var(--input-border)' }}>
-                          {/* Escalation (4-08): split this row into periods with a rising rate. */}
-                          <button
-                            type="button"
-                            disabled={loadingLocation}
-                            onClick={() => setEscalate({ index: i, start: '37', every: '36', percent: '' })}
-                            className="inline-flex h-9 w-7 items-center justify-center rounded-md cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 hover:bg-[var(--selected-bg)]"
-                            style={{ color: 'var(--text)' }}
-                            title={`Escalate row ${i + 1} — e.g. +10% every 36 months`}
-                            aria-label={`Escalate row ${i + 1}`}
-                          >
-                            <TrendingUp size={14} />
-                          </button>
-                          {/* This row's MGL Schedule (month-by-month breakdown). */}
-                          <button
-                            type="button"
-                            onClick={() => setMglScheduleRow(i)}
-                            className="inline-flex h-9 w-7 items-center justify-center rounded-md cursor-pointer hover:bg-[var(--selected-bg)]"
-                            style={{ color: 'var(--text)' }}
-                            title={`MGL Schedule of row ${i + 1}`}
-                            aria-label={`MGL Schedule of row ${i + 1}`}
-                          >
-                            <CalendarRange size={14} />
-                          </button>
-                          <button
-                            type="button"
-                            disabled={loadingLocation}
-                            onClick={() => {
-                              const remove = () =>
-                                setForm((p) => ({ ...p, properties: p.properties.filter((_, ri) => ri !== i) }));
-                              if (blankRow) remove();
-                              else askRowDelete(`property row ${i + 1}`, remove);
-                            }}
-                            className="inline-flex h-9 w-7 items-center justify-center rounded-md cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 hover:bg-[var(--selected-bg)]"
-                            style={{ color: blankRow ? 'var(--text-muted)' : '#ef4444' }}
-                            title={blankRow ? `Remove empty row ${i + 1}` : `Delete row ${i + 1}`}
-                            aria-label={blankRow ? `Remove empty row ${i + 1}` : `Delete row ${i + 1}`}
-                          >
-                            {blankRow ? <Minus size={14} /> : <Trash2 size={14} />}
-                          </button>
+                        <td className="py-1 pl-1 pr-0.5 align-top border-b text-center whitespace-nowrap" style={{ borderColor: 'var(--input-border)' }}>
+                          <div className="inline-flex items-center gap-1">
+                            {/* Escalate + MGL Schedule, joined like one control. */}
+                            <div
+                              className="inline-flex h-9 items-stretch overflow-hidden rounded-lg border"
+                              style={{ borderColor: 'var(--input-border)', backgroundColor: 'var(--surface)' }}
+                            >
+                              {/* Escalation (4-08): split this row into periods with a rising rate. */}
+                              <button
+                                type="button"
+                                disabled={loadingLocation}
+                                onClick={() => setEscalate({ index: i, start: '37', every: '36', percent: '' })}
+                                className="inline-flex w-7 items-center justify-center text-secondary transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 hover:bg-[var(--selected-bg)] hover:text-[var(--text)]"
+                                title={`Escalate row ${i + 1} — e.g. +10% every 36 months`}
+                                aria-label={`Escalate row ${i + 1}`}
+                              >
+                                <TrendingUp size={14} />
+                              </button>
+                              <span className="w-px self-stretch" style={{ backgroundColor: 'var(--input-border)' }} aria-hidden />
+                              {/* This row's MGL Schedule (month-by-month breakdown). */}
+                              <button
+                                type="button"
+                                onClick={() => setMglScheduleRow(i)}
+                                className="inline-flex w-7 items-center justify-center text-secondary transition-colors cursor-pointer hover:bg-[var(--selected-bg)] hover:text-[var(--text)]"
+                                title={`MGL Schedule of row ${i + 1}`}
+                                aria-label={`MGL Schedule of row ${i + 1}`}
+                              >
+                                <CalendarRange size={14} />
+                              </button>
+                            </div>
+                            <button
+                              type="button"
+                              disabled={loadingLocation}
+                              onClick={() => {
+                                const remove = () =>
+                                  setForm((p) => ({ ...p, properties: p.properties.filter((_, ri) => ri !== i) }));
+                                if (blankRow) remove();
+                                else askRowDelete(`property row ${i + 1}`, remove);
+                              }}
+                              className={`inline-flex h-9 w-8 items-center justify-center rounded-lg border transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 ${
+                                blankRow
+                                  ? 'hover:bg-[var(--selected-bg)]'
+                                  : 'border-red-500/35 bg-red-500/[0.06] text-red-500 hover:border-red-500 hover:bg-red-500 hover:text-white'
+                              }`}
+                              style={blankRow ? { borderColor: 'var(--input-border)', color: 'var(--text-muted)' } : undefined}
+                              title={blankRow ? `Remove empty row ${i + 1}` : `Delete row ${i + 1}`}
+                              aria-label={blankRow ? `Remove empty row ${i + 1}` : `Delete row ${i + 1}`}
+                            >
+                              {blankRow ? <Minus size={14} /> : <Trash2 size={14} />}
+                            </button>
+                          </div>
                         </td>
                       </tr>
                       );
