@@ -611,18 +611,25 @@ select.input-field:-webkit-autofill:focus {
  * Custom Report: List <-> Totals. The new view fades and rises in; the
  * setup sidebar slides back in from the left when returning to List.
  */
-@keyframes mode-swap-in {
-  from { opacity: 0; transform: translateY(6px); }
-  to { opacity: 1; transform: none; }
+/* List ↔ Totals (Custom Report): the content slides in from the side the
+   toggle moved to, fading up from a slight blur — macOS-style spring. */
+@keyframes mode-swap-from-right {
+  from { opacity: 0; transform: translateX(28px) scale(0.985); filter: blur(4px); }
+  to { opacity: 1; transform: none; filter: none; }
+}
+@keyframes mode-swap-from-left {
+  from { opacity: 0; transform: translateX(-28px) scale(0.985); filter: blur(4px); }
+  to { opacity: 1; transform: none; filter: none; }
 }
 @keyframes mode-side-in {
-  from { opacity: 0; transform: translateX(-12px); }
-  to { opacity: 1; transform: none; }
+  from { opacity: 0; transform: translateX(-16px); filter: blur(3px); }
+  to { opacity: 1; transform: none; filter: none; }
 }
-.mode-swap { animation: mode-swap-in 220ms cubic-bezier(0.2, 0.7, 0.2, 1) both; }
-.mode-side { animation: mode-side-in 240ms cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+.mode-swap-right { animation: mode-swap-from-right 460ms cubic-bezier(0.22, 1.2, 0.36, 1) both; }
+.mode-swap-left { animation: mode-swap-from-left 460ms cubic-bezier(0.22, 1.2, 0.36, 1) both; }
+.mode-side { animation: mode-side-in 420ms cubic-bezier(0.22, 1.2, 0.36, 1) both; }
 @media (prefers-reduced-motion: reduce) {
-  .mode-swap, .mode-side { animation: none; }
+  .mode-swap-right, .mode-swap-left, .mode-side { animation: none; }
 }
 
 /*

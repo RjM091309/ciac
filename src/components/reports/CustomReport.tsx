@@ -937,33 +937,52 @@ export function CustomReport() {
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2">
                 {/* List = the rows; Totals = "Total ___ by ___ as of [year]". */}
-                <div className="inline-flex gap-1 rounded-xl p-1" style={{ backgroundColor: 'var(--control-bg)' }} role="tablist">
+                {/* macOS-style segmented control: one white thumb slides (with a little spring) under the chosen side. */}
+                <div
+                  className="relative grid grid-cols-2 gap-1 rounded-xl p-1"
+                  style={{ backgroundColor: 'var(--control-bg)', boxShadow: 'inset 0 1px 2px rgb(0 0 0 / 0.06)' }}
+                  role="tablist"
+                >
+                  <span
+                    aria-hidden
+                    className="pointer-events-none absolute bottom-1 left-1 top-1 rounded-lg transition-transform duration-[420ms] motion-reduce:transition-none"
+                    style={{
+                      width: 'calc(50% - 6px)',
+                      transform: mode === 'totals' ? 'translateX(calc(100% + 4px))' : 'translateX(0)',
+                      transitionTimingFunction: 'cubic-bezier(0.34, 1.36, 0.64, 1)',
+                      backgroundColor: 'var(--surface)',
+                      boxShadow: '0 1px 3px rgb(0 0 0 / 0.12), 0 0 0 0.5px rgb(0 0 0 / 0.06)',
+                    }}
+                  />
                   {(
                     [
                       ['list', 'List', 'Every row', FileText],
                       ['totals', 'Totals', 'Sum by group', Sigma],
                     ] as const
-                  ).map(([key, label, hint, Icon]) => (
-                    <button
-                      key={key}
-                      type="button"
-                      role="tab"
-                      aria-selected={mode === key}
-                      onClick={() => setMode(key)}
-                      className="inline-flex items-center gap-2.5 rounded-lg px-4 py-2 text-left transition-all duration-200 hover:text-[var(--text)]"
-                      style={
-                        mode === key
-                          ? { backgroundColor: 'var(--surface)', color: 'var(--text)', boxShadow: '0 1px 3px rgb(0 0 0 / 0.12)' }
-                          : { color: 'var(--text-muted)' }
-                      }
-                    >
-                      <Icon size={17} />
-                      <span className="flex flex-col leading-tight">
-                        <span className="text-[14px] font-bold">{label}</span>
-                        <span className="text-[10.5px] font-medium opacity-70">{hint}</span>
-                      </span>
-                    </button>
-                  ))}
+                  ).map(([key, label, hint, Icon]) => {
+                    const on = mode === key;
+                    return (
+                      <button
+                        key={key}
+                        type="button"
+                        role="tab"
+                        aria-selected={on}
+                        onClick={() => setMode(key)}
+                        className="relative z-10 inline-flex items-center gap-2.5 rounded-lg px-4 py-2 text-left transition-colors duration-300 hover:text-[var(--text)] active:scale-[0.98]"
+                        style={{ color: on ? 'var(--text)' : 'var(--text-muted)' }}
+                      >
+                        <Icon
+                          size={17}
+                          className="transition-transform duration-300 motion-reduce:transition-none"
+                          style={{ transform: on ? 'scale(1.08)' : 'scale(1)' }}
+                        />
+                        <span className="flex flex-col leading-tight">
+                          <span className="text-[14px] font-bold">{label}</span>
+                          <span className="text-[10.5px] font-medium opacity-70">{hint}</span>
+                        </span>
+                      </button>
+                    );
+                  })}
                 </div>
                 {running ? <Loader2 size={13} className="animate-spin text-secondary" /> : null}
               </div>
@@ -1089,7 +1108,7 @@ export function CustomReport() {
             </div>
           ) : null}
 
-          <div key={`body-${mode}`} className="mode-swap">
+          <div key={`body-${mode}`} className={mode === 'totals' ? 'mode-swap-right' : 'mode-swap-left'}>
           {mode === 'totals' ? (
             datasetKey === 'locators' ? (
               <QuickTotal
